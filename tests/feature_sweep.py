@@ -123,7 +123,9 @@ def main():
             os.remove(stale)
 
         t0 = time.time()
-        proc = run([EXE, "--encoder", name, "--end", END, work])
+        # --ffmpeg-source path: always the system FFmpeg, so the sweep is not
+        # silently re-run against a managed build someone installed.
+        proc = run([EXE, "--encoder", name, "--end", END, "--ffmpeg-source", "path", work])
         wall = time.time() - t0
 
         produced = glob.glob(os.path.join(OUT, "src_live.*"))

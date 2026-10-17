@@ -49,6 +49,21 @@ CASES = [
     ("amv_forced",      ["--encoder", "amv"],                   "amv"),
     ("high_limit",      ["--encoder", "mpeg4", "--limit", "99999",
                          "--recover", "90000"],                 "avi"),
+    # "path" is the escape hatch back to the system FFmpeg: discovery must skip
+    # any managed build and still produce a normal encode.
+    ("source_path",     ["--encoder", "mpeg4", "--turbo", "--ffmpeg-source", "path"], "avi"),
+    # --play off must be a no-op, or scripting an encode would pop a window.
+    ("play_off",        ["--encoder", "mpeg4", "--turbo", "--play", "off"], "avi"),
+]
+
+# Non-encoding option paths: (name, args, expected rc, substring that must appear).
+# Separate from CASES because they produce no media file.
+OPTION_CHECKS = [
+    ("ffmpeg_list",       ["--ffmpeg-list"],                      0, "btbn"),
+    ("ffmpeg_source_bad", ["--ffmpeg-source", "bogus"],           2, "must be one of"),
+    ("ffmpeg_manual",     ["--ffmpeg-download", "avbuild"],       1, "downloaded by hand"),
+    ("play_bad",          ["--play", "bogus"],                    2, "--play supports"),
+    ("completion_new",    ["--completion", "bash"],               0, "--ffmpeg-source"),
 ]
 
 
@@ -83,7 +98,8 @@ def main():
     for name, extra, ext in CASES:
         dst = OUT / f"{name}.{ext}"
         t0 = time.time()
-        proc = run([str(EXE), str(SRC), str(dst), "--end", "00:00:04", *extra])
+        proc = run([str(EXE), str(SRC), str(dst), "--end", "00:00:04",
+                    *extra, "--ffmpeg-source", "path"])
         wall = time.time() - t0
 
         status, detail = "PASS", ""
@@ -120,8 +136,24 @@ def main():
             fails += 1
         print(f"{name:<18}{status:<8}{size:>9}  {wall:>5.2f}s  {detail}")
 
+    print()
+    print(f"{'option':<18}{'result':<8}detail")
     print("-" * 92)
-    print(f"total={len(CASES)} pass={len(CASES) - fails} fail={fails}")
+    total = len(CASES)
+    for name, args, want_rc, want_text in OPTION_CHECKS:
+        proc = run([str(EXE), *args])
+        blob = proc.stdout + proc.stderr
+        ok = proc.returncode == want_rc and want_text in blob
+        if not ok:
+            fails += 1
+        why = "" if ok else (
+            f"rc={proc.returncode} want {want_rc}" if proc.returncode != want_rc
+            else f"missing {want_text!r}")
+        print(f"{name:<18}{'PASS' if ok else 'FAIL':<8}{why}")
+        total += 1
+
+    print("-" * 92)
+    print(f"total={total} pass={total - fails} fail={fails}")
     return 1 if fails else 0
 
 

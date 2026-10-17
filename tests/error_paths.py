@@ -58,7 +58,10 @@ def main() -> int:
             args = [str(SRC), str(out) + ext, "--end-time", "00:00:02", *extra]
 
         py_rc, py_out = run([sys.executable, str(PY)], args)
-        cs_rc, cs_out = run([str(CS)], args)
+        # --ffmpeg-source pins the C# run to the system FFmpeg -- the same binary
+        # the Python baseline uses -- so a managed build installed later cannot
+        # change these exit codes. Python has no such flag, hence the asymmetry.
+        cs_rc, cs_out = run([str(CS)], [*args, "--ffmpeg-source", "path"])
 
         def first_error(text: str) -> str:
             for line in text.splitlines():

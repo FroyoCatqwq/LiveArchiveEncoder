@@ -178,10 +178,12 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
  9. Turbo mode        开关，默认关闭（见 §7.5）
 10. Language          界面语言，en / zh
 11. Parallel shards   并行分片数，1＝关闭（见 §7.5）
+12. FFmpeg toolchain  切换/下载/删除 FFmpeg 构建（见 §7.10）
+13. Playback after run 编码完成后用什么播放（见 §7.11）
  0. Exit
 ```
 
-9 / 10 / 11 改完立即写进配置文件，下一次打开就是这次的值。
+9 – 13 改完立即写进配置文件，下一次打开就是这次的值。
 
 选编码器时会自动做三件事：把不支持的帧率吸附到合法值、把尺寸归一化到编码器
 支持的尺寸、按容器挑一个默认音频编码器。AMV 和 RoQ 还会额外强制音频参数
@@ -448,22 +450,47 @@ Register-ArgumentCompleter -Native -CommandName 'LiveArchiveEncoder' -ScriptBloc
 
 ## 7.8 远程资源（SMB 共享）
 
-输入可以直接给 UNC 路径，正反斜杠都认：
+输入**和输出**都可以直接给 UNC 路径，正反斜杠都认：
 
 ```powershell
 LiveArchiveEncoder.exe \\nas\share\record.mp4 out.rm --encoder rv20
 LiveArchiveEncoder.exe //nas/share/record.mp4 out.rm --encoder rv20
+
+# 直接写回共享目录
+LiveArchiveEncoder.exe record.mp4 \\nas\share\out.rm --encoder rv20
 ```
 
-识别为 UNC 时会额外给 FFmpeg 加上网络韧性参数（`-rw_timeout`、
-`-stimeout`、`-reconnect 1`、`-reconnect_streamed 1`、`-reconnect_delay_max 5`），
-避免网络抖动时整个管道挂死或第一条连接断开就失败。本地文件不会加这些参数。
+### 读取侧
 
-关于 SMB3 / SMB2：**在 Windows 上版本协商是操作系统做的，应用程序无法直接指定**。
-本程序能做的是把实际协商结果查出来并显示，让"悄悄降级到 SMB1"这种事暴露出来：
+识别为 UNC 时会给 FFmpeg 加上网络韧性参数（`-rw_timeout`、`-reconnect 1`、
+`-reconnect_streamed 1`、`-reconnect_delay_max 5`），避免网络抖动时整个管道挂死。
+本地文件不会加这些参数。
+
+> **v7.4 修正**：v7.3 的列表里有 `-stimeout`，但那是 **ffplay 的选项**，FFmpeg
+> 根本不认识（`ffmpeg -h full` 里查不到）。任何 UNC 输入都会在一帧还没读到之前
+> 直接失败：`Unrecognized option 'stimeout'. Error splitting the argument list`。
+> 已移除。
+
+### 写入侧
+
+`-reconnect*` 系列在 `ffmpeg -h full` 里标记为 `D`（decoding only），只能用在
+输入端，放到输出端会被拒。写入侧唯一可用的韧性选项是 **`-rw_timeout`**（它同时
+覆盖读写），所以输出为 UNC 时只加这一个。
+
+另外加了两个写侧保护：
+
+- 编码前对输出目录做一次**可写探测**（建一个 0 字节标记文件再删掉）。实时节奏
+  编码很慢，20 秒之后才发现共享是只读的太亏了。
+- 输出为 UNC 时在 banner 里同样打印协商到的协议版本（`SMB output : ...`）。
+
+### SMB 版本协商
+
+**在 Windows 上版本协商是操作系统做的，应用程序无法直接指定。** 本程序能做的是
+把实际协商结果查出来并显示，让"悄悄降级到 SMB1"这种事暴露出来：
 
 ```
 SMB share       : \\nas\share -- SMB3 in use
+SMB output      : \\nas\share -- SMB3 in use
 ```
 
 - 协商到 SMB3 → `SMB3 in use`
@@ -516,6 +543,109 @@ v7.3 实测 35/35 无非预期失败。少数编码器会自动修正参数并�
 NOTE: h261 requires a special frame size; using 176x144.
 NOTE: mpeg1video does not support 13 fps; using 23.976 fps.
 ```
+
+---
+
+## 7.10 FFmpeg 工具链（多发行版：切换 / 下载 / 删除）
+
+v7.4 起程序可以自己管理 FFmpeg，不再依赖你手动往 PATH 里塞一个版本。
+
+### 布局
+
+```
+%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg\<来源>\bin\ffmpeg.exe
+```
+
+多版本**并存**，切换是瞬时的；下载失败也不会破坏已经在用的那个。
+
+### 四个来源
+
+| id | 项目 | 构建 | 下载方式 |
+| --- | --- | --- | --- |
+| `btbn`（**默认**） | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) | master 每日自动构建，win64 GPL | 自动（.zip） |
+| `gyan` | [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) | git master full | 自动（.7z，需要 7-Zip 或 PATH 里的 `7z`） |
+| `avbuild` | [avbuild（SourceForge）](https://sourceforge.net/projects/avbuild/files/windows-desktop/) | master | **手动**（见下） |
+| `nonfree` | [BnqDzj/FFmpeg-Builds-nonfree](https://github.com/BnqDzj/FFmpeg-Builds-nonfree) | master 每日自动构建，win64 nonfree | 自动（.zip） |
+
+默认来源是 `btbn` 的**每日构建版**（GitHub release 标签 `latest`，资产
+`ffmpeg-master-latest-win64-gpl.zip`）。
+
+### 命令行
+
+```powershell
+# 看看装了哪些
+LiveArchiveEncoder.exe --ffmpeg-list
+
+# 下载并安装（默认 btbn 的每日构建）
+LiveArchiveEncoder.exe --ffmpeg-download                       # 等价于 --ffmpeg-download btbn
+LiveArchiveEncoder.exe --ffmpeg-download nonfree --proxy http://127.0.0.1:10808
+
+# 用哪个构建来编码
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --ffmpeg-source btbn
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --ffmpeg-source path   # 回到系统 FFmpeg
+
+# 删除
+LiveArchiveEncoder.exe --ffmpeg-delete gyan
+
+# 手动来源（avbuild）：先自己下载，再从本地文件安装
+LiveArchiveEncoder.exe --ffmpeg-download avbuild --ffmpeg-archive C:\Downloads\xxx.7z
+```
+
+`--proxy` 可以省略；省略时会复用配置文件里记住的代理。
+
+### 下载细节
+
+- **有 `aria2c` 就优先用它**，16 连接、断点续传、走代理；没有则退回 `HttpClient`
+  单连接，同样支持代理。aria2c 失败也会自动退回 `HttpClient`。
+- **会校验压缩包的 magic bytes**（`PK` / `7z¼¯'`）。有些站点（比如 SourceForge）
+  会返回一个 HTML 拦截页，下载器照样会把它"下载成功"——没有这步你就会得到一个
+  131 KB 的假压缩包，然后看到解压器报一堆莫名其妙的错。
+- `.zip` 用内建的 `ZipFile` 解压；`.7z` 需要 PATH 里的 `7z` / `7za` / `7zz`，
+  或装在 `C:\Program Files\7-Zip\7z.exe`。找不到会明确告诉你去装 7-Zip，
+  或者改用 `.zip` 的 btbn / nonfree。
+- 装完会检查 `--enable-gpl`：非 GPL 构建会少掉 libx264 / libxvid / libtheora 等
+  一批编码器，屏幕上会提示。
+
+### 为什么要手动下载 avbuild
+
+SourceForge 的镜像跳转被一层 Cloudflare "Just a moment..." 拦截页挡着：aria2c
+和 HttpClient 都只能拿到那个 HTML 页面，而伪装成 Chrome 的完整 User-Agent 会直接
+403。与其让下载器悄悄写下一个 HTML 文件当作构建，不如明确让你在浏览器里下载，
+再用 `--ffmpeg-archive` 装进去。程序会直接把该打开的网址和该执行的命令打印出来。
+
+### 交互式菜单
+
+主菜单 `12` 进入工具链子菜单：`1` 列表、`2` 切换、`3` 下载/更新（手动来源会提示
+粘贴本地压缩包路径）、`4` 删除、`5` 设置下载代理。切换或安装之后会**重新探测**
+编码器/滤镜/缩放器列表——换了个构建，可用编码器是会变的；如果原来选中的编码器
+在新构建里不存在，会提示你重选而不是带着一个必然失败的配置继续。
+
+### 优先级
+
+`--ffmpeg` 显式路径 **>** 配置文件里选定的受管理构建 **>** 程序目录 / `BTBN_FFMPEG_DIR`
+**>** PATH。
+
+> 注意：受管理构建只有在被**显式选定**时才会生效。一个没动过的配置会一直用系统
+> FFmpeg——否则你随手装一个构建就会把所有脚本化运行的产物悄悄换掉。
+
+---
+
+## 7.11 编码完成后播放
+
+```powershell
+# 用当前 FFmpeg 自带的 ffplay 播放（推荐：rm / roq / amv 这些老容器它都能开）
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --play ffplay
+
+# 用外部播放器；不填 --player 就走系统文件关联
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --play external
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --play external --player "C:\...\mpc-hc64.exe"
+```
+
+- `--play off`（默认）什么都不做，脚本里跑不会弹窗。
+- ffplay 优先从**当前 FFmpeg 所在目录**找（受管理构建里通常自带），找不到再查
+  PATH；都没有会明确报错提示改用外部播放器。播放时加了 `-autoexit`，放完自己关。
+- 交互式菜单 `13` 可以设置播放方式和外部播放器路径（填 `-` 清除，回到系统关联）。
+  设置成 ffplay / external 之后，每次编码结束会多问一句 `Play the result now? [Y/n]`。
 
 ---
 
@@ -625,6 +755,17 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 `--help` / `--cpu-info` 两个辅助标志。这些都不改变默认行为：不加任何开关时，
 命令行语义与 v6.3.3 一致。
 
+### v7.4 新增
+
+1. **SMB 读写**（§7.8）：修掉 `-stimeout` 这个让 UNC 输入必然失败的参数；新增
+   写入侧韧性参数、写前可写探测、输出侧协议版本报告。
+2. **FFmpeg 工具链**（§7.10）：四个发行版（BtbN / gyan.dev / avbuild / nonfree），
+   支持切换、下载、删除；默认每日构建版；下载可选代理；有 `aria2c` 就多线程下载；
+   安装目录 `%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg\<来源>\bin`。
+3. **编码后播放**（§7.11）：`--play ffplay|external`，外部播放器可指定，留空走
+   系统关联；默认 `off`。
+4. **源码纳入 git 管理**：v7.3 基线 + 按改动逐步提交，方便回溯每一步。
+
 ---
 
 ## 12. 自测
@@ -660,4 +801,8 @@ python tests\compare_matrix.py
 否则 fresh/repeat 计数会被 CPU 争用扰动（这是自适应控制器的正常反应，不是 bug）。
 
 全部通过会打出 `total=12 pass=12 fail=0` / `total=11 fail=0` /
-`total=35 pass=35 warn=0 fail=0` / `total=17 pass=17 fail=0` / `total=20 pass=20 fail=0`。
+`total=35 pass=35 warn=0 fail=0` / `total=25 pass=25 fail=0` /
+`total=30 pass=30 fail=0`。
+
+> 跑回归之前建议把配置里的 `FfmpegSource` 设成 `"path"`（或删掉受管理构建），
+> 这样 C# 版和 Python 版用的是同一个系统 FFmpeg，对比才有意义。

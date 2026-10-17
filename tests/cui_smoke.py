@@ -110,6 +110,35 @@ def main():
         check("run5 survives invalid input", p5.returncode == 0, f"rc={p5.returncode}")
         check("run5 reports invalid selection", "Invalid selection" in p5.stdout)
 
+        # ---------------------------------------------------------------- run 6
+        # FFmpeg toolchain menu: listing must work without touching the network
+        # (option 1 is the read-only one) and the choice must be remembered.
+        p6 = cui([], "12\n1\n0\n0\n")
+        check("run6 exit code 0", p6.returncode == 0, f"rc={p6.returncode}")
+        check("run6 toolchain menu offered", "12." in p6.stdout and "FFmpeg toolchain" in p6.stdout)
+        check("run6 lists every source",
+              all(s in p6.stdout for s in ("btbn", "gyan", "avbuild", "nonfree")))
+        check("run6 marks manual sources", "manual download" in p6.stdout)
+        c6 = read_config()
+        check("run6 ffmpeg source persisted", c6 and c6.get("FfmpegSource") == "btbn",
+              str(c6.get("FfmpegSource") if c6 else None))
+
+        # ---------------------------------------------------------------- run 7
+        # Playback menu: choosing ffplay must stick, and "off" must be reachable
+        # again afterwards.
+        p7 = cui([], "13\nffplay\n0\n")
+        check("run7 exit code 0", p7.returncode == 0, f"rc={p7.returncode}")
+        check("run7 playback menu offered", "13." in p7.stdout and "Playback" in p7.stdout)
+        c7 = read_config()
+        check("run7 play mode persisted", c7 and c7.get("PlayMode") == "ffplay",
+              str(c7.get("PlayMode") if c7 else None))
+
+        p8 = cui([], "13\nbogus\n13\noff\n0\n")
+        check("run8 rejects a bad play mode", "Choose off, ffplay or external" in p8.stdout)
+        c8 = read_config()
+        check("run8 play mode back to off", c8 and c8.get("PlayMode") == "off",
+              str(c8.get("PlayMode") if c8 else None))
+
     finally:
         if had_config:
             shutil.copyfile(BACKUP, CONFIG)

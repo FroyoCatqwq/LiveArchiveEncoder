@@ -9,6 +9,17 @@ live_archive_encoder：把现代视频转码成 RV20 / RoQ / MPEG-1 等**老式�
 ## 版本
 - v6.3.3 = `live_archive_encoder.py`（Python 3.13，权威参考实现）
 - v7 = `src/LiveArchiveEncoder`（.NET 10 / C# 14），功能对等的移植版
+- 源码已纳入 git（2026-10-18 起）：v7.3 基线 + 按改动逐步提交
+
+## v7.4 用户可见行为（改这块前先想清楚）
+- **FFmpeg 工具链**：`%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg\<id>\bin`。
+  四来源 btbn(默认)/gyan/avbuild(手动)/nonfree。**受管理构建只有在被显式选定
+  时才生效**，未动过的配置一律用系统 FFmpeg；`"path"` 是回到系统 FFmpeg 的显式值。
+- **下载**：有 aria2c 就 16 连接 + 代理，失败回退 HttpClient；压缩包要做
+  magic bytes 校验（有些站点返回 HTML 拦截页，下载器照样报成功）。
+- **播放**：`--play ffplay|external`，默认 off；ffplay 优先当前 FFmpeg 同目录。
+- **SMB 写入**：只加 `-rw_timeout`（`-reconnect*` 是 decode-only，输出端会被拒）；
+  写前做一次可写探测。
 
 ## 迁移红线（改 v7 时必须同时改 v6.3.3 才允许的行为变更）
 - FFmpeg 命令行参数顺序（包括 `-threads` 放在 rawvideo 输入之前）

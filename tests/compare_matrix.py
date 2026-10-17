@@ -130,7 +130,10 @@ def main() -> int:
                 p.unlink()
 
         py_args = [str(SRC), str(out_py), "--end-time", "00:00:05", *extra]
-        cs_args = [str(SRC), str(out_cs), "--end-time", "00:00:05", *extra]
+        # --ffmpeg-source path pins the C# run to the system FFmpeg, the same
+        # binary the Python baseline uses; a managed build would otherwise win.
+        cs_args = [str(SRC), str(out_cs), "--end-time", "00:00:05",
+                   *extra, "--ffmpeg-source", "path"]
 
         py_summary, py_time = run_py(py_args)
         cs_summary, cs_time = run_cs(cs_args)
