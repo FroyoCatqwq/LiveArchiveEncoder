@@ -150,6 +150,14 @@ public static class RealtimeEncoder
         string muxer = o.Encoder.FormatName;
         dst.Directory?.Create();
 
+        // Writing to a share that turns out to be read-only wastes the whole
+        // real-time encode before it fails, so check once, up front.
+        if (dst.Directory is { Exists: true } outDir && !Remote.Smb.CanWriteDirectory(outDir.FullName))
+        {
+            throw new UnauthorizedAccessException(
+                $"cannot write to {outDir.FullName}; check the share permissions");
+        }
+
         // Both preflights are independent one-shot FFmpeg runs purely meant to fail
         // fast before the real encode. Running them side by side removes one more
         // process startup from the critical path; either one throwing still aborts
@@ -195,6 +203,8 @@ public static class RealtimeEncoder
 
             string? smb = Remote.Smb.Describe(src.FullName);
             if (smb is not null) Console.WriteLine(smb);
+            string? smbOut = Remote.Smb.DescribeOutput(dst.FullName);
+            if (smbOut is not null) Console.WriteLine(smbOut);
         }
 
         return Execute(
@@ -459,6 +469,9 @@ public static class RealtimeEncoder
         // encoder shutdown.
         if (duration is not null) cmd.AddRange(["-t", ArgsBuilder.FloatArg(duration.Value)]);
 
+        // -rw_timeout is the only write-side resilience option FFmpeg has; the
+        // reconnect family is decode-only and would be rejected here.
+        cmd.AddRange(Remote.Smb.RemoteWriteArgs(dst.FullName));
         cmd.AddRange(["-flush_packets", "1", "-progress", "pipe:2", "-f", muxer, "-y", dst.FullName]);
         return cmd;
     }

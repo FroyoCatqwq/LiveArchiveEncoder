@@ -40,6 +40,13 @@ public static class Completion
         ("--completion", ["bash", "zsh", "fish", "powershell"]),
         ("--parallel", ["1", "2", "4", "8"]),
         ("--ffmpeg", ["@FILE"]), ("--ffprobe", ["@FILE"]),
+        ("--ffmpeg-source", ["path", .. FFmpeg.FfmpegCatalog.All.Select(d => d.Id)]),
+        ("--ffmpeg-download", [.. FFmpeg.FfmpegCatalog.All.Select(d => d.Id)]),
+        ("--ffmpeg-archive", ["@FILE"]),
+        ("--ffmpeg-delete", [.. FFmpeg.FfmpegCatalog.All.Select(d => d.Id)]),
+        ("--play", ["off", "ffplay", "external"]),
+        ("--player", ["@FILE"]),
+        ("--proxy", ["http://127.0.0.1:10808", "http://127.0.0.1:7890", "socks5://127.0.0.1:10808"]),
     ];
 
     private const string FileMarker = "@FILE";
@@ -53,7 +60,7 @@ public static class Completion
     private static readonly string[] FlagOptions =
     [
         "-h", "--help", "--no-crop", "--deint-marked-only", "--no-cuda", "--turbo",
-        "--list-filters", "--quiet", "--no-cui", "--cpu-info",
+        "--list-filters", "--quiet", "--no-cui", "--cpu-info", "--ffmpeg-list",
     ];
 
     private static string[] Resolve(string[] values, IEnumerable<string> encoders)

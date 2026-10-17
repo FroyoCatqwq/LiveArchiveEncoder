@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.3 (.NET 10)",
+        ["app.title"] = "Live Archive Encoder CUI v7.4 (.NET 10)",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -239,16 +239,71 @@ public static class L
         ["lang.switched"] = "Language set to {0}.",
 
         ["smb.share"] = "SMB share",
+        ["smb.shareout"] = "SMB output",
         ["smb.smb3"] = "SMB3 in use",
         ["smb.smb2"] = "SMB2 in use (server did not offer SMB3)",
         ["smb.smb1"] = "SMB1 in use - obsolete and insecure; enable SMB2/3 on the server",
         ["smb.unknown"] = "UNC input; read-resilience options applied (dialect {0})",
         ["smb.notconnected"] = "UNC input; read-resilience options applied (dialect unknown until the share is connected)",
+
+        ["banner.source"] = "FFmpeg source",
+
+        ["menu.toolchain"] = "FFmpeg toolchain",
+        ["menu.play"] = "Playback after run",
+
+        ["tc.heading"] = "=== FFmpeg toolchain ===",
+        ["tc.root"] = "Install root",
+        ["tc.active"] = "in use",
+        ["tc.installed"] = "installed",
+        ["tc.notinstalled"] = "not installed",
+        ["tc.notinstalled.hint"] = "'{0}' is not installed yet; download it first.",
+        ["tc.hint"] = "Managed builds live under the install root and win over PATH. "
+            + "Downloads use aria2c when it is on PATH.",
+        ["tc.hint.manual"] = "Automatic download: {0}. Everything else is installed from a "
+            + "local archive (its host blocks automated downloads).",
+        ["tc.manual.howto"] = "'{0}' has to be downloaded by hand: its host serves a "
+            + "Cloudflare interstitial instead of the archive.",
+        ["tc.manual.step1"] = "  1. open {0} in a browser and download the newest master archive",
+        ["tc.manual.step2"] = "  2. paste the path to that .7z / .zip below",
+        ["tc.manual.prompt"] = "Path to the downloaded archive (blank = cancel): ",
+        ["tc.cancelled"] = "Cancelled.",
+        ["tc.menu.heading"] = "=== FFmpeg toolchain ===",
+        ["tc.menu.list"] = "List sources and installed builds",
+        ["tc.menu.switch"] = "Switch active source",
+        ["tc.menu.download"] = "Download / update a source",
+        ["tc.menu.delete"] = "Delete an installed source",
+        ["tc.menu.proxy"] = "Download proxy",
+        ["tc.menu.back"] = "Back",
+        ["tc.choose"] = "Sources: {0}",
+        ["tc.prompt.source"] = "Source: ",
+        ["tc.prompt.proxy"] = "Proxy for this download (blank = direct): ",
+        ["tc.prompt.proxy.edit"] = "Proxy [{0}] ('-' to clear, blank = keep): ",
+        ["tc.proxyinuse"] = "Using proxy {0}",
+        ["tc.proxyset"] = "Proxy set to {0}.",
+        ["tc.installing"] = "Installing {0}...",
+        ["tc.installok"] = "'{0}' is ready and selected.",
+        ["tc.installfail"] = "install failed: {0}",
+        ["tc.deleted"] = "Removed '{0}'.",
+        ["tc.deletefail"] = "could not remove: {0}",
+        ["tc.unknown"] = "unknown source '{0}'",
+        ["tc.switched"] = "Active source is now '{0}' ({1}).",
+        ["tc.refreshed"] = "FFmpeg re-detected: {0}",
+        ["tc.encodergone"] = "The selected encoder '{0}' does not exist in this build; please pick one again.",
+        ["tc.nogpl"] = "NOTE: this build does not report --enable-gpl, so GPL-only codecs "
+            + "(libx264, libxvid, libtheora, ...) are missing.",
+
+        ["play.prompt.mode"] = "Playback [off/ffplay/external] [{0}]: ",
+        ["play.prompt.player"] = "External player [{0}] ('-' = system default): ",
+        ["play.assoc"] = "system default",
+        ["play.badmode"] = "Choose off, ffplay or external.",
+        ["play.set"] = "Playback set to: {0}",
+        ["play.ask"] = "\nPlay the result now? [Y/n]: ",
+        ["play.launchfail"] = "could not start playback: {0}",
     };
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.3 (.NET 10)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.4 (.NET 10)",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 
@@ -454,11 +509,66 @@ public static class L
         ["lang.switched"] = "界面语言已切换为 {0}。",
 
         ["smb.share"] = "SMB 共享",
+        ["smb.shareout"] = "SMB 输出",
         ["smb.smb3"] = "正在使用 SMB3",
         ["smb.smb2"] = "正在使用 SMB2（服务端未提供 SMB3）",
         ["smb.smb1"] = "正在使用 SMB1 —— 已过时且不安全的协议，请在服务端启用 SMB2/3",
         ["smb.unknown"] = "UNC 输入；已启用读取重试参数（协议版本 {0}）",
         ["smb.notconnected"] = "UNC 输入；已启用读取重试参数（共享尚未连接，协议版本未知）",
+
+        ["banner.source"] = "FFmpeg 来源",
+
+        ["menu.toolchain"] = "FFmpeg 工具链",
+        ["menu.play"] = "编码后播放",
+
+        ["tc.heading"] = "=== FFmpeg 工具链 ===",
+        ["tc.root"] = "安装根目录",
+        ["tc.active"] = "正在使用",
+        ["tc.installed"] = "已安装",
+        ["tc.notinstalled"] = "未安装",
+        ["tc.notinstalled.hint"] = "'{0}' 尚未安装，请先下载。",
+        ["tc.hint"] = "受管理的构建都放在安装根目录下，优先级高于 PATH；"
+            + "下载时若 PATH 里有 aria2c 就用它多线程下载。",
+        ["tc.hint.manual"] = "可自动下载的来源：{0}。其余来源需要从本地压缩包安装"
+            + "（其托管站点会拦截自动下载）。",
+        ["tc.manual.howto"] = "'{0}' 需要手动下载：该站点的镜像跳转会被 Cloudflare 拦截页挡住，"
+            + "自动下载只能拿到一个 HTML 页面。",
+        ["tc.manual.step1"] = "  1. 用浏览器打开 {0}，下载最新的 master 压缩包",
+        ["tc.manual.step2"] = "  2. 在下面填入该 .7z / .zip 的完整路径",
+        ["tc.manual.prompt"] = "已下载压缩包的路径（留空=取消）: ",
+        ["tc.cancelled"] = "已取消。",
+        ["tc.menu.heading"] = "=== FFmpeg 工具链 ===",
+        ["tc.menu.list"] = "查看各来源与已安装构建",
+        ["tc.menu.switch"] = "切换当前来源",
+        ["tc.menu.download"] = "下载/更新某个来源",
+        ["tc.menu.delete"] = "删除已安装的来源",
+        ["tc.menu.proxy"] = "下载代理",
+        ["tc.menu.back"] = "返回",
+        ["tc.choose"] = "可用来源：{0}",
+        ["tc.prompt.source"] = "来源: ",
+        ["tc.prompt.proxy"] = "本次下载使用的代理（留空=直连）: ",
+        ["tc.prompt.proxy.edit"] = "代理 [{0}]（输入 - 清除，留空=保持不变）: ",
+        ["tc.proxyinuse"] = "正在使用代理 {0}",
+        ["tc.proxyset"] = "代理已设为 {0}。",
+        ["tc.installing"] = "正在安装 {0}...",
+        ["tc.installok"] = "'{0}' 已就绪并设为当前来源。",
+        ["tc.installfail"] = "安装失败：{0}",
+        ["tc.deleted"] = "已删除 '{0}'。",
+        ["tc.deletefail"] = "删除失败：{0}",
+        ["tc.unknown"] = "未知来源 '{0}'",
+        ["tc.switched"] = "当前来源已切换为 '{0}'（{1}）。",
+        ["tc.refreshed"] = "已重新检测 FFmpeg：{0}",
+        ["tc.encodergone"] = "当前选择的编码器 '{0}' 在这个构建里不存在，请重新选择。",
+        ["tc.nogpl"] = "注意：该构建没有 --enable-gpl，因此只有 GPL 许可的编码器"
+            + "（libx264、libxvid、libtheora 等）不可用。",
+
+        ["play.prompt.mode"] = "播放方式 [off/ffplay/external] [{0}]: ",
+        ["play.prompt.player"] = "外部播放器 [{0}]（输入 - 表示用系统默认）: ",
+        ["play.assoc"] = "系统默认",
+        ["play.badmode"] = "请选择 off、ffplay 或 external。",
+        ["play.set"] = "播放方式已设为：{0}",
+        ["play.ask"] = "\n现在播放结果？[Y/n]: ",
+        ["play.launchfail"] = "无法启动播放：{0}",
     };
 
     public static string Lang { get; private set; } = English;

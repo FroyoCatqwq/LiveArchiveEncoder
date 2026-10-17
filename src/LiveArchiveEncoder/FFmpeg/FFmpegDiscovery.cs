@@ -9,9 +9,31 @@ public static partial class FFmpegDiscovery
 {
     public static bool IsBtbn { get; private set; }
 
-    public static string FindFFmpeg(string? userValue)
+    /// <summary>
+    /// Pick the ffmpeg to use.
+    ///
+    /// Order: an explicit <c>--ffmpeg</c> path, then a build this tool installed
+    /// itself under <c>%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg</c>, then whatever
+    /// sits next to the executable, then PATH. The managed install outranks PATH
+    /// because a user who asked for a specific distribution expects that one to
+    /// win over a stray system copy.
+    /// </summary>
+    public static string FindFFmpeg(string? userValue, string? sourceId = null)
     {
         if (!string.IsNullOrWhiteSpace(userValue)) return ResolveExecutable(userValue);
+
+        // A managed build only wins when it was explicitly selected. An
+        // untouched configuration must keep using the system FFmpeg: silently
+        // switching every scripted run to a build the user installed on a whim
+        // would change output nobody asked to change.
+        if (!string.IsNullOrWhiteSpace(sourceId)
+            && !string.Equals(sourceId, "path", StringComparison.OrdinalIgnoreCase)
+            && Toolchain.FFmpegFor(sourceId) is { Length: > 0 } managed)
+        {
+            IsBtbn = string.Equals(sourceId, "btbn", StringComparison.OrdinalIgnoreCase);
+            return managed;
+        }
+
         foreach (string path in CandidateBtbnFFmpegPaths())
         {
             if (File.Exists(path))
@@ -22,6 +44,35 @@ public static partial class FFmpegDiscovery
         }
         IsBtbn = false;
         return ResolveExecutable("ffmpeg");
+    }
+
+    /// <summary>
+    /// ffplay next to the active ffmpeg, else PATH. Absence is normal -- many
+    /// builds ship without it -- so callers get null rather than an exception.
+    /// </summary>
+    public static string? FindFFplay(string ffmpegPath)
+    {
+        string? dir = Path.GetDirectoryName(ffmpegPath);
+        if (!string.IsNullOrEmpty(dir))
+        {
+            string sibling = Path.Combine(dir, OperatingSystem.IsWindows() ? "ffplay.exe" : "ffplay");
+            if (File.Exists(sibling)) return sibling;
+        }
+
+        string exeName = OperatingSystem.IsWindows() ? "ffplay.exe" : "ffplay";
+        string? envPath = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(envPath)) return null;
+        foreach (string entry in envPath.Split(Path.PathSeparator))
+        {
+            if (entry.Length == 0) continue;
+            try
+            {
+                string full = Path.Combine(entry, exeName);
+                if (File.Exists(full)) return full;
+            }
+            catch { /* invalid PATH entry */ }
+        }
+        return null;
     }
 
     public static string FindFFprobe(string? userValue, string ffmpegPath)

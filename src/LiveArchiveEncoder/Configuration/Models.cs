@@ -1,5 +1,15 @@
 namespace LiveArchiveEncoder.Configuration;
 
+/// <summary>What to do with the file once an encode finishes.</summary>
+public enum PlayMode
+{
+    Off = 0,
+    /// <summary>ffplay from the active FFmpeg build.</summary>
+    Ffplay = 1,
+    /// <summary>A user-supplied executable; falls back to the shell association when unset.</summary>
+    External = 2,
+}
+
 /// <summary>Video stream information reported by ffprobe.</summary>
 public sealed class StreamInfo
 {
@@ -84,4 +94,18 @@ public sealed class Config
 
     /// <summary>UI language, e.g. "en" or "zh".</summary>
     public string Language { get; set; } = "en";
+
+    /// <summary>
+    /// Which FFmpeg distribution to use: one of the ids in
+    /// <see cref="FFmpeg.FfmpegCatalog"/>, or "path" to mean "whatever is on PATH".
+    /// </summary>
+    public string FfmpegSource { get; set; } = FFmpeg.FfmpegCatalog.DefaultId;
+
+    /// <summary>Proxy used when downloading an FFmpeg build, e.g. http://127.0.0.1:10808.</summary>
+    public string? FfmpegProxy { get; set; }
+
+    public PlayMode Play { get; set; } = PlayMode.Off;
+
+    /// <summary>External player executable; empty means the shell file association.</summary>
+    public string? PlayerPath { get; set; }
 }

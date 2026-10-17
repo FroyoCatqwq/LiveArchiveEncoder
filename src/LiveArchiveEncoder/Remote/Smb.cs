@@ -119,7 +119,12 @@ public static class Smb
     /// even when Windows has not connected the share yet and the dialect is
     /// therefore still unknown.
     /// </summary>
-    public static string? Describe(string path)
+    public static string? Describe(string path) => Describe(path, L.T("smb.share"));
+
+    /// <summary>Same report for a UNC <em>destination</em>.</summary>
+    public static string? DescribeOutput(string path) => Describe(path, L.T("smb.shareout"));
+
+    private static string? Describe(string path, string label)
     {
         if (!IsUncPath(path)) return null;
 
@@ -133,7 +138,7 @@ public static class Smb
                 SmbDialect.Smb1 => L.T("smb.smb1"),
                 _ => L.T("smb.unknown", report.Value.Detail ?? "?"),
             };
-        return $"{L.T("smb.share"),-17}: {ShareRoot(path)} -- {verdict}";
+        return $"{label,-17}: {ShareRoot(path)} -- {verdict}";
     }
 
     /// <summary>
@@ -152,6 +157,20 @@ public static class Smb
     /// FFmpeg options that make a network read survivable instead of hanging
     /// forever or dying on the first transient disconnect. Only applied to UNC
     /// inputs: on a local file they would just add overhead.
+    ///
+    /// Every entry here was checked against <c>ffmpeg -h full</c> on this build
+    /// (2026-10-18):
+    ///
+    ///   * <c>-rw_timeout</c> is an AVFormatContext option flagged <c>ED</c>, so
+    ///     it covers both reading and writing;
+    ///   * the <c>-reconnect*</c> family is flagged <c>D</c> -- decoding only --
+    ///     which is exactly how we use it, and it is silently accepted even by
+    ///     the plain file protocol;
+    ///   * <c>-stimeout</c> was in the original list but is an <em>ffplay</em>
+    ///     option. FFmpeg rejects it outright with
+    ///     "Unrecognized option 'stimeout'. Error splitting the argument list",
+    ///     which made every UNC source fail before a single frame was read.
+    ///     It is gone for that reason.
     /// </summary>
     public static List<string> RemoteReadArgs(string path)
     {
@@ -160,10 +179,53 @@ public static class Smb
         [
             // Give up on a stalled read instead of blocking the whole pipeline.
             "-rw_timeout", "30000000",
-            "-stimeout", "30000000",
             "-reconnect", "1",
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
         ];
+    }
+
+    /// <summary>
+    /// Options for a UNC <em>destination</em>.
+    ///
+    /// The reconnect family cannot be used here: <c>ffmpeg -h full</c> flags it
+    /// <c>D</c> (decoding only), so on the output side it would be rejected.
+    /// <c>-rw_timeout</c> is the one AVFormatContext option that covers writes,
+    /// and it is what stops a vanished share from hanging the muxer forever.
+    /// </summary>
+    public static List<string> RemoteWriteArgs(string path)
+    {
+        if (!IsUncPath(path)) return [];
+        return ["-rw_timeout", "30000000"];
+    }
+
+    /// <summary>
+    /// Cheap write probe for a UNC destination directory.
+    ///
+    /// An encode is deliberately slow (real-time pacing), so discovering after
+    /// twenty seconds that the share is read-only or the credentials only grant
+    /// read access is worse than discovering it now. Creates and immediately
+    /// deletes a zero-byte marker next to the output.
+    /// </summary>
+    public static bool CanWriteDirectory(string directory)
+    {
+        if (!IsUncPath(directory)) return true;
+
+        string marker = Path.Combine(directory, ".lae-write-probe");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            using (File.Create(marker, 1, FileOptions.DeleteOnClose)) { }
+            return true;
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                        or NotSupportedException or System.Security.SecurityException)
+        {
+            return false;
+        }
+        finally
+        {
+            try { if (File.Exists(marker)) File.Delete(marker); } catch { /* best effort */ }
+        }
     }
 }

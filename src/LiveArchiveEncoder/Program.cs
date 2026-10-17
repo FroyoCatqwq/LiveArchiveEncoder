@@ -44,15 +44,79 @@ public static class Program
             return 0;
         }
 
+        // Toolchain management never needs a working FFmpeg, so it runs before
+        // discovery -- otherwise a missing ffmpeg would make "install one"
+        // impossible, which is exactly the situation it exists to fix.
+        if (cli.FfmpegList)
+        {
+            ToolchainConsole.PrintInstalled();
+            return 0;
+        }
+
+        if (cli.FfmpegDelete is not null)
+        {
+            (bool deleted, string? deleteError) = FFmpeg.Toolchain.Delete(cli.FfmpegDelete);
+            if (!deleted)
+            {
+                Console.Error.WriteLine($"ERROR: {deleteError}");
+                return 1;
+            }
+            Console.WriteLine($"Removed '{cli.FfmpegDelete}' from {FFmpeg.Toolchain.Home(cli.FfmpegDelete)}");
+            return 0;
+        }
+
+        if (cli.FfmpegDownload is not null)
+        {
+            FFmpeg.FfmpegDist? dist = FFmpeg.FfmpegCatalog.Find(cli.FfmpegDownload);
+            if (dist is null)
+            {
+                Console.Error.WriteLine(
+                    $"ERROR: unknown source '{cli.FfmpegDownload}'; choose one of {FFmpeg.FfmpegCatalog.Ids}");
+                return 2;
+            }
+            string? proxy = cli.FfmpegProxy ?? ConfigStore.Load().FfmpegProxy;
+            Console.WriteLine($"{dist.Label}\n{dist.Homepage}");
+
+            if (!dist.AutoDownload && cli.FfmpegArchive is null)
+            {
+                // Say exactly what to click and what to type afterwards; a bare
+                // "cannot download" leaves the user stuck.
+                Console.WriteLine();
+                Console.WriteLine($"'{dist.Id}' has to be downloaded by hand: its host blocks "
+                    + "automated downloads (a Cloudflare interstitial is served instead of the archive).");
+                Console.WriteLine($" 1. open {dist.Homepage}");
+                Console.WriteLine($" 2. download the newest ffmpeg-master-windows-desktop-*.7z");
+                Console.WriteLine($" 3. LiveArchiveEncoder --ffmpeg-download {dist.Id} "
+                    + "--ffmpeg-archive <path to the .7z>");
+                return 1;
+            }
+
+            (bool installed, string? installError) =
+                FFmpeg.Toolchain.Install(dist, proxy, cli.FfmpegArchive, Console.WriteLine);
+            if (!installed)
+            {
+                Console.Error.WriteLine($"ERROR: {installError}");
+                return 1;
+            }
+            UserConfig remembered = ConfigStore.Load();
+            remembered.FfmpegSource = dist.Id;
+            if (proxy is not null) remembered.FfmpegProxy = proxy;
+            ConfigStore.Save(remembered);
+            return 0;
+        }
+
         string ffmpeg;
         string ffprobe;
         bool btbn;
         HashSet<string> availableFilters;
         HashSet<string> availableScaleAlgorithms;
 
+        string? source = cli.FfmpegSource;
+        if (string.IsNullOrWhiteSpace(source)) source = ConfigStore.Load().FfmpegSource;
+
         try
         {
-            ffmpeg = FFmpegDiscovery.FindFFmpeg(cli.FFmpeg);
+            ffmpeg = FFmpegDiscovery.FindFFmpeg(cli.FFmpeg, source);
             btbn = FFmpegDiscovery.IsBtbn;
             ffprobe = FFmpegDiscovery.FindFFprobe(cli.FFprobe, ffmpeg);
             availableFilters = FFmpegCapabilities.DetectVideoFilters(ffmpeg);
@@ -84,7 +148,7 @@ public static class Program
         if (string.IsNullOrEmpty(cli.Input) && !cli.NoCui)
         {
             return Cui.Run(ffmpeg, ffprobe, btbn, availableFilters, availableScaleAlgorithms,
-                cli.Language);
+                cli.Language, source);
         }
 
         if (string.IsNullOrEmpty(cli.Input))
@@ -104,7 +168,8 @@ public static class Program
             return 130;
         }
         catch (Exception exc) when (exc is FileNotFoundException or InvalidOperationException
-                                        or ArgumentException or TimeoutException)
+                                        or ArgumentException or TimeoutException
+                                        or UnauthorizedAccessException)
         {
             Console.Error.WriteLine($"ERROR: {exc.Message}");
             return 1;

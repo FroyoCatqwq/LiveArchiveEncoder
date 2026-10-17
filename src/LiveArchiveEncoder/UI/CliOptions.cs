@@ -71,6 +71,32 @@ public sealed class CliOptions
     /// <summary>When set, print a shell completion script and exit.</summary>
     public string? Completion { get; init; }
 
+    /// <summary>FFmpeg distribution to use: btbn / gyan / avbuild / nonfree.</summary>
+    public string FfmpegSource { get; init; } = LiveArchiveEncoder.FFmpeg.FfmpegCatalog.DefaultId;
+
+    /// <summary>Proxy for FFmpeg downloads, e.g. http://127.0.0.1:10808.</summary>
+    public string? FfmpegProxy { get; init; }
+
+    /// <summary>When set, download and install that distribution, then exit.</summary>
+    public string? FfmpegDownload { get; init; }
+
+    /// <summary>
+    /// Local archive to install instead of downloading. Needed for sources whose
+    /// host blocks automated downloads (SourceForge / avbuild).
+    /// </summary>
+    public string? FfmpegArchive { get; init; }
+
+    /// <summary>When set, delete an installed distribution, then exit.</summary>
+    public string? FfmpegDelete { get; init; }
+
+    public bool FfmpegList { get; init; }
+
+    /// <summary>What to open when the encode finishes.</summary>
+    public PlayMode Play { get; init; } = PlayMode.Off;
+
+    /// <summary>External player executable; empty uses the shell association.</summary>
+    public string? PlayerPath { get; init; }
+
     public double EffectiveRecover => Recover ?? Limit * 0.75;
 }
 
@@ -121,6 +147,14 @@ public static class CliParser
         int parallel = 1;
         string? language = null;
         string? completion = null;
+        string ffmpegSource = FFmpeg.FfmpegCatalog.DefaultId;
+        string? ffmpegProxy = null;
+        string? ffmpegDownload = null;
+        string? ffmpegArchive = null;
+        string? ffmpegDelete = null;
+        bool ffmpegList = false;
+        PlayMode play = PlayMode.Off;
+        string? playerPath = null;
 
         var positionals = new List<string>();
 
@@ -147,6 +181,21 @@ public static class CliParser
                 if (inlineValue is not null) { value = inlineValue; return true; }
                 if (i + 1 < args.Length) { value = args[++i]; return true; }
                 value = "";
+                return false;
+            }
+
+            // --ffmpeg-download is usable bare ("install the default"), so its
+            // value is only consumed when it actually names a source. Without this
+            // `--ffmpeg-download --quiet` would swallow --quiet.
+            bool TrySourceValue(out string value)
+            {
+                value = "";
+                if (inlineValue is not null) { value = inlineValue; return true; }
+                if (i + 1 < args.Length && FFmpeg.FfmpegCatalog.Find(args[i + 1]) is not null)
+                {
+                    value = args[++i];
+                    return true;
+                }
                 return false;
             }
 
@@ -273,6 +322,41 @@ public static class CliParser
                 case "--ffprobe":
                     if (!TryValue(out ffprobe)) return (null, "--ffprobe requires a value");
                     break;
+                case "--ffmpeg-source":
+                    if (!TryValue(out ffmpegSource)) return (null, "--ffmpeg-source requires a value");
+                    ffmpegSource = ffmpegSource.Trim().ToLowerInvariant();
+                    // "path" is the escape hatch back to the system FFmpeg.
+                    if (FFmpeg.FfmpegCatalog.Find(ffmpegSource) is null
+                        && !string.Equals(ffmpegSource, "path", StringComparison.OrdinalIgnoreCase))
+                        return (null, $"--ffmpeg-source must be one of {FFmpeg.FfmpegCatalog.Ids} or path");
+                    break;
+                case "--ffmpeg-download":
+                    ffmpegDownload = TrySourceValue(out string dl) ? dl.ToLowerInvariant()
+                        : FFmpeg.FfmpegCatalog.DefaultId;
+                    break;
+                case "--ffmpeg-archive":
+                    if (!TryValue(out ffmpegArchive)) return (null, "--ffmpeg-archive requires a path");
+                    ffmpegArchive = ffmpegArchive.Trim().Trim('"');
+                    break;
+                case "--ffmpeg-delete":
+                    if (!TrySourceValue(out ffmpegDelete))
+                        return (null, $"--ffmpeg-delete requires one of {FFmpeg.FfmpegCatalog.Ids}");
+                    ffmpegDelete = ffmpegDelete.ToLowerInvariant();
+                    break;
+                case "--ffmpeg-list": ffmpegList = true; break;
+                case "--proxy":
+                    if (!TryValue(out ffmpegProxy)) return (null, "--proxy requires a value");
+                    break;
+                case "--play":
+                    if (!TryValue(out string playRaw)) return (null, "--play requires a mode");
+                    play = Player.ParseMode(playRaw);
+                    if (play == PlayMode.Off && !playRaw.Trim().Equals("off", StringComparison.OrdinalIgnoreCase)
+                        && playRaw.Trim().Length > 0)
+                        return (null, "--play supports off, ffplay or external");
+                    break;
+                case "--player":
+                    if (!TryValue(out playerPath)) return (null, "--player requires a path");
+                    break;
                 case "--list-filters": listFilters = true; break;
                 case "--quiet": quiet = true; break;
                 case "--no-cui": noCui = true; break;
@@ -343,6 +427,14 @@ public static class CliParser
             Parallel = parallel,
             Language = language,
             Completion = completion,
+            FfmpegSource = ffmpegSource,
+            FfmpegProxy = ffmpegProxy,
+            FfmpegDownload = ffmpegDownload,
+            FfmpegArchive = ffmpegArchive,
+            FfmpegDelete = ffmpegDelete,
+            FfmpegList = ffmpegList,
+            Play = play,
+            PlayerPath = playerPath,
         }, null);
     }
 
@@ -390,6 +482,14 @@ public static class CliParser
             ("--parallel", "N", "shard the range and encode concurrently (default: 1)"),
             ("--quiet", "", "suppress the progress banner"),
             ("--no-cui", "", "never enter the interactive UI"),
+            ("--ffmpeg-source", "ID", $"FFmpeg distribution: {FFmpeg.FfmpegCatalog.Ids} or path (default: btbn)"),
+            ("--ffmpeg-download", "ID", "download and install a distribution, then exit"),
+            ("--ffmpeg-archive", "PATH", "install from a local archive instead of downloading"),
+            ("--ffmpeg-delete", "ID", "delete an installed distribution, then exit"),
+            ("--ffmpeg-list", "", "list the installed distributions, then exit"),
+            ("--proxy", "URL", "proxy for FFmpeg downloads, e.g. http://127.0.0.1:10808"),
+            ("--play", "MODE", "after encoding: off, ffplay or external (default: off)"),
+            ("--player", "PATH", "external player executable (default: system file association)"),
         ];
 
         var sb = new System.Text.StringBuilder();

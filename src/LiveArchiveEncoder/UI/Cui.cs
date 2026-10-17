@@ -13,7 +13,7 @@ public static class Cui
     public static int Run(
         string ffmpeg, string ffprobe, bool btbn,
         HashSet<string> availableFilters, HashSet<string> availableScaleAlgorithms,
-        string? language = null)
+        string? language = null, string? ffmpegSource = null)
     {
         (string version, _, bool likelyGpl) = FFmpegDiscovery.BuildInfo(ffmpeg);
         List<EncoderInfo> encoders = FFmpegDiscovery.DetectLegacyEncoders(ffmpeg);
@@ -25,6 +25,7 @@ public static class Cui
         UserConfig stored = ConfigStore.Load();
         bool restored = stored.Encoder is not null || stored.SavedAt is not null;
         if (restored) ConfigStore.Apply(stored, c, encoders);
+        if (!string.IsNullOrWhiteSpace(ffmpegSource)) c.FfmpegSource = ffmpegSource;
 
         // Precedence: --lang on the command line beats the stored preference,
         // which beats the built-in default.
@@ -35,6 +36,9 @@ public static class Cui
         Console.WriteLine("============================");
         Console.WriteLine($"{L.Pad("FFmpeg", 17)}: {version}");
         Console.WriteLine($"{L.Pad(L.T("banner.executable"), 17)}: {ffmpeg}");
+        string sourceState = Toolchain.IsInstalled(c.FfmpegSource)
+            ? L.T("tc.installed") : L.T("tc.notinstalled");
+        Console.WriteLine($"{L.Pad(L.T("banner.source"), 17)}: {c.FfmpegSource} ({sourceState})");
         Console.WriteLine($"{L.Pad(L.T("banner.btbn"), 17)}: {(btbn ? L.T("value.yes") : L.T("value.fallback"))}");
         Console.WriteLine($"{L.Pad(L.T("banner.gpl"), 17)}: {(likelyGpl ? L.T("value.yes") : L.T("value.notdetected"))}");
         Console.WriteLine(
@@ -64,6 +68,8 @@ public static class Cui
             Console.WriteLine($" 9. {L.Pad(L.T("menu.turbo"), 22)} = {(c.Turbo ? L.T("turbo.on") : L.T("turbo.off"))}");
             Console.WriteLine($"10. {L.Pad(L.T("menu.language"), 22)} = {c.Language}");
             Console.WriteLine($"11. {L.Pad(L.T("menu.parallel"), 22)} = {(c.Parallel > 1 ? c.Parallel.ToString(CultureInfo.InvariantCulture) : L.T("menu.parallel.off"))}");
+            Console.WriteLine($"12. {L.Pad(L.T("menu.toolchain"), 22)} = {c.FfmpegSource}");
+            Console.WriteLine($"13. {L.Pad(L.T("menu.play"), 22)} = {Player.Describe(c.Play, c.PlayerPath, FFmpegDiscovery.FindFFplay(ffmpeg))}");
             Console.WriteLine($" 0. {L.T("menu.exit")}");
             Console.Write(L.T("menu.select"));
 
@@ -143,6 +149,25 @@ public static class Cui
                     Console.WriteLine(c.Parallel > 1 ? L.T("parallel.set", c.Parallel) : L.T("parallel.off"));
                     Persist(c);
                     break;
+                case "12":
+                    {
+                        // The toolchain menu can install or select a different
+                        // build, which invalidates every capability probe done
+                        // so far -- re-resolve instead of keeping stale lists.
+                        (string newSource, string? newProxy) =
+                            ToolchainConsole.Menu(c.FfmpegSource, c.FfmpegProxy);
+                        c.FfmpegSource = newSource;
+                        c.FfmpegProxy = newProxy;
+                        Persist(c);
+                        RefreshToolchain(c, ref ffmpeg, ref ffprobe, ref btbn,
+                            ref encoders, ref audioAvailable,
+                            ref availableFilters, ref availableScaleAlgorithms);
+                        break;
+                    }
+                case "13":
+                    EditPlayback(c, ffmpeg);
+                    Persist(c);
+                    break;
                 default:
                     Console.WriteLine(L.T("menu.invalid"));
                     break;
@@ -158,6 +183,76 @@ public static class Cui
 
     private static FileInfo DefaultOutput(FileInfo src, EncoderInfo encoder) =>
         new(Path.Combine(src.DirectoryName ?? ".", $"{Path.GetFileNameWithoutExtension(src.Name)}_live.{encoder.Extension}"));
+
+    /// <summary>
+    /// Re-resolve everything that depends on which FFmpeg is in use. Called after
+    /// the toolchain menu, because installing or selecting another build changes
+    /// the encoder list, the filter list and the scaler list at the same time.
+    /// </summary>
+    private static void RefreshToolchain(
+        Config c, ref string ffmpeg, ref string ffprobe, ref bool btbn,
+        ref List<EncoderInfo> encoders, ref HashSet<string> audioAvailable,
+        ref HashSet<string> availableFilters, ref HashSet<string> availableScaleAlgorithms)
+    {
+        if (!Toolchain.IsInstalled(c.FfmpegSource))
+        {
+            Console.WriteLine(L.T("tc.notinstalled.hint", c.FfmpegSource));
+            return;
+        }
+
+        try
+        {
+            ffmpeg = FFmpegDiscovery.FindFFmpeg(null, c.FfmpegSource);
+            btbn = FFmpegDiscovery.IsBtbn;
+            ffprobe = FFmpegDiscovery.FindFFprobe(null, ffmpeg);
+            availableFilters = FFmpegCapabilities.DetectVideoFilters(ffmpeg);
+            availableFilters = FFmpegCapabilities.VerifyNamedFilters(
+                ffmpeg, availableFilters, ["scale", .. Constants.DeinterlaceFilters]);
+            availableScaleAlgorithms = FFmpegCapabilities.DetectScaleAlgorithms(ffmpeg);
+            encoders = FFmpegDiscovery.DetectLegacyEncoders(ffmpeg);
+            audioAvailable = FFmpegDiscovery.DetectAudioEncoders(ffmpeg);
+
+            // The selected encoder may not exist in the new build; dropping it
+            // beats starting an encode that is guaranteed to fail.
+            if (c.Encoder is not null
+                && !encoders.Any(e => string.Equals(e.Name, c.Encoder.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                Console.WriteLine(L.T("tc.encodergone", c.Encoder.Name));
+                c.Encoder = null;
+            }
+            Console.WriteLine(L.T("tc.refreshed", ffmpeg));
+        }
+        catch (Exception exc) when (exc is FileNotFoundException or InvalidOperationException or TimeoutException)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{exc.Message}");
+        }
+    }
+
+    private static void EditPlayback(Config c, string ffmpeg)
+    {
+        Console.Write(L.T("play.prompt.mode", Player.ModeName(c.Play)));
+        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        if (raw.Length == 0) return;
+
+        PlayMode mode = Player.ParseMode(raw);
+        if (mode == PlayMode.Off && raw is not ("off" or "0" or "none"))
+        {
+            Console.WriteLine(L.T("play.badmode"));
+            return;
+        }
+        c.Play = mode;
+
+        if (mode == PlayMode.External)
+        {
+            Console.Write(L.T("play.prompt.player", c.PlayerPath ?? L.T("play.assoc")));
+            string entered = (Console.ReadLine() ?? "").Trim().Trim('"');
+            // "-" clears the player so playback falls back to the shell association.
+            if (entered == "-") c.PlayerPath = null;
+            else if (entered.Length > 0) c.PlayerPath = entered;
+        }
+
+        Console.WriteLine(L.T("play.set", Player.Describe(c.Play, c.PlayerPath, FFmpegDiscovery.FindFFplay(ffmpeg))));
+    }
 
     private static FileInfo? InputFileMenu()
     {
@@ -616,6 +711,19 @@ public static class Cui
             Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
             Console.WriteLine();
             Report.PrintResult(c.OutputPath.FullName, result);
+
+            if (c.Play != PlayMode.Off)
+            {
+                Console.Write(L.T("play.ask"));
+                string answer = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+                if (answer is "" or "y" or "yes")
+                {
+                    (bool played, string? playError) = Player.Launch(
+                        c.Play, c.OutputPath.FullName, ffmpeg, c.PlayerPath);
+                    if (!played && playError is not null)
+                        Console.WriteLine($"{L.T("error.prefix")}{L.T("play.launchfail", playError)}");
+                }
+            }
         }
         catch (OperationCanceledException)
         {

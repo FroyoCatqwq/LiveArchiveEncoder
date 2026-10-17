@@ -68,6 +68,18 @@ public sealed class UserConfig
     public int Parallel { get; set; } = 1;
     public string Language { get; set; } = "en";
 
+    /// <summary>Selected FFmpeg distribution id (btbn / gyan / avbuild / nonfree / path).</summary>
+    public string FfmpegSource { get; set; } = FFmpeg.FfmpegCatalog.DefaultId;
+
+    /// <summary>Proxy for FFmpeg downloads; null means "ask every time".</summary>
+    public string? FfmpegProxy { get; set; }
+
+    /// <summary>"off" / "ffplay" / "external".</summary>
+    public string PlayMode { get; set; } = "off";
+
+    /// <summary>External player executable; empty means the shell association.</summary>
+    public string? PlayerPath { get; set; }
+
     /// <summary>Ignored on load; present so the file is self-describing.</summary>
     public DateTimeOffset? SavedAt { get; set; }
 }
@@ -170,6 +182,10 @@ public static class ConfigStore
         Turbo = c.Turbo,
         Parallel = c.Parallel,
         Language = c.Language,
+        FfmpegSource = c.FfmpegSource,
+        FfmpegProxy = c.FfmpegProxy,
+        PlayMode = UI.Player.ModeName(c.Play),
+        PlayerPath = c.PlayerPath,
     };
 
     /// <summary>
@@ -227,5 +243,18 @@ public static class ConfigStore
         // Never restore a nonsensical shard count from an older/corrupt file.
         c.Parallel = Math.Max(1, stored.Parallel);
         c.Language = stored.Language;
+
+        // A source that is not installed is still remembered (so an install picks
+        // it up later). "path" means "stay on the system FFmpeg" and is the only
+        // non-distribution value accepted; anything else unrecognised falls back
+        // to the default so a typo can never make discovery fail.
+        string wanted = (stored.FfmpegSource ?? "").Trim().ToLowerInvariant();
+        if (wanted == "path") c.FfmpegSource = "path";
+        else c.FfmpegSource = FFmpeg.FfmpegCatalog.Find(wanted) is null
+            ? FFmpeg.FfmpegCatalog.DefaultId
+            : wanted;
+        c.FfmpegProxy = stored.FfmpegProxy;
+        c.Play = UI.Player.ParseMode(stored.PlayMode);
+        c.PlayerPath = stored.PlayerPath;
     }
 }

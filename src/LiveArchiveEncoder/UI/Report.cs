@@ -1,6 +1,7 @@
 using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
+using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
 
 namespace LiveArchiveEncoder.UI;
@@ -76,6 +77,8 @@ public static class Report
         Line(L.T("menu.parallel"),
             c.Parallel > 1 ? c.Parallel.ToString(CultureInfo.InvariantCulture) : L.T("menu.parallel.off"));
         Line(L.T("menu.language"), c.Language);
+        Line(L.T("banner.source"), c.FfmpegSource);
+        Line(L.T("menu.play"), Player.Describe(c.Play, c.PlayerPath, FFmpegDiscovery.FindFFplay(ffmpeg)));
         if (c.Encoder is not null && c.Encoder.Name == "libx264")
         {
             Line(L.T("param.x264preset"), c.X264Preset);

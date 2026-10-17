@@ -153,6 +153,10 @@ public static class Cli
                 // --lang wins; without it the stored preference is preserved so a
                 // CLI run never silently resets the language chosen in the UI.
                 Language = args.Language ?? ConfigStore.Load().Language,
+                FfmpegSource = args.FfmpegSource,
+                FfmpegProxy = args.FfmpegProxy,
+                Play = args.Play,
+                PlayerPath = args.PlayerPath,
             };
             Validation.ValidateCommonConfig(config);
             if (config.EndTimeSeconds is not null && config.EndTimeSeconds <= config.StartTimeSeconds)
@@ -215,6 +219,16 @@ public static class Cli
 
         Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
         if (!args.Quiet) Report.PrintResult(dst.FullName, result);
+
+        // Only ffplay/external do anything; "off" is a no-op so scripting a run
+        // never pops a window.
+        if (args.Play != PlayMode.Off)
+        {
+            (bool played, string? playError) =
+                Player.Launch(args.Play, dst.FullName, ffmpeg, args.PlayerPath);
+            if (!played && playError is not null)
+                Console.Error.WriteLine($"ERROR: {playError}");
+        }
         return 0;
     }
 
