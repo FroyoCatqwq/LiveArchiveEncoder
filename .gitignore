@@ -1,0 +1,27 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+publish/
+artifacts/
+*.user
+*.suo
+.vs/
+
+# Test scratch output
+tests/out/
+tests/out*/
+tests/*.log
+tests/*.json.bak
+tests/_cui_backup/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local data (installed ffmpeg toolchains, config)
+.local/
+
+# OS
+Thumbs.db
+.DS_Store

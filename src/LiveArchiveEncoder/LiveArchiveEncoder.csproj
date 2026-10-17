@@ -1,0 +1,70 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>LiveArchiveEncoder</RootNamespace>
+    <AssemblyName>LiveArchiveEncoder</AssemblyName>
+
+    <!-- No locale-dependent formatting: FFmpeg arguments must be invariant. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Workstation GC keeps pause times low while feeding raw frames. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <Optimize>true</Optimize>
+    <DebugType>none</DebugType>
+    <!-- Trim runtime services this tool never uses. All of these are offline
+         switches; ReadyToRun/NativeAOT were rejected because they need NuGet
+         runtime packs that cannot be restored behind the local proxy. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <DebuggerSupport>false</DebuggerSupport>
+  </PropertyGroup>
+
+  <!-- NativeAOT.
+       AOT is opt-in so the default `dotnet build` stays a plain JIT app:
+       dotnet publish -c Release -r win-x64 -p:PublishAot=true
+
+       What AOT actually buys here: process start drops from the JIT plus
+       tiered warm-up cost to a few milliseconds, and the result is one small
+       self-contained exe. It does NOT make encoding faster: the encoder runs
+       in FFmpeg child processes and the wall clock is pinned by the
+       deliberate realtime pacing. -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <!-- Optimise generated code for throughput; also enables the runtime's
+         vectorised sort (VxSort) path. -->
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <!-- Drop the symbol table from the native image. -->
+    <StripSymbols>true</StripSymbols>
+    <!-- Statically linked, no VC++ redistributable needed. -->
+    <StaticallyLinked>true</StaticallyLinked>
+
+    <!-- link.exe needs the Windows SDK import libraries (advapi32.lib,
+         ucrt.lib, ...). `vcvarsall.bat` normally supplies them through LIB,
+         but its SDK discovery goes through reg.exe, which is blocked in the
+         build sandbox used here, so the directories are passed explicitly.
+         On a normal developer box this block can be deleted. -->
+    <WindowsSdkLibRoot Condition="'$(WindowsSdkLibRoot)' == ''">C:\Program Files (x86)\Windows Kits\10\Lib</WindowsSdkLibRoot>
+    <WindowsSdkLibVersion Condition="'$(WindowsSdkLibVersion)' == ''">10.0.26100.0</WindowsSdkLibVersion>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+    <AdditionalNativeLibraryDirectories Include="$(WindowsSdkLibRoot)\$(WindowsSdkLibVersion)\um\x64" />
+    <AdditionalNativeLibraryDirectories Include="$(WindowsSdkLibRoot)\$(WindowsSdkLibVersion)\ucrt\x64" />
+  </ItemGroup>
+
+  <!-- Keep the GC heap small: this process allocates almost nothing per frame. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.Conserve" Value="7" Trim="false" />
+  </ItemGroup>
+
+</Project>

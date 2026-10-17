@@ -1,0 +1,26 @@
+case                   py_rc  cs_rc  match   first error line
+--------------------------------------------------------------------------------------------------------------
+unknown_encoder        2      2      OK      py: ERROR: not_a_codec is not detected as a legacy/classic video encoder.
+                                             cs: ERROR: not_a_codec is not detected as a legacy/classic video encoder.
+bad_extension          2      2      OK      py: ERROR: Output extension '.mp4' does not match selected muxer 'rm' for 
+                                             cs: ERROR: Output extension '.mp4' does not match selected muxer 'rm' for 
+missing_input          2      2      OK      py: ERROR: input not found: D:\RecordingVideos\live_archive_frame_damage_p
+                                             cs: ERROR: input not found: D:\RecordingVideos\live_archive_frame_damage_p
+bad_timecode           2      2      OK      py: usage: live_archive_encoder.py [-h] [--start-time HH:MM:SS]
+                                             cs: ERROR: minutes and seconds in a timecode must be between 00 and 59
+end_before_start       2      2      OK      py: ERROR: end time must be later than start time
+                                             cs: ERROR: end time must be later than start time
+start_past_eof         2      2      OK      py: ERROR: end time must be later than start time
+                                             cs: ERROR: end time must be later than start time
+bad_scale_algo         2      2      OK      py: ERROR: unknown scale algorithm 'not_a_kernel'; choose: neighbor, neare
+                                             cs: ERROR: unknown scale algorithm 'not_a_kernel'; choose: neighbor, neare
+bad_recover            2      2      OK      py: ERROR: recover must be > 0 and < limit
+                                             cs: ERROR: recover must be > 0 and < limit
+roq_bad_size           1      1      OK      py: ERROR: roqvideo requires width and height to be divisible by 16; got 2
+                                             cs: ERROR: roqvideo requires width and height to be divisible by 16; got 2
+roq_bad_audio_rate     2      2      OK      py: ERROR: roq_dpcm requires --audio-rate 22050 (or leave it unset for aut
+                                             cs: ERROR: roq_dpcm requires --audio-rate 22050 (or leave it unset for aut
+unknown_arg            2      2      OK      py: usage: live_archive_encoder.py [-h] [--start-time HH:MM:SS]
+                                             cs: ERROR: unrecognized argument: --bogus-flag
+--------------------------------------------------------------------------------------------------------------
+total=11 fail=0

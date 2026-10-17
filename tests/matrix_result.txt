@@ -1,0 +1,81 @@
+source : D:\RecordingVideos\live_archive_frame_damage_project_v6.3_v2.1\live_archive_encoder_v7_net10\tests\media\test_src.mp4
+python : D:\RecordingVideos\live_archive_frame_damage_project_v6.3_v2.1\live_archive_encoder_v7_net10\live_archive_encoder.py
+csharp : D:\RecordingVideos\live_archive_frame_damage_project_v6.3_v2.1\live_archive_encoder_v7_net10\src\LiveArchiveEncoder\bin\Release\net10.0\LiveArchiveEncoder.exe
+
+[PASS] rv20_default
+        media : {'codec': 'rv20', 'width': 256, 'height': 192, 'pix_fmt': 'yuv420p', 'fps': '13/1', 'duration': 5.0, 'audio': 'ac3', 'streams': 2, 'format': 'rm', 'size': 136405}
+        py    : fresh=24 repeat=41 video=186.2 kbps wall=6.82s exit=0
+        cs    : fresh=24 repeat=41 video=186.2 kbps wall=6.57s exit=0
+
+[PASS] mpeg4_avi
+        media : {'codec': 'mpeg4', 'width': 256, 'height': 192, 'pix_fmt': 'yuv420p', 'fps': '13/1', 'duration': 5.077, 'audio': 'mp3', 'streams': 2, 'format': 'avi', 'size': 155114}
+        py    : fresh=24 repeat=41 video=216.2 kbps wall=6.73s exit=0
+        cs    : fresh=24 repeat=41 video=216.2 kbps wall=6.64s exit=0
+
+[PASS] libx264_mp4
+        media : {'codec': 'h264', 'width': 256, 'height': 192, 'pix_fmt': 'yuv420p', 'fps': '13/1', 'duration': 5.0, 'audio': 'aac', 'streams': 2, 'format': 'mov,mp4,m4a,3gp,3g2,mj2', 'size': 108285}
+        py    : fresh=61 repeat=4 video=141.3 kbps wall=6.89s exit=0
+        cs    : fresh=61 repeat=4 video=141.3 kbps wall=6.75s exit=0
+
+[PASS] mpeg1video_mpg
+        media : {'codec': 'mpeg1video', 'width': 256, 'height': 192, 'pix_fmt': 'yuv420p', 'fps': '48000/1001', 'duration': 4.942, 'audio': 'mp2', 'streams': 2, 'format': 'mpeg', 'size': 229376}
+        py    : fresh=54 repeat=66 video=338.3 kbps wall=6.79s exit=0
+        cs    : fresh=56 repeat=64 video=335.0 kbps wall=6.64s exit=0
+
+[PASS] wmv2_asf
+        media : {'codec': 'wmv2', 'width': 256, 'height': 192, 'pix_fmt': 'yuv420p', 'fps': '13/1', 'duration': 5.046, 'audio': 'wmav2', 'streams': 2, 'format': 'asf', 'size': 141615}
+        py    : fresh=28 repeat=37 video=189.5 kbps wall=6.81s exit=0
+        cs    : fresh=33 repeat=32 video=194.6 kbps wall=6.69s exit=0
+
+[PASS] mjpeg_avi
+        media : {'codec': 'mjpeg', 'width': 256, 'height': 192, 'pix_fmt': 'yuvj420p', 'fps': '13/1', 'duration': 5.077, 'audio': 'mp3', 'streams': 2, 'format': 'avi', 'size': 491874}
+        py    : fresh=24 repeat=41 video=755.0 kbps wall=6.96s exit=0
+        cs    : fresh=24 repeat=41 video=755.0 kbps wall=6.65s exit=0
+
+[PASS] roqvideo_roq
+        media : {'codec': 'roq', 'width': 256, 'height': 192, 'pix_fmt': 'yuvj444p', 'fps': '13/1', 'duration': 0.0, 'audio': 'roq_dpcm', 'streams': 2, 'format': 'roq', 'size': 281200}
+        py    : fresh=24 repeat=41 video=417.9 kbps wall=6.89s exit=0
+        cs    : fresh=24 repeat=41 video=417.9 kbps wall=6.73s exit=0
+
+[PASS] h261_special
+        media : {'codec': 'h261', 'width': 176, 'height': 144, 'pix_fmt': 'yuv420p', 'fps': '30000/1001', 'duration': 0.0, 'audio': None, 'streams': 1, 'format': 'h261', 'size': 85341}
+        py    : fresh=50 repeat=15 video=147.1 kbps wall=6.82s exit=0
+        cs    : fresh=45 repeat=20 video=136.5 kbps wall=6.69s exit=0
+
+[PASS] rv20_timerange
+        media : {'codec': 'rv20', 'width': 256, 'height': 192, 'pix_fmt': 'yuv420p', 'fps': '13/1', 'duration': 3.0, 'audio': 'ac3', 'streams': 2, 'format': 'rm', 'size': 93205}
+        py    : fresh=18 repeat=21 video=216.5 kbps wall=4.82s exit=0
+        cs    : fresh=18 repeat=21 video=216.5 kbps wall=4.73s exit=0
+
+[PASS] mpeg4_nocrop_bicubic
+        media : {'codec': 'mpeg4', 'width': 320, 'height': 240, 'pix_fmt': 'yuv420p', 'fps': '13/1', 'duration': 5.077, 'audio': 'mp3', 'streams': 2, 'format': 'avi', 'size': 207264}
+        py    : fresh=31 repeat=34 video=299.6 kbps wall=6.82s exit=0
+        cs    : fresh=31 repeat=34 video=299.6 kbps wall=6.69s exit=0
+
+[PASS] mpeg4_yadif
+        media : {'codec': 'mpeg4', 'width': 256, 'height': 192, 'pix_fmt': 'yuv420p', 'fps': '13/1', 'duration': 5.077, 'audio': 'mp3', 'streams': 2, 'format': 'avi', 'size': 163804}
+        py    : fresh=33 repeat=32 video=230.1 kbps wall=6.88s exit=0
+        cs    : fresh=33 repeat=32 video=230.1 kbps wall=6.67s exit=0
+
+[PASS] mpeg4_lowfps
+        media : {'codec': 'mpeg4', 'width': 256, 'height': 192, 'pix_fmt': 'yuv420p', 'fps': '8/1', 'duration': 5.125, 'audio': 'mp3', 'streams': 2, 'format': 'avi', 'size': 143386}
+        py    : fresh=26 repeat=14 video=193.1 kbps wall=6.69s exit=0
+        cs    : fresh=27 repeat=13 video=197.4 kbps wall=6.61s exit=0
+
+================================================================================================
+case                     result  codec      size         fps      dur     audio    py_wall  cs_wall 
+------------------------------------------------------------------------------------------------
+rv20_default             PASS    rv20       256x192      13/1     5.0     ac3         6.82s    6.57s
+mpeg4_avi                PASS    mpeg4      256x192      13/1     5.077   mp3         6.73s    6.64s
+libx264_mp4              PASS    h264       256x192      13/1     5.0     aac         6.89s    6.75s
+mpeg1video_mpg           PASS    mpeg1video 256x192      48000/1001 4.942   mp2         6.79s    6.64s
+wmv2_asf                 PASS    wmv2       256x192      13/1     5.046   wmav2       6.81s    6.69s
+mjpeg_avi                PASS    mjpeg      256x192      13/1     5.077   mp3         6.96s    6.65s
+roqvideo_roq             PASS    roq        256x192      13/1     0.0     roq_dpcm    6.89s    6.73s
+h261_special             PASS    h261       176x144      30000/1001 0.0     None        6.82s    6.69s
+rv20_timerange           PASS    rv20       256x192      13/1     3.0     ac3         4.82s    4.73s
+mpeg4_nocrop_bicubic     PASS    mpeg4      320x240      13/1     5.077   mp3         6.82s    6.69s
+mpeg4_yadif              PASS    mpeg4      256x192      13/1     5.077   mp3         6.88s    6.67s
+mpeg4_lowfps             PASS    mpeg4      256x192      8/1      5.125   mp3         6.69s    6.61s
+================================================================================================
+total=12 pass=12 fail=0

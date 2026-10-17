@@ -1,0 +1,48 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="live_archive_encoder.py" />
+    <File Path="tests\compare_matrix.py" />
+    <File Path="tests\benchmark.ps1" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/">
+    <File Path="src\LiveArchiveEncoder\LiveArchiveEncoder.csproj" />
+    <File Path="src\LiveArchiveEncoder\Program.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/Configuration/">
+    <File Path="src\LiveArchiveEncoder\Configuration\Constants.cs" />
+    <File Path="src\LiveArchiveEncoder\Configuration\Models.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/Core/">
+    <File Path="src\LiveArchiveEncoder\Core\EncoderMath.cs" />
+    <File Path="src\LiveArchiveEncoder\Core\HighResolutionTimer.cs" />
+    <File Path="src\LiveArchiveEncoder\Core\PixelFormatUtil.cs" />
+    <File Path="src\LiveArchiveEncoder\Core\Timecode.cs" />
+    <File Path="src\LiveArchiveEncoder\Core\Validation.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/FFmpeg/">
+    <File Path="src\LiveArchiveEncoder\FFmpeg\FFmpegCapabilities.cs" />
+    <File Path="src\LiveArchiveEncoder\FFmpeg\FFmpegDiscovery.cs" />
+    <File Path="src\LiveArchiveEncoder\FFmpeg\PipeReaders.cs" />
+    <File Path="src\LiveArchiveEncoder\FFmpeg\Probe.cs" />
+    <File Path="src\LiveArchiveEncoder\FFmpeg\ProcessRunner.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/Frames/">
+    <File Path="src\LiveArchiveEncoder\Frames\FrameBufferPool.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/RateControl/">
+    <File Path="src\LiveArchiveEncoder\RateControl\OutputMonitor.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/Encoding/">
+    <File Path="src\LiveArchiveEncoder\Encoding\ArgsBuilder.cs" />
+    <File Path="src\LiveArchiveEncoder\Encoding\EncodeResult.cs" />
+    <File Path="src\LiveArchiveEncoder\Encoding\Preflight.cs" />
+    <File Path="src\LiveArchiveEncoder\Encoding\RealtimeEncoder.cs" />
+    <File Path="src\LiveArchiveEncoder\Encoding\RealtimeOptions.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/UI/">
+    <File Path="src\LiveArchiveEncoder\UI\Cli.cs" />
+    <File Path="src\LiveArchiveEncoder\UI\CliOptions.cs" />
+    <File Path="src\LiveArchiveEncoder\UI\Cui.cs" />
+    <File Path="src\LiveArchiveEncoder\UI\Report.cs" />
+  </Folder>
+</Solution>

@@ -1,0 +1,43 @@
+=== 真实素材 HK-MCT1-PART-encoded.avi (320x240 h264+aac), 60s 片段, mpeg4/avi ===
+--- PYTHON ---
+Encoder command: mpeg4 -> avi -> D:\RecordingVideos\live_archive_frame_damage_project_v6.3_v2.1\live_archive_encoder_v7_net10\tests\media\real_py.avi
+[   58.7s] video= 145.3 kbps LIVE      motion=13fps slots=    761 new=    635 repeat=    126[   59.2s] video=  91.3 kbps LIVE      motion=13fps slots=    768 new=    642 repeat=    126[   59.7s] video= 107.7 kbps LIVE      motion=13fps slots=    775 new=    649 repeat=    126Done: tests\media\real_py.avi
+Duration           : 60.00s
+Output resolution  : 256x192
+Video average      : 148.8 kbps
+Total average      : 180.8 kbps
+Fresh frames       : 653
+Repeated slots     : 127
+real	1m2.018s
+--- C# ---
+Encoder command: mpeg4 -> avi -> D:\RecordingVideos\live_archive_frame_damage_project_v6.3_v2.1\live_archive_encoder_v7_net10\tests\media\real_cs.avi
+[   59.2s] video=  78.2 kbps LIVE      motion=13fps slots=    769 new=    632 repeat=    137[   59.8s] video=  99.6 kbps LIVE      motion=13fps slots=    776 new=    639 repeat=    137Done: D:\RecordingVideos\live_archive_frame_damage_project_v6.3_v2.1\live_archive_encoder_v7_net10\tests\media\real_cs.avi
+Duration           : 60.00s
+Output resolution  : 256x192
+Video average      : 148.6 kbps
+Total average      : 180.6 kbps
+Fresh frames       : 642
+Repeated slots     : 138
+real	1m2.025s
+=== ffprobe PY ===
+codec_name=mpeg4
+width=256
+height=192
+r_frame_rate=13/1
+duration=60.076923
+codec_name=mp3
+r_frame_rate=0/0
+duration=60.084000
+duration=60.084000
+size=1355718
+=== ffprobe CS ===
+codec_name=mpeg4
+width=256
+height=192
+r_frame_rate=13/1
+duration=60.076923
+codec_name=mp3
+r_frame_rate=0/0
+duration=60.084000
+duration=60.084000
+size=1354470
