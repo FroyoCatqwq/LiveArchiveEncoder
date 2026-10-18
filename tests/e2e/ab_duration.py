@@ -23,6 +23,9 @@ EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
 
 ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 SRC = ROOT / "tests" / "media" / "test_src.mp4"
+# The v6.3.3 baseline defaults to CUDA decoding; v7.5 defaults to software on
+# both platforms. Pin the baseline to software too, otherwise the two sides
+# decode differently on a machine that has an NVIDIA card.
 PY = ROOT / "reference" / "live_archive_encoder.py"
 CS = ROOT / "src" / "LiveArchiveEncoder" / "bin" / "Release" / "net10.0" / EXE_NAME
 WORK = ROOT / "tests" / "out" / "ab"
@@ -60,7 +63,7 @@ def main() -> int:
         print("=" * 78)
         print(f"case: {name}   segment 0 - {END}")
         variants = [
-            ("py          ", [sys.executable, str(PY)]),
+            ("py          ", [sys.executable, str(PY), "--no-cuda"]),
             ("cs inline   ", [str(CS), "--audio-mode", "inline"]),
             ("cs separate ", [str(CS), "--audio-mode", "separate"]),
             ("cs auto     ", [str(CS)]),

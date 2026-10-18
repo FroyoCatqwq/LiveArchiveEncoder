@@ -15,6 +15,9 @@ EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
 ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 MEDIA = ROOT / "tests" / "media"
 SRC = MEDIA / "test_src.mp4"
+# The v6.3.3 baseline defaults to CUDA decoding; v7.5 defaults to software on
+# both platforms. Pin the baseline to software too, otherwise the two sides
+# decode differently on a machine that has an NVIDIA card.
 PY = ROOT / "reference" / "live_archive_encoder.py"
 # CS_EXE lets the same suite be run against the NativeAOT build.
 CS = Path(os.environ.get("CS_EXE")
@@ -61,7 +64,7 @@ def main() -> int:
                 next((extra[i + 1] for i, v in enumerate(extra) if v == "--encoder"), "rv20"), ".rm")
             args = [str(SRC), str(out) + ext, "--end-time", "00:00:02", *extra]
 
-        py_rc, py_out = run([sys.executable, str(PY)], args)
+        py_rc, py_out = run([sys.executable, str(PY), "--no-cuda"], args)
         # --ffmpeg-source pins the C# run to the system FFmpeg -- the same binary
         # the Python baseline uses -- so a managed build installed later cannot
         # change these exit codes. Python has no such flag, hence the asymmetry.

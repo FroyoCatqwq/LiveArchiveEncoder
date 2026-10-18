@@ -24,6 +24,9 @@ EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
 ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 MEDIA = ROOT / "tests" / "media"
 SRC = MEDIA / "test_src.mp4"
+# The v6.3.3 baseline defaults to CUDA decoding; v7.5 defaults to software on
+# both platforms. Pin the baseline to software too, otherwise the two sides
+# decode differently on a machine that has an NVIDIA card.
 PY = ROOT / "reference" / "live_archive_encoder.py"
 # CS_EXE lets the same matrix be run against the NativeAOT build.
 CS = Path(os.environ.get("CS_EXE")
@@ -84,7 +87,7 @@ def probe(path: Path) -> dict:
 
 def run_py(args: list[str]) -> tuple[dict, float]:
     t0 = time.perf_counter()
-    p = subprocess.run([sys.executable, str(PY), *args],
+    p = subprocess.run([sys.executable, str(PY), "--no-cuda", *args],
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     elapsed = time.perf_counter() - t0
     return parse_summary(p.stdout, p.stderr, p.returncode), elapsed
