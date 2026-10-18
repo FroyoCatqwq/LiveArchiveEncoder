@@ -6,6 +6,10 @@
 #                               zlib-dev and the ILCompiler packages)
 #   tools/build.sh --no-jit     skip the framework-dependent publish
 #
+# DOTNET overrides the dotnet executable. Useful when the SDK only exists
+# through a shim manager (mise/asdf) that a non-interactive shell never puts on
+# PATH, e.g.  DOTNET="$HOME/dot" tools/build.sh
+#
 # Counterpart of tools/build.ps1. The one intentional difference: there is no
 # AVX2 flavour here. On Windows the ILCompiler defaults to the SSE2 baseline and
 # can be raised with -p:IlcInstructionSet=avx2; that knob is x86-only and made
@@ -21,6 +25,7 @@ AOT=0
 NO_JIT=0
 CONFIGURATION="Release"
 RID="linux-x64"
+DOTNET="${DOTNET:-dotnet}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -39,13 +44,13 @@ project="$repo_root/src/LiveArchiveEncoder/LiveArchiveEncoder.csproj"
 
 if [ "$NO_JIT" -eq 0 ]; then
   echo "== JIT publish ($CONFIGURATION) =="
-  dotnet publish "$project" -c "$CONFIGURATION" -o "$repo_root/publish/jit"
+  "$DOTNET" publish "$project" -c "$CONFIGURATION" -o "$repo_root/publish/jit"
   echo "  -> publish/jit/LiveArchiveEncoder"
 fi
 
 if [ "$AOT" -eq 1 ]; then
   echo "== NativeAOT publish ($RID) =="
-  dotnet publish "$project" -c "$CONFIGURATION" -r "$RID" \
+  "$DOTNET" publish "$project" -c "$CONFIGURATION" -r "$RID" \
     -p:PublishAot=true -o "$repo_root/publish/aot"
   echo "  -> publish/aot/LiveArchiveEncoder"
 fi

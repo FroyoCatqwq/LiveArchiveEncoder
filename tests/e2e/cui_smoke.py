@@ -125,8 +125,15 @@ def main():
         p6 = cui([], "12\n1\n0\n0\n")
         check("run6 exit code 0", p6.returncode == 0, f"rc={p6.returncode}")
         check("run6 toolchain menu offered", "12." in p6.stdout and "FFmpeg toolchain" in p6.stdout)
-        check("run6 lists every source",
-              all(s in p6.stdout for s in ("btbn", "gyan", "avbuild", "nonfree")))
+        # gyan.dev publishes no Linux build, so the Linux catalogue is
+        # deliberately shorter. Asking for "gyan" there would fail for a
+        # correct reason -- the menu must not offer a source it cannot install.
+        expected = (("btbn", "gyan", "avbuild", "nonfree") if os.name == "nt"
+                    else ("btbn", "avbuild", "nonfree"))
+        missing = [s for s in expected if s not in p6.stdout]
+        check("run6 lists every source", not missing, f"missing={missing}")
+        if os.name != "nt":
+            check("run6 hides windows-only sources", "gyan" not in p6.stdout)
         check("run6 marks manual sources", "manual download" in p6.stdout)
         c6 = read_config()
         check("run6 ffmpeg source persisted", c6 and c6.get("FfmpegSource") == "btbn",

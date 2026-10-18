@@ -101,9 +101,39 @@ public sealed class ToolchainTests
         Assert.That(resolved, Does.Contain("ffmpeg"));
         if (Toolchain.FFmpegFor("btbn") is { } managed)
         {
+            // The contract is that "path" does not consult the managed install
+            // -- it resolves through PATH like any other program. When the user
+            // put that very build on PATH, both routes legitimately agree, so
+            // there is nothing to distinguish here.
+            if (IsOnPath(managed))
+                Assert.Ignore("the managed build is on PATH; 'path' and 'btbn' resolve to the same file");
+
             Assert.That(resolved, Is.Not.EqualTo(managed),
                 "--ffmpeg-source path must not pick the managed build");
         }
+    }
+
+    private static bool IsOnPath(string executable)
+    {
+        string? dir = Path.GetDirectoryName(executable);
+        if (dir is null) return false;
+
+        string? envPath = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(envPath)) return false;
+
+        foreach (string entry in envPath.Split(Path.PathSeparator))
+        {
+            if (entry.Length == 0) continue;
+            try
+            {
+                if (string.Equals(Path.GetFullPath(entry), Path.GetFullPath(dir),
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase
+                                                    : StringComparison.Ordinal))
+                    return true;
+            }
+            catch { /* invalid PATH entry */ }
+        }
+        return false;
     }
 
     /// <summary>
