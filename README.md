@@ -35,7 +35,7 @@ tests\build.ps1 -Aot -WindowsSdkLibVersion 10.0.26100.0
 ## Tests
 
 ```powershell
-# Unit tests (NUnit 4)
+# Unit tests (NUnit 5)
 dotnet test tests/LiveArchiveEncoder.Tests/LiveArchiveEncoder.Tests.csproj -c Release
 
 # …or from the solution (same thing, discovers every project)

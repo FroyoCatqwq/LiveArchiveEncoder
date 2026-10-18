@@ -810,8 +810,8 @@ dotnet test tests\LiveArchiveEncoder.Tests -c Release
 > 词条完整性这一条刚建好就抓到了真东西：`note.*` 和 `run.*` 共 13 个词条只有英文，
 > 中文界面下会漏回英文并把那一列的对齐顶歪。已补齐。
 
-包：`NUnit` + `NUnit3TestAdapter` + `Microsoft.NET.Test.Sdk`，走 `nuget.config`
-里的代理还原。
+包：`NUnit` **5.x** + `NUnit3TestAdapter` **6.x**（适配器包名没变，NUnit 4/5 都用它）
++ `Microsoft.NET.Test.Sdk` **18.x**，走 `nuget.config` 里的代理还原。
 
 ### 与 Python 基线的等价性回归
 

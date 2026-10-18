@@ -13,9 +13,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
-    <PackageReference Include="NUnit" Version="4.*" />
-    <PackageReference Include="NUnit3TestAdapter" Version="5.*" />
+    <!-- NUnit 5 (framework 5.x + adapter 6.x). The adapter package is still
+         called NUnit3TestAdapter; it is what serves both NUnit 4 and 5. -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
+    <PackageReference Include="NUnit" Version="5.*" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.*" />
   </ItemGroup>
 
   <ItemGroup>
