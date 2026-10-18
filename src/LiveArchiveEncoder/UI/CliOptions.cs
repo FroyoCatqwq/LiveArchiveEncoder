@@ -11,6 +11,13 @@ public sealed class CliOptions
     public double StartTime { get; init; }
     public double? EndTime { get; init; }
     public string Encoder { get; init; } = "rv20";
+
+    /// <summary>
+    /// True when <c>--encoder</c> appeared on the command line. The property
+    /// above cannot express that on its own -- it has a default -- and an era
+    /// preset must not override a choice the user actually made.
+    /// </summary>
+    public bool EncoderExplicit { get; init; }
     public string? AudioEncoder { get; init; }
     public double Limit { get; init; } = 200.0;
     public double? Recover { get; init; }
@@ -105,6 +112,28 @@ public sealed class CliOptions
     /// <summary>External player executable; empty uses the shell association.</summary>
     public string? PlayerPath { get; init; }
 
+    // ---- v7.6: post-processing ----
+
+    /// <summary>Watermark text. Set means the stage is armed; null leaves the stored setting alone.</summary>
+    public string? Watermark { get; init; }
+    public string? WatermarkPosition { get; init; }
+    public int? WatermarkSize { get; init; }
+    public string? WatermarkColor { get; init; }
+    public string? WatermarkFont { get; init; }
+
+    /// <summary>Explicitly disarm the watermark stage.</summary>
+    public bool NoWatermark { get; init; }
+
+    /// <summary>Arm the recompress pass, using the stored or given arguments.</summary>
+    public bool Recompress { get; init; }
+    public string? RecompressArgs { get; init; }
+    public string? RecompressContainer { get; init; }
+    public bool RecompressKeep { get; init; }
+    public bool NoRecompress { get; init; }
+
+    /// <summary>Era preset id to apply; see <see cref="PostProcess.EraPresets"/>.</summary>
+    public string? Era { get; init; }
+
     public double EffectiveRecover => Recover ?? Limit * 0.75;
 }
 
@@ -118,6 +147,7 @@ public static class CliParser
         double start = 0.0;
         double? end = null;
         string encoder = "rv20";
+        bool encoderExplicit = false;
         string? audioEncoder = null;
         double limit = 200.0;
         double? recover = null;
@@ -164,6 +194,18 @@ public static class CliParser
         bool ffmpegList = false;
         PlayMode play = PlayMode.Off;
         string? playerPath = null;
+        string? watermark = null;
+        string? watermarkPosition = null;
+        int? watermarkSize = null;
+        string? watermarkColor = null;
+        string? watermarkFont = null;
+        bool noWatermark = false;
+        bool recompress = false;
+        string? recompressArgs = null;
+        string? recompressContainer = null;
+        bool recompressKeep = false;
+        bool noRecompress = false;
+        string? era = null;
 
         var positionals = new List<string>();
 
@@ -222,6 +264,7 @@ public static class CliParser
                     break;
                 case "--encoder":
                     if (!TryValue(out encoder)) return (null, "--encoder requires a value");
+                    encoderExplicit = true;
                     break;
                 case "--audio-encoder":
                     if (!TryValue(out audioEncoder)) return (null, "--audio-encoder requires a value");
@@ -388,6 +431,50 @@ public static class CliParser
                 case "--help" or "-h":
                     help = true;
                     break;
+
+                // ---- v7.6: post-processing ----
+                case "--watermark":
+                    if (!TryValue(out watermark)) return (null, "--watermark requires a value");
+                    break;
+                case "--watermark-position":
+                    if (!TryValue(out watermarkPosition)) return (null, "--watermark-position requires a value");
+                    watermarkPosition = watermarkPosition.Trim().ToLowerInvariant().Replace('_', '-');
+                    if (!Configuration.WatermarkSettings.Positions.Contains(watermarkPosition))
+                        return (null, $"--watermark-position must be one of "
+                            + string.Join(", ", Configuration.WatermarkSettings.Positions));
+                    break;
+                case "--watermark-size":
+                    if (!TryValue(out string wmSizeRaw) || !int.TryParse(wmSizeRaw, out int wmSize))
+                        return (null, "--watermark-size requires an integer");
+                    if (wmSize < 0) return (null, "--watermark-size must be 0 (automatic) or positive");
+                    watermarkSize = wmSize;
+                    break;
+                case "--watermark-color":
+                    if (!TryValue(out watermarkColor)) return (null, "--watermark-color requires a value");
+                    break;
+                case "--watermark-font":
+                    if (!TryValue(out watermarkFont)) return (null, "--watermark-font requires a path");
+                    break;
+                case "--no-watermark": noWatermark = true; break;
+
+                case "--recompress": recompress = true; break;
+                case "--recompress-args":
+                    if (!TryValue(out recompressArgs)) return (null, "--recompress-args requires a value");
+                    break;
+                case "--recompress-container":
+                    if (!TryValue(out recompressContainer)) return (null, "--recompress-container requires a value");
+                    recompressContainer = recompressContainer.TrimStart('.').ToLowerInvariant();
+                    break;
+                case "--recompress-keep": recompressKeep = true; break;
+                case "--no-recompress": noRecompress = true; break;
+
+                case "--era":
+                    if (!TryValue(out era)) return (null, "--era requires a value");
+                    era = era.Trim();
+                    if (PostProcess.EraPresets.Find(era) is null)
+                        return (null, $"--era must be one of {PostProcess.EraPresets.Ids}");
+                    break;
+
                 default:
                     return (null, $"unrecognized argument: {arg}");
             }
@@ -404,6 +491,7 @@ public static class CliParser
             StartTime = start,
             EndTime = end,
             Encoder = encoder,
+            EncoderExplicit = encoderExplicit,
             AudioEncoder = audioEncoder,
             Limit = limit,
             Recover = recover,
@@ -452,6 +540,20 @@ public static class CliParser
             FfmpegList = ffmpegList,
             Play = play,
             PlayerPath = playerPath,
+            Watermark = watermark,
+            WatermarkPosition = watermarkPosition,
+            WatermarkSize = watermarkSize,
+            WatermarkColor = watermarkColor,
+            WatermarkFont = watermarkFont,
+            NoWatermark = noWatermark,
+            // --recompress-args arms the pass on its own: nobody writes out a
+            // full argument list and then expects it not to run.
+            Recompress = recompress || recompressArgs is not null,
+            RecompressArgs = recompressArgs,
+            RecompressContainer = recompressContainer,
+            RecompressKeep = recompressKeep,
+            NoRecompress = noRecompress,
+            Era = era,
         }, null);
     }
 
@@ -509,6 +611,18 @@ public static class CliParser
             ("--proxy", "URL", "proxy for FFmpeg downloads, e.g. http://127.0.0.1:10808"),
             ("--play", "MODE", "after encoding: off, ffplay or external (default: off)"),
             ("--player", "PATH", "external player executable (default: system file association)"),
+            ("--watermark", "TEXT", "burn TEXT into the live recording before the recompress pass"),
+            ("--watermark-position", "NAME", "top-left, top-right, bottom-left, bottom-right or center"),
+            ("--watermark-size", "N", "font size; 0 scales it to the frame (default: 0)"),
+            ("--watermark-color", "COLOR", "font colour (default: white)"),
+            ("--watermark-font", "PATH", "font file; default is a system font that can draw the text"),
+            ("--no-watermark", "", "disable the watermark stage"),
+            ("--recompress", "", "re-encode the result the way a video site would (default: off)"),
+            ("--recompress-args", "ARGS", "FFmpeg arguments for that pass; -i and the output are supplied"),
+            ("--recompress-container", "EXT", "container for the recompressed file (default: mp4)"),
+            ("--recompress-keep", "", "keep the watermarked intermediate file"),
+            ("--no-recompress", "", "disable the recompress stage"),
+            ("--era", "ID", $"apply an era preset: {PostProcess.EraPresets.Ids}"),
         ];
 
         var sb = new System.Text.StringBuilder();

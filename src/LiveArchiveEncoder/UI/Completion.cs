@@ -50,6 +50,17 @@ public static class Completion
         ("--play", ["off", "ffplay", "external"]),
         ("--player", ["@FILE"]),
         ("--proxy", ["http://127.0.0.1:10808", "http://127.0.0.1:7890", "socks5://127.0.0.1:10808"]),
+        // v7.6: post-processing. --watermark / --recompress-args take free text,
+        // so they complete as files (paths with spaces are the common case).
+        ("--watermark", ["@FILE"]),
+        ("--watermark-position", [.. WatermarkSettings.Positions]),
+        ("--watermark-size", ["0", "10", "16", "24"]),
+        ("--watermark-color", ["white", "black", "yellow", "red", "0x80FFFFFF"]),
+        ("--watermark-font", ["@FILE"]),
+        ("--recompress", []),
+        ("--recompress-args", ["@FILE"]),
+        ("--recompress-container", ["mp4", "mkv", "avi", "flv"]),
+        ("--era", [.. PostProcess.EraPresets.All.Select(p => p.Id)]),
     ];
 
     private const string FileMarker = "@FILE";
@@ -64,6 +75,7 @@ public static class Completion
     [
         "-h", "--help", "--no-crop", "--deint-marked-only", "--no-cuda", "--turbo",
         "--list-filters", "--quiet", "--no-cui", "--cpu-info", "--ffmpeg-list",
+        "--no-watermark", "--recompress", "--recompress-keep", "--no-recompress",
     ];
 
     private static string[] Resolve(string[] values, IEnumerable<string> encoders)

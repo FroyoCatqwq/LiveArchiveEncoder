@@ -1,11 +1,15 @@
 # Live Archive Encoder v7 (.NET 10 / C# 14)
 
-CUI/CLI frontend for classic/legacy FFmpeg video encoders. This is a
+CUI/CLI frontend for classic/legacy FFmpeg video encoders. Started as a
 behaviour-preserving port of `live_archive_encoder.py` v6.3.3 (kept verbatim
 under `reference/`) to C# on .NET 10, with the internals rewritten for lower
-allocation and better pipe scheduling.
+allocation and better pipe scheduling. **As of v7.6 it grows past the port**:
+post-processing stages (text watermark, a "video site" recompress pass) and
+per-era presets sit on top of the realtime encoder, all of them off by default —
+with no flags given, the output is still exactly what v6.3.3 would have produced.
 
-Full user guide: [`docs/usage.md`](docs/usage.md).
+Full user guide: [`docs/usage.md`](docs/usage.md); where the era-preset numbers
+come from: [`docs/era-presets.md`](docs/era-presets.md).
 
 **The port keeps the realtime simulation semantics of v6.3.3.** The capture
 thread feeds frames at the source cadence and the main loop emits one output
@@ -169,6 +173,9 @@ Two flags are additions rather than ports:
 | `--cpu-info` | prints the instruction sets and `Vector<byte>.Count` the runtime reports |
 | `--audio-mode inline\|separate\|auto` | audio routing; `inline` (default) is v6.3.3 behaviour, see below |
 | `--hwaccel NAME` | hardware decode; `off` (default), `auto`, or any method from `ffmpeg -hwaccels`. The method is probed by actually decoding one frame and falls back to software when it fails |
+| `--watermark TEXT` | burn a text watermark into the live recording, before the recompress pass. Position/size/colour/font are separate flags; off by default |
+| `--recompress`, `--recompress-args ARGS` | re-encode the result the way a video site would. You write the middle of the FFmpeg command (`-vf scale=320:240,fps=15 -c:v libx264 -crf 28 …`); the program owns `-i` and the output path, and the fragment is tokenised and vetted so a stray path cannot overwrite your source. Off by default |
+| `--era ID` | apply an era preset: one set of live + recompress settings per era of online video, 1997→2016 — dial-up RealVideo G2, early-ADSL RealMedia, the FLV/Youku/Tudou years, early H.264, 720p. Sources in `docs/era-presets.md` |
 
 ### Audio routing
 

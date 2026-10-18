@@ -58,7 +58,28 @@ CASES = [
     ("source_path",     ["--encoder", "mpeg4", "--turbo", "--ffmpeg-source", "path"], "avi"),
     # --play off must be a no-op, or scripting an encode would pop a window.
     ("play_off",        ["--encoder", "mpeg4", "--turbo", "--play", "off"], "avi"),
+
+    # ---- v7.6: era preset + post-processing stages ----
+    # An era preset rewrites the encoder, frame size and bitrate ceiling, so the
+    # output container follows the preset's encoder, not the old default.
+    ("era_flv",         ["--era", "flv07", "--turbo"],                    "flv"),
+    # The watermark stage writes <stem>_wm.mp4 next to the main product.
+    ("watermark_only",  ["--encoder", "mpeg4", "--turbo", "--watermark", "测试"], "avi"),
+    # Both stages: watermark -> recompress, and --recompress-keep keeps the
+    # intermediate so both can be probed below.
+    ("post_full_chain", ["--encoder", "mpeg4", "--turbo", "--watermark", "测试",
+                         "--recompress", "--recompress-keep",
+                         "--recompress-args", "-vf scale=320:240,fps=15 "
+                                              "-c:v libx264 -crf 28 -ac 1 -b:a 32k"], "avi"),
 ]
+
+# v7.6: files the post-processing stages leave next to the main product.
+# case name -> [(file that must exist, expected codec)].
+POST_PRODUCTS = {
+    "watermark_only":   [("watermark_only_wm.mp4", "h264")],
+    "post_full_chain":  [("post_full_chain_wm.mp4", "h264"),
+                         ("post_full_chain_web.mp4", "h264")],
+}
 
 # Non-encoding option paths: (name, args, expected rc, substring that must appear).
 # Separate from CASES because they produce no media file.
@@ -68,6 +89,22 @@ OPTION_CHECKS = [
     ("ffmpeg_manual",     ["--ffmpeg-download", "avbuild"],       1, "downloaded by hand"),
     ("play_bad",          ["--play", "bogus"],                    2, "--play supports"),
     ("completion_new",    ["--completion", "bash"],               0, "--ffmpeg-source"),
+    # v7.6: era presets and the recompress fragment validator. The validator has
+    # to fire before the live pass -- a bad fragment must never cost a 20 minute
+    # encode -- which is why the rejection is rc=2 from argument parsing.
+    # --lang en pins the message: the CLI otherwise speaks the language stored in
+    # the settings file, which is a user choice, not this script's.
+    ("era_unknown",       ["--lang", "en", "--era", "nope"],        2, "must be one of"),
+    ("rc_bad_args",       ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
+                           "--recompress-args", "-i x.mp4",
+                           str(SRC), str(OUT / "rc_bad.avi")],      2, "not allowed here"),
+    ("rc_trailing_output", ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
+                           "--recompress-args", "-c:v libx264 out.mp4",
+                           str(SRC), str(OUT / "rc_trail.avi")],    2, "output file name"),
+    ("wm_position_bad",   ["--lang", "en", "--no-cui", "--watermark", "x",
+                           "--watermark-position", "middle",
+                           str(SRC), str(OUT / "wm_bad.mp4")],      2, "watermark-position"),
+    ("era_help_lists",    ["--completion", "bash"],                 0, "--era"),
 ]
 
 
@@ -134,6 +171,19 @@ def main():
                               f"v={len(video)} a={len(audio)} dur={dur:.2f}s")
                     if name == "quiet" and proc.stdout.strip():
                         status, detail = "FAIL", "--quiet still printed output"
+
+                # The live product exists; now the stage products.
+                for rel, want_codec in POST_PRODUCTS.get(name, []):
+                    staged = OUT / rel
+                    if not staged.exists() or staged.stat().st_size == 0:
+                        status, detail = "FAIL", f"missing stage product {rel}"
+                        break
+                    sinfo = probe(staged)
+                    sv = [s for s in (sinfo or {}).get("streams", [])
+                          if s.get("codec_type") == "video"]
+                    if not sv or sv[0].get("codec_name") != want_codec:
+                        status, detail = "FAIL", f"{rel} is not {want_codec}"
+                        break
 
         size = dst.stat().st_size if dst.exists() else 0
         if status == "FAIL":

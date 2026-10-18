@@ -26,7 +26,7 @@ internal partial class UserConfigJsonContext : JsonSerializerContext;
 /// </summary>
 public sealed class UserConfig
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -80,6 +80,18 @@ public sealed class UserConfig
 
     /// <summary>External player executable; empty means the shell association.</summary>
     public string? PlayerPath { get; set; }
+
+    // ---- v7.6: post-processing stages ----
+    // Absent from v1 files, which is fine: System.Text.Json leaves a property
+    // alone when the JSON does not mention it, so an old config keeps the
+    // defaults (both stages off) instead of nulling anything out.
+
+    public WatermarkSettings Watermark { get; set; } = new();
+
+    public RecompressSettings Recompress { get; set; } = new();
+
+    /// <summary>Last applied era preset id, or null for "custom settings".</summary>
+    public string? EraPreset { get; set; }
 
     /// <summary>Ignored on load; present so the file is self-describing.</summary>
     public DateTimeOffset? SavedAt { get; set; }
@@ -187,6 +199,28 @@ public static class ConfigStore
         FfmpegProxy = c.FfmpegProxy,
         PlayMode = UI.Player.ModeName(c.Play),
         PlayerPath = c.PlayerPath,
+        Watermark = CloneWatermark(c.Watermark),
+        Recompress = CloneRecompress(c.Recompress),
+        EraPreset = c.EraPreset,
+    };
+
+    private static WatermarkSettings CloneWatermark(WatermarkSettings s) => new()
+    {
+        Enabled = s.Enabled,
+        Text = s.Text,
+        Position = s.Position,
+        FontSize = s.FontSize,
+        Margin = s.Margin,
+        FontColor = s.FontColor,
+        FontFile = s.FontFile,
+    };
+
+    private static RecompressSettings CloneRecompress(RecompressSettings s) => new()
+    {
+        Enabled = s.Enabled,
+        Args = s.Args,
+        Container = s.Container,
+        KeepIntermediate = s.KeepIntermediate,
     };
 
     /// <summary>
@@ -257,6 +291,13 @@ public static class ConfigStore
         c.FfmpegProxy = stored.FfmpegProxy;
         c.Play = UI.Player.ParseMode(stored.PlayMode);
         c.PlayerPath = stored.PlayerPath;
+
+        // Restored whole rather than field by field: both stages are plain data
+        // with no dependency on the FFmpeg build, so there is nothing here that
+        // could be unavailable the way an encoder can be.
+        c.Watermark = CloneWatermark(stored.Watermark);
+        c.Recompress = CloneRecompress(stored.Recompress);
+        c.EraPreset = stored.EraPreset;
     }
 
     /// <summary>

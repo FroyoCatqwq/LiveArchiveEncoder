@@ -758,6 +758,111 @@ LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --play external --player "C
 
 ---
 
+## 7.12 后处理：水印与二次压缩（v7.6）
+
+直播录制之后、上传网站之前，网站还会做两件事：**打上自己的 logo**，然后**转一遍
+码**。v7.6 把这两步做成独立的阶段，串在 live 编码之后：
+
+```
+live 编码 → (14) 时代预设   ← 可选，一层把两层参数都填好
+         → (15) 水印        ← 独立阶段，可单独生效
+         → (16) 二次压缩    ← 独立阶段，默认关闭
+         → 成品
+```
+
+产物命名（都在 live 产物旁边）：
+
+| 阶段 | 产物 | 说明 |
+| --- | --- | --- |
+| live | `clip_live.rm` | 第一次编码，永远保留 |
+| 水印 | `clip_live_wm.mp4` | drawtext 重编码；不开二次压缩时它就是最终产物 |
+| 二次压缩 | `clip_live_web.mp4` | 模拟网站转码；`_wm` 中间文件默认用完即删 |
+
+两个阶段**默认都关闭**。
+
+### 时代预设（菜单 14 / `--era ID`）
+
+一代一套完整方案，同时填好 live 层和二次压缩层。**选预设不会自动打开二次压缩**
+——那是你手动开的东西，预设只把参数填好。依据和出处见
+[`docs/era-presets.md`](era-presets.md)。
+
+| id | 年代 | live 层 | 二次压缩 |
+| --- | --- | --- | --- |
+| `dialup98` | 1997–2000 拨号 | rv20 160x120@10，上限 45 kbps | crf 34，160x120@10，音频 16k 单声道 |
+| `broadband03` | 2001–2004 ADSL 初期 | rv20 320x240@15，上限 225 kbps | crf 31，320x240@15 |
+| `flv07` | 2005–2008 视频网站 | flv 352x264@15，上限 300 kbps | crf 28，352x264@15，音频 22.05k 单声道 |
+| `mp4_10` | 2009–2012 | libx264 640x480@25，上限 900 kbps | crf 25，640x480@25 |
+| `hd14` | 2013–2016 | libx264 1280x720@30，上限 2500 kbps | crf 23，720p@30，立体声 96k |
+
+```powershell
+# 一条命令跑完"2007 年传优酷"：live 用 flv1，二次压缩参数自动填好
+LiveArchiveEncoder.exe src.mp4 out.flv --era flv07 --turbo --recompress
+```
+
+`--era` 不碰你显式给的 `--encoder` / `--width` / `--limit`：预设是兜底，不是覆盖。
+
+### 二次压缩（菜单 16）
+
+你只写 FFmpeg 命令的**中间参数段**，`-i <live产物>` 和输出路径由程序生成：
+
+```powershell
+LiveArchiveEncoder.exe src.mp4 out.rm --era flv07 --recompress --turbo
+# -> clip_live.rm      (live)
+# -> clip_live_web.mp4 (二次压缩，用 flv07 预设的参数)
+
+# 或者完全自定义（这就是 0 几年视频网站转码的写法）
+LiveArchiveEncoder.exe src.mp4 out.rm --recompress --recompress-args ^
+  "-vf scale=320:240,fps=15 -c:v libx264 -profile:v baseline -preset veryfast -crf 28 -ac 1 -ar 16000 -b:a 16k"
+```
+
+参数段会被**逐 token 校验**，以下写法直接拒绝（在编码**之前**，不会白跑一遍）：
+
+| 写法 | 原因 |
+| --- | --- |
+| `-i other.mp4` | 输入就是 live 产物，由程序指定 |
+| `-o anything` | FFmpeg 没有这个旗标 |
+| 末尾出现 `out.mp4` 这样的裸路径 | FFmpeg 会把它当成第二个输出，覆盖你指定的文件 |
+
+其余随意——`-filter_complex`、多 `-map`、`-ss` 都是你的事。
+
+相关选项：`--recompress`（启用）、`--recompress-args "…"`（设参数并启用）、
+`--recompress-container EXT`（默认 mp4）、`--recompress-keep`（保留 `_wm` 中间文件）、
+`--no-recompress`。
+
+### 水印（菜单 15）
+
+静态文字水印，在 live 之后、二次压缩之前叠加——**logo 必须和画面一起被转码**
+才像当年的样子，反过来就会得到一个"现代清晰的 logo 糊在废片上"的怪东西。
+
+```powershell
+# 文字 + 位置，字号颜色留空 = 按画面尺寸自适应
+LiveArchiveEncoder.exe src.mp4 out.rm --watermark "优酷网" --watermark-position top-right --turbo
+
+# 全套
+LiveArchiveEncoder.exe src.mp4 out.rm --watermark "土豆网" ^
+  --watermark-position bottom-left --watermark-size 16 --watermark-color yellow ^
+  --watermark-font "C:\Windows\Fonts\msyh.ttc" --recompress --recompress-keep
+```
+
+- 位置：`top-left` / `top-right`（默认）/ `bottom-left` / `bottom-right` / `center`。
+  0 几年网站会在两个上角之间来回切换，那是动画——留给 v8。
+- 字号 `0`（默认）= 画面高度的 1/15、下限 8px：160x120 的小画面上得到 8px 的
+  年代感水印，而不是盖住六分之一画面的现代大字。
+- 字体自动挑选，**优先 CJK 字体**（中文 Windows 选微软雅黑）——Arial 画不了
+  中文，`drawtext` 会输出一排方块。找不到字体时整个阶段明确报错，不会静默跳过。
+  也可用 `--watermark-font` 或环境变量 `LAE_WATERMARK_FONT` 指定。
+- 水印阶段必然重编码，输出统一为 MP4/H.264（crf 20）：中间产物要能被后续阶段
+  读取，没必要在这个阶段复刻 roq/amv 那些尺寸限制。
+
+### CLI 与配置的关系
+
+**CLI 不读取配置里的水印/二次压缩状态**——脚本必须可预期，`--watermark` 不给
+就没有水印，哪怕昨晚在菜单里开过。参数段和文字本身会随 `--era` 预设填好；
+交互菜单（14/15/16）里设置的会保存，菜单下次打开还在。
+`--era` 不会替你打开二次压缩，要配 `--recompress`。
+
+---
+
 ## 8. 实用命令示例
 
 ```powershell
@@ -905,6 +1010,24 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
    的是 `file`，新 FFmpeg 构建会直接拒绝，导致共享上的源解出 0 帧。
 5. **CI 双轨**：GitHub Actions 跑 windows + ubuntu 矩阵；Codeberg 用 Woodpecker
    （`.woodpecker.yaml`）做 restore + build + test。
+
+### v7.6 新增
+
+从 v7.6 起，C# 版**不再承诺与 Python v6.3.3 的输出一致**——原有行为全部保留，
+新功能只在显式开启时生效，默认行为不变。
+
+1. **后处理管线**（§7.12）：live 编码之后接两个独立阶段——**文字水印**（drawtext，
+   可单独生效）和**二次压缩**（模拟 0 几年视频网站转码，你写 FFmpeg 参数段，程序
+   负责 `-i` 和输出）。两者默认关闭。产物命名：`clip_live.rm` →
+   `clip_live_wm.mp4` → `clip_live_web.mp4`。
+2. **时代预设**（§7.12，`--era ID`）：五个年代一套一套的 live + 二次压缩参数，
+   从 1997 年拨号时代的 RealVideo G2 到 2016 年的 720p H.264。数字有出处
+   （RealSystem G2 官方手册、实测的土豆 FLV 文件、杂志里的网速报道），见
+   [`docs/era-presets.md`](era-presets.md)。
+3. **安全设计**：二次压缩的参数段逐 token 校验，`-i`、`-o`、末尾裸路径直接拒绝
+   ——这些写法会让 FFmpeg 覆盖你的源文件。校验发生在 live 编码**之前**。
+4. **CLI 语义不变**：`--watermark` / `--recompress` 不读取配置文件里的状态，
+   不给就没有；交互菜单里的设置会保存，菜单之间粘性保留。
 
 ---
 

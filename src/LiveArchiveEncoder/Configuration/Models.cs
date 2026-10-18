@@ -114,4 +114,102 @@ public sealed class Config
 
     /// <summary>External player executable; empty means the shell file association.</summary>
     public string? PlayerPath { get; set; }
+
+    /// <summary>
+    /// Text watermark burned in after the live pass and before the recompress
+    /// pass. Off by default.
+    /// </summary>
+    public WatermarkSettings Watermark { get; set; } = new();
+
+    /// <summary>
+    /// The "upload to a video site" pass. Off by default.
+    /// </summary>
+    public RecompressSettings Recompress { get; set; } = new();
+
+    /// <summary>
+    /// Which era preset was last applied, or null when the settings are custom.
+    /// Remembered only so the menu can show it; it is never used to override
+    /// explicit settings.
+    /// </summary>
+    public string? EraPreset { get; set; }
+}
+
+/// <summary>
+/// A static text watermark.
+///
+/// Deliberately narrow in v7.6: text, placement, size and colour. Movement,
+/// outlines, background boxes and timed appearance are v8's job and were left
+/// out rather than added as switches that do nothing -- the stage itself is
+/// separate from the recompress stage precisely so those can be added without
+/// touching anything else.
+/// </summary>
+public sealed class WatermarkSettings
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>The drawn text. Empty is rejected before FFmpeg is started.</summary>
+    public string Text { get; set; } = "";
+
+    /// <summary>
+    /// top-left, top-right, bottom-left, bottom-right or center.
+    /// A video site of the era alternated corners between clips; that animation
+    /// is not implemented yet, so this is a fixed corner.
+    /// </summary>
+    public string Position { get; set; } = "top-right";
+
+    /// <summary>
+    /// Point size. 0 means "scale it to the frame": height/15, floored at 8, so
+    /// a 160x120 clip gets a period-appropriate 8 px mark instead of a 16 px one
+    /// that would cover a sixth of the picture.
+    /// </summary>
+    public int FontSize { get; set; }
+
+    /// <summary>Edge inset in pixels. 0 means height/40, floored at 4.</summary>
+    public int Margin { get; set; }
+
+    /// <summary>Any FFmpeg colour name or 0xRRGGBB value.</summary>
+    public string FontColor { get; set; } = "white";
+
+    /// <summary>
+    /// Explicit font file. Null makes the program pick a system font that can
+    /// actually render the text; on a Chinese Windows box that is Microsoft
+    /// YaHei, because Arial cannot draw CJK and drawtext fails without a font
+    /// that can.
+    /// </summary>
+    public string? FontFile { get; set; }
+
+    public static IReadOnlyList<string> Positions =>
+        ["top-left", "top-right", "bottom-left", "bottom-right", "center"];
+
+    public static string CanonicalPosition(string? value)
+    {
+        string v = (value ?? "").Trim().ToLowerInvariant().Replace('_', '-');
+        return Positions.Contains(v) ? v : "top-right";
+    }
+}
+
+/// <summary>
+/// The second pass: re-encode the live product the way a video site would have.
+///
+/// The user supplies the middle of an FFmpeg command and the program owns both
+/// ends, so a typo cannot overwrite the source. See <see cref="PostProcess.PostArgs"/>.
+/// </summary>
+public sealed class RecompressSettings
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Everything between <c>-i &lt;live product&gt;</c> and the output path,
+    /// e.g. <c>-vf "scale=320:240,fps=15" -c:v libx264 -crf 28 -ac 1 -b:a 32k</c>.
+    /// </summary>
+    public string Args { get; set; } = "";
+
+    /// <summary>Container extension without the dot.</summary>
+    public string Container { get; set; } = "mp4";
+
+    /// <summary>
+    /// Keep the watermarked intermediate file instead of deleting it when the
+    /// recompress pass consumes it.
+    /// </summary>
+    public bool KeepIntermediate { get; set; }
 }

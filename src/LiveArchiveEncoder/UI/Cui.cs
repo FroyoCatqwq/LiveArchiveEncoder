@@ -70,6 +70,9 @@ public static class Cui
             Console.WriteLine($"11. {L.Pad(L.T("menu.parallel"), 22)} = {(c.Parallel > 1 ? c.Parallel.ToString(CultureInfo.InvariantCulture) : L.T("menu.parallel.off"))}");
             Console.WriteLine($"12. {L.Pad(L.T("menu.toolchain"), 22)} = {c.FfmpegSource}");
             Console.WriteLine($"13. {L.Pad(L.T("menu.play"), 22)} = {Player.Describe(c.Play, c.PlayerPath, FFmpegDiscovery.FindFFplay(ffmpeg))}");
+            Console.WriteLine($"14. {L.Pad(L.T("era.menu"), 22)} = {DescribeEra(c)}");
+            Console.WriteLine($"15. {L.Pad(L.T("wm.menu"), 22)} = {DescribeWatermark(c)}");
+            Console.WriteLine($"16. {L.Pad(L.T("rc.menu"), 22)} = {DescribeRecompress(c)}");
             Console.WriteLine($" 0. {L.T("menu.exit")}");
             Console.Write(L.T("menu.select"));
 
@@ -166,6 +169,18 @@ public static class Cui
                     }
                 case "13":
                     EditPlayback(c, ffmpeg);
+                    Persist(c);
+                    break;
+                case "14":
+                    PickEraPreset(c);
+                    Persist(c);
+                    break;
+                case "15":
+                    EditWatermark(c);
+                    Persist(c);
+                    break;
+                case "16":
+                    EditRecompress(c);
                     Persist(c);
                     break;
                 default:
@@ -718,6 +733,32 @@ public static class Cui
             Console.WriteLine();
             Report.PrintResult(c.OutputPath.FullName, result);
 
+            // v7.6: watermark first, then the video-site recompress pass, in that
+            // order -- the mark has to suffer the same transcode the picture does.
+            string finalPath = c.OutputPath.FullName;
+            if (PostProcess.PostPipeline.Needed(c))
+            {
+                PostProcess.PostProcessOutcome post =
+                    PostProcess.PostPipeline.Run(ffmpeg, c.OutputPath.FullName, c);
+                finalPath = post.FinalPath;
+
+                if (post.WatermarkRan && post.WatermarkPath is { Length: > 0 } wm)
+                    Console.WriteLine(L.T("post.watermark", wm));
+                if (post.RecompressRan && post.RecompressPath is { Length: > 0 } rc)
+                    Console.WriteLine(L.T("post.recompress", rc));
+                if (post.IntermediateRemoved)
+                    Console.WriteLine(L.T("post.intermediate"));
+
+                if (post.Failed)
+                {
+                    string stage = post.FailedStage!;
+                    string detail = (stage == "watermark" ? post.WatermarkError : post.RecompressError) ?? "";
+                    Console.WriteLine($"{L.T("error.prefix")}{L.T("post.failed", stage, detail)}");
+                    Console.WriteLine(L.T("post.kept", c.OutputPath.FullName));
+                    finalPath = c.OutputPath.FullName;   // play what did survive
+                }
+            }
+
             if (c.Play != PlayMode.Off)
             {
                 Console.Write(L.T("play.ask"));
@@ -725,7 +766,7 @@ public static class Cui
                 if (answer is "" or "y" or "yes")
                 {
                     (bool played, string? playError) = Player.Launch(
-                        c.Play, c.OutputPath.FullName, ffmpeg, c.PlayerPath);
+                        c.Play, finalPath, ffmpeg, c.PlayerPath);
                     if (!played && playError is not null)
                         Console.WriteLine($"{L.T("error.prefix")}{L.T("play.launchfail", playError)}");
                 }
@@ -750,5 +791,176 @@ public static class Cui
 
         int index = choices.FindIndex(m => string.Equals(m, current, StringComparison.OrdinalIgnoreCase));
         return choices[(index + 1) % choices.Count];
+    }
+
+    // ---- v7.6: era preset / watermark / recompress menus ----
+
+    private static string DescribeEra(Config c) =>
+        c.EraPreset is { Length: > 0 } id && PostProcess.EraPresets.Find(id) is not null
+            ? id
+            : L.T("era.none");
+
+    private static string DescribeWatermark(Config c) =>
+        c.Watermark.Enabled
+            ? $"\"{c.Watermark.Text}\""
+            : L.T("wm.off");
+
+    private static string DescribeRecompress(Config c) =>
+        (c.Recompress.Enabled ? "on" : L.T("wm.off"))
+        + (c.Recompress.Args.Length > 0 ? $" | {c.Recompress.Args}" : "");
+
+    private static void PickEraPreset(Config c)
+    {
+        Console.WriteLine(L.T("era.choose", PostProcess.EraPresets.Ids));
+        foreach (PostProcess.EraPreset preset in PostProcess.EraPresets.All)
+            Console.WriteLine($"  {preset.Id,-14} {preset.YearFrom}-{preset.YearTo}  {L.T(preset.NoteKey)}");
+
+        Console.Write(L.T("era.prompt", c.EraPreset ?? ""));
+        string pick = (Console.ReadLine() ?? "").Trim();
+        if (pick.Length == 0) return;
+
+        PostProcess.EraPreset? chosen = PostProcess.EraPresets.Find(pick);
+        if (chosen is null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("era.unknown", pick, PostProcess.EraPresets.Ids)}");
+            return;
+        }
+
+        // The preset writes the live layer straight into the config and pre-fills
+        // the recompress arguments. It does not arm the recompress stage: that is
+        // opt-in by design, and the menu is where a user turns it on.
+        chosen.ApplyLive(c);
+        c.Recompress.Args = chosen.RecompressArgs;
+        c.Recompress.Container = chosen.RecompressContainer;
+        c.EraPreset = chosen.Id;
+
+        Console.WriteLine(L.T("era.applied", chosen.Id,
+            c.Width, c.Height, $"{c.Fps:G6}", $"{c.Limit:G6}"));
+        Console.WriteLine(L.T("rc.hint"));
+    }
+
+    private static void EditWatermark(Config c)
+    {
+        while (true)
+        {
+            Console.WriteLine($"\n== {L.T("wm.menu")} ==");
+            Console.WriteLine($" 1. {L.Pad(L.T("wm.menu.enable"), 30)} = {DescribeWatermark(c)}");
+            Console.WriteLine($" 2. {L.Pad(L.T("wm.menu.position"), 30)} = {c.Watermark.Position}");
+            Console.WriteLine($" 3. {L.Pad(L.T("wm.menu.size"), 30)} = {(c.Watermark.FontSize > 0 ? c.Watermark.FontSize.ToString(CultureInfo.InvariantCulture) : "0" + L.T("wm.size.auto"))}");
+            Console.WriteLine($" 4. {L.Pad(L.T("wm.menu.color"), 30)} = {c.Watermark.FontColor}");
+            Console.WriteLine($" 5. {L.Pad(L.T("wm.menu.font"), 30)} = {c.Watermark.FontFile ?? L.T("value.auto")}");
+            Console.WriteLine($" 0. {L.T("wm.menu.back")}");
+            Console.Write(L.T("menu.select"));
+
+            switch ((Console.ReadLine() ?? "").Trim())
+            {
+                case "0": return;
+                case "1":
+                    Console.Write(L.T("wm.prompt.text"));
+                    string text = (Console.ReadLine() ?? "").Trim();
+                    if (text.Length == 0 || text == "-")
+                    {
+                        c.Watermark.Enabled = false;
+                        c.Watermark.Text = "";
+                        Console.WriteLine(L.T("wm.off.set"));
+                        break;
+                    }
+                    c.Watermark.Text = text;
+                    c.Watermark.Enabled = true;
+                    Console.WriteLine(L.T("wm.set", text));
+                    break;
+                case "2":
+                    int p = WatermarkSettings.Positions
+                        .ToList().IndexOf(WatermarkSettings.CanonicalPosition(c.Watermark.Position));
+                    c.Watermark.Position = WatermarkSettings.Positions[(p + 1) % 5];
+                    Console.WriteLine(L.T("wm.pos.set", c.Watermark.Position));
+                    break;
+                case "3":
+                    Console.Write(L.T("wm.prompt.size", c.Watermark.FontSize));
+                    if (int.TryParse((Console.ReadLine() ?? "").Trim(), out int size) && size >= 0)
+                    {
+                        c.Watermark.FontSize = size;
+                        Console.WriteLine(L.T("wm.size.set", size, size == 0 ? L.T("wm.size.auto") : ""));
+                    }
+                    else Console.WriteLine($"{L.T("error.prefix")}{L.T("wm.badsize")}");
+                    break;
+                case "4":
+                    Console.Write(L.T("wm.prompt.color", c.Watermark.FontColor));
+                    string colour = (Console.ReadLine() ?? "").Trim();
+                    if (colour.Length > 0)
+                    {
+                        c.Watermark.FontColor = colour;
+                        Console.WriteLine(L.T("wm.color.set", colour));
+                    }
+                    break;
+                case "5":
+                    Console.Write(L.T("wm.prompt.font", c.Watermark.FontFile ?? L.T("value.auto")));
+                    string font = (Console.ReadLine() ?? "").Trim().Trim('"');
+                    if (font == "-")
+                    {
+                        c.Watermark.FontFile = null;
+                        Console.WriteLine(L.T("wm.font.auto"));
+                    }
+                    else if (font.Length > 0)
+                    {
+                        c.Watermark.FontFile = font;
+                        Console.WriteLine(L.T("wm.font.set", font));
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void EditRecompress(Config c)
+    {
+        while (true)
+        {
+            Console.WriteLine($"\n== {L.T("rc.menu")} ==");
+            Console.WriteLine($" 1. {L.Pad(L.T("rc.menu.enable"), 30)} = {(c.Recompress.Enabled ? "on" : L.T("wm.off"))}");
+            Console.WriteLine($" 2. {L.Pad(L.T("rc.menu.args"), 30)} = {(c.Recompress.Args.Length == 0 ? L.T("value.notselected") : c.Recompress.Args)}");
+            Console.WriteLine($" 3. {L.Pad(L.T("rc.menu.container"), 30)} = {c.Recompress.Container}");
+            Console.WriteLine($" 4. {L.Pad(L.T("rc.menu.keep"), 30)} = {L.YesNo(c.Recompress.KeepIntermediate)}");
+            Console.WriteLine($" 0. {L.T("rc.menu.back")}");
+            Console.Write(L.T("menu.select"));
+
+            switch ((Console.ReadLine() ?? "").Trim())
+            {
+                case "0": return;
+                case "1":
+                    c.Recompress.Enabled = !c.Recompress.Enabled;
+                    Console.WriteLine(c.Recompress.Enabled ? L.T("rc.on") : L.T("rc.off"));
+                    if (c.Recompress.Enabled && c.Recompress.Args.Length == 0)
+                        Console.WriteLine(L.T("rc.hint"));
+                    break;
+                case "2":
+                    Console.WriteLine(L.T("rc.hint"));
+                    Console.Write(L.T("rc.prompt.args"));
+                    string fragment = (Console.ReadLine() ?? "").Trim();
+                    if (fragment.Length == 0) break;
+
+                    (List<string> _, string? error) = PostProcess.PostArgs.Parse(fragment);
+                    if (error is not null)
+                        Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.args.rejected", error)}");
+                    else
+                    {
+                        c.Recompress.Args = fragment;
+                        Console.WriteLine(L.T("rc.args.set"));
+                    }
+                    break;
+                case "3":
+                    Console.Write(L.T("rc.prompt.container", c.Recompress.Container));
+                    string container = (Console.ReadLine() ?? "").Trim().TrimStart('.').ToLowerInvariant();
+                    if (container.Length > 0)
+                    {
+                        c.Recompress.Container = container;
+                        Console.WriteLine(L.T("rc.container.set", container));
+                    }
+                    break;
+                case "4":
+                    c.Recompress.KeepIntermediate = !c.Recompress.KeepIntermediate;
+                    Console.WriteLine(c.Recompress.KeepIntermediate ? L.T("rc.keep.on") : L.T("rc.keep.off"));
+                    break;
+            }
+        }
     }
 }

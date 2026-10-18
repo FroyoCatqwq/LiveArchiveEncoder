@@ -13,6 +13,11 @@ public static class Cli
         HashSet<string> availableFilters, HashSet<string> availableScaleAlgorithms,
         CancellationToken cancellationToken = default)
     {
+        // Loaded once: the post-processing stages are sticky (a user sets the
+        // recompress arguments in the menu and then runs the CLI), so the CLI has
+        // to consult the same file the interactive shell writes.
+        UserConfig stored = ConfigStore.Load();
+
         // DetectLegacyEncoders and DetectAudioEncoders are independent `ffmpeg
         // -encoders` runs. Overlap them so two process startups cost one.
         Task<List<EncoderInfo>> encodersTask =
@@ -21,12 +26,31 @@ public static class Cli
             Task.Run(() => FFmpegDiscovery.DetectAudioEncoders(ffmpeg), cancellationToken);
 
         List<EncoderInfo> encoders = encodersTask.GetAwaiter().GetResult();
+
+        // An era preset reshapes the live pass (encoder, frame size, rate,
+        // bitrate ceiling) and pre-fills the recompress arguments. It never
+        // arms the recompress stage on its own -- that stays opt-in.
+        PostProcess.EraPreset? era = null;
+        if (args.Era is { Length: > 0 } eraId)
+        {
+            era = PostProcess.EraPresets.Find(eraId);
+            if (era is null)
+            {
+                Console.Error.WriteLine($"ERROR: unknown era preset '{eraId}'; "
+                    + $"choose one of {PostProcess.EraPresets.Ids}");
+                return 2;
+            }
+        }
+
+        // --encoder wins over the preset; the preset wins over the built-in default.
+        string wantedEncoder = era is not null && !args.EncoderExplicit ? era.Encoder : args.Encoder;
+
         EncoderInfo? encoder = encoders.FirstOrDefault(
-            e => string.Equals(e.Name, args.Encoder, StringComparison.OrdinalIgnoreCase));
+            e => string.Equals(e.Name, wantedEncoder, StringComparison.OrdinalIgnoreCase));
         if (encoder is null)
         {
             Console.Error.WriteLine(
-                $"ERROR: {args.Encoder} is not detected as a legacy/classic video encoder.");
+                $"ERROR: {wantedEncoder} is not detected as a legacy/classic video encoder.");
             return 2;
         }
         encoder.Caps = FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, encoder);
@@ -51,12 +75,19 @@ public static class Cli
         try { Validation.ValidateOutputExtension(dst, encoder); }
         catch (ArgumentException exc) { Console.Error.WriteLine($"ERROR: {exc.Message}"); return 2; }
 
-        (double baseFps, bool fpsExact) = EncoderMath.ChooseBaseFps(args.Fps, encoder.Caps);
+        // Era values are the fallback, not an override: an explicit flag still wins.
+        double effectiveFps = era?.Fps ?? args.Fps;
+        int effectiveWidth = era?.Width ?? args.Width;
+        int effectiveHeight = era?.Height ?? args.Height;
+        double effectiveLimit = era?.LimitKbps ?? args.Limit;
+        string effectiveScaleAlgo = era?.ScaleAlgo ?? args.ScaleAlgo;
+
+        (double baseFps, bool fpsExact) = EncoderMath.ChooseBaseFps(effectiveFps, encoder.Caps);
         if (!fpsExact)
-            Console.WriteLine(L.T("note.fpsunsupported", encoder.Name, $"{args.Fps:G6}", $"{baseFps:G6}"));
+            Console.WriteLine(L.T("note.fpsunsupported", encoder.Name, $"{effectiveFps:G6}", $"{baseFps:G6}"));
 
         (int width, int height, bool sizeExact) = EncoderMath.NormalizeDimensions(
-            encoder.Name, args.Width, args.Height);
+            encoder.Name, effectiveWidth, effectiveHeight);
         if (!sizeExact)
             Console.WriteLine(L.T("note.specialsizes", encoder.Name, width, height));
 
@@ -67,7 +98,7 @@ public static class Cli
                 : args.FpsLevels.Split(',', StringSplitOptions.RemoveEmptyEntries)
                     .Select(x => double.Parse(x, System.Globalization.CultureInfo.InvariantCulture)));
 
-        double recover = args.EffectiveRecover;
+        double recover = args.Recover ?? effectiveLimit * 0.75;
         HashSet<string> audioAvailable = audioEncodersTask.GetAwaiter().GetResult();
         string? audioEncoder = string.IsNullOrEmpty(args.AudioEncoder)
             ? EncoderMath.ChooseAudioEncoder(encoder.FormatName, audioAvailable)
@@ -79,8 +110,8 @@ public static class Cli
             return 2;
         }
 
-        int? audioRate = args.AudioRate;
-        int audioChannels = args.AudioChannels;
+        int? audioRate = era?.AudioRate ?? args.AudioRate;
+        int audioChannels = era?.AudioChannels ?? args.AudioChannels;
         if (encoder.Name == "amv")
         {
             if (audioAvailable.Contains("adpcm_ima_amv")) audioEncoder = "adpcm_ima_amv";
@@ -112,7 +143,7 @@ public static class Cli
         Config config;
         try
         {
-            string scaleAlgo = EncoderMath.CanonicalScaleAlgo(args.ScaleAlgo);
+            string scaleAlgo = EncoderMath.CanonicalScaleAlgo(effectiveScaleAlgo);
             if (!availableScaleAlgorithms.Contains(scaleAlgo))
                 throw new ArgumentException($"scale algorithm '{scaleAlgo}' is not exposed by this FFmpeg build");
 
@@ -126,13 +157,13 @@ public static class Cli
                 AudioEncoder = audioEncoder,
                 Fps = baseFps,
                 FpsLevels = levels,
-                Limit = args.Limit,
+                Limit = effectiveLimit,
                 Recover = recover,
                 Window = args.Window,
                 Qv = args.Qv ?? EncoderMath.DefaultQuality(encoder.Name),
                 Threads = args.Threads,
                 BufferFrames = args.BufferFrames,
-                AudioKbps = args.AudioKbps,
+                AudioKbps = era?.AudioKbps ?? args.AudioKbps,
                 AudioChannels = audioChannels,
                 AudioRate = audioRate,
                 Width = width,
@@ -152,15 +183,23 @@ public static class Cli
                 Parallel = args.Parallel,
                 // --lang wins; without it the stored preference is preserved so a
                 // CLI run never silently resets the language chosen in the UI.
-                Language = args.Language ?? ConfigStore.Load().Language,
+                Language = args.Language ?? stored.Language,
                 FfmpegSource = args.FfmpegSource,
                 FfmpegProxy = args.FfmpegProxy,
                 Play = args.Play,
                 PlayerPath = args.PlayerPath,
+                Watermark = ResolveWatermark(args),
+                Recompress = ResolveRecompress(args, era),
+                EraPreset = era?.Id ?? (args.Era is null ? stored.EraPreset : null),
             };
             Validation.ValidateCommonConfig(config);
             if (config.EndTimeSeconds is not null && config.EndTimeSeconds <= config.StartTimeSeconds)
                 throw new ArgumentException("end time must be later than start time");
+
+            // Check the post-processing stages before the live pass, not after:
+            // a live encode runs at the source's pace, so discovering a bad
+            // recompress fragment twenty minutes in would waste the whole run.
+            ValidatePostProcessing(config);
         }
         catch (ArgumentException exc)
         {
@@ -220,16 +259,130 @@ public static class Cli
         Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
         if (!args.Quiet) Report.PrintResult(dst.FullName, result);
 
+        // ---- v7.6: watermark, then the video-site recompress pass ----
+        string finalPath = dst.FullName;
+        if (PostProcess.PostPipeline.Needed(config))
+        {
+            PostProcess.PostProcessOutcome post =
+                PostProcess.PostPipeline.Run(ffmpeg, dst.FullName, config);
+            finalPath = post.FinalPath;
+
+            if (!args.Quiet)
+            {
+                if (post.WatermarkRan && post.WatermarkPath is { Length: > 0 } wm)
+                    Console.WriteLine(L.T("post.watermark", wm));
+                if (post.RecompressRan && post.RecompressPath is { Length: > 0 } rc)
+                    Console.WriteLine(L.T("post.recompress", rc));
+                if (post.IntermediateRemoved)
+                    Console.WriteLine(L.T("post.intermediate"));
+            }
+
+            if (post.Failed)
+            {
+                string stage = post.FailedStage!;
+                string detail = (stage == "watermark" ? post.WatermarkError : post.RecompressError) ?? "";
+                Console.Error.WriteLine($"ERROR: {L.T("post.failed", stage, detail)}");
+                // Say the live file survived: losing a long encode and then
+                // discovering the watermark typo is bad enough without also
+                // wondering whether the recording is gone.
+                Console.Error.WriteLine(L.T("post.kept", dst.FullName));
+                return 1;
+            }
+        }
+
         // Only ffplay/external do anything; "off" is a no-op so scripting a run
         // never pops a window.
         if (args.Play != PlayMode.Off)
         {
             (bool played, string? playError) =
-                Player.Launch(args.Play, dst.FullName, ffmpeg, args.PlayerPath);
+                Player.Launch(args.Play, finalPath, ffmpeg, args.PlayerPath);
             if (!played && playError is not null)
                 Console.Error.WriteLine($"ERROR: {playError}");
         }
         return 0;
+    }
+
+    /// <summary>
+    /// CLI-only values, exactly like every other flag in this file.
+    ///
+    /// Deliberately <em>not</em> seeded from the settings file. The CLI has never
+    /// read the stored config for defaults -- scripted runs must be predictable
+    /// -- and these two stages are the worst possible place to break that rule:
+    /// a recompress pass silently re-encodes an already lossy file, so a setting
+    /// that stuck from yesterday's interactive session would keep degrading
+    /// today's output. The interactive shell keeps its own state; a CLI run
+    /// writes what it was given, same as turbo.
+    /// </summary>
+    private static WatermarkSettings ResolveWatermark(CliOptions args)
+    {
+        var wm = new WatermarkSettings
+        {
+            Enabled = false,
+            Text = "",
+            Position = "top-right",
+            FontSize = 0,
+            Margin = 0,
+            FontColor = "white",
+        };
+
+        if (args.Watermark is { Length: > 0 } text)
+        {
+            wm.Text = text;
+            wm.Enabled = true;
+        }
+        if (args.WatermarkPosition is { Length: > 0 } pos) wm.Position = pos;
+        if (args.WatermarkSize is { } size) wm.FontSize = size;
+        if (args.WatermarkColor is { Length: > 0 } colour) wm.FontColor = colour;
+        if (args.WatermarkFont is { Length: > 0 } font) wm.FontFile = font;
+
+        if (args.NoWatermark) wm.Enabled = false;
+        return wm;
+    }
+
+    /// <summary>
+    /// Same rule as <see cref="ResolveWatermark"/>: what the command line says,
+    /// nothing else. <c>--recompress-args</c> arms the stage on its own -- nobody
+    /// writes out a full argument list and then expects it not to run -- while
+    /// <c>--recompress</c> alone reuses the arguments of the era preset when one
+    /// was given.
+    /// </summary>
+    private static RecompressSettings ResolveRecompress(CliOptions args, PostProcess.EraPreset? era)
+    {
+        var rc = new RecompressSettings
+        {
+            Enabled = false,
+            Args = era?.RecompressArgs ?? "",
+            Container = era?.RecompressContainer ?? "mp4",
+            KeepIntermediate = false,
+        };
+
+        if (args.RecompressArgs is { Length: > 0 } a) rc.Args = a;
+        if (args.RecompressContainer is { Length: > 0 } c) rc.Container = c;
+        if (args.RecompressKeep) rc.KeepIntermediate = true;
+
+        if (args.Recompress) rc.Enabled = true;
+        if (args.NoRecompress) rc.Enabled = false;
+        return rc;
+    }
+
+    /// <summary>
+    /// Reject the post-processing settings that cannot work, before anything
+    /// expensive happens.
+    /// </summary>
+    private static void ValidatePostProcessing(Config config)
+    {
+        if (config.Recompress.Enabled)
+        {
+            (_, string? error) = PostProcess.PostArgs.Parse(config.Recompress.Args);
+            if (error is not null)
+                throw new ArgumentException(L.T("post.args.bad", error));
+
+            if (string.IsNullOrWhiteSpace(config.Recompress.Container))
+                throw new ArgumentException(L.T("rc.args.empty"));
+        }
+
+        if (config.Watermark.Enabled && string.IsNullOrWhiteSpace(config.Watermark.Text))
+            throw new ArgumentException(L.T("wm.empty"));
     }
 
     private static FileInfo DefaultOutput(FileInfo src, EncoderInfo encoder) =>
