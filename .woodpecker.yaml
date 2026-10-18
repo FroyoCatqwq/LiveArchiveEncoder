@@ -1,0 +1,27 @@
+# Woodpecker CI — https://ci.codeberg.org
+#
+# Scope note (important): this project is Windows-targeted. The PowerShell
+# tooling, the winmm.dll P/Invoke behind the high-resolution timer and the
+# UNC/SMB handling only make sense there, and the Python harnesses under
+# tests/e2e/ need an FFmpeg with the legacy encoders plus a quiet machine.
+# Codeberg's hosted Woodpecker runners are Linux containers, so this pipeline
+# deliberately does NOT try to run the app or the unit tests — that would report
+# failures that have nothing to do with the change under review.
+#
+# What it does guarantee: the solution still restores and compiles on a neutral
+# SDK, which is what catches the overwhelming majority of accidental breakage.
+# Run `dotnet test` and the e2e harnesses on Windows; see docs/usage.md.
+
+when:
+  - event: [push, pull_request]
+
+steps:
+  - name: restore
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    commands:
+      - dotnet restore LiveArchiveEncoder.V7.slnx
+
+  - name: build
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    commands:
+      - dotnet build LiveArchiveEncoder.V7.slnx -c Release --no-restore
