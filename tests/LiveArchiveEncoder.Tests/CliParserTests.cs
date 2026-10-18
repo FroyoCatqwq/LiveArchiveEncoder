@@ -1,4 +1,5 @@
-using LiveArchiveEncoder.Configuration;
+﻿using LiveArchiveEncoder.Configuration;
+using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.UI;
 
 namespace LiveArchiveEncoder.Tests;
@@ -20,13 +21,26 @@ public sealed class CliParserTests
 
     private static string? Error(params string[] args) => CliParser.Parse(args).Error;
 
+    /// <summary>
+    /// Every id the parser must accept here. gyan.dev publishes no Linux build,
+    /// so it is only part of the set on Windows; avbuild exists on both and is
+    /// the non-default id these tests use instead.
+    /// </summary>
+    private static IEnumerable<string> KnownIds()
+    {
+        yield return "btbn";
+        if (FfmpegCatalog.Find("gyan") is not null) yield return "gyan";
+        yield return "avbuild";
+        yield return "nonfree";
+        yield return "path";
+    }
+
+    /// <summary>A non-default source id that exists on every platform.</summary>
+    private static string OtherId => "avbuild";
+
     // ------------------------------------------------------------------ source
 
-    [TestCase("btbn")]
-    [TestCase("gyan")]
-    [TestCase("avbuild")]
-    [TestCase("nonfree")]
-    [TestCase("path")]
+    [TestCaseSource(nameof(KnownIds))]
     public void FfmpegSource_AcceptsEveryKnownIdAndPath(string id) =>
         Assert.That(Parse("--ffmpeg-source", id).FfmpegSource, Is.EqualTo(id));
 
@@ -50,7 +64,7 @@ public sealed class CliParserTests
     public void FfmpegDownload_BareDefaultsToBtbn() =>
         Assert.That(Parse("--ffmpeg-download").FfmpegDownload, Is.EqualTo("btbn"));
 
-    [TestCase("gyan")]
+    [TestCase("avbuild")]
     [TestCase("nonfree")]
     public void FfmpegDownload_WithAnIdUsesIt(string id) =>
         Assert.That(Parse("--ffmpeg-download", id).FfmpegDownload, Is.EqualTo(id));
@@ -71,14 +85,14 @@ public sealed class CliParserTests
 
     [Test]
     public void FfmpegDownload_EqualsSyntaxWorks() =>
-        Assert.That(Parse("--ffmpeg-download=gyan").FfmpegDownload, Is.EqualTo("gyan"));
+        Assert.That(Parse("--ffmpeg-download=" + OtherId).FfmpegDownload, Is.EqualTo(OtherId));
 
     // ----------------------------------------------------------------- delete
 
     [Test]
     public void FfmpegDelete_RequiresAKnownSource()
     {
-        Assert.That(Parse("--ffmpeg-delete", "gyan").FfmpegDelete, Is.EqualTo("gyan"));
+        Assert.That(Parse("--ffmpeg-delete", OtherId).FfmpegDelete, Is.EqualTo(OtherId));
         Assert.That(Error("--ffmpeg-delete", "bogus"), Does.Contain("--ffmpeg-delete requires"));
     }
 

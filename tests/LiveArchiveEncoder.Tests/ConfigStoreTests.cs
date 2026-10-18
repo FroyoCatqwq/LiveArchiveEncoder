@@ -1,4 +1,4 @@
-using LiveArchiveEncoder.Configuration;
+﻿using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.FFmpeg;
 
 namespace LiveArchiveEncoder.Tests;
@@ -51,9 +51,13 @@ public sealed class ConfigStoreTests
     [Test]
     public void ToolchainAndPlaybackSettingsSurviveARoundTrip()
     {
+        // avbuild, not gyan: gyan.dev ships no Linux build, so storing it and
+        // reading it back would be rejected by the catalogue on that platform
+        // and silently reset to btbn -- which is correct behaviour, just not
+        // what this round-trip test is about.
         var c = new Config
         {
-            FfmpegSource = "gyan",
+            FfmpegSource = "avbuild",
             FfmpegProxy = "http://127.0.0.1:10808",
             Play = PlayMode.External,
             PlayerPath = @"C:\mpc\mpc-hc64.exe",
@@ -67,7 +71,7 @@ public sealed class ConfigStoreTests
         var restored = new Config();
         ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
 
-        Assert.That(restored.FfmpegSource, Is.EqualTo("gyan"));
+        Assert.That(restored.FfmpegSource, Is.EqualTo("avbuild"));
         Assert.That(restored.FfmpegProxy, Is.EqualTo("http://127.0.0.1:10808"));
         Assert.That(restored.Play, Is.EqualTo(PlayMode.External));
         Assert.That(restored.PlayerPath, Is.EqualTo(@"C:\mpc\mpc-hc64.exe"));
