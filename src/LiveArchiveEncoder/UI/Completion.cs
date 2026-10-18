@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using LiveArchiveEncoder.Configuration;
 
@@ -40,10 +40,12 @@ public static class Completion
         ("--completion", ["bash", "zsh", "fish", "powershell"]),
         ("--parallel", ["1", "2", "4", "8"]),
         ("--ffmpeg", ["@FILE"]), ("--ffprobe", ["@FILE"]),
-        ("--ffmpeg-source", ["path", .. FFmpeg.FfmpegCatalog.All.Select(d => d.Id)]),
-        ("--ffmpeg-download", [.. FFmpeg.FfmpegCatalog.All.Select(d => d.Id)]),
+        // Available, not All: only the ids installable on this platform are
+        // worth completing, and All would list "btbn" twice.
+        ("--ffmpeg-source", ["path", .. FFmpeg.FfmpegCatalog.Available.Select(d => d.Id).Distinct()]),
+        ("--ffmpeg-download", [.. FFmpeg.FfmpegCatalog.Available.Select(d => d.Id).Distinct()]),
         ("--ffmpeg-archive", ["@FILE"]),
-        ("--ffmpeg-delete", [.. FFmpeg.FfmpegCatalog.All.Select(d => d.Id)]),
+        ("--ffmpeg-delete", [.. FFmpeg.FfmpegCatalog.Available.Select(d => d.Id).Distinct()]),
         ("--play", ["off", "ffplay", "external"]),
         ("--player", ["@FILE"]),
         ("--proxy", ["http://127.0.0.1:10808", "http://127.0.0.1:7890", "socks5://127.0.0.1:10808"]),

@@ -106,6 +106,25 @@ public sealed class ToolchainTests
         }
     }
 
+    /// <summary>
+    /// The catalogue holds one entry per id per platform, so anything that
+    /// enumerates sources for the user has to go through
+    /// <see cref="FfmpegCatalog.Available"/> -- otherwise the Windows and Linux
+    /// "btbn" both show up and the menu offers a build that cannot be installed.
+    /// </summary>
+    [Test]
+    public void SourceListsNeverMixPlatforms()
+    {
+        foreach (FfmpegDist dist in FfmpegCatalog.Available)
+            Assert.That(dist.Platform, Is.EqualTo(FfmpegCatalog.Current));
+
+        string script = Completion.Generate("bash", []);
+        Assert.That(script, Does.Contain("btbn"));
+        Assert.That(script.Contains("gyan"),
+            Is.EqualTo(FfmpegCatalog.Current == DistPlatform.Windows),
+            "gyan.dev publishes no Linux build");
+    }
+
     [Test]
     public void PlayModeNamesRoundTrip()
     {

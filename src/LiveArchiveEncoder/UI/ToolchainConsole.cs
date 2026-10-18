@@ -18,7 +18,10 @@ public static class ToolchainConsole
     {
         Console.WriteLine($"\n{L.T("tc.heading")}");
         Console.WriteLine($"{L.Pad(L.T("tc.root"), 15)}: {Toolchain.Root}");
-        foreach (FfmpegDist dist in FfmpegCatalog.All)
+        // Available, not All: the catalogue holds one entry per id per
+        // platform, and listing all of them would show "btbn (win64)" next to
+        // "btbn (linux64)" on a machine that can only ever install one.
+        foreach (FfmpegDist dist in FfmpegCatalog.Available)
         {
             string? exe = Toolchain.FFmpegFor(dist.Id);
             bool active = string.Equals(dist.Id, activeId, StringComparison.OrdinalIgnoreCase);
