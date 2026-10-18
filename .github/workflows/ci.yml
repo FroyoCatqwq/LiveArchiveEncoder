@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: build + unit tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore LiveArchiveEncoder.V7.slnx
+
+      - name: Build
+        run: dotnet build LiveArchiveEncoder.V7.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build
+
+# The Python harnesses under tests/e2e/ are deliberately NOT run here: they
+# compare this build against the v6.3.3 baseline and need an FFmpeg with the
+# legacy encoders on PATH, plus a quiet machine (the realtime controller picks
+# frames against the wall clock). Run them locally, see docs/usage.md.

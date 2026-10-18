@@ -1,0 +1,26 @@
+# Normalise line endings: LF in the repository, native on checkout.
+# Without this, a mixed Windows/Linux clone rewrites every file on checkout.
+* text=auto
+
+# PowerShell and the solution file are Windows-only consumers.
+*.ps1   text eol=crlf
+*.slnx  text eol=crlf
+*.csproj text
+*.config text
+
+# Source that must stay readable in diffs.
+*.cs    text diff=csharp
+*.py    text diff=python
+*.md    text
+*.json  text
+*.yml   text
+
+# Test fixture and anything else binary must never be normalised.
+*.mp4   binary
+*.rm    binary
+*.avi   binary
+*.mpg   binary
+*.wmv   binary
+*.roq   binary
+*.zip   binary
+*.png   binary
