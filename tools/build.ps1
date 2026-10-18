@@ -1,9 +1,9 @@
 # Builds the encoder.
 #
-#   .\build.ps1                       JIT (framework-dependent) build only
-#   .\build.ps1 -Aot                  additionally publish a NativeAOT exe
-#   .\build.ps1 -Aot -AotAvx2         JIT + AOT + AOT with -p:IlcInstructionSet=avx2
-#   .\build.ps1 -Aot -NoJit           NativeAOT only
+#   tools\build.ps1                       JIT (framework-dependent) build only
+#   tools\build.ps1 -Aot                  additionally publish a NativeAOT exe
+#   tools\build.ps1 -Aot -AotAvx2         JIT + AOT + AOT with -p:IlcInstructionSet=avx2
+#   tools\build.ps1 -Aot -NoJit           NativeAOT only
 #
 # -NoJit skips the framework-dependent publish; the other two switches decide
 # which NativeAOT flavours land in publish\aot and publish\aot-avx2.
@@ -26,7 +26,7 @@
 # the csproj does this through $(WindowsSdkLibRoot) / $(WindowsSdkLibVersion)
 # and both can be overridden here:
 #
-#   .\build.ps1 -Aot -WindowsSdkLibVersion 10.0.22621.0
+#   tools\build.ps1 -Aot -WindowsSdkLibVersion 10.0.22621.0
 #
 param(
     [switch]$Aot,
@@ -38,7 +38,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$project = Join-Path $PSScriptRoot "..\src\LiveArchiveEncoder\LiveArchiveEncoder.csproj"
+$repoRoot = Split-Path -Parent $PSScriptRoot          # tools\ -> project root
+$project = Join-Path $repoRoot "src\LiveArchiveEncoder\LiveArchiveEncoder.csproj"
 $project = [System.IO.Path]::GetFullPath($project)
 
 function Invoke-Build {
@@ -50,14 +51,14 @@ function Invoke-Build {
 
 if (-not $NoJit) {
     Write-Host "== JIT build ($Configuration) ==" -ForegroundColor Cyan
-    Invoke-Build @("-o", (Join-Path $PSScriptRoot "..\publish\jit"))
+    Invoke-Build @("-o", (Join-Path $repoRoot "publish\jit"))
     Write-Host "  -> publish\jit\LiveArchiveEncoder.exe"
 }
 
 if ($Aot) {
     Write-Host "== NativeAOT publish ($RuntimeIdentifier) ==" -ForegroundColor Cyan
     $extra = @("-r", $RuntimeIdentifier, "-p:PublishAot=true",
-               "-o", (Join-Path $PSScriptRoot "..\publish\aot"))
+               "-o", (Join-Path $repoRoot "publish\aot"))
     if ($WindowsSdkLibVersion -ne "") {
         $extra += "-p:WindowsSdkLibVersion=$WindowsSdkLibVersion"
     }
@@ -68,7 +69,7 @@ if ($Aot) {
 if ($AotAvx2) {
     Write-Host "== NativeAOT publish with AVX2 baseline ($RuntimeIdentifier) ==" -ForegroundColor Cyan
     $extra = @("-r", $RuntimeIdentifier, "-p:PublishAot=true", "-p:IlcInstructionSet=avx2",
-               "-o", (Join-Path $PSScriptRoot "..\publish\aot-avx2"))
+               "-o", (Join-Path $repoRoot "publish\aot-avx2"))
     if ($WindowsSdkLibVersion -ne "") {
         $extra += "-p:WindowsSdkLibVersion=$WindowsSdkLibVersion"
     }

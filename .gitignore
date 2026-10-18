@@ -7,11 +7,9 @@ artifacts/
 *.suo
 .vs/
 
-# Test scratch output
+# All test scratch lands under tests/out/ (ignored as a whole).
+# Point it elsewhere per suite with CM_OUT / FS_OUT if you need to.
 tests/out/
-tests/out*/
-tests/*.log
-tests/*.json.bak
 tests/_cui_backup/
 
 # Python

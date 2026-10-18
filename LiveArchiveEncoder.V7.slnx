@@ -1,68 +1,87 @@
 <Solution>
   <Folder Name="/Solution Items/">
-    <File Path="live_archive_encoder.py" />
-    <File Path="tests\compare_matrix.py" />
-    <File Path="tests\benchmark.ps1" />
+    <File Path="README.md" />
+    <File Path="nuget.config" />
+    <File Path=".gitignore" />
+    <File Path="reference/live_archive_encoder.py" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/">
-    <Project Path="src\LiveArchiveEncoder\LiveArchiveEncoder.csproj" />
-    <File Path="src\LiveArchiveEncoder\Program.cs" />
+    <Project Path="src/LiveArchiveEncoder/LiveArchiveEncoder.csproj" />
+    <File Path="src/LiveArchiveEncoder/Program.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Configuration/">
-    <File Path="src\LiveArchiveEncoder\Configuration\Constants.cs" />
-    <File Path="src\LiveArchiveEncoder\Configuration\Models.cs" />
+    <File Path="src/LiveArchiveEncoder/Configuration/Constants.cs" />
+    <File Path="src/LiveArchiveEncoder/Configuration/Models.cs" />
+    <File Path="src/LiveArchiveEncoder/Configuration/UserConfig.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Core/">
-    <File Path="src\LiveArchiveEncoder\Core\EncoderMath.cs" />
-    <File Path="src\LiveArchiveEncoder\Core\HighResolutionTimer.cs" />
-    <File Path="src\LiveArchiveEncoder\Core\PixelFormatUtil.cs" />
-    <File Path="src\LiveArchiveEncoder\Core\Timecode.cs" />
-    <File Path="src\LiveArchiveEncoder\Core\Validation.cs" />
-  </Folder>
-  <Folder Name="/src/LiveArchiveEncoder/FFmpeg/">
-    <File Path="src\LiveArchiveEncoder\FFmpeg\FFmpegCapabilities.cs" />
-    <File Path="src\LiveArchiveEncoder\FFmpeg\FFmpegDiscovery.cs" />
-    <File Path="src\LiveArchiveEncoder\FFmpeg\PipeReaders.cs" />
-    <File Path="src\LiveArchiveEncoder\FFmpeg\Probe.cs" />
-    <File Path="src\LiveArchiveEncoder\FFmpeg\ProcessRunner.cs" />
-  </Folder>
-  <Folder Name="/src/LiveArchiveEncoder/Frames/">
-    <File Path="src\LiveArchiveEncoder\Frames\FrameBufferPool.cs" />
-  </Folder>
-  <Folder Name="/src/LiveArchiveEncoder/RateControl/">
-    <File Path="src\LiveArchiveEncoder\RateControl\OutputMonitor.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/EncoderMath.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/HighResolutionTimer.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/Interrupt.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/PixelFormatUtil.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/Timecode.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/Validation.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Encoding/">
-    <File Path="src\LiveArchiveEncoder\Encoding\ArgsBuilder.cs" />
-    <File Path="src\LiveArchiveEncoder\Encoding\EncodeResult.cs" />
-    <File Path="src\LiveArchiveEncoder\Encoding\Preflight.cs" />
-    <File Path="src\LiveArchiveEncoder\Encoding\RealtimeEncoder.cs" />
-    <File Path="src\LiveArchiveEncoder\Encoding\RealtimeOptions.cs" />
+    <File Path="src/LiveArchiveEncoder/Encoding/ArgsBuilder.cs" />
+    <File Path="src/LiveArchiveEncoder/Encoding/AudioTrack.cs" />
+    <File Path="src/LiveArchiveEncoder/Encoding/EncodeResult.cs" />
+    <File Path="src/LiveArchiveEncoder/Encoding/ParallelEncoder.cs" />
+    <File Path="src/LiveArchiveEncoder/Encoding/Preflight.cs" />
+    <File Path="src/LiveArchiveEncoder/Encoding/RealtimeEncoder.cs" />
+    <File Path="src/LiveArchiveEncoder/Encoding/RealtimeOptions.cs" />
   </Folder>
-  <Folder Name="/src/LiveArchiveEncoder/Remote/">
-    <File Path="src\LiveArchiveEncoder\Remote\Smb.cs" />
+  <Folder Name="/src/LiveArchiveEncoder/FFmpeg/">
+    <File Path="src/LiveArchiveEncoder/FFmpeg/FFmpegCapabilities.cs" />
+    <File Path="src/LiveArchiveEncoder/FFmpeg/FfmpegCatalog.cs" />
+    <File Path="src/LiveArchiveEncoder/FFmpeg/FFmpegDiscovery.cs" />
+    <File Path="src/LiveArchiveEncoder/FFmpeg/PipeReaders.cs" />
+    <File Path="src/LiveArchiveEncoder/FFmpeg/Probe.cs" />
+    <File Path="src/LiveArchiveEncoder/FFmpeg/ProcessRunner.cs" />
+    <File Path="src/LiveArchiveEncoder/FFmpeg/Toolchain.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/Frames/">
+    <File Path="src/LiveArchiveEncoder/Frames/FrameBufferPool.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Localization/">
-    <File Path="src\LiveArchiveEncoder\Localization\Strings.cs" />
+    <File Path="src/LiveArchiveEncoder/Localization/Strings.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/RateControl/">
+    <File Path="src/LiveArchiveEncoder/RateControl/OutputMonitor.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/Remote/">
+    <File Path="src/LiveArchiveEncoder/Remote/Smb.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/UI/">
-    <File Path="src\LiveArchiveEncoder\UI\Cli.cs" />
-    <File Path="src\LiveArchiveEncoder\UI\CliOptions.cs" />
-    <File Path="src\LiveArchiveEncoder\UI\Completion.cs" />
-    <File Path="src\LiveArchiveEncoder\UI\CpuInfo.cs" />
-    <File Path="src\LiveArchiveEncoder\UI\Cui.cs" />
-    <File Path="src\LiveArchiveEncoder\UI\Player.cs" />
-    <File Path="src\LiveArchiveEncoder\UI\Report.cs" />
-    <File Path="src\LiveArchiveEncoder\UI\ToolchainConsole.cs" />
+    <File Path="src/LiveArchiveEncoder/UI/Cli.cs" />
+    <File Path="src/LiveArchiveEncoder/UI/CliOptions.cs" />
+    <File Path="src/LiveArchiveEncoder/UI/Completion.cs" />
+    <File Path="src/LiveArchiveEncoder/UI/CpuInfo.cs" />
+    <File Path="src/LiveArchiveEncoder/UI/Cui.cs" />
+    <File Path="src/LiveArchiveEncoder/UI/Player.cs" />
+    <File Path="src/LiveArchiveEncoder/UI/Report.cs" />
+    <File Path="src/LiveArchiveEncoder/UI/ToolchainConsole.cs" />
   </Folder>
   <Folder Name="/tests/LiveArchiveEncoder.Tests/">
-    <Project Path="tests\LiveArchiveEncoder.Tests\LiveArchiveEncoder.Tests.csproj" />
-    <File Path="tests\LiveArchiveEncoder.Tests\CliParserTests.cs" />
-    <File Path="tests\LiveArchiveEncoder.Tests\ConfigStoreTests.cs" />
-    <File Path="tests\LiveArchiveEncoder.Tests\FfmpegCatalogTests.cs" />
-    <File Path="tests\LiveArchiveEncoder.Tests\LocalizationTests.cs" />
-    <File Path="tests\LiveArchiveEncoder.Tests\PlayerTests.cs" />
-    <File Path="tests\LiveArchiveEncoder.Tests\SmbTests.cs" />
-    <File Path="tests\LiveArchiveEncoder.Tests\ToolchainTests.cs" />
+    <Project Path="tests/LiveArchiveEncoder.Tests/LiveArchiveEncoder.Tests.csproj" />
+    <File Path="tests/LiveArchiveEncoder.Tests/CliParserTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/ConfigStoreTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/FfmpegCatalogTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/LocalizationTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/PlayerTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/SmbTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/ToolchainTests.cs" />
+  </Folder>
+  <Folder Name="/tests/e2e/">
+    <File Path="tests/e2e/ab_duration.py" />
+    <File Path="tests/e2e/compare_matrix.py" />
+    <File Path="tests/e2e/cui_smoke.py" />
+    <File Path="tests/e2e/error_paths.py" />
+    <File Path="tests/e2e/feature_sweep.py" />
+    <File Path="tests/e2e/option_smoke.py" />
+  </Folder>
+  <Folder Name="/tools/">
+    <File Path="tools/benchmark.ps1" />
+    <File Path="tools/build.ps1" />
   </Folder>
 </Solution>

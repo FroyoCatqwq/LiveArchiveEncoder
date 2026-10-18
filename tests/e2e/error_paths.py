@@ -8,15 +8,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 MEDIA = ROOT / "tests" / "media"
 SRC = MEDIA / "test_src.mp4"
-PY = ROOT / "live_archive_encoder.py"
+PY = ROOT / "reference" / "live_archive_encoder.py"
 # CS_EXE lets the same suite be run against the NativeAOT build.
 CS = Path(os.environ.get("CS_EXE")
           or (ROOT / "src" / "LiveArchiveEncoder" / "bin" / "Release" / "net10.0"
               / "LiveArchiveEncoder.exe"))
-WORK = ROOT / "tests" / "out"
+WORK = ROOT / "tests" / "out" / "errors"
 WORK.mkdir(parents=True, exist_ok=True)
 
 CASES = [

@@ -1,7 +1,7 @@
 # Live Archive Encoder v7 (.NET 10 / C#) — 使用教程
 
 面向使用者的操作手册。想了解迁移细节与验证数据，看 `README.md` 和
-`tests/TEST_REPORT_v7.md`。
+`docs/test-report-v7.md`。
 
 > **一句话说明**：把一个现代视频，以"当年直播录档"的方式，实时节奏地重新编码成
 > RV20 / RoQ / MPEG-1 / MPEG-4 / WMV2 等老式编码器格式，并带自适应码率控制。
@@ -32,12 +32,12 @@ dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
 # -> src\LiveArchiveEncoder\bin\Release\net10.0\LiveArchiveEncoder.exe
 
 # 或者用构建脚本，顺便出 NativeAOT 单文件版
-tests\build.ps1 -Aot
+tools\build.ps1 -Aot
 # -> publish\jit\LiveArchiveEncoder.exe       162 KB，需要 .NET 10 运行时
 # -> publish\aot\LiveArchiveEncoder.exe       3.8 MB，单个文件、零依赖
 
 # 三套全出（JIT + AOT + AOT-AVX2）
-tests\build.ps1 -Aot -AotAvx2
+tools\build.ps1 -Aot -AotAvx2
 # -> publish\aot-avx2\LiveArchiveEncoder.exe  3.9 MB，把指令集基线从 SSE2 抬到 AVX2
 ```
 
@@ -66,7 +66,7 @@ NativeAOT 需要 Visual Studio 的 **Desktop development with C++** 工作负载
 `LNK1181: cannot open input file 'advapi32.lib'`，此时显式给它版本号：
 
 ```powershell
-tests\build.ps1 -Aot -WindowsSdkLibVersion 10.0.26100.0
+tools\build.ps1 -Aot -WindowsSdkLibVersion 10.0.26100.0
 ```
 
 ---
@@ -525,12 +525,12 @@ v6.3.3 的 AMV 是**完全不能用的**——无论怎么调都只产出 0 字�
 ### 全编码器扫描
 
 ```powershell
-python tests\feature_sweep.py                                   # 默认 JIT
-CS_EXE=publish\aot\LiveArchiveEncoder.exe python tests\feature_sweep.py
+python tests\e2e\feature_sweep.py                                   # 默认 JIT
+CS_EXE=publish\aot\LiveArchiveEncoder.exe python tests\e2e\feature_sweep.py
 ```
 
 对当前 FFmpeg 探测到的**全部 35 个** legacy 编码器各跑 2 秒片段，检查退出码、
-产物非空、包含视频流、时长合理，并留一份产物在 `tests\out_fsweep\`。
+产物非空、包含视频流、时长合理，并留一份产物在 `tests\out\sweep\`。
 
 三种结果：`PASS` 正常；`WARN` 容器不写时长（amv / h263 / roq / h261 是容器本身的
 行为，用纯 ffmpeg 生成的对照文件同样没有时长，不是本程序的问题）；`NOPROBE` 指
@@ -783,7 +783,7 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 | 层 | 工具 | 管什么 | 怎么跑 |
 | --- | --- | --- | --- |
 | 单元 | **NUnit**（`tests/LiveArchiveEncoder.Tests`） | 纯逻辑：SMB 参数、CLI 解析、配置往返、词条完整性、工具链元数据 | `dotnet test` |
-| 等价性回归 | Python harness | 与 v6.3.3 的**产物是否等价**、错误路径、全编码器扫描 | `python tests\*.py` |
+| 等价性回归 | Python harness | 与 v6.3.3 的**产物是否等价**、错误路径、全编码器扫描 | `python tests\e2e\*.py` |
 
 ### NUnit 单元测试（v7.4.1 起）
 
@@ -820,23 +820,23 @@ dotnet test tests\LiveArchiveEncoder.Tests -c Release
 
 ```powershell
 # 12 个编码器/参数矩阵，逐字段对比 Python 版与 C# 版
-python tests\compare_matrix.py
+python tests\e2e\compare_matrix.py
 
 # 11 条错误路径，对比退出码
-python tests\error_paths.py
+python tests\e2e\error_paths.py
 
 # 全编码器功能扫描：当前 FFmpeg 的每个 legacy 编码器跑 2 秒片段（见 §7.9）
-python tests\feature_sweep.py
+python tests\e2e\feature_sweep.py
 
 # 选项通路冒烟：turbo / 分片 / 分离音频 / 反交错 / 时间区间 …
-python tests\option_smoke.py
+python tests\e2e\option_smoke.py
 
 # 交互式菜单冒烟：语言切换、turbo/分片开关、配置持久化、损坏配置容错
-python tests\cui_smoke.py
+python tests\e2e\cui_smoke.py
 
 # 拿 AOT 产物跑同一套回归
 set CS_EXE=D:\...\publish\aot\LiveArchiveEncoder.exe
-python tests\compare_matrix.py
+python tests\e2e\compare_matrix.py
 ```
 
 `compare_matrix` / `error_paths` / `feature_sweep` / `option_smoke` 都需要

@@ -17,17 +17,17 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 MEDIA = ROOT / "tests" / "media"
 SRC = MEDIA / "test_src.mp4"
-PY = ROOT / "live_archive_encoder.py"
+PY = ROOT / "reference" / "live_archive_encoder.py"
 # CS_EXE lets the same matrix be run against the NativeAOT build.
 CS = Path(os.environ.get("CS_EXE")
           or (ROOT / "src" / "LiveArchiveEncoder" / "bin" / "Release" / "net10.0"
               / "LiveArchiveEncoder.exe"))
 # CM_OUT moves the scratch directory. Handy for running two builds back to back
 # without deleting the previous products.
-WORK = Path(os.environ.get("CM_OUT") or (ROOT / "tests" / "out"))
+WORK = Path(os.environ.get("CM_OUT") or (ROOT / "tests" / "out" / "matrix"))
 
 # name -> extra CLI args (input/output are appended by the harness)
 CASES: list[tuple[str, str, list[str]]] = [

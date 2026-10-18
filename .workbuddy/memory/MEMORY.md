@@ -43,7 +43,14 @@ live_archive_encoder：把现代视频转码成 RV20 / RoQ / MPEG-1 等**老式�
 - 自带 ffmpeg（BtbN GPL）在 PATH，35 个 legacy 编码器可用。
 
 ## 测试
+- `dotnet test LiveArchiveEncoder.V7.slnx -c Release` — **NUnit 单元测试，121 个**，
+  6 秒跑完，不依赖真实编码（v7.4.1 起，v7.4.2 升到 NUnit 5）。
+- **NUnit 版本**：框架 `NUnit 5.*`（5.0.0）+ 适配器 `NUnit3TestAdapter 6.*`（6.3.1）
+  + `Microsoft.NET.Test.Sdk 18.*`（18.11.0）。**适配器包名仍是 NUnit3TestAdapter**，
+  NUnit 4/5 共用，别去找 "NUnit5TestAdapter"。
+- **`.slnx` 里 csproj 必须写 `<Project Path=...>`**（写 `<File>` 会找不到工程）。
 - `python tests/compare_matrix.py` — 12 个编码器/参数矩阵，对比 ffprobe 结构字段
+  （`CM_ONLY=name` 只跑指定用例；探针含 `frames`，mpeg/mpegts 的 duration 走 0.12s 容差）
 - `python tests/error_paths.py` — 11 个错误路径，对比退出码
 - `python tests/feature_sweep.py` — 全部 35 个 legacy 编码器各跑 2 秒片段
 - `python tests/option_smoke.py` — 18 条选项通路（turbo/parallel/audio-mode/deint/…）
@@ -64,6 +71,9 @@ live_archive_encoder：把现代视频转码成 RV20 / RoQ / MPEG-1 等**老式�
 - **amv / h263 / roq / h261**：容器不写时长。用纯 ffmpeg 生成的对照文件同样
   没有时长 → 容器固有行为。判断要按**扩展名**而不是 format_name
   （ffprobe 会把 amv 认成 avi）。
+- **mpeg1video(MPG) 时长漂移**：MPEG-PS/TS 时间戳来自管道写入节奏，**Python 自己
+  两次跑就会得到 4.942 和 4.984**（帧数都是 120）。已改为 duration 容差 0.12s +
+  精确比对 `frames`。看到这条 FAIL 先别怀疑端口。
 
 ## 取消/中断（踩过的坑，改这块务必注意）
 - 取消令牌必须**按操作发放**。`Interrupt.BeginOperation()` 会在返回前清掉上一次

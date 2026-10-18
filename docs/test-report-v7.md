@@ -1,5 +1,9 @@
 # Live Archive Encoder v7 — migration test report
 
+> Archived report. Paths quoted below are from before the repo was reorganised:
+> the Python harnesses now live in `tests/e2e/`, the build helper in `tools/`,
+> and the v6.3.3 baseline in `reference/`. The numbers are unaffected.
+
 Scope: verify that the .NET 10 / C# 14 port is functionally equivalent to
 `live_archive_encoder.py` v6.3.3, and measure what the port actually changes in
 controller cost.

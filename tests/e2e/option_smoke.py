@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Option-path smoke test.
 
-The encoder matrix (tests/feature_sweep.py) covers "does this codec work"; this
+The encoder matrix (tests/e2e/feature_sweep.py) covers "does this codec work"; this
 one covers "do the option paths still work" -- turbo, sharding, the split audio
 pipeline, deinterlacing, cropping and time ranges. Each case only has to produce
 a structurally valid file; bit-exactness is the matrix's job.
 
-    python tests/option_smoke.py
-    CS_EXE=publish/aot/LiveArchiveEncoder.exe python tests/option_smoke.py
+    python tests/e2e/option_smoke.py
+    CS_EXE=publish/aot/LiveArchiveEncoder.exe python tests/e2e/option_smoke.py
 """
 
 import json
@@ -17,11 +17,11 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 DEFAULT_EXE = ROOT / "publish" / "jit" / "LiveArchiveEncoder.exe"
 EXE = Path(os.environ.get("CS_EXE", DEFAULT_EXE))
 SRC = ROOT / "tests" / "media" / "test_src.mp4"
-OUT = ROOT / "tests" / "out_options"
+OUT = ROOT / "tests" / "out" / "options"
 
 # name, extra args, output extension. Every case names its encoder explicitly:
 # the default is rv20 (rm), and the extension has to match the muxer.

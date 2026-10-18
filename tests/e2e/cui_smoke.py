@@ -5,8 +5,8 @@ Drives the CUI through a piped stdin and asserts on what it prints and what it
 leaves behind in the settings file. The real settings file is used (that is the
 point of the test) but it is backed up first and restored afterwards.
 
-    python tests/cui_smoke.py
-    CS_EXE=publish/aot/LiveArchiveEncoder.exe python tests/cui_smoke.py
+    python tests/e2e/cui_smoke.py
+    CS_EXE=publish/aot/LiveArchiveEncoder.exe python tests/e2e/cui_smoke.py
 """
 
 import json
@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 DEFAULT_EXE = ROOT / "publish" / "jit" / "LiveArchiveEncoder.exe"
 EXE = Path(os.environ.get("CS_EXE", DEFAULT_EXE))
 CONFIG = Path(os.environ.get("LOCALAPPDATA", "")) / "LiveArchiveEncoder" / "config.json"

@@ -11,9 +11,9 @@ binary reports as available it:
   4. probes the result and requires a video stream plus a plausible duration.
 
 Usage:
-    python tests/feature_sweep.py                      # jit build
-    CS_EXE=publish/aot/LiveArchiveEncoder.exe python tests/feature_sweep.py
-    SWEEP_END=00:00:05 python tests/feature_sweep.py
+    python tests/e2e/feature_sweep.py                      # jit build
+    CS_EXE=publish/aot/LiveArchiveEncoder.exe python tests/e2e/feature_sweep.py
+    SWEEP_END=00:00:05 python tests/e2e/feature_sweep.py
 """
 
 import glob
@@ -24,13 +24,16 @@ import subprocess
 import sys
 import time
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_EXE = os.path.normpath(os.path.join(ROOT, "..", "publish", "jit", "LiveArchiveEncoder.exe"))
+# tests/e2e/, so: HERE = tests/e2e, TESTS = tests, ROOT = project root.
+HERE = os.path.dirname(os.path.abspath(__file__))
+TESTS = os.path.dirname(HERE)
+ROOT = os.path.dirname(TESTS)
+DEFAULT_EXE = os.path.normpath(os.path.join(ROOT, "publish", "jit", "LiveArchiveEncoder.exe"))
 EXE = os.path.normpath(os.environ.get("CS_EXE", DEFAULT_EXE))
-SRC = os.path.join(ROOT, "media", "test_src.mp4")
+SRC = os.path.join(TESTS, "media", "test_src.mp4")
 # FS_OUT moves the scratch directory; pointing it somewhere empty avoids deleting
 # the products of a previous run.
-OUT = os.environ.get("FS_OUT") or os.path.join(ROOT, "out_fsweep")
+OUT = os.environ.get("FS_OUT") or os.path.join(TESTS, "out", "sweep")
 END = os.environ.get("SWEEP_END", "00:00:02")
 
 # Containers whose muxer never writes a duration, so ffprobe legitimately

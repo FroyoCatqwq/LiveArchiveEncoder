@@ -1,8 +1,11 @@
 # Live Archive Encoder v7 (.NET 10 / C# 14)
 
 Windows CUI/CLI frontend for classic/legacy FFmpeg video encoders. This is a
-behaviour-preserving port of `live_archive_encoder.py` v6.3.3 to C# on .NET 10,
-with the internals rewritten for lower allocation and better pipe scheduling.
+behaviour-preserving port of `live_archive_encoder.py` v6.3.3 (kept verbatim
+under `reference/`) to C# on .NET 10, with the internals rewritten for lower
+allocation and better pipe scheduling.
+
+Full user guide: [`docs/usage.md`](docs/usage.md).
 
 **The port keeps the realtime simulation semantics of v6.3.3.** The capture
 thread feeds frames at the source cadence and the main loop emits one output
@@ -17,7 +20,7 @@ dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
 # -> src/LiveArchiveEncoder/bin/Release/net10.0/LiveArchiveEncoder.exe
 
 # …or both builds, plus an optional NativeAOT publish
-tests\build.ps1 -Aot
+tools\build.ps1 -Aot
 # -> publish\jit\LiveArchiveEncoder.exe       (162 KB + shared framework)
 # -> publish\aot\LiveArchiveEncoder.exe       (3.8 MB, single file, no deps)
 ```
@@ -29,7 +32,7 @@ import libraries. If `vcvarsall.bat` cannot locate the SDK on your machine, pass
 the directories explicitly:
 
 ```powershell
-tests\build.ps1 -Aot -WindowsSdkLibVersion 10.0.26100.0
+tools\build.ps1 -Aot -WindowsSdkLibVersion 10.0.26100.0
 ```
 
 ## Tests
@@ -53,13 +56,16 @@ End-to-end equivalence against the Python reference lives in the Python
 harnesses, which invoke a built exe and need FFmpeg on `PATH`:
 
 ```powershell
-python tests/compare_matrix.py     # 12 encoder/param cases, ffprobe structure
-python tests/error_paths.py        # 11 failure paths, exit codes
-python tests/feature_sweep.py      # every legacy encoder, 2 s clip
-python tests/option_smoke.py       # option plumbing
-python tests/cui_smoke.py          # interactive menu assertions
-CS_EXE=publish\aot\LiveArchiveEncoder.exe python tests/compare_matrix.py
+python tests/e2e/compare_matrix.py     # 12 encoder/param cases, ffprobe structure
+python tests/e2e/error_paths.py        # 11 failure paths, exit codes
+python tests/e2e/feature_sweep.py      # every legacy encoder, 2 s clip
+python tests/e2e/option_smoke.py       # option plumbing
+python tests/e2e/cui_smoke.py          # interactive menu assertions
+CS_EXE=publish\aot\LiveArchiveEncoder.exe python tests/e2e/compare_matrix.py
 ```
+
+All scratch products land in `tests/out/` (gitignored); `CM_OUT` / `FS_OUT`
+move them if you want to keep two builds side by side.
 
 `compare_matrix.py` depends on the realtime frame-selection logic, so run it
 alone — a parallel build or another encode will shift the wall clock and change
@@ -119,26 +125,39 @@ it is **not** the default and it is **not** faster:
 
 `--audio-mode auto` behaves like `separate` but falls back to the single-process
 pipeline when the muxer rejects the split. Measured numbers are in
-`tests/TEST_REPORT_v7.md` §7.
+`docs/test-report-v7.md` §7.
 
 ## Layout
 
 ```
 src/LiveArchiveEncoder/
   Configuration/  Config, EncoderInfo, EncoderCaps, StreamInfo, constant tables
-  Core/           timecode parsing, pixel-format maths, validation, high-res timer
-  FFmpeg/         discovery, capability probing, ffprobe, process + pipe I/O
+  Core/           timecode parsing, pixel-format maths, validation, high-res timer,
+                  Ctrl+C interrupt
+  FFmpeg/         discovery, toolchain (multi-distro install/update/delete),
+                  capability probing, ffprobe, process + pipe I/O
   Frames/         bounded pre-allocated frame pool
   RateControl/    rolling bitrate monitor fed by `ffmpeg -progress`
-  Encoding/       argument builders, preflight, the realtime encode loop, audio routing
-  UI/             CLI parser + help, CUI menus, shared reporting, --cpu-info
+  Encoding/       argument builders, preflight, the realtime encode loop, audio
+                  routing, optional parallel sharding
+  Remote/         SMB/UNC argument construction for read and write
+  Localization/   en/zh string tables (every key must exist in both)
+  UI/             CLI parser + help, CUI menus, shared reporting, --cpu-info,
+                  post-encode playback
 tests/
-  compare_matrix.py   functional equivalence harness (12 encoder/parameter cases)
-  error_paths.py      error-path equivalence harness (11 cases)
-  benchmark.ps1       controller CPU / memory measurement
-  ab_duration.py      isolates inline vs separate for container duration
-  build.ps1           JIT and/or NativeAOT build helper
-  media/test_src.mp4  generated 20 s 320x240 h264+aac fixture
+  LiveArchiveEncoder.Tests/   NUnit 5 unit tests (no real encode needed)
+  e2e/                        Python end-to-end equivalence harnesses
+  media/test_src.mp4          generated 20 s 320x240 h264+aac fixture
+  out/                        scratch products, gitignored
+tools/
+  build.ps1                   JIT and/or NativeAOT build helper
+  benchmark.ps1               controller CPU / memory measurement
+reference/
+  live_archive_encoder.py     v6.3.3 — the Python baseline the port is measured against
+docs/
+  usage.md                    full user guide (CLI, CUI, FFmpeg toolchain, playback)
+  test-report-v7.md           measured porting results
+  runs/                       archived harness output from past verification runs
 ```
 
 ## What was actually changed versus v6.3.3
@@ -177,4 +196,4 @@ bitrate maths, preflight steps, and every default value.
   executable and a faster process start; the encode is unchanged because it runs
   in FFmpeg and is paced against the wall clock.
 
-See `tests/TEST_REPORT_v7.md` for the measured comparison against v6.3.3.
+See `docs/test-report-v7.md` for the measured comparison against v6.3.3.

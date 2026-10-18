@@ -16,11 +16,11 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 SRC = ROOT / "tests" / "media" / "test_src.mp4"
-PY = ROOT / "live_archive_encoder.py"
+PY = ROOT / "reference" / "live_archive_encoder.py"
 CS = ROOT / "src" / "LiveArchiveEncoder" / "bin" / "Release" / "net10.0" / "LiveArchiveEncoder.exe"
-WORK = ROOT / "tests" / "out_ab"
+WORK = ROOT / "tests" / "out" / "ab"
 WORK.mkdir(parents=True, exist_ok=True)
 
 CASES = [("mpeg1video", "mpg"), ("wmv2", "wmv")]
