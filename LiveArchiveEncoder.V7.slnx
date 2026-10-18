@@ -5,7 +5,7 @@
     <File Path="tests\benchmark.ps1" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/">
-    <File Path="src\LiveArchiveEncoder\LiveArchiveEncoder.csproj" />
+    <Project Path="src\LiveArchiveEncoder\LiveArchiveEncoder.csproj" />
     <File Path="src\LiveArchiveEncoder\Program.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Configuration/">
@@ -39,10 +39,30 @@
     <File Path="src\LiveArchiveEncoder\Encoding\RealtimeEncoder.cs" />
     <File Path="src\LiveArchiveEncoder\Encoding\RealtimeOptions.cs" />
   </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/Remote/">
+    <File Path="src\LiveArchiveEncoder\Remote\Smb.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/Localization/">
+    <File Path="src\LiveArchiveEncoder\Localization\Strings.cs" />
+  </Folder>
   <Folder Name="/src/LiveArchiveEncoder/UI/">
     <File Path="src\LiveArchiveEncoder\UI\Cli.cs" />
     <File Path="src\LiveArchiveEncoder\UI\CliOptions.cs" />
+    <File Path="src\LiveArchiveEncoder\UI\Completion.cs" />
+    <File Path="src\LiveArchiveEncoder\UI\CpuInfo.cs" />
     <File Path="src\LiveArchiveEncoder\UI\Cui.cs" />
+    <File Path="src\LiveArchiveEncoder\UI\Player.cs" />
     <File Path="src\LiveArchiveEncoder\UI\Report.cs" />
+    <File Path="src\LiveArchiveEncoder\UI\ToolchainConsole.cs" />
+  </Folder>
+  <Folder Name="/tests/LiveArchiveEncoder.Tests/">
+    <Project Path="tests\LiveArchiveEncoder.Tests\LiveArchiveEncoder.Tests.csproj" />
+    <File Path="tests\LiveArchiveEncoder.Tests\CliParserTests.cs" />
+    <File Path="tests\LiveArchiveEncoder.Tests\ConfigStoreTests.cs" />
+    <File Path="tests\LiveArchiveEncoder.Tests\FfmpegCatalogTests.cs" />
+    <File Path="tests\LiveArchiveEncoder.Tests\LocalizationTests.cs" />
+    <File Path="tests\LiveArchiveEncoder.Tests\PlayerTests.cs" />
+    <File Path="tests\LiveArchiveEncoder.Tests\SmbTests.cs" />
+    <File Path="tests\LiveArchiveEncoder.Tests\ToolchainTests.cs" />
   </Folder>
 </Solution>

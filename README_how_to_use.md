@@ -766,9 +766,54 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
    系统关联；默认 `off`。
 4. **源码纳入 git 管理**：v7.3 基线 + 按改动逐步提交，方便回溯每一步。
 
+### v7.4.1 新增
+
+1. **引入 NUnit**（`tests/LiveArchiveEncoder.Tests`，121 个用例）：纯逻辑单测，
+   不依赖 FFmpeg 和网络，几秒跑完；Python harness 继续负责"与 v6.3.3 是否等价"
+   那一层。见 §12。
+2. 首次跑就抓到并修掉了一个真 Bug：`note.*` / `run.*` 共 13 个词条只有英文没有
+   中文，中文界面下会漏回英文并把对齐顶歪。现在有词条完整性测试盯着。
+
 ---
 
 ## 12. 自测
+
+测试分两层，各管一段：
+
+| 层 | 工具 | 管什么 | 怎么跑 |
+| --- | --- | --- | --- |
+| 单元 | **NUnit**（`tests/LiveArchiveEncoder.Tests`） | 纯逻辑：SMB 参数、CLI 解析、配置往返、词条完整性、工具链元数据 | `dotnet test` |
+| 等价性回归 | Python harness | 与 v6.3.3 的**产物是否等价**、错误路径、全编码器扫描 | `python tests\*.py` |
+
+### NUnit 单元测试（v7.4.1 起）
+
+```powershell
+dotnet test tests\LiveArchiveEncoder.Tests
+# 或指定配置
+dotnet test tests\LiveArchiveEncoder.Tests -c Release
+```
+
+不需要 FFmpeg、不需要网络、几秒跑完，覆盖：
+
+- `SmbTests` — UNC 识别、**`RemoteReadArgs` 不得再吐出 `-stimeout`**（v7.3 的回归）、
+  写入侧只用 `-rw_timeout`、可写探测不留痕迹
+- `FfmpegCatalogTests` — 四个来源的 id / 默认值 / 谁能自动下载 / 压缩包类型
+- `ToolchainTests` — 安装目录布局、**`path` 来源不许解析成受管理构建**、
+  未知来源只报错不抛异常
+- `PlayerTests` — 播放模式解析与描述，缺文件/缺播放器都是"报告"而不是"崩"
+- `CliParserTests` — `--ffmpeg-source` / `--ffmpeg-download`（裸用不吞下一个 flag）/
+  `--ffmpeg-archive` / `--play` / `--proxy` 等新选项，以及老选项没被碰坏
+- `ConfigStoreTests` — JSON 往返、`"path"` 不被规范化掉、损坏文件回退、
+  分片数夹取
+- `LocalizationTests` — **中英文词条必须一一对应**（见下）、CJK 显示宽度补齐
+
+> 词条完整性这一条刚建好就抓到了真东西：`note.*` 和 `run.*` 共 13 个词条只有英文，
+> 中文界面下会漏回英文并把那一列的对齐顶歪。已补齐。
+
+包：`NUnit` + `NUnit3TestAdapter` + `Microsoft.NET.Test.Sdk`，走 `nuget.config`
+里的代理还原。
+
+### 与 Python 基线的等价性回归
 
 所有脚本都支持 `CS_EXE=<路径>` 切换被测 exe（用来验 AOT 产物）。三套产物都跑一遍
 才算过——NativeAOT 下反射型 API 会直接崩，JIT 上却完全正常，只验 JIT 会漏。

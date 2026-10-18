@@ -451,6 +451,21 @@ public static class L
 
         ["start.confirm"] = "\n开始编码？[Y/n]: ",
 
+        ["note.fpsunsupported"] = "注意：{0} 不支持 {1} fps，改用 {2} fps。",
+        ["note.specialsizes"] = "注意：{0} 需要特殊的帧尺寸，改用 {1}x{2}。",
+        ["note.sizeadjusted"] = "已把 {0} 调整为受支持的输出尺寸：{1}x{2}",
+        ["note.transportadjusted"] = "已按 {0} 调整输出尺寸：{1}x{2}",
+        ["note.splitunavailable"] = "\n注意：分离音频通路不可用（{0}），回退为单进程编码。",
+        ["note.splitmux"] = "注意：分离音频通路不可用（{0}），改用单进程编码。",
+        ["note.shardingskipped"] = "已跳过分片：{0}",
+
+        ["run.encodercommand"] = "编码器命令",
+        ["run.sourcepix"] = "源像素格式",
+        ["run.pipepix"] = "管道像素格式",
+        ["run.outputsize"] = "输出尺寸",
+        ["run.timerange"] = "时间范围",
+        ["run.filters"] = "滤镜",
+
         ["report.heading"] = "=== 当前配置 ===",
         ["report.ffmpeg"] = "FFmpeg",
         ["report.source"] = "来源",
@@ -592,6 +607,22 @@ public static class L
         Dictionary<string, string> table = IsChinese ? Zh : En;
         return table.TryGetValue(key, out string? value) ? value : En.GetValueOrDefault(key, key);
     }
+
+    /// <summary>Every key defined for one language.</summary>
+    public static IReadOnlyCollection<string> KeysFor(string? language) =>
+        string.Equals(language, Chinese, StringComparison.OrdinalIgnoreCase)
+            ? Zh.Keys
+            : En.Keys;
+
+    /// <summary>
+    /// Every key defined in <em>any</em> language. The unit tests compare this
+    /// against <see cref="KeysFor"/> per language to catch a table that drifted:
+    /// a missing key falls back to English, which silently breaks the column
+    /// alignment of every label list it appears in.
+    /// </summary>
+    public static IReadOnlyCollection<string> AllKeys => [.. En.Keys.Union(Zh.Keys)];
+
+    public static IReadOnlyCollection<string> Languages => [English, Chinese];
 
     /// <summary>Formatted lookup; {0}..{n} are substituted positionally.</summary>
     public static string T(string key, params object?[] args)

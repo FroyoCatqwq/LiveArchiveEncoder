@@ -32,6 +32,39 @@ the directories explicitly:
 tests\build.ps1 -Aot -WindowsSdkLibVersion 10.0.26100.0
 ```
 
+## Tests
+
+```powershell
+# Unit tests (NUnit 4)
+dotnet test tests/LiveArchiveEncoder.Tests/LiveArchiveEncoder.Tests.csproj -c Release
+
+# …or from the solution (same thing, discovers every project)
+dotnet test LiveArchiveEncoder.V7.slnx -c Release
+```
+
+The NUnit project covers the pure-logic layers that do not need a real encode:
+SMB argument construction, the FFmpeg distribution catalogue, toolchain layout,
+player argument parsing, CLI parsing, config persistence, and localisation
+parity (every key must exist in both `en` and `zh`). It also runs under
+NativeAOT-sensitive APIs, so a reflection-only code path shows up as a failure
+here rather than as a crash in a published binary.
+
+End-to-end equivalence against the Python reference lives in the Python
+harnesses, which invoke a built exe and need FFmpeg on `PATH`:
+
+```powershell
+python tests/compare_matrix.py     # 12 encoder/param cases, ffprobe structure
+python tests/error_paths.py        # 11 failure paths, exit codes
+python tests/feature_sweep.py      # every legacy encoder, 2 s clip
+python tests/option_smoke.py       # option plumbing
+python tests/cui_smoke.py          # interactive menu assertions
+CS_EXE=publish\aot\LiveArchiveEncoder.exe python tests/compare_matrix.py
+```
+
+`compare_matrix.py` depends on the realtime frame-selection logic, so run it
+alone — a parallel build or another encode will shift the wall clock and change
+which frames the adaptive controller picks.
+
 ## Usage
 
 ```powershell
