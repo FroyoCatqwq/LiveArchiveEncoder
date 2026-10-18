@@ -133,13 +133,19 @@ public static partial class FFmpegDiscovery
         roots.Add(AppContext.BaseDirectory);
         roots.Add(Directory.GetCurrentDirectory());
 
-        string[] names =
-        [
-            "ffmpeg-master-latest-win64-gpl",
-            "ffmpeg-n9.0-latest-win64-gpl-9.0",
-            "ffmpeg-n8.1-latest-win64-gpl-8.1",
-            "ffmpeg",
-        ];
+        // Windows builds ship a .exe; every other platform ships an
+        // extension-less binary (the upstream tarballs do exactly that).
+        string exe = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+
+        string[] names = OperatingSystem.IsWindows()
+            ? ["ffmpeg-master-latest-win64-gpl",
+               "ffmpeg-n9.0-latest-win64-gpl-9.0",
+               "ffmpeg-n8.1-latest-win64-gpl-8.1",
+               "ffmpeg"]
+            : ["ffmpeg-master-latest-linux64-gpl",
+               "ffmpeg-master-latest-linux64-lgpl",
+               "ffmpeg-master-latest-linux64-nonfree",
+               "ffmpeg"];
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var unique = new List<string>();
@@ -159,17 +165,17 @@ public static partial class FFmpegDiscovery
             foreach (string name in names)
             {
                 string baseDir = Path.Combine(root, name);
-                Add(Path.Combine(baseDir, "bin", "ffmpeg.exe"));
-                Add(Path.Combine(baseDir, "ffmpeg.exe"));
+                Add(Path.Combine(baseDir, "bin", exe));
+                Add(Path.Combine(baseDir, exe));
             }
-            Add(Path.Combine(root, "bin", "ffmpeg.exe"));
-            Add(Path.Combine(root, "ffmpeg.exe"));
+            Add(Path.Combine(root, "bin", exe));
+            Add(Path.Combine(root, exe));
 
             try
             {
                 foreach (string child in Directory.EnumerateDirectories(root).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
                 {
-                    Add(Path.Combine(child, "bin", "ffmpeg.exe"));
+                    Add(Path.Combine(child, "bin", exe));
                 }
             }
             catch { /* unreadable directory */ }

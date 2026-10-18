@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
@@ -39,7 +39,15 @@ public static class RealtimeEncoder
         var src = new FileInfo(Path.GetFullPath(o.SourcePath));
         var dst = new FileInfo(Path.GetFullPath(o.DestinationPath));
 
-        if (!src.Exists) throw new FileNotFoundException($"Input not found: {src.FullName}");
+        // "Input not found" is the wrong message for an SMB source that simply
+        // is not reachable as a path yet -- tell the user how to make it one.
+        if (!src.Exists)
+        {
+            string? hint = Remote.Smb.UnreachableHint(o.SourcePath);
+            throw new FileNotFoundException(hint is null
+                ? $"Input not found: {src.FullName}"
+                : $"Input not found: {src.FullName}\n{hint}");
+        }
         if (string.Equals(src.FullName, dst.FullName, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Output must differ from input");
 
@@ -247,7 +255,15 @@ public static class RealtimeEncoder
     {
         var src = new FileInfo(Path.GetFullPath(o.SourcePath));
         var dst = new FileInfo(Path.GetFullPath(o.DestinationPath));
-        if (!src.Exists) throw new FileNotFoundException($"Input not found: {src.FullName}");
+        // "Input not found" is the wrong message for an SMB source that simply
+        // is not reachable as a path yet -- tell the user how to make it one.
+        if (!src.Exists)
+        {
+            string? hint = Remote.Smb.UnreachableHint(o.SourcePath);
+            throw new FileNotFoundException(hint is null
+                ? $"Input not found: {src.FullName}"
+                : $"Input not found: {src.FullName}\n{hint}");
+        }
 
         // Reuse the inline preparation to resolve every derived parameter
         // (transport format, size, filters, duration, audio settings) identically.

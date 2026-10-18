@@ -1,16 +1,22 @@
 # Woodpecker CI — https://ci.codeberg.org
 #
-# Scope note (important): this project is Windows-targeted. The PowerShell
-# tooling, the winmm.dll P/Invoke behind the high-resolution timer and the
-# UNC/SMB handling only make sense there, and the Python harnesses under
-# tests/e2e/ need an FFmpeg with the legacy encoders plus a quiet machine.
-# Codeberg's hosted Woodpecker runners are Linux containers, so this pipeline
-# deliberately does NOT try to run the app or the unit tests — that would report
-# failures that have nothing to do with the change under review.
+# v7.5 made the app cross-platform, so the pipeline can finally do more than
+# prove it compiles: the unit tests run here too. They are pure logic (argument
+# parsing, catalogue metadata, timecode maths, the SMB string layer) and need
+# neither FFmpeg nor a quiet machine, which is exactly why they were split out
+# of the e2e harnesses back in v7.4.1.
 #
-# What it does guarantee: the solution still restores and compiles on a neutral
-# SDK, which is what catches the overwhelming majority of accidental breakage.
-# Run `dotnet test` and the e2e harnesses on Windows; see docs/usage.md.
+# Still Windows-only, and still not exercised here:
+#   * the winmm.dll timeBeginPeriod call in Core/HighResolutionTimer.cs -- it is
+#     guarded by OperatingSystem.IsWindows() and simply does nothing elsewhere;
+#   * the UNC half of Remote/Smb.cs, which on Linux is joined by the CIFS mount
+#     detection instead.
+#
+# The Python harnesses under tests/e2e/ remain excluded on purpose: they compare
+# this build against the v6.3.3 baseline, need an FFmpeg carrying the legacy
+# encoders, and pick frames against the wall clock, so a busy runner reports
+# failures that have nothing to do with the change under review. Run them on a
+# real machine; see docs/usage.md.
 
 when:
   - event: [push, pull_request]
@@ -25,3 +31,8 @@ steps:
     image: mcr.microsoft.com/dotnet/sdk:10.0
     commands:
       - dotnet build LiveArchiveEncoder.V7.slnx -c Release --no-restore
+
+  - name: test
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    commands:
+      - dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build

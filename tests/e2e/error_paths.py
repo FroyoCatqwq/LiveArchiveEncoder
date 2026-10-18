@@ -7,6 +7,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+# The apphost carries no extension on Unix; every path in this suite goes
+# through EXE_NAME so the same script runs on Windows and on Linux.
+EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
+
 
 ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 MEDIA = ROOT / "tests" / "media"
@@ -15,7 +19,7 @@ PY = ROOT / "reference" / "live_archive_encoder.py"
 # CS_EXE lets the same suite be run against the NativeAOT build.
 CS = Path(os.environ.get("CS_EXE")
           or (ROOT / "src" / "LiveArchiveEncoder" / "bin" / "Release" / "net10.0"
-              / "LiveArchiveEncoder.exe"))
+              / EXE_NAME))
 WORK = ROOT / "tests" / "out" / "errors"
 WORK.mkdir(parents=True, exist_ok=True)
 

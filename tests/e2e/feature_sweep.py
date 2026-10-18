@@ -23,12 +23,16 @@ import shutil
 import subprocess
 import sys
 import time
+# The apphost carries no extension on Unix; every path in this suite goes
+# through EXE_NAME so the same script runs on Windows and on Linux.
+EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
+
 
 # tests/e2e/, so: HERE = tests/e2e, TESTS = tests, ROOT = project root.
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTS = os.path.dirname(HERE)
 ROOT = os.path.dirname(TESTS)
-DEFAULT_EXE = os.path.normpath(os.path.join(ROOT, "publish", "jit", "LiveArchiveEncoder.exe"))
+DEFAULT_EXE = os.path.normpath(os.path.join(ROOT, "publish", "jit", EXE_NAME))
 EXE = os.path.normpath(os.environ.get("CS_EXE", DEFAULT_EXE))
 SRC = os.path.join(TESTS, "media", "test_src.mp4")
 # FS_OUT moves the scratch directory; pointing it somewhere empty avoids deleting

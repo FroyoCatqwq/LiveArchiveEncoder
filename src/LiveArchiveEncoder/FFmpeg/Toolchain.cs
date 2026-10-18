@@ -67,7 +67,9 @@ public static class Toolchain
     public static List<InstalledToolchain> Installed()
     {
         var list = new List<InstalledToolchain>();
-        foreach (FfmpegDist dist in FfmpegCatalog.All)
+        // Available, not All: the catalogue holds one entry per platform per id,
+        // and an installed build can only ever be this platform's.
+        foreach (FfmpegDist dist in FfmpegCatalog.Available)
         {
             string? ffmpeg = FFmpegFor(dist.Id);
             if (ffmpeg is null) continue;
@@ -143,7 +145,7 @@ public static class Toolchain
         {
             if (!File.Exists(localArchive)) return (false, $"archive not found: {localArchive}");
             if (FfmpegCatalog.KindOfFile(localArchive) is not { } detected)
-                return (false, $"'{localArchive}' is neither a .zip nor a .7z archive");
+                return (false, $"'{localArchive}' is not a .zip, .7z or .tar.xz archive");
             kind = detected;
         }
         else if (!dist.AutoDownload)
@@ -163,7 +165,14 @@ public static class Toolchain
             Directory.CreateDirectory(extractDir);
             Directory.CreateDirectory(bin);
 
-            string archive = Path.Combine(staging, "download" + (kind == ArchiveKind.Zip ? ".zip" : ".7z"));
+            string archive = Path.Combine(staging, "download" + dist.ArchiveExtension);
+            if (kind != dist.Archive)
+            {
+                // A manual --ffmpeg-archive may disagree with the catalogue.
+                archive = Path.Combine(staging, "download"
+                    + (kind == ArchiveKind.Zip ? ".zip"
+                       : kind == ArchiveKind.SevenZip ? ".7z" : ".tar.xz"));
+            }
             if (localArchive is { Length: > 0 })
             {
                 Say($"Archive: {localArchive}");
@@ -207,7 +216,10 @@ public static class Toolchain
 
             CopyInto(bin, found);
             if (Exe(dist.Id, "ffmpeg") is null)
-                return (false, $"extraction finished but no ffmpeg.exe landed in {bin}");
+            {
+                string want = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+                return (false, $"extraction finished but no {want} landed in {bin}");
+            }
 
             Say($"Installed: {Exe(dist.Id, "ffmpeg")}");
             Say(ShortVersion(Exe(dist.Id, "ffmpeg")!));
@@ -349,6 +361,21 @@ public static class Toolchain
 
     private static (bool Ok, string? Error) Extract(string archive, string destination)
     {
+        // Linux builds ship as .tar.xz; tar is the only tool guaranteed to be
+        // there (Bsdtar on Windows never sees this path).
+        if (archive.EndsWith(".tar.xz", StringComparison.OrdinalIgnoreCase)
+            || archive.EndsWith(".txz", StringComparison.OrdinalIgnoreCase))
+        {
+            string? tar = FindOnPath("tar");
+            if (tar is null)
+                return (false, "a .tar.xz archive needs tar; install tar and xz-utils");
+
+            (int tarCode, string tarOutput) = RunLong(tar, ["-xJf", archive, "-C", destination], null);
+            return tarCode == 0
+                ? (true, null)
+                : (false, $"tar exited with {tarCode}: {Tail(tarOutput)} -- is xz-utils installed?");
+        }
+
         if (archive.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
             try
@@ -365,9 +392,11 @@ public static class Toolchain
 
         string? sevenZip = FindSevenZip();
         if (sevenZip is null)
-            return (false,
-                "a .7z archive needs an extractor; install 7-Zip (7z.exe) or put 7z on PATH, "
-                + "or pick the BtbN / nonfree source which ships a .zip");
+            return (false, OperatingSystem.IsWindows()
+                ? "a .7z archive needs an extractor; install 7-Zip (7z.exe) or put 7z on PATH, "
+                  + "or pick the BtbN / nonfree source which ships a .zip"
+                : "a .7z archive needs an extractor; install p7zip (7z / 7za / 7zz on PATH), "
+                  + "or pick the BtbN / nonfree source");
 
         (int code, string output) = RunLong(sevenZip,
             ["x", "-y", "-bso0", "-bsp0", $"-o{destination}", archive], null);
@@ -383,6 +412,10 @@ public static class Toolchain
             if (found is not null) return found;
         }
 
+        if (!OperatingSystem.IsWindows()) return null;
+
+        // Only meaningful on Windows; GetFolderPath gives "" elsewhere and the
+        // join would produce a path that never exists anyway.
         string[] candidates =
         [
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "7-Zip", "7z.exe"),
@@ -442,10 +475,16 @@ public static class Toolchain
             return $"could not read the downloaded file: {exc.Message}";
         }
 
-        bool ok = kind == ArchiveKind.Zip
-            ? read >= 2 && head[0] == 'P' && head[1] == 'K'
-            : read >= 6 && head[0] == 0x37 && head[1] == 0x7A && head[2] == 0xBC
-              && head[3] == 0xAF && head[4] == 0x27 && head[5] == 0x1C;
+        bool ok = kind switch
+        {
+            ArchiveKind.Zip => read >= 2 && head[0] == 'P' && head[1] == 'K',
+            // .tar.xz: the xz container starts FD 37 7A 58 5A 00.
+            ArchiveKind.TarXz => read >= 6 && head[0] == 0xFD && head[1] == 0x37
+                                 && head[2] == 0x7A && head[3] == 0x58 && head[4] == 0x5A
+                                 && head[5] == 0x00,
+            _ => read >= 6 && head[0] == 0x37 && head[1] == 0x7A && head[2] == 0xBC
+                  && head[3] == 0xAF && head[4] == 0x27 && head[5] == 0x1C,
+        };
         if (ok) return null;
 
         bool looksHtml = read >= 1 && (head[0] == '<' || head[0] == 0xEF);
@@ -465,18 +504,53 @@ public static class Toolchain
         {
             string name = Path.GetFileName(file);
             if (!IsToolchainFile(name)) continue;
-            File.Copy(file, Path.Combine(bin, name), overwrite: true);
+            string target = Path.Combine(bin, name);
+            File.Copy(file, target, overwrite: true);
+            // File.Copy does not carry the mode across. On Unix a freshly
+            // copied ffmpeg would land as 0644 and then fail to exec, so the
+            // owner execute bit has to be restored explicitly.
+            MakeExecutable(target, name);
         }
     }
 
-    /// <summary>Executables and their licences, nothing else -- no docs, no headers.</summary>
-    private static bool IsToolchainFile(string name) =>
-        name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-        || name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-        || name.Equals("LICENSE", StringComparison.OrdinalIgnoreCase)
-        || name.Equals("LICENSE.txt", StringComparison.OrdinalIgnoreCase)
-        || name.StartsWith("COPYING", StringComparison.OrdinalIgnoreCase)
-        || name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase);
+    private static void MakeExecutable(string path, string name)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        if (name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) return;
+        if (name.Equals("LICENSE", StringComparison.OrdinalIgnoreCase)) return;
+        if (name.StartsWith("COPYING", StringComparison.OrdinalIgnoreCase)) return;
+        try
+        {
+            File.SetUnixFileMode(path,
+                File.GetUnixFileMode(path) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute
+                                           | UnixFileMode.OtherExecute);
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                        or PlatformNotSupportedException)
+        {
+            // Non-executable toolchain is a hard failure, but it surfaces
+            // clearly at launch; do not abort the whole install here.
+        }
+    }
+
+    /// <summary>
+    /// Executables and their licences, nothing else -- no docs, no headers.
+    /// On Unix the tools have no extension at all (ffmpeg, ffprobe, ffplay), so
+    /// extension-less files count as binaries there.
+    /// </summary>
+    private static bool IsToolchainFile(string name)
+    {
+        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return true;
+        if (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) return true;
+        if (name.Equals("LICENSE", StringComparison.OrdinalIgnoreCase)) return true;
+        if (name.Equals("LICENSE.txt", StringComparison.OrdinalIgnoreCase)) return true;
+        if (name.StartsWith("COPYING", StringComparison.OrdinalIgnoreCase)) return true;
+        if (name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) return true;
+
+        return !OperatingSystem.IsWindows()
+               && !name.Contains('.')
+               && name is "ffmpeg" or "ffprobe" or "ffplay";
+    }
 
     /// <summary>
     /// Long-running child with streamed output. No wall-clock cap: a multi-GB

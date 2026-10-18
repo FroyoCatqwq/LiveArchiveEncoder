@@ -16,6 +16,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+# The apphost carries no extension on Unix; every path in this suite goes
+# through EXE_NAME so the same script runs on Windows and on Linux.
+EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
+
 
 ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 MEDIA = ROOT / "tests" / "media"
@@ -24,7 +28,7 @@ PY = ROOT / "reference" / "live_archive_encoder.py"
 # CS_EXE lets the same matrix be run against the NativeAOT build.
 CS = Path(os.environ.get("CS_EXE")
           or (ROOT / "src" / "LiveArchiveEncoder" / "bin" / "Release" / "net10.0"
-              / "LiveArchiveEncoder.exe"))
+              / EXE_NAME))
 # CM_OUT moves the scratch directory. Handy for running two builds back to back
 # without deleting the previous products.
 WORK = Path(os.environ.get("CM_OUT") or (ROOT / "tests" / "out" / "matrix"))

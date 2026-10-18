@@ -6,10 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+# v7.5 made the app cross-platform, so both supported systems build and test
+# every change. macOS is not in the matrix: nothing in the code depends on it,
+# but nobody has run the legacy-encoder sweeps there.
 jobs:
   unit-tests:
-    name: build + unit tests
-    runs-on: windows-latest
+    name: build + unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
     steps:
       - uses: actions/checkout@v4
 
@@ -17,6 +25,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+
+      # Purely so the tests that probe a real FFmpeg run instead of skipping.
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg xz-utils
 
       - name: Restore
         run: dotnet restore LiveArchiveEncoder.V7.slnx

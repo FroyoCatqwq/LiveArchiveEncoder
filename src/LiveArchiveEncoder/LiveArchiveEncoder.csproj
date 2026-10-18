@@ -57,9 +57,15 @@
     <WindowsSdkLibVersion Condition="'$(WindowsSdkLibVersion)' == ''">10.0.26100.0</WindowsSdkLibVersion>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+  <ItemGroup Condition="'$(PublishAot)' == 'true' AND $([MSBuild]::IsOSPlatform('Windows'))">
     <AdditionalNativeLibraryDirectories Include="$(WindowsSdkLibRoot)\$(WindowsSdkLibVersion)\um\x64" />
     <AdditionalNativeLibraryDirectories Include="$(WindowsSdkLibRoot)\$(WindowsSdkLibVersion)\ucrt\x64" />
+  </ItemGroup>
+
+  <!-- Linux AOT needs the same idea but different libraries: the toolchain
+       resolves libc/libunwind from the system, nothing extra to point at. -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true' AND !$([MSBuild]::IsOSPlatform('Windows'))">
+    <AdditionalNativeLibraryDirectories Include="/usr/lib/x86_64-linux-gnu" />
   </ItemGroup>
 
   <!-- Keep the GC heap small: this process allocates almost nothing per frame. -->

@@ -16,9 +16,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+# The apphost carries no extension on Unix; every path in this suite goes
+# through EXE_NAME so the same script runs on Windows and on Linux.
+EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
+
 
 ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
-DEFAULT_EXE = ROOT / "publish" / "jit" / "LiveArchiveEncoder.exe"
+DEFAULT_EXE = ROOT / "publish" / "jit" / EXE_NAME
 EXE = Path(os.environ.get("CS_EXE", DEFAULT_EXE))
 SRC = ROOT / "tests" / "media" / "test_src.mp4"
 OUT = ROOT / "tests" / "out" / "options"

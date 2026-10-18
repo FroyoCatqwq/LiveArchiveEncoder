@@ -15,11 +15,20 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+# The apphost carries no extension on Unix; every path in this suite goes
+# through EXE_NAME so the same script runs on Windows and on Linux.
+EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
+
 
 ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
-DEFAULT_EXE = ROOT / "publish" / "jit" / "LiveArchiveEncoder.exe"
+DEFAULT_EXE = ROOT / "publish" / "jit" / EXE_NAME
 EXE = Path(os.environ.get("CS_EXE", DEFAULT_EXE))
-CONFIG = Path(os.environ.get("LOCALAPPDATA", "")) / "LiveArchiveEncoder" / "config.json"
+# SpecialFolder.LocalApplicationData is %LOCALAPPDATA% on Windows and
+# ~/.local/share everywhere else; the C# side asks the runtime, so this has
+# to agree with it or the test would back up the wrong file.
+APPDATA = (os.environ.get("LOCALAPPDATA") if os.name == "nt"
+           else os.path.expanduser("~/.local/share"))
+CONFIG = Path(APPDATA) / "LiveArchiveEncoder" / "config.json"
 BACKUP = CONFIG.with_suffix(".json.bak")
 
 PASS, FAIL = [], []

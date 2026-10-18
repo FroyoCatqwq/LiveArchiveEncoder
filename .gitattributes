@@ -15,6 +15,12 @@
 *.json  text
 *.yml   text
 
+# Shell scripts are executed by /bin/sh, which chokes on a CRLF shebang.
+*.sh    text eol=lf
+
+# Woodpecker has no extension; it is YAML.
+.woodpecker.yaml text
+
 # Test fixture and anything else binary must never be normalised.
 *.mp4   binary
 *.rm    binary

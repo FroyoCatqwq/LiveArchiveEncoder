@@ -63,6 +63,13 @@ public static class Player
             if (string.IsNullOrWhiteSpace(externalPlayer))
             {
                 // Shell association: opens with whatever the user has registered.
+                // On Unix that means xdg-open, which every desktop ships and which
+                // is also the only handler for these legacy containers.
+                if (!OperatingSystem.IsWindows() && Which("xdg-open") is { Length: > 0 } xdg)
+                {
+                    Start(xdg, [file]);
+                    return (true, null);
+                }
                 Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
                 return (true, null);
             }
@@ -84,5 +91,23 @@ public static class Player
         var info = new ProcessStartInfo { FileName = exe, UseShellExecute = false };
         foreach (string a in args) info.ArgumentList.Add(a);
         Process.Start(info);
+    }
+
+    /// <summary>Local PATH lookup; FFmpegDiscovery.Which is private.</summary>
+    private static string? Which(string name)
+    {
+        string? envPath = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(envPath)) return null;
+        foreach (string dir in envPath.Split(Path.PathSeparator))
+        {
+            if (dir.Length == 0) continue;
+            try
+            {
+                string full = Path.Combine(dir, name);
+                if (File.Exists(full)) return full;
+            }
+            catch { /* invalid PATH entry */ }
+        }
+        return null;
     }
 }

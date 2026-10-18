@@ -81,13 +81,20 @@ public static class Program
             {
                 // Say exactly what to click and what to type afterwards; a bare
                 // "cannot download" leaves the user stuck.
+                // The SourceForge folder -- and therefore the file name -- is
+                // per platform, so name the one this build can actually use.
+                string folder = dist.Platform == FFmpeg.DistPlatform.Windows
+                    ? "windows-desktop" : "linux-desktop";
+                string pattern = dist.Platform == FFmpeg.DistPlatform.Windows
+                    ? "ffmpeg-master-windows-desktop-*.7z" : "ffmpeg-master-linux-desktop-*.7z";
                 Console.WriteLine();
                 Console.WriteLine($"'{dist.Id}' has to be downloaded by hand: its host blocks "
                     + "automated downloads (a Cloudflare interstitial is served instead of the archive).");
                 Console.WriteLine($" 1. open {dist.Homepage}");
-                Console.WriteLine($" 2. download the newest ffmpeg-master-windows-desktop-*.7z");
+                Console.WriteLine($" 2. download the newest {pattern}");
                 Console.WriteLine($" 3. LiveArchiveEncoder --ffmpeg-download {dist.Id} "
                     + "--ffmpeg-archive <path to the .7z>");
+                Console.WriteLine($"(the '{folder}' folder is the one for this platform)");
                 return 1;
             }
 

@@ -10,16 +10,21 @@ the split pipeline apart from ordinary run-to-run jitter.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+# The apphost carries no extension on Unix; every path in this suite goes
+# through EXE_NAME so the same script runs on Windows and on Linux.
+EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
+
 
 ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
 SRC = ROOT / "tests" / "media" / "test_src.mp4"
 PY = ROOT / "reference" / "live_archive_encoder.py"
-CS = ROOT / "src" / "LiveArchiveEncoder" / "bin" / "Release" / "net10.0" / "LiveArchiveEncoder.exe"
+CS = ROOT / "src" / "LiveArchiveEncoder" / "bin" / "Release" / "net10.0" / EXE_NAME
 WORK = ROOT / "tests" / "out" / "ab"
 WORK.mkdir(parents=True, exist_ok=True)
 
