@@ -197,3 +197,9 @@ bitrate maths, preflight steps, and every default value.
   in FFmpeg and is paced against the wall clock.
 
 See `docs/test-report-v7.md` for the measured comparison against v6.3.3.
+
+## License
+
+GPL-3.0 — see [`LICENSE`](LICENSE). The C# port inherits the licence of
+`reference/live_archive_encoder.py`, and the default FFmpeg distribution it
+downloads (BtbN) is a GPL build.
