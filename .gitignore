@@ -20,6 +20,10 @@ __pycache__/
 # Local data (installed ffmpeg toolchains, config)
 .local/
 
+# AI assistant working notes: local-only, carry machine-specific paths and proxy
+# settings. Kept on disk, never published.
+.workbuddy/
+
 # OS
 Thumbs.db
 .DS_Store
