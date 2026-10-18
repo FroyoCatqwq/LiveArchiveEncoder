@@ -59,8 +59,11 @@ public static class FontResolver
             yield break;
         }
 
-        // Linux: distribution layout varies, so list the common CJK fonts and
-        // then the Latin fallbacks every distro ships.
+        // Linux: the directory layout is a per-distro decision. Debian/Ubuntu
+        // use truetype/<family>/, Fedora/RHEL use <packagename>-fonts/, and what
+        // ships at all depends on which font packages were installed. Rather than
+        // trying to enumerate every spelling, name the handful that are common
+        // and let the directory scan below do the real work.
         yield return "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
         yield return "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf";
         yield return "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc";
@@ -68,14 +71,38 @@ public static class FontResolver
         yield return "/usr/share/fonts/truetype/arphic/uming.ttc";
         yield return "/usr/share/fonts/truetype/arphic/ukai.ttc";
         yield return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-        yield return "/usr/share/fonts/truetype/freefont/FreeSans.ttf";
+        yield return "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf";
+        yield return "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf";
         yield return "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf";
+        yield return "/usr/share/fonts/truetype/freefont/FreeSans.ttf";
         yield return "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf";
     }
 
+    /// <summary>File name fragments that mean "this font can draw CJK".</summary>
+    private static readonly string[] CjkMarkers =
+        ["cjk", "wqy", "zenhei", "microhei", "droidsansfallback", "arphic",
+         "uming", "ukai", "notosanssc", "notosanstc"];
+
+    /// <summary>Plain Latin sans-serif fallbacks, in preference order.</summary>
+    private static readonly string[] SansMarkers =
+        ["dejavu", "liberation", "notosans", "freesans", "ubuntu", "roboto", "cantarell"];
+
+    private static bool IsFontFile(string path) =>
+        path.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".otf", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase);
+
+    private static bool Matches(string path, string[] markers) =>
+        markers.Any(m => Path.GetFileName(path).Contains(m, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>
-    /// Last resort: take the first scalable font in the system directory.
-    /// Better an arbitrary font that renders than no watermark at all.
+    /// Last resort: pick the best font in the system directory.
+    ///
+    /// Ordered, not arbitrary. Taking "the first .ttf found" would happily return
+    /// a symbol font or a Latin-only one, and a Chinese watermark would then
+    /// render as empty boxes -- which looks like a broken build rather than a
+    /// missing font. So CJK-capable files win, then known sans-serif families,
+    /// then anything at all.
     /// </summary>
     private static string? ScanFontDirectory()
     {
@@ -85,20 +112,38 @@ public static class FontResolver
 
         if (!Directory.Exists(root)) return null;
 
+        List<string> files;
         try
         {
-            return Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
-                .Where(p => p.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase)
-                         || p.EndsWith(".otf", StringComparison.OrdinalIgnoreCase)
-                         || p.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase))
+            files = Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
+                .Where(IsFontFile)
                 .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
+                .ToList();
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
         {
             return null;
         }
+
+        if (files.Count == 0) return null;
+
+        return files.FirstOrDefault(p => Matches(p, CjkMarkers))
+            ?? files.FirstOrDefault(p => Matches(p, SansMarkers))
+            ?? files[0];
     }
+
+    /// <summary>
+    /// What to tell someone whose machine has no fonts at all. Headless boxes and
+    /// minimal container images routinely ship without any, and "no usable font
+    /// found" on its own sends people looking for a bug in the encoder.
+    /// </summary>
+    public static string InstallHint => OperatingSystem.IsWindows()
+        ? "no fonts found; check %WINDIR%\\Fonts"
+        : OperatingSystem.IsMacOS()
+            ? "no fonts found; install one under /Library/Fonts or /System/Library/Fonts"
+            : "no fonts found; install a font package (Debian/Ubuntu: "
+              + "sudo apt install fonts-dejavu-core fonts-noto-cjk; "
+              + "Fedora/RHEL: sudo dnf install dejavu-sans-fonts liberation-sans-fonts)";
 
     /// <summary>
     /// FFmpeg's filter parser reads a backslash as an escape, so Windows paths

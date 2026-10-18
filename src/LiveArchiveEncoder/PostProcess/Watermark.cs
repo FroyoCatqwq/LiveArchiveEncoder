@@ -1,5 +1,6 @@
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.FFmpeg;
+using LiveArchiveEncoder.Localization;
 
 namespace LiveArchiveEncoder.PostProcess;
 
@@ -71,8 +72,9 @@ public static class Watermark
 
         string? font = string.IsNullOrWhiteSpace(settings.FontFile) ? FontResolver.Find() : settings.FontFile;
         if (font is null || !File.Exists(font))
-            return (false, "no usable font found; install one or set WatermarkFontFile "
-                         + $"(or ${FontResolver.EnvironmentVariable}) to a .ttf/.ttc file");
+            // Localised sentence first, then the untranslated install command --
+            // a shell command should not be rendered in the user's language.
+            return (false, $"{L.T("wm.nofont", FontResolver.EnvironmentVariable)} {FontResolver.InstallHint}");
 
         string filter = BuildFilter(settings, width, height, font);
 
