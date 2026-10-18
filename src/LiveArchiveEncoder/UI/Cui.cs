@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.RegularExpressions;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
@@ -108,7 +108,7 @@ public static class Cui
                     ChooseEncoder(c, encoders, audioAvailable, ffmpeg);
                     break;
                 case "4":
-                    EditSettings(c, availableFilters, availableScaleAlgorithms);
+                    EditSettings(c, availableFilters, availableScaleAlgorithms, ffmpeg);
                     break;
                 case "5":
                     try
@@ -379,7 +379,8 @@ public static class Cui
     }
 
     private static void EditSettings(
-        Config c, HashSet<string> availableFilters, HashSet<string> availableScaleAlgorithms)
+        Config c, HashSet<string> availableFilters, HashSet<string> availableScaleAlgorithms,
+        string ffmpeg)
     {
         var deintOptions = new List<string> { "off" };
         deintOptions.AddRange(Constants.DeinterlaceFilters.Where(f => availableFilters.Contains(f)));
@@ -407,7 +408,7 @@ public static class Cui
             Row(16, L.T("param.audiokbps"), $"{c.AudioKbps}k");
             Row(17, L.T("param.audiochannels"), c.AudioChannels.ToString(CultureInfo.InvariantCulture));
             Row(18, L.T("param.audiorate"), c.AudioRate?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto"));
-            Row(19, L.T("param.cuda"), L.YesNo(c.Cuda));
+            Row(19, L.T("param.hwaccel"), c.Hwaccel);
             Row(20, L.T("param.audioencoder"), c.AudioEncoder ?? L.T("value.none"));
             if (enc == "libx264")
             {
@@ -522,7 +523,12 @@ public static class Cui
                             c.AudioRate?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto")));
                         c.AudioRate = rateRaw.Length > 0 ? int.Parse(rateRaw, CultureInfo.InvariantCulture) : null;
                         break;
-                    case "19": c.Cuda = !c.Cuda; break;
+                    case "19":
+                        // Cycle off -> auto -> each method this FFmpeg was built
+                        // with -> off. Whether a method actually works is decided
+                        // at encode time by decoding a frame.
+                        c.Hwaccel = NextHwaccel(c.Hwaccel, ffmpeg);
+                        break;
                     case "20":
                         string audioRaw = ReadRaw(
                             L.T("param.prompt.audioencoder", c.AudioEncoder ?? L.T("value.none"))).ToLowerInvariant();
@@ -683,7 +689,7 @@ public static class Cui
                 AudioKbps = c.AudioKbps,
                 AudioChannels = c.AudioChannels,
                 AudioRate = c.AudioRate,
-                HwaccelCuda = c.Cuda,
+                Hwaccel = c.Hwaccel,
                 Width = c.Width,
                 Height = c.Height,
                 Crop43 = c.Crop43,
@@ -733,5 +739,16 @@ public static class Cui
         {
             Console.Error.WriteLine($"\n{L.T("error.prefix")}{exc.Message}");
         }
+    }
+
+    /// <summary>Cycle the hardware-decode setting for CUI row 19.</summary>
+    private static string NextHwaccel(string current, string ffmpeg)
+    {
+        List<string> choices = ["off", "auto"];
+        choices.AddRange(FFmpeg.Hwaccel.CompiledIn(ffmpeg)
+            .Where(m => !choices.Contains(m, StringComparer.OrdinalIgnoreCase)));
+
+        int index = choices.FindIndex(m => string.Equals(m, current, StringComparison.OrdinalIgnoreCase));
+        return choices[(index + 1) % choices.Count];
     }
 }

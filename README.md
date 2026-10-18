@@ -96,7 +96,7 @@ All v6.3.3 flags are supported with identical names and defaults:
 `--buffer-frames`, `--audio-kbps`, `--audio-channels`, `--audio-rate`, `--width`,
 `--height`, `--no-crop`, `--scale-algo/--scale-flags`, `--deinterlace`,
 `--deint-mode`, `--deint-parity`, `--deint-marked-only`, `--x264-preset`,
-`--x264-tune`, `--x264-profile`, `--x264-level`, `--no-cuda`, `--ffmpeg`,
+`--x264-tune`, `--x264-profile`, `--x264-level`, `--hwaccel`, `--no-cuda`, `--ffmpeg`,
 `--ffprobe`, `--list-filters`, `--quiet`, `--no-cui`.
 
 Two flags are additions rather than ports:

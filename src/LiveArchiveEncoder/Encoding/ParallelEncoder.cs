@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
@@ -106,7 +106,7 @@ public static class ParallelEncoder
                             AudioKbps = o.AudioKbps,
                             AudioChannels = o.AudioChannels,
                             AudioRate = o.AudioRate,
-                            HwaccelCuda = o.HwaccelCuda,
+                            Hwaccel = o.Hwaccel,
                             Width = o.Width,
                             Height = o.Height,
                             Crop43 = o.Crop43,

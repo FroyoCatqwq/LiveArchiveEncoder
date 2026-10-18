@@ -1,4 +1,4 @@
-using LiveArchiveEncoder.Configuration;
+﻿using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
@@ -143,7 +143,7 @@ public static class Cli
                 DeintMode = args.DeintMode,
                 DeintParity = args.DeintParity,
                 DeintMarkedOnly = args.DeintMarkedOnly,
-                Cuda = !args.NoCuda,
+                Hwaccel = args.Hwaccel,
                 X264Preset = args.X264Preset,
                 X264Tune = args.X264Tune,
                 X264Profile = args.X264Profile,
@@ -194,7 +194,7 @@ public static class Cli
             AudioKbps = config.AudioKbps,
             AudioChannels = config.AudioChannels,
             AudioRate = config.AudioRate,
-            HwaccelCuda = config.Cuda,
+            Hwaccel = config.Hwaccel,
             Width = config.Width,
             Height = config.Height,
             Crop43 = config.Crop43,

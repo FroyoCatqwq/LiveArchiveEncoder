@@ -1,4 +1,4 @@
-namespace LiveArchiveEncoder.Localization;
+﻿namespace LiveArchiveEncoder.Localization;
 
 /// <summary>
 /// Two-language string table for everything a user actually reads.
@@ -118,7 +118,7 @@ public static class L
         ["param.audiokbps"] = "audio bitrate",
         ["param.audiochannels"] = "audio channels",
         ["param.audiorate"] = "audio sample rate",
-        ["param.cuda"] = "CUDA decode",
+        ["param.hwaccel"] = "Hardware decode",
         ["param.audioencoder"] = "audio encoder",
         ["param.x264preset"] = "x264 preset",
         ["param.x264tune"] = "x264 tune",
@@ -173,6 +173,8 @@ public static class L
             + "falling back to single-process encoding.",
         ["note.splitmux"] = "NOTE: split audio pipeline unavailable ({0}); using single-process encoding.",
         ["note.shardingskipped"] = "Sharding skipped: {0}",
+        ["note.hwaccelfallback"] = "NOTE: {0} decoded the probe frame but failed the real preflight; "
+            + "using software decode.",
 
         ["run.encodercommand"] = "Encoder command",
         ["run.sourcepix"] = "Source pix_fmt",
@@ -206,7 +208,7 @@ public static class L
         ["report.audio"] = "Audio",
         ["report.threads"] = "Threads",
         ["report.buffer"] = "Buffer",
-        ["report.cuda"] = "CUDA decode",
+        ["report.hwaccel"] = "Hardware decode",
         ["report.deintavail"] = "Deint available",
         ["report.scaleavail"] = "Scale available",
         ["report.impairments"] = "Impairments",
@@ -404,7 +406,7 @@ public static class L
         ["param.audiokbps"] = "音频码率",
         ["param.audiochannels"] = "音频声道",
         ["param.audiorate"] = "音频采样率",
-        ["param.cuda"] = "CUDA 解码",
+        ["param.hwaccel"] = "硬件解码",
         ["param.audioencoder"] = "音频编码器",
         ["param.x264preset"] = "x264 preset",
         ["param.x264tune"] = "x264 tune",
@@ -458,6 +460,7 @@ public static class L
         ["note.splitunavailable"] = "\n注意：分离音频通路不可用（{0}），回退为单进程编码。",
         ["note.splitmux"] = "注意：分离音频通路不可用（{0}），改用单进程编码。",
         ["note.shardingskipped"] = "已跳过分片：{0}",
+        ["note.hwaccelfallback"] = "注意：{0} 通过了探测帧，但在正式预检中失败，改用软件解码。",
 
         ["run.encodercommand"] = "编码器命令",
         ["run.sourcepix"] = "源像素格式",
@@ -491,7 +494,7 @@ public static class L
         ["report.audio"] = "音频",
         ["report.threads"] = "线程数",
         ["report.buffer"] = "缓冲",
-        ["report.cuda"] = "CUDA 解码",
+        ["report.hwaccel"] = "硬件解码",
         ["report.deintavail"] = "可用反交错",
         ["report.scaleavail"] = "可用缩放",
         ["report.impairments"] = "损坏处理",

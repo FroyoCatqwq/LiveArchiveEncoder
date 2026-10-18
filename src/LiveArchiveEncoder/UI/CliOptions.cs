@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 
 namespace LiveArchiveEncoder.UI;
@@ -35,6 +35,14 @@ public sealed class CliOptions
     public string X264Tune { get; init; } = "";
     public string X264Profile { get; init; } = "";
     public string X264Level { get; init; } = "";
+    /// <summary>
+    /// Hardware decode method. "off" is the default since v7.5: using one needs
+    /// a working driver and device, both of which are verified (by decoding a
+    /// frame) before the method is actually used.
+    /// </summary>
+    public string Hwaccel { get; init; } = "off";
+
+    /// <summary>Kept for v7.4 scripts; means <c>--hwaccel off</c>.</summary>
     public bool NoCuda { get; init; }
     public string? FFmpeg { get; init; }
     public string? FFprobe { get; init; }
@@ -135,6 +143,7 @@ public static class CliParser
         string x264Profile = "";
         string x264Level = "";
         bool noCuda = false;
+        string hwaccel = "off";
         string? ffmpeg = null;
         string? ffprobe = null;
         bool listFilters = false;
@@ -308,6 +317,11 @@ public static class CliParser
                         return (null, "--completion supports bash, zsh, fish or powershell");
                     break;
                 case "--no-cuda": noCuda = true; break;
+                case "--hwaccel":
+                    if (!TryValue(out hwaccel)) return (null, "--hwaccel requires a value");
+                    hwaccel = hwaccel.Trim().ToLowerInvariant();
+                    if (hwaccel.Length == 0) return (null, "--hwaccel requires a method name");
+                    break;
                 case "--turbo": turbo = true; break;
                 case "--parallel":
                     if (!TryValue(out string parRaw) || !int.TryParse(parRaw, out parallel))
@@ -414,6 +428,9 @@ public static class CliParser
             X264Tune = x264Tune,
             X264Profile = x264Profile,
             X264Level = x264Level,
+            // --no-cuda is the v7.4 spelling of "off" and wins over --hwaccel
+            // when both are given, because it is the more explicit request.
+            Hwaccel = noCuda ? "off" : hwaccel,
             NoCuda = noCuda,
             FFmpeg = ffmpeg,
             FFprobe = ffprobe,
@@ -471,7 +488,9 @@ public static class CliParser
             ("--x264-tune", "NAME", "libx264 tune"),
             ("--x264-profile", "NAME", "libx264 profile"),
             ("--x264-level", "NAME", "libx264 level"),
-            ("--no-cuda", "", "never try CUDA decoding"),
+            ("--hwaccel", "NAME", "hardware decode: off (default), auto, or a method from "
+                                + "\"ffmpeg -hwaccels\" (cuda, vaapi, qsv, ...); verified before use"),
+            ("--no-cuda", "", "shorthand for --hwaccel off"),
             ("--ffmpeg", "PATH", "explicit ffmpeg executable"),
             ("--ffprobe", "PATH", "explicit ffprobe executable"),
             ("--list-filters", "", "print the detected filters and scalers, then exit"),

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
@@ -64,7 +64,7 @@ public static class Report
         }
         Line(L.T("report.threads"), c.Threads.ToString(CultureInfo.InvariantCulture));
         Line(L.T("report.buffer"), $"{c.BufferFrames} {L.T("param.buffer.frames")}");
-        Line(L.T("report.cuda"), L.YesNo(c.Cuda));
+        Line(L.T("report.hwaccel"), c.Hwaccel);
         string deintAvailable = string.Join(", ",
             Constants.DeinterlaceFilters.Where(f => availableFilters.Contains(f)));
         Line(L.T("report.deintavail"), deintAvailable.Length == 0 ? L.T("value.none") : deintAvailable);

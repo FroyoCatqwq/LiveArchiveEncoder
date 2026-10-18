@@ -57,6 +57,7 @@ public sealed class ConfigStoreTests
         // what this round-trip test is about.
         var c = new Config
         {
+            Hwaccel = "cuda",
             FfmpegSource = "avbuild",
             FfmpegProxy = "http://127.0.0.1:10808",
             Play = PlayMode.External,
@@ -71,6 +72,7 @@ public sealed class ConfigStoreTests
         var restored = new Config();
         ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
 
+        Assert.That(restored.Hwaccel, Is.EqualTo("cuda"));
         Assert.That(restored.FfmpegSource, Is.EqualTo("avbuild"));
         Assert.That(restored.FfmpegProxy, Is.EqualTo("http://127.0.0.1:10808"));
         Assert.That(restored.Play, Is.EqualTo(PlayMode.External));
@@ -78,6 +80,27 @@ public sealed class ConfigStoreTests
         Assert.That(restored.Language, Is.EqualTo("zh"));
         Assert.That(restored.Turbo, Is.True);
         Assert.That(restored.Parallel, Is.EqualTo(4));
+    }
+
+    /// <summary>
+    /// A stored method name is only a request -- whether it works is decided at
+    /// encode time by decoding a frame. What must be rejected at load is garbage,
+    /// with "off" as the safe answer.
+    /// </summary>
+    [TestCase("cuda", "cuda")]
+    [TestCase("VAAPI", "vaapi")]
+    [TestCase("auto", "auto")]
+    [TestCase("", "off")]
+    [TestCase("some method with spaces", "off")]
+    [TestCase(null, "off")]
+    public void Hwaccel_IsSanitisedOnLoad(string? stored, string expected)
+    {
+        ConfigStore.Save(new UserConfig { Hwaccel = stored! }, _file);
+
+        var restored = new Config();
+        ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
+
+        Assert.That(restored.Hwaccel, Is.EqualTo(expected));
     }
 
     /// <summary>

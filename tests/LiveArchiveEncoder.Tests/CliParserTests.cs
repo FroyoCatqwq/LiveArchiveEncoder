@@ -38,6 +38,37 @@ public sealed class CliParserTests
     /// <summary>A non-default source id that exists on every platform.</summary>
     private static string OtherId => "avbuild";
 
+    // -------------------------------------------------------------- hwaccel
+
+    /// <summary>
+    /// Off by default: a hardware method needs a driver and a device, and the
+    /// headless boxes this runs on (all Linux CI, any Windows box without an
+    /// NVIDIA stack) used to die on the first frame with "Cannot load libcuda.so.1".
+    /// </summary>
+    [Test]
+    public void Hwaccel_DefaultsToOff() =>
+        Assert.That(Parse().Hwaccel, Is.EqualTo("off"));
+
+    [TestCase("off")]
+    [TestCase("auto")]
+    [TestCase("cuda")]
+    [TestCase("vaapi")]
+    [TestCase("qsv")]
+    public void Hwaccel_AcceptsAMethodName(string method) =>
+        Assert.That(Parse("--hwaccel", method).Hwaccel, Is.EqualTo(method));
+
+    [Test]
+    public void Hwaccel_NeedsAValue() =>
+        Assert.That(Error("--hwaccel"), Does.Contain("--hwaccel requires a value"));
+
+    /// <summary>v7.4 scripts pass --no-cuda; it is "off", not a removed flag.</summary>
+    [Test]
+    public void NoCudaIsShorthandForOff()
+    {
+        Assert.That(Parse("--no-cuda").Hwaccel, Is.EqualTo("off"));
+        Assert.That(Parse("--hwaccel", "cuda", "--no-cuda").Hwaccel, Is.EqualTo("off"));
+    }
+
     // ------------------------------------------------------------------ source
 
     [TestCaseSource(nameof(KnownIds))]

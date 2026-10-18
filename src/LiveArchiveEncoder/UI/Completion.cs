@@ -31,6 +31,7 @@ public static class Completion
         ("--scale-algo", [.. Constants.ScaleAlgorithmAliases.Keys.OrderBy(x => x, StringComparer.Ordinal)]),
         ("--scale-flags", [.. Constants.ScaleAlgorithmAliases.Keys.OrderBy(x => x, StringComparer.Ordinal)]),
         ("--deinterlace", ["off", .. Constants.DeinterlaceFilters]),
+        ("--hwaccel", ["off", "auto", "cuda", "vaapi", "qsv", "d3d11va", "dxva2", "vdpau", "vulkan"]),
         ("--deint-mode", ["send_frame", "send_field"]),
         ("--deint-parity", ["auto", "tff", "bff"]),
         ("--x264-preset", ["ultrafast", "veryfast", "faster", "fast", "medium", "slow", "slower"]),

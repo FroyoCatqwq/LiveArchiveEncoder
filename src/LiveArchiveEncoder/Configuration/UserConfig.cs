@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace LiveArchiveEncoder.Configuration;
@@ -58,7 +58,8 @@ public sealed class UserConfig
     public string DeintMode { get; set; } = "send_frame";
     public string DeintParity { get; set; } = "auto";
     public bool DeintMarkedOnly { get; set; }
-    public bool Cuda { get; set; } = true;
+    /// <summary>Hardware decode method: "off" (default), "auto", or a method name.</summary>
+    public string Hwaccel { get; set; } = "off";
     public string X264Preset { get; set; } = "medium";
     public string X264Tune { get; set; } = "";
     public string X264Profile { get; set; } = "";
@@ -174,7 +175,7 @@ public static class ConfigStore
         DeintMode = c.DeintMode,
         DeintParity = c.DeintParity,
         DeintMarkedOnly = c.DeintMarkedOnly,
-        Cuda = c.Cuda,
+        Hwaccel = c.Hwaccel,
         X264Preset = c.X264Preset,
         X264Tune = c.X264Tune,
         X264Profile = c.X264Profile,
@@ -234,7 +235,7 @@ public static class ConfigStore
         c.DeintMode = stored.DeintMode;
         c.DeintParity = stored.DeintParity;
         c.DeintMarkedOnly = stored.DeintMarkedOnly;
-        c.Cuda = stored.Cuda;
+        c.Hwaccel = SanitiseHwaccel(stored.Hwaccel);
         c.X264Preset = stored.X264Preset;
         c.X264Tune = stored.X264Tune;
         c.X264Profile = stored.X264Profile;
@@ -256,5 +257,21 @@ public static class ConfigStore
         c.FfmpegProxy = stored.FfmpegProxy;
         c.Play = UI.Player.ParseMode(stored.PlayMode);
         c.PlayerPath = stored.PlayerPath;
+    }
+
+    /// <summary>
+    /// A stored method name is only a request: the driver and the device are
+    /// checked at encode time, not here. What is rejected at load is the shape --
+    /// an empty string, or a v7.4 file that wrote a boolean-ish value. Anything
+    /// unrecognised becomes "off", which is the safe default on headless boxes.
+    /// </summary>
+    private static string SanitiseHwaccel(string? value)
+    {
+        string name = (value ?? "").Trim();
+        if (name.Length == 0) return "off";
+        if (name.Equals("off", StringComparison.OrdinalIgnoreCase)) return "off";
+        if (name.Equals("auto", StringComparison.OrdinalIgnoreCase)) return "auto";
+        // Method names are what `ffmpeg -hwaccels` prints: lowercase, no spaces.
+        return name.Any(char.IsWhiteSpace) ? "off" : name.ToLowerInvariant();
     }
 }

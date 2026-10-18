@@ -131,7 +131,8 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--deint-marked-only` | 关 | 只反交错被标记为 interlaced 的帧 |
 | `--x264-preset` | `medium` | 仅 libx264 |
 | `--x264-tune` / `--x264-profile` / `--x264-level` | 空 | 仅 libx264，留空＝自动 |
-| `--no-cuda` | 默认尝试 CUDA | 加上它就**不**传 `-hwaccel cuda` |
+| `--hwaccel` | `off` | 硬件解码：`off` / `auto` / `ffmpeg -hwaccels` 里的任意名字（cuda、vaapi、qsv、d3d11va…）。**默认关闭**；开启前会真的解一帧验证驱动和显卡，验证不过就自动回退软件解码 |
+| `--no-cuda` | — | `--hwaccel off` 的旧写法，保留兼容 |
 | `--ffmpeg` / `--ffprobe` | PATH 里找 | 显式指定可执行文件 |
 | `--list-filters` | — | 打印当前 FFmpeg 支持的反交错滤镜和缩放算法后退出 |
 | `--quiet` | 关 | 不打印进度横幅和结果摘要 |
@@ -198,7 +199,7 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
  9. size            10. crop 4:3        11. scale algorithm 12. deinterlace
 13. deint mode      14. field parity    15. deint marked only
 16. audio bitrate   17. audio channels  18. audio sample rate
-19. CUDA decode     20. audio encoder
+19. hardware decode 20. audio encoder
 21. x264 preset     22. x264 tune       23. x264 profile    24. x264 level
                     （21–24 仅在编码器是 libx264 时出现）
 25. segment start   26. segment end
@@ -677,8 +678,14 @@ LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --deinterlace yadif --dei
 # 隔行扫描素材，只处理标记为 interlaced 的帧
 LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --deinterlace bwdif --deint-marked-only
 
-# 机器没有 NVIDIA / 不想看 CUDA 警告
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --no-cuda
+# 有 NVIDIA 显卡且驱动正常，想让解码走 GPU
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --hwaccel cuda
+
+# 不确定机器有什么，让工具自己试（按平台偏好顺序，第一个真能解出帧的就用它）
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --hwaccel auto
+
+# 没有显卡 / 不想看 CUDA 报错：默认就是关的，什么都不用加
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20
 
 # 脚本里跑，别进菜单也别刷屏
 LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --no-cui --quiet
@@ -736,7 +743,7 @@ Repeated slots     : 21
 | `FFmpeg filter 'yadif' is not available in this build` | FFmpeg 编译时没带这个滤镜 | 换完整构建，或用 `off` |
 | `audio encoder not found: xxx` | 音频编码器不存在 | 去掉 `--audio-encoder` 让程序按容器自动选 |
 | `ERROR: input not found` | 路径不对 | 注意路径含空格要加引号 |
-| 一堆 CUDA/cuvid 警告 | 机器没 NVIDIA 或驱动不匹配 | 加 `--no-cuda` |
+| 一堆 CUDA/cuvid 警告 | 机器没 NVIDIA 或驱动不匹配 | 默认已关闭硬件解码；若手动开了 `--hwaccel cuda`，改回 `--hwaccel off` |
 | 输出文件只有音轨 / 时长不对 | 老式 muxer 的坑（RoQ、RealMedia 都出现过） | 默认 `inline` 模式不会遇到；如果用 `--audio-mode separate`，工具内置了 3 帧预演 + 输出解码校验，会拦下并自动回退到单进程 |
 
 ---

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
@@ -34,7 +34,7 @@ public static class Preflight
         string? x264Tune,
         string? x264Profile,
         string? x264Level,
-        bool hwaccelCuda,
+        string hwaccel,
         double startSeconds,
         AudioTrial? audio = null)
     {
@@ -45,7 +45,8 @@ public static class Preflight
         {
             string output = Path.Combine(tempDir, $"preflight.{encoder.Extension}");
             var cmd = new List<string> { ffmpeg, "-hide_banner", "-loglevel", "error" };
-            if (hwaccelCuda) cmd.AddRange(["-hwaccel", "cuda"]);
+            if (!string.Equals(hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
+                cmd.AddRange(["-hwaccel", hwaccel]);
             if (startSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(startSeconds)]);
             cmd.AddRange([
                 "-threads", Math.Max(1, threads).ToString(),

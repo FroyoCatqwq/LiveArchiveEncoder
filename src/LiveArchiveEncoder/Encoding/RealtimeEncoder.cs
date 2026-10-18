@@ -87,7 +87,7 @@ public static class RealtimeEncoder
             DeintMode = o.DeintMode,
             DeintParity = o.DeintParity,
             DeintMarkedOnly = o.DeintMarkedOnly,
-            Cuda = o.HwaccelCuda,
+            Hwaccel = o.Hwaccel,
             X264Preset = string.IsNullOrEmpty(o.X264Preset) ? "medium" : o.X264Preset,
             X264Tune = o.X264Tune ?? "",
             X264Profile = o.X264Profile ?? "",
@@ -170,20 +170,50 @@ public static class RealtimeEncoder
         // fast before the real encode. Running them side by side removes one more
         // process startup from the critical path; either one throwing still aborts
         // before any output is written, so the fail-fast guarantee is unchanged.
-        Task videoPreflight = Task.Run(() => Preflight.Video(
-            ffmpeg: o.FFmpeg, src: src, encoder: o.Encoder, fps: o.Fps, quality: o.Quality,
-            threads: o.Threads, width: width, height: height, vf: vf, muxer: muxer,
-            stream: stream,
-            x264Preset: o.Encoder.Name == "libx264" ? o.X264Preset : null,
-            x264Tune: o.Encoder.Name == "libx264" ? o.X264Tune : null,
-            x264Profile: o.Encoder.Name == "libx264" ? o.X264Profile : null,
-            x264Level: o.Encoder.Name == "libx264" ? o.X264Level : null,
-            hwaccelCuda: o.HwaccelCuda, startSeconds: o.StartSeconds,
-            audio: hasAudio && Constants.FormatsRequiringAudio.Contains(o.Encoder.FormatName)
-                ? new AudioTrial(
-                    o.AudioEncoder!, audioChannels, audioRate,
-                    o.Encoder.Name == "amv" ? EncoderMath.AmvAudioBlockSize(o.Fps) : 0)
-                : null));
+        void RunVideoPreflight(string hwaccel)
+        {
+            Preflight.Video(
+                ffmpeg: o.FFmpeg, src: src, encoder: o.Encoder, fps: o.Fps, quality: o.Quality,
+                threads: o.Threads, width: width, height: height, vf: vf, muxer: muxer,
+                stream: stream,
+                x264Preset: o.Encoder.Name == "libx264" ? o.X264Preset : null,
+                x264Tune: o.Encoder.Name == "libx264" ? o.X264Tune : null,
+                x264Profile: o.Encoder.Name == "libx264" ? o.X264Profile : null,
+                x264Level: o.Encoder.Name == "libx264" ? o.X264Level : null,
+                hwaccel: hwaccel, startSeconds: o.StartSeconds,
+                audio: hasAudio && Constants.FormatsRequiringAudio.Contains(o.Encoder.FormatName)
+                    ? new AudioTrial(
+                        o.AudioEncoder!, audioChannels, audioRate,
+                        o.Encoder.Name == "amv" ? EncoderMath.AmvAudioBlockSize(o.Fps) : 0)
+                    : null);
+        }
+
+        // A hardware method is only ever used after it has decoded a frame here,
+        // so "auto" has already been narrowed to something real by this point.
+        // The one thing a probe cannot predict is the encoder/muxer combination
+        // of the actual run, so the preflight still gets a software retry: the
+        // retry only ever happens in the case that would otherwise have thrown.
+        Action<string>? say = o.Verbose ? Console.WriteLine : null;
+        string hwaccel = FFmpeg.Hwaccel.Resolve(o.Hwaccel, o.FFmpeg, src, say);
+        o.Hwaccel = hwaccel;
+
+        Task videoPreflight = Task.Run(() =>
+        {
+            if (!string.Equals(hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    RunVideoPreflight(hwaccel);
+                    return;
+                }
+                catch (InvalidOperationException)
+                {
+                    o.Hwaccel = FFmpeg.Hwaccel.Off;
+                    say?.Invoke(L.T("note.hwaccelfallback", hwaccel));
+                }
+            }
+            RunVideoPreflight(FFmpeg.Hwaccel.Off);
+        });
 
         Task? audioPreflight = hasAudio && o.AudioEncoder is not null
             ? Task.Run(() => Preflight.Audio(
@@ -324,7 +354,7 @@ public static class RealtimeEncoder
                 AudioKbps = o.AudioKbps,
                 AudioChannels = audioChannels,
                 AudioRate = audioRate,
-                HwaccelCuda = o.HwaccelCuda,
+                Hwaccel = o.Hwaccel,
                 Width = o.Width,
                 Height = o.Height,
                 Crop43 = o.Crop43,
@@ -414,7 +444,8 @@ public static class RealtimeEncoder
         var cmd = new List<string> { o.FFmpeg, "-hide_banner", "-loglevel", "error" };
         // Network resilience only for UNC sources; on a local file these are noise.
         cmd.AddRange(Remote.Smb.RemoteReadArgs(src.FullName));
-        if (o.HwaccelCuda) cmd.AddRange(["-hwaccel", "cuda"]);
+        if (!string.Equals(o.Hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
+            cmd.AddRange(["-hwaccel", o.Hwaccel]);
         if (o.StartSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(o.StartSeconds)]);
         cmd.AddRange(["-i", src.FullName]);
         if (duration is not null) cmd.AddRange(["-t", ArgsBuilder.FloatArg(duration.Value)]);

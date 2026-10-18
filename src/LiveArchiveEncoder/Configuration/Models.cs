@@ -1,4 +1,4 @@
-namespace LiveArchiveEncoder.Configuration;
+﻿namespace LiveArchiveEncoder.Configuration;
 
 /// <summary>What to do with the file once an encode finishes.</summary>
 public enum PlayMode
@@ -76,7 +76,13 @@ public sealed class Config
     public string DeintMode { get; set; } = "send_frame";
     public string DeintParity { get; set; } = "auto";
     public bool DeintMarkedOnly { get; set; }
-    public bool Cuda { get; set; } = true;
+    /// <summary>
+    /// Hardware decode method: "off" (the default), "auto", or any name
+    /// <c>ffmpeg -hwaccels</c> reports (cuda, vaapi, d3d11va, qsv, ...).
+    /// Off by default because using one requires a working driver and device,
+    /// which is verified -- not assumed -- before it is switched on.
+    /// </summary>
+    public string Hwaccel { get; set; } = "off";
     public string X264Preset { get; set; } = "medium";
     public string X264Tune { get; set; } = "";
     public string X264Profile { get; set; } = "";

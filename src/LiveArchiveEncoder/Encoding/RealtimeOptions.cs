@@ -22,7 +22,20 @@ public sealed class RealtimeOptions
     public int AudioKbps { get; init; } = 32;
     public int AudioChannels { get; init; } = 1;
     public int? AudioRate { get; init; }
-    public bool HwaccelCuda { get; init; } = true;
+    /// <summary>
+    /// Hardware decode method: "off" (the default since v7.5), "auto", or any
+    /// name <c>ffmpeg -hwaccels</c> prints (cuda, vaapi, d3d11va, qsv, ...).
+    ///
+    /// Off by default because using one needs a real driver and a real device,
+    /// which is verified by decoding a frame before the method is accepted --
+    /// <c>ffmpeg -hwaccels</c> only says what the binary was compiled against.
+    /// Most machines this runs on (including every Linux CI box) are headless,
+    /// so the software path has to be the one that works out of the box.
+    ///
+    /// Mutable on purpose: <see cref="Hwaccel.Resolve"/> narrows "auto" to a
+    /// concrete method, and a preflight failure falls back to "off".
+    /// </summary>
+    public string Hwaccel { get; set; } = "off";
     public int Width { get; init; } = Constants.DefaultWidth;
     public int Height { get; init; } = Constants.DefaultHeight;
     public bool Crop43 { get; init; } = true;
