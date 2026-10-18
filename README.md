@@ -84,13 +84,16 @@ At runtime you need an FFmpeg/ffprobe pair on `PATH` (or pass `--ffmpeg` /
 
 ```bash
 # NUnit 5 unit tests — identical command on both platforms
-dotnet test LiveArchiveEncoder.V7.slnx -c Release
+dotnet test LiveArchiveEncoder.V7.slnx -c Release      # 214 on Windows, 213 on Linux
 ```
 
 The NUnit project covers the pure-logic layers that do not need a real encode:
 SMB argument construction, the FFmpeg distribution catalogue, toolchain layout,
 player argument parsing, CLI parsing, config persistence, hwaccel normalisation,
-and localisation parity (every key must exist in both `en` and `zh`). It also runs under
+and localisation parity (every key must exist in both `en` and `zh`). Since v7.6
+it also covers the post-processing layer: the recompress fragment tokenizer and
+its rejections, the `drawtext` filter expression, era-preset consistency, and a
+version-1 settings file still loading with both new stages off. It also runs under
 NativeAOT-sensitive APIs, so a reflection-only code path shows up as a failure
 here rather than as a crash in a published binary.
 
@@ -103,10 +106,19 @@ put that build's `bin` on `PATH` first):
 python3 tests/e2e/compare_matrix.py     # 12 encoder/param cases, ffprobe structure
 python3 tests/e2e/error_paths.py        # 11 failure paths, exit codes
 python3 tests/e2e/feature_sweep.py      # every legacy encoder, 2 s clip
-python3 tests/e2e/option_smoke.py       # option plumbing
+python3 tests/e2e/option_smoke.py       # option plumbing, incl. the v7.6 stages
 python3 tests/e2e/cui_smoke.py          # interactive menu assertions
 CS_EXE=publish/aot/LiveArchiveEncoder python3 tests/e2e/compare_matrix.py
 ```
+
+`option_smoke.py` is the one that exercises the post-processing chain: it encodes
+with a watermark, with both stages armed, and with an era preset, then probes the
+`_wm` and `_web` products as well as the live file. Two of its cases need a font
+in the `fonts/` directory.
+
+`compare_matrix.py` compares against v6.3.3 and is kept as a regression check, but
+the port no longer has to match the Python output bit for bit -- v7.6 features are
+all opt-in, so with no flags the two still agree.
 
 Every harness resolves the executable through `EXE_NAME`, so the same file runs
 unchanged on Windows (`.exe`) and Linux (no extension).
@@ -214,6 +226,21 @@ src/LiveArchiveEncoder/
   Localization/   en/zh string tables (every key must exist in both)
   UI/             CLI parser + help, CUI menus, shared reporting, --cpu-info,
                   post-encode playback
+  PostProcess/    v7.6: the stages that follow the live encode -- era presets,
+                  the recompress argument validator, the drawtext watermark,
+                  font resolution, and the chain that orders them
+```
+
+Two data directories live next to each other under the user's profile, so both
+survive an upgrade and neither is inside the repo:
+
+```
+%LOCALAPPDATA%\LiveArchiveEncoder\        ~/.local/share/LiveArchiveEncoder/
+  ffmpeg/<id>/bin/                          managed FFmpeg distributions
+  fonts/                                    watermark fonts (user-supplied)
+  config.json                               persisted settings
+```
+
 tests/
   LiveArchiveEncoder.Tests/   NUnit 5 unit tests (no real encode needed)
   e2e/                        Python end-to-end equivalence harnesses

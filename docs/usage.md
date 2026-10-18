@@ -991,10 +991,17 @@ Repeated slots     : 21
 | `ERROR: input not found` | 路径不对 | 注意路径含空格要加引号 |
 | 一堆 CUDA/cuvid 警告 | 机器没 NVIDIA 或驱动不匹配 | 默认已关闭硬件解码；若手动开了 `--hwaccel cuda`，改回 `--hwaccel off` |
 | 输出文件只有音轨 / 时长不对 | 老式 muxer 的坑（RoQ、RealMedia 都出现过） | 默认 `inline` 模式不会遇到；如果用 `--audio-mode separate`，工具内置了 3 帧预演 + 输出解码校验，会拦下并自动回退到单进程 |
+| watermark 报"找不到可用字体" | `fonts` 目录是空的 | 往 `%LOCALAPPDATA%\LiveArchiveEncoder\fonts\`（Linux `~/.local/share/LiveArchiveEncoder/fonts/`）放一个 .ttf/.ttc；Windows 首次使用会自动复制微软雅黑进去，Linux 需要自己放。见 §7.12 |
+| 水印能生成但**中文是方块** | 挑到的是没有中文字形的字体 | 放一个中文字体进 `fonts` 目录（msyh.ttc / simhei.ttf / Noto*CJK），或用 `--watermark-font` 直接指定 |
+| `recompress` 报 `'-i' is not allowed here` / `looks like an output file name` | 参数段里写了输入或输出 | 参数段只写中间部分，`-i` 和输出路径由程序生成；见 §7.12 |
 
 ---
 
 ## 11. 和 Python 版（v6.3.3）的关系
+
+> **v7.6 起**：不再承诺与 v6.3.3 的输出一致——C# 版开始长自己的东西了
+> （§7.12 的后处理管线）。原有行为**全部保留**，新功能一律需要显式开启，所以
+> 不加任何开关时两边仍然等价；`compare_matrix` 从"等价性判据"降级为回归检查。
 
 C# v7 是 v6.3.3 的**行为等价**移植：FFmpeg 命令行（包括 `-threads` 的位置）、
 自适应状态机的阈值与迟滞、选帧规则、滚动码率算法、所有默认值和常量表，全部逐项
@@ -1021,9 +1028,9 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 
 ### v7.4.1 新增
 
-1. **引入 NUnit**（`tests/LiveArchiveEncoder.Tests`，121 个用例）：纯逻辑单测，
-   不依赖 FFmpeg 和网络，几秒跑完；Python harness 继续负责"与 v6.3.3 是否等价"
-   那一层。见 §12。
+1. **引入 NUnit**（`tests/LiveArchiveEncoder.Tests`，当时 121 个用例，v7.6 已达
+   214）：纯逻辑单测，不依赖 FFmpeg 和网络，几秒跑完；Python harness 继续负责
+   "与 v6.3.3 是否等价"那一层。见 §12。
 2. 首次跑就抓到并修掉了一个真 Bug：`note.*` / `run.*` 共 13 个词条只有英文没有
    中文，中文界面下会漏回英文并把对齐顶歪。现在有词条完整性测试盯着。
 
@@ -1105,6 +1112,15 @@ DOTNET="$HOME/dot" dotnet test LiveArchiveEncoder.V7.slnx -c Release   # 见 §1
 - `ConfigStoreTests` — JSON 往返、`"path"` 不被规范化掉、损坏文件回退、
   分片数夹取
 - `LocalizationTests` — **中英文词条必须一一对应**（见下）、CJK 显示宽度补齐
+- `PostArgsTests` — 二次压缩参数段的切分与校验：正常片段放行，`-i` / `-o` /
+  末尾裸路径必须拒绝；引号内空格保留，**反斜杠不当转义符**
+- `WatermarkTests` — drawtext 表达式（字体路径转义、位置 `W-tw-10`）、字号按
+  画面自适应、五种位置各自的表达式
+- `RecompressTests` — 参数向量必须以输出收尾、坏片段不生成命令、失败只报错不抛
+- `EraPresetTests` — id 唯一、两层参数齐全、**预设自带的参数段能通过自家校验器**、
+  时代在像素数与码率上单调递增
+- `PostProcessingConfigTests` — 水印/压缩设置往返持久化、**v1 配置文件仍能读出
+  且两个阶段默认关闭**
 
 > 词条完整性这一条刚建好就抓到了真东西：`note.*` 和 `run.*` 共 13 个词条只有英文，
 > 中文界面下会漏回英文并把那一列的对齐顶歪。已补齐。
@@ -1145,9 +1161,23 @@ python3 tests/e2e/cui_smoke.py
 需要注意：`compare_matrix` 依赖实时节流下的帧选择，跑的时候**别同时跑别的重活**，
 否则 fresh/repeat 计数会被 CPU 争用扰动（这是自适应控制器的正常反应，不是 bug）。
 
-全部通过会打出 `total=12 pass=12 fail=0` / `total=11 fail=0` /
-`total=35 pass=35 warn=0 fail=0` / `total=25 pass=25 fail=0` /
-`total=30 pass=30 fail=0`。
+全部通过会打出（Windows / Linux 略有差异）：
+
+```
+dotnet test     失败 0，通过 214（Linux 是 212 通过 + 1 跳过）
+compare_matrix  total=12 pass=12 fail=0
+error_paths     total=11 fail=0
+feature_sweep   total=35 pass=35 warn=0 fail=0
+option_smoke    total=33 pass=33 fail=0
+cui_smoke       total=30 pass=30 fail=0（Linux 是 31）
+```
+
+Linux 少一条是因为 `PathMeansSystemFfmpeg` 需要 PATH 上的系统 FFmpeg；cui_smoke
+多一条是因为非 Windows 上会额外断言 `gyan` 不出现在清单里。
+
+`option_smoke` 里的 `era_flv` / `watermark_only` / `post_full_chain` 三个用例需要
+`fonts` 目录里有字体（见 §7.12）。另外 `compare_matrix` 现在只是**回归检查**——
+v7.6 起不再要求与 Python 版输出一致，但不开新开关时两边仍然一致。
 
 > 跑回归之前建议把配置里的 `FfmpegSource` 设成 `"path"`（或删掉受管理构建），
 > 这样 C# 版和 Python 版用的是同一个系统 FFmpeg，对比才有意义。
