@@ -12,19 +12,45 @@
 
 ## 1. 安装与构建
 
+### 平台支持
+
+| | Windows | Linux |
+| --- | --- | --- |
+| 状态 | 主要开发平台 | v7.5 起完整支持 |
+| 构建 | `tools\build.ps1`（JIT / AOT / AOT-AVX2） | `tools/build.sh`（JIT，可加 `--aot`） |
+| NativeAOT | ✅ 需要 MSVC + Windows SDK | ⚠️ 实验性，需要 `clang` + `zlib` 开发包 |
+| SMB | UNC 路径（`\\host\share`） | CIFS 挂载点（`/mnt/…`），需要 `cifs-utils` |
+| 播放器 | `ffplay` 或 `start` 关联程序 | `ffplay` 或 `xdg-open` |
+| 受管理 FFmpeg | ✅ | ✅ |
+
+跨平台规则（写脚本时按这个来）：
+
+- 可执行文件名：Windows `LiveArchiveEncoder.exe`，Linux `LiveArchiveEncoder`
+  （无扩展名）。端到端脚本用 `EXE_NAME` 处理了这个差异。
+- 受管理 FFmpeg 目录：Windows
+  `%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg\<id>\bin`，Linux
+  `~/.local/share/LiveArchiveEncoder/ffmpeg/<id>/bin`。
+- 配置文件同级：`config.json`。
+- 路径分隔符两边都接受；UNC 用 `\\host\share`，Linux 挂载点用普通路径。
+
 ### 依赖
 
 | 需求 | 说明 |
 | --- | --- |
-| FFmpeg + ffprobe | 必须在 `PATH` 里，或用 `--ffmpeg` / `--ffprobe` 显式指定 |
+| FFmpeg + ffprobe | 必须在 `PATH` 里，或用 `--ffmpeg` / `--ffprobe` 显式指定；也可以让本工具自己装一套（见 §7.10） |
 | .NET 10 SDK | 仅**构建**时需要 |
 | 运行 | JIT 版需要 .NET 10 运行时；NativeAOT 版什么都不需要 |
+| Linux 额外 | `xz-utils`（解压 `.tar.xz` 的受管理构建）、`cifs-utils`（挂载 SMB）、`samba`（要开共享时） |
 
 老式编码器（rv20、roqvideo、amv 等）只在完整构建的 FFmpeg 里才有。推荐
 [BtbN GPL 构建](https://github.com/BtbN/FFmpeg-Builds/releases)；进交互式菜单时，
 启动横幅会显示 `BtbN default` 和 `GPL build` 两行，可以直接确认当前用的是哪一套。
 
-### 构建
+> **注意发行版自带的 FFmpeg。** 很多 Linux 发行版为了许可证原因裁掉了 rv20、
+> roqvideo 等编码器，桌面版 Ubuntu 的 `ffmpeg` 也可能来自受限仓库。用
+> `--list-encoders` 确认，或者直接让本工具下载一份完整构建。
+
+### 构建（Windows）
 
 ```powershell
 # 常规（JIT）构建
@@ -40,6 +66,34 @@ tools\build.ps1 -Aot
 tools\build.ps1 -Aot -AotAvx2
 # -> publish\aot-avx2\LiveArchiveEncoder.exe  3.9 MB，把指令集基线从 SSE2 抬到 AVX2
 ```
+
+### 构建（Linux / macOS）
+
+```bash
+# JIT（默认）
+tools/build.sh
+# -> publish/jit/LiveArchiveEncoder
+
+# 顺便出 NativeAOT（先装 clang 和 zlib 开发包）
+#   Debian/Ubuntu: sudo apt install clang zlib1g-dev
+#   Fedora:        sudo dnf install clang zlib-devel
+tools/build.sh --aot
+# -> publish/aot/LiveArchiveEncoder
+
+# 只出 AOT
+tools/build.sh --aot --no-jit
+```
+
+`DOTNET` 环境变量可以换掉被调用的 `dotnet`。用 mise / asdf 之类 shim 管理器装
+SDK 时很有用——非交互 shell 不会把 shim 目录放进 `PATH`：
+
+```bash
+DOTNET="$HOME/dot" tools/build.sh
+```
+
+Linux 上的 NativeAOT 是**实验性**的：ILCompiler 在 Linux 上要链接系统库，不同
+发行版的库布局差异很大，出问题优先用 JIT 版。AOT 在 Linux 上也没有 AVX2 变体
+——`IlcInstructionSet` 是 x86 专属开关，而且实测对编码速度没有影响。
 
 三套产物的差别只在 C# 侧（实测 `--cpu-info`）：
 
@@ -451,43 +505,56 @@ Register-ArgumentCompleter -Native -CommandName 'LiveArchiveEncoder' -ScriptBloc
 
 ## 7.8 远程资源（SMB 共享）
 
-输入**和输出**都可以直接给 UNC 路径，正反斜杠都认：
+输入**和输出**都可以直接给远程路径，两边写法不同：
 
 ```powershell
+# Windows —— UNC，正反斜杠都认
 LiveArchiveEncoder.exe \\nas\share\record.mp4 out.rm --encoder rv20
 LiveArchiveEncoder.exe //nas/share/record.mp4 out.rm --encoder rv20
+LiveArchiveEncoder.exe record.mp4 \\nas\share\out.rm --encoder rv20   # 直接写回共享
+```
 
-# 直接写回共享目录
-LiveArchiveEncoder.exe record.mp4 \\nas\share\out.rm --encoder rv20
+```bash
+# Linux —— 先把共享挂到某个目录，然后用普通路径
+sudo mkdir -p /mnt/lae
+sudo mount -t cifs //192.168.1.220/lae /mnt/lae -o guest,vers=3.1.1,uid=$UID,gid=$UID
+LiveArchiveEncoder /mnt/lae/record.mp4 /mnt/lae/out.rm --encoder rv20
 ```
 
 ### 读取侧
 
-识别为 UNC 时会给 FFmpeg 加上网络韧性参数（`-rw_timeout`、`-reconnect 1`、
-`-reconnect_streamed 1`、`-reconnect_delay_max 5`），避免网络抖动时整个管道挂死。
-本地文件不会加这些参数。
+识别为远程路径时会给 FFmpeg 加上 **`-rw_timeout 30000000`**（30 秒），避免网络
+抖动时整个管道挂死。本地文件不会加这个参数。
 
 > **v7.4 修正**：v7.3 的列表里有 `-stimeout`，但那是 **ffplay 的选项**，FFmpeg
 > 根本不认识（`ffmpeg -h full` 里查不到）。任何 UNC 输入都会在一帧还没读到之前
 > 直接失败：`Unrecognized option 'stimeout'. Error splitting the argument list`。
 > 已移除。
+>
+> **v7.5 修正**：之前还给读取侧加了 `-reconnect 1`、
+> `-reconnect_streamed 1`、`-reconnect_delay_max 5`。这三个选项属于 **HTTP /
+> FTP 协议**，不属于 `file` 协议——UNC 路径走的正是 `file`。老一些的 FFmpeg 构建
+> 会静默忽略未知选项，新的构建直接拒绝：
+> `Option reconnect not found. Error opening input file`。结果是**源放在 SMB 共享
+> 上会解出 0 帧**（fresh=0、0 字节、码率显示 48 kbps），而报错还被缓冲吃掉了。
+> 现在读取、写入、ffprobe 三处统一只加 `-rw_timeout`。
 
 ### 写入侧
 
 `-reconnect*` 系列在 `ffmpeg -h full` 里标记为 `D`（decoding only），只能用在
 输入端，放到输出端会被拒。写入侧唯一可用的韧性选项是 **`-rw_timeout`**（它同时
-覆盖读写），所以输出为 UNC 时只加这一个。
+覆盖读写），所以输出为远程路径时只加这一个。
 
 另外加了两个写侧保护：
 
 - 编码前对输出目录做一次**可写探测**（建一个 0 字节标记文件再删掉）。实时节奏
   编码很慢，20 秒之后才发现共享是只读的太亏了。
-- 输出为 UNC 时在 banner 里同样打印协商到的协议版本（`SMB output : ...`）。
+- 输出为远程路径时在 banner 里同样打印协商到的协议版本（`SMB output : ...`）。
 
 ### SMB 版本协商
 
-**在 Windows 上版本协商是操作系统做的，应用程序无法直接指定。** 本程序能做的是
-把实际协商结果查出来并显示，让"悄悄降级到 SMB1"这种事暴露出来：
+**版本协商是操作系统做的，应用程序无法直接指定。** 本程序能做的是把实际协商
+结果查出来并显示，让"悄悄降级到 SMB1"这种事暴露出来：
 
 ```
 SMB share       : \\nas\share -- SMB3 in use
@@ -497,6 +564,34 @@ SMB output      : \\nas\share -- SMB3 in use
 - 协商到 SMB3 → `SMB3 in use`
 - 只有 SMB2 → `SMB2 in use (server did not offer SMB3)`
 - 落到 SMB1 → `SMB1 in use - obsolete and insecure; enable SMB2/3 on the server`（警告）
+
+Windows 上通过 `Get-SmbConnection` 查询；**Linux 上通过解析
+`/proc/self/mountinfo`（回退 `/proc/mounts`）**，找出该路径所属挂载点的文件系统
+类型是 `cifs` / `smb3`，再从挂载选项里读 `vers=`。两者都只是"把 OS 已经决定好
+的事情显示出来"。
+
+Linux 挂载点识别不出来的常见原因：用了 symlink（指向别处的符号链接会让路径
+匹配失败）、`mountinfo` 不可读、或者挂载时没写 `vers=`（此时会显示"已启用读取
+重试参数，协议版本待连接后可知"）。
+
+在 Linux 上搭一个测试共享（Fedora/RHEL 系，SELinux 会拦 samba 的家目录共享，
+测试时先放宽）：
+
+```bash
+sudo dnf install samba samba-client cifs-utils
+sudo mkdir -p /srv/lae && sudo chmod 777 /srv/lae
+printf '[lae]\n   path = /srv/lae\n   browseable = yes\n   read only = no\n   guest ok = yes\n' \
+  | sudo tee -a /etc/samba/smb.conf
+printf '   map to guest = Bad User\n' | sudo tee -a /etc/samba/smb.conf
+sudo setenforce 0                      # 或给 /srv/lae 打 samba_share_t 标签
+sudo systemctl enable --now smb
+```
+
+客户端：
+
+```bash
+sudo mount -t cifs //<server>/lae /mnt/lae -o guest,vers=3.1.1,uid=$UID,gid=$UID
+```
 
 共享还没连接（协议版本暂时查不到）时也不会沉默，会说明"已启用读取重试参数，
 协议版本待连接后可知"——至少让你知道韧性参数已经生效了。查询失败（无权限、
@@ -554,42 +649,49 @@ v7.4 起程序可以自己管理 FFmpeg，不再依赖你手动往 PATH 里塞�
 ### 布局
 
 ```
-%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg\<来源>\bin\ffmpeg.exe
+Windows : %LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg\<来源>\bin\ffmpeg.exe
+Linux   : ~/.local/share/LiveArchiveEncoder/ffmpeg/<来源>/bin/ffmpeg
 ```
 
-多版本**并存**，切换是瞬时的；下载失败也不会破坏已经在用的那个。
+（`~/.local/share` 就是 .NET 的 `SpecialFolder.LocalApplicationData`；
+`XDG_DATA_HOME` 设了別处就跟着变。）多版本**并存**，切换是瞬时的；下载失败也
+不会破坏已经在用的那个。Linux 上解压后会自动给 `bin/` 下的文件补 `+x`。
 
-### 四个来源
+### 来源清单
 
-| id | 项目 | 构建 | 下载方式 |
+| id | 项目 | Windows | Linux |
 | --- | --- | --- | --- |
-| `btbn`（**默认**） | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) | master 每日自动构建，win64 GPL | 自动（.zip） |
-| `gyan` | [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) | git master full | 自动（.7z，需要 7-Zip 或 PATH 里的 `7z`） |
-| `avbuild` | [avbuild（SourceForge）](https://sourceforge.net/projects/avbuild/files/windows-desktop/) | master | **手动**（见下） |
-| `nonfree` | [BnqDzj/FFmpeg-Builds-nonfree](https://github.com/BnqDzj/FFmpeg-Builds-nonfree) | master 每日自动构建，win64 nonfree | 自动（.zip） |
+| `btbn`（**默认**） | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) | ✅ 自动，`.zip`（win64 GPL） | ✅ 自动，`.tar.xz`（linux64 GPL） |
+| `gyan` | [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) | ✅ 自动，`.7z`（需要 7-Zip） | ❌ 不提供 Linux 构建 |
+| `avbuild` | [avbuild（SourceForge）](https://sourceforge.net/projects/avbuild/files/) | **手动**（见下） | **手动** |
+| `nonfree` | [BnqDzj/FFmpeg-Builds-nonfree](https://github.com/BnqDzj/FFmpeg-Builds-nonfree) | ✅ 自动，`.zip` | ✅ 自动，`.tar.xz` |
 
-默认来源是 `btbn` 的**每日构建版**（GitHub release 标签 `latest`，资产
-`ffmpeg-master-latest-win64-gpl.zip`）。
+**清单是按平台过滤的。** `--ffmpeg-list`、shell 补全和交互式菜单只会列出当前
+平台能装的来源——在 Linux 上看不到 `gyan`，因为装不了它。
+
+默认来源是 `btbn` 的**每日构建版**（GitHub release 标签 `latest`）：Windows 取
+`ffmpeg-master-latest-win64-gpl.zip`，Linux 取
+`ffmpeg-master-latest-linux64-gpl.tar.xz`。
 
 ### 命令行
 
 ```powershell
-# 看看装了哪些
+# Windows
 LiveArchiveEncoder.exe --ffmpeg-list
-
-# 下载并安装（默认 btbn 的每日构建）
-LiveArchiveEncoder.exe --ffmpeg-download                       # 等价于 --ffmpeg-download btbn
+LiveArchiveEncoder.exe --ffmpeg-download
 LiveArchiveEncoder.exe --ffmpeg-download nonfree --proxy http://127.0.0.1:10808
-
-# 用哪个构建来编码
 LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --ffmpeg-source btbn
 LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --ffmpeg-source path   # 回到系统 FFmpeg
-
-# 删除
 LiveArchiveEncoder.exe --ffmpeg-delete gyan
-
-# 手动来源（avbuild）：先自己下载，再从本地文件安装
 LiveArchiveEncoder.exe --ffmpeg-download avbuild --ffmpeg-archive C:\Downloads\xxx.7z
+```
+
+```bash
+# Linux —— 参数完全一样，只是可执行文件不带 .exe
+./LiveArchiveEncoder --ffmpeg-list
+./LiveArchiveEncoder --ffmpeg-download
+./LiveArchiveEncoder src.mp4 out.rm --encoder rv20 --ffmpeg-source btbn
+./LiveArchiveEncoder --ffmpeg-download avbuild --ffmpeg-archive ~/Downloads/xxx.tar.xz
 ```
 
 `--proxy` 可以省略；省略时会复用配置文件里记住的代理。
@@ -598,12 +700,16 @@ LiveArchiveEncoder.exe --ffmpeg-download avbuild --ffmpeg-archive C:\Downloads\x
 
 - **有 `aria2c` 就优先用它**，16 连接、断点续传、走代理；没有则退回 `HttpClient`
   单连接，同样支持代理。aria2c 失败也会自动退回 `HttpClient`。
-- **会校验压缩包的 magic bytes**（`PK` / `7z¼¯'`）。有些站点（比如 SourceForge）
-  会返回一个 HTML 拦截页，下载器照样会把它"下载成功"——没有这步你就会得到一个
-  131 KB 的假压缩包，然后看到解压器报一堆莫名其妙的错。
+- **会校验压缩包的 magic bytes**（`PK` / `7z¼¯'` / `FD 37 7A 58 5A 00`）。有些
+  站点（比如 SourceForge）会返回一个 HTML 拦截页，下载器照样会把它"下载成功"——
+  没有这步你就会得到一个 131 KB 的假压缩包，然后看到解压器报一堆莫名其妙的错。
+  v7.5 新增 `.tar.xz` 的 magic，Linux 构建用的就是它。
 - `.zip` 用内建的 `ZipFile` 解压；`.7z` 需要 PATH 里的 `7z` / `7za` / `7zz`，
   或装在 `C:\Program Files\7-Zip\7z.exe`。找不到会明确告诉你去装 7-Zip，
   或者改用 `.zip` 的 btbn / nonfree。
+- `.tar.xz` 直接调系统的 `tar -xJf`。**Linux 上如果没装 `xz-utils`，`tar` 会报
+  `xz: Cannot exec`**——程序会提示 "is xz-utils installed?"，装上即可
+  （Debian/Ubuntu `sudo apt install xz-utils`，Fedora `sudo dnf install xz`）。
 - 装完会检查 `--enable-gpl`：非 GPL 构建会少掉 libx264 / libxvid / libtheora 等
   一批编码器，屏幕上会提示。
 
@@ -645,6 +751,8 @@ LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --play external --player "C
 - `--play off`（默认）什么都不做，脚本里跑不会弹窗。
 - ffplay 优先从**当前 FFmpeg 所在目录**找（受管理构建里通常自带），找不到再查
   PATH；都没有会明确报错提示改用外部播放器。播放时加了 `-autoexit`，放完自己关。
+- Linux 上 `--play external` 且不填 `--player` 时走 **`xdg-open`**（Windows 上
+  是 Shell 文件关联）。
 - 交互式菜单 `13` 可以设置播放方式和外部播放器路径（填 `-` 清除，回到系统关联）。
   设置成 ffplay / external 之后，每次编码结束会多问一句 `Play the result now? [Y/n]`。
 
@@ -781,6 +889,23 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 2. 首次跑就抓到并修掉了一个真 Bug：`note.*` / `run.*` 共 13 个词条只有英文没有
    中文，中文界面下会漏回英文并把对齐顶歪。现在有词条完整性测试盯着。
 
+### v7.5 新增
+
+1. **支持 Windows + Linux 双平台**（§1）。执行文件名、受管理 FFmpeg 目录、播放器
+   调用、压缩包类型（新增 `.tar.xz`）、SMB 路径识别都按平台分支；`tools/build.sh`
+   是 `tools\build.ps1` 的对应物。
+2. **Linux 端的 SMB**（§7.8）：识别 CIFS 挂载点（读 `/proc/self/mountinfo`），
+   显示协商到的 dialect；读写两侧都验证过。
+3. **硬件解码改为可选且默认关闭**：`--hwaccel NAME`，`NAME` 可以是
+   `ffmpeg -hwaccels` 里的任意方法（cuda / vaapi / qsv / d3d11va …），`auto` 让
+   程序挑一个能用的。原来那个默认开 CUDA 的行为在无显卡机器（包括 CI 容器和
+   Linux 虚拟机）上会直接崩在 `Cannot load libcuda.so.1`，所以默认值改成 `off`。
+   启用前会**真的解一帧**验证，验证不过自动回退软件解码。
+4. **去掉了 SMB 读取侧的 `-reconnect*`**（§7.8）：它属于 HTTP/FTP 协议，UNC 走
+   的是 `file`，新 FFmpeg 构建会直接拒绝，导致共享上的源解出 0 帧。
+5. **CI 双轨**：GitHub Actions 跑 windows + ubuntu 矩阵；Codeberg 用 Woodpecker
+   （`.woodpecker.yaml`）做 restore + build + test。
+
 ---
 
 ## 12. 自测
@@ -795,18 +920,24 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 ### NUnit 单元测试（v7.4.1 起）
 
 ```powershell
-dotnet test tests\LiveArchiveEncoder.Tests
-# 或指定配置
-dotnet test tests\LiveArchiveEncoder.Tests -c Release
+# Windows
+dotnet test LiveArchiveEncoder.V7.slnx -c Release
+```
+
+```bash
+# Linux —— 同一条命令；SDK 只装在 mise/asdf 里时给它一个包装脚本
+DOTNET="$HOME/dot" dotnet test LiveArchiveEncoder.V7.slnx -c Release   # 见 §1
 ```
 
 不需要 FFmpeg、不需要网络、几秒跑完，覆盖：
 
-- `SmbTests` — UNC 识别、**`RemoteReadArgs` 不得再吐出 `-stimeout`**（v7.3 的回归）、
-  写入侧只用 `-rw_timeout`、可写探测不留痕迹
-- `FfmpegCatalogTests` — 四个来源的 id / 默认值 / 谁能自动下载 / 压缩包类型
+- `SmbTests` — 远程路径识别、**读写两侧都不得再吐出 `-stimeout` / `-reconnect*`**
+  （v7.3 / v7.5 的回归），写入侧只用 `-rw_timeout`、可写探测不留痕迹
+- `FfmpegCatalogTests` — 各来源的 id / 默认值 / 谁能自动下载 / 压缩包类型，
+  **以及清单不会跨平台混列**（Linux 上不得出现 `gyan`）
 - `ToolchainTests` — 安装目录布局、**`path` 来源不许解析成受管理构建**、
   未知来源只报错不抛异常
+- `HwaccelTests` — `off` / `auto` 归一化，未知方法名的处理
 - `PlayerTests` — 播放模式解析与描述，缺文件/缺播放器都是"报告"而不是"崩"
 - `CliParserTests` — `--ffmpeg-source` / `--ffmpeg-download`（裸用不吞下一个 flag）/
   `--ffmpeg-archive` / `--play` / `--proxy` 等新选项，以及老选项没被碰坏
@@ -826,28 +957,29 @@ dotnet test tests\LiveArchiveEncoder.Tests -c Release
 才算过——NativeAOT 下反射型 API 会直接崩，JIT 上却完全正常，只验 JIT 会漏。
 
 ```powershell
-# 12 个编码器/参数矩阵，逐字段对比 Python 版与 C# 版
+# Windows
 python tests\e2e\compare_matrix.py
-
-# 11 条错误路径，对比退出码
 python tests\e2e\error_paths.py
-
-# 全编码器功能扫描：当前 FFmpeg 的每个 legacy 编码器跑 2 秒片段（见 §7.9）
 python tests\e2e\feature_sweep.py
-
-# 选项通路冒烟：turbo / 分片 / 分离音频 / 反交错 / 时间区间 …
 python tests\e2e\option_smoke.py
-
-# 交互式菜单冒烟：语言切换、turbo/分片开关、配置持久化、损坏配置容错
 python tests\e2e\cui_smoke.py
-
-# 拿 AOT 产物跑同一套回归
-set CS_EXE=D:\...\publish\aot\LiveArchiveEncoder.exe
-python tests\e2e\compare_matrix.py
 ```
 
+```bash
+# Linux —— 脚本本身平台无关，用 python3 跑即可
+python3 tests/e2e/compare_matrix.py
+python3 tests/e2e/error_paths.py
+python3 tests/e2e/feature_sweep.py
+python3 tests/e2e/option_smoke.py
+python3 tests/e2e/cui_smoke.py
+```
+
+两份清单里的脚本都是同一批文件；可执行文件名的差异由脚本里的 `EXE_NAME` 处理。
+
 `compare_matrix` / `error_paths` / `feature_sweep` / `option_smoke` 都需要
-`tests\media\test_src.mp4`（20 秒 320x240 h264+aac 素材）和 PATH 里的 ffprobe。
+`tests/media/test_src.mp4`（20 秒 320x240 h264+aac 素材）、PATH 里的 ffprobe，
+以及**Python 基线也要能用系统 FFmpeg**——Linux 上如果只装了受管理构建，把它的
+`bin` 目录临时加进 `PATH` 即可。
 
 需要注意：`compare_matrix` 依赖实时节流下的帧选择，跑的时候**别同时跑别的重活**，
 否则 fresh/repeat 计数会被 CPU 争用扰动（这是自适应控制器的正常反应，不是 bug）。

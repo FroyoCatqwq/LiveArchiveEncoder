@@ -1,0 +1,111 @@
+# Forgejo Actions — https://codeberg.org/fr0yo0v0_qwq/LiveArchiveEncoder
+#
+# Codeberg hosts Actions only in a limited fashion (docs.codeberg.org/ci/actions),
+# so the pipeline that is guaranteed to run there is Woodpecker
+# (.woodpecker.yaml). This workflow is here because Actions is the thing that can
+# also attach build products to a release, and because `fj actions dispatch`
+# lets you kick one off by hand.
+#
+# If no runner is registered for the repo the job simply stays queued. To give
+# it one: Settings -> Units -> Actions, then Settings -> Actions -> Runners ->
+# Create new Runner, and point a forgejo-runner at Codeberg with (at least) the
+# label `ubuntu-latest`.
+#
+# Both flavours are published from the same Linux runner: .NET cross-publishes
+# win-x64 fine as long as the build is framework-dependent (no RID-specific
+# native assets to link), so one job gives you both archives.
+#
+# NativeAOT is deliberately NOT built here. On Windows it needs MSVC + the
+# Windows SDK; on Linux it needs clang + zlib headers and is experimental
+# (README, "Known constraints"). Build it locally with tools/build.ps1 -Aot
+# or tools/build.sh --aot.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # Purely so the tests that probe a real FFmpeg run instead of skipping.
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg xz-utils
+
+      - name: Restore
+        run: dotnet restore LiveArchiveEncoder.V7.slnx
+
+      - name: Build
+        run: dotnet build LiveArchiveEncoder.V7.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build
+
+  package:
+    name: publish ${{ matrix.rid }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [linux-x64, win-x64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        run: |
+          dotnet publish src/LiveArchiveEncoder/LiveArchiveEncoder.csproj \
+            -c Release -r ${{ matrix.rid }} --self-contained false \
+            -o publish/${{ matrix.rid }}
+
+      # The Linux build is an extension-less apphost; make sure it carries the
+      # executable bit before it goes into the archive.
+      - name: Package (linux)
+        if: matrix.rid == 'linux-x64'
+        run: |
+          chmod +x publish/linux-x64/LiveArchiveEncoder
+          tar -czf dist-linux-x64.tar.gz -C publish/linux-x64 .
+
+      - name: Package (windows)
+        if: matrix.rid == 'win-x64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
+          (cd publish/win-x64 && zip -q -r ../../dist-win-x64.zip .)
+
+      - name: Upload (linux)
+        if: matrix.rid == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiveArchiveEncoder-linux-x64
+          path: dist-linux-x64.tar.gz
+
+      - name: Upload (windows)
+        if: matrix.rid == 'win-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiveArchiveEncoder-win-x64
+          path: dist-win-x64.zip
+
+# The Python harnesses under tests/e2e/ are deliberately not run here: they
+# compare this build against the v6.3.3 baseline, need an FFmpeg carrying the
+# legacy encoders, and pick frames against the wall clock, so a busy runner
+# reports failures that have nothing to do with the change under review.

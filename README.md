@@ -1,6 +1,6 @@
 # Live Archive Encoder v7 (.NET 10 / C# 14)
 
-Windows CUI/CLI frontend for classic/legacy FFmpeg video encoders. This is a
+CUI/CLI frontend for classic/legacy FFmpeg video encoders. This is a
 behaviour-preserving port of `live_archive_encoder.py` v6.3.3 (kept verbatim
 under `reference/`) to C# on .NET 10, with the internals rewritten for lower
 allocation and better pipe scheduling.
@@ -12,21 +12,59 @@ thread feeds frames at the source cadence and the main loop emits one output
 slot every `1/fps` seconds. Nothing here removes that pacing, so total wall time
 remains tied to media duration.
 
+## Platforms
+
+| | Windows | Linux |
+| --- | --- | --- |
+| Status | primary | supported since v7.5 |
+| Build | `tools\build.ps1` (JIT / AOT / AOT-AVX2) | `tools/build.sh` (JIT, `--aot` optional) |
+| NativeAOT | yes — needs MSVC + Windows SDK | experimental — needs `clang` + zlib headers |
+| SMB | UNC paths (`\\host\share`) | CIFS mount points; needs `cifs-utils` |
+| Player | `ffplay` or shell file association | `ffplay` or `xdg-open` |
+| Managed FFmpeg | yes | yes (`.tar.xz`, needs `xz-utils`) |
+
+Platform-specific bits a script has to know:
+
+* The executable is `LiveArchiveEncoder.exe` on Windows and extension-less
+  `LiveArchiveEncoder` elsewhere. The Python harnesses handle this via `EXE_NAME`.
+* Managed builds live under `%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg\<id>\bin`
+  on Windows and `~/.local/share/LiveArchiveEncoder/ffmpeg/<id>/bin` elsewhere.
+* The FFmpeg catalogue is filtered per platform — `gyan.dev` ships no Linux
+  build, so Linux menus and completions never offer it.
+
 ## Build
 
-```powershell
-# JIT (framework-dependent) — the default build
-dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
-# -> src/LiveArchiveEncoder/bin/Release/net10.0/LiveArchiveEncoder.exe
+Windows (PowerShell):
 
-# …or both builds, plus an optional NativeAOT publish
+```powershell
+dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
+# -> src\LiveArchiveEncoder\bin\Release\net10.0\LiveArchiveEncoder.exe
+
 tools\build.ps1 -Aot
 # -> publish\jit\LiveArchiveEncoder.exe       (162 KB + shared framework)
 # -> publish\aot\LiveArchiveEncoder.exe       (3.8 MB, single file, no deps)
 ```
 
-Requires the .NET 10 SDK and an FFmpeg/ffprobe pair on `PATH` (or pass
-`--ffmpeg` / `--ffprobe`). NativeAOT additionally needs the **Desktop
+Linux / macOS:
+
+```bash
+tools/build.sh
+# -> publish/jit/LiveArchiveEncoder
+
+# NativeAOT needs clang and zlib headers first:
+#   sudo apt install clang zlib1g-dev     (Debian/Ubuntu)
+#   sudo dnf install clang zlib-devel     (Fedora)
+tools/build.sh --aot
+```
+
+`DOTNET` overrides the `dotnet` executable, which matters when the SDK comes from
+a shim manager (`mise`, `asdf`) that a non-interactive shell never puts on `PATH`:
+
+```bash
+DOTNET="$HOME/dot" tools/build.sh
+```
+
+Requires the .NET 10 SDK. Windows NativeAOT additionally needs the **Desktop
 development with C++** workload: it links with `link.exe` and the Windows SDK
 import libraries. If `vcvarsall.bat` cannot locate the SDK on your machine, pass
 the directories explicitly:
@@ -35,34 +73,39 @@ the directories explicitly:
 tools\build.ps1 -Aot -WindowsSdkLibVersion 10.0.26100.0
 ```
 
+At runtime you need an FFmpeg/ffprobe pair on `PATH` (or pass `--ffmpeg` /
+`--ffprobe`), or let the tool download and manage one itself (`--ffmpeg-download`).
+
 ## Tests
 
-```powershell
-# Unit tests (NUnit 5)
-dotnet test tests/LiveArchiveEncoder.Tests/LiveArchiveEncoder.Tests.csproj -c Release
-
-# …or from the solution (same thing, discovers every project)
+```bash
+# NUnit 5 unit tests — identical command on both platforms
 dotnet test LiveArchiveEncoder.V7.slnx -c Release
 ```
 
 The NUnit project covers the pure-logic layers that do not need a real encode:
 SMB argument construction, the FFmpeg distribution catalogue, toolchain layout,
-player argument parsing, CLI parsing, config persistence, and localisation
-parity (every key must exist in both `en` and `zh`). It also runs under
+player argument parsing, CLI parsing, config persistence, hwaccel normalisation,
+and localisation parity (every key must exist in both `en` and `zh`). It also runs under
 NativeAOT-sensitive APIs, so a reflection-only code path shows up as a failure
 here rather than as a crash in a published binary.
 
 End-to-end equivalence against the Python reference lives in the Python
-harnesses, which invoke a built exe and need FFmpeg on `PATH`:
+harnesses, which invoke a built exe and need FFmpeg on `PATH` (the Python
+baseline uses the system FFmpeg too, so on a box that only has a managed build,
+put that build's `bin` on `PATH` first):
 
-```powershell
-python tests/e2e/compare_matrix.py     # 12 encoder/param cases, ffprobe structure
-python tests/e2e/error_paths.py        # 11 failure paths, exit codes
-python tests/e2e/feature_sweep.py      # every legacy encoder, 2 s clip
-python tests/e2e/option_smoke.py       # option plumbing
-python tests/e2e/cui_smoke.py          # interactive menu assertions
-CS_EXE=publish\aot\LiveArchiveEncoder.exe python tests/e2e/compare_matrix.py
+```bash
+python3 tests/e2e/compare_matrix.py     # 12 encoder/param cases, ffprobe structure
+python3 tests/e2e/error_paths.py        # 11 failure paths, exit codes
+python3 tests/e2e/feature_sweep.py      # every legacy encoder, 2 s clip
+python3 tests/e2e/option_smoke.py       # option plumbing
+python3 tests/e2e/cui_smoke.py          # interactive menu assertions
+CS_EXE=publish/aot/LiveArchiveEncoder python3 tests/e2e/compare_matrix.py
 ```
+
+Every harness resolves the executable through `EXE_NAME`, so the same file runs
+unchanged on Windows (`.exe`) and Linux (no extension).
 
 All scratch products land in `tests/out/` (gitignored); `CM_OUT` / `FS_OUT`
 move them if you want to keep two builds side by side.
@@ -71,24 +114,43 @@ move them if you want to keep two builds side by side.
 alone — a parallel build or another encode will shift the wall clock and change
 which frames the adaptive controller picks.
 
+## Continuous integration
+
+| host | config | what it does |
+| --- | --- | --- |
+| GitHub Actions | `.github/workflows/ci.yml` | restore + build + unit tests on a `windows-latest` / `ubuntu-latest` matrix |
+| Codeberg (Woodpecker) | `.woodpecker.yaml` | restore + build + unit tests on Linux — this is the pipeline Codeberg actually hosts |
+| Codeberg (Forgejo Actions) | `.forgejo/workflows/ci.yml` | unit tests plus framework-dependent `linux-x64` / `win-x64` publishes uploaded as artifacts |
+
+Codeberg provides hosted Actions only in a limited fashion and recommends
+Woodpecker for hosted CI, so `.forgejo/workflows/ci.yml` needs a runner
+registered under your account or the repository
+(*Settings → Units → Actions*, then *Settings → Actions → Runners → Create new
+Runner* with at least the `ubuntu-latest` label). Without one the job simply
+stays queued; dispatch it by hand with `fj actions dispatch ci main`.
+
+The Python harnesses run on none of them on purpose — see the note in `## Tests`.
+
 ## Usage
 
 ```powershell
-# CLI: positional input/output plus flags
+# CLI: positional input/output plus flags (Windows)
 LiveArchiveEncoder.exe input.mp4 output.rm --encoder rv20 --limit 200 --fps 13
-
-# CUI: no input argument opens the interactive menu
-LiveArchiveEncoder.exe
-
-# Show the deinterlacers / scalers exposed by the selected FFmpeg
-LiveArchiveEncoder.exe --list-filters
-
-# Print the help text (same exit code and contract as argparse in v6.3.3)
-LiveArchiveEncoder.exe --help
-
-# Print what the .NET runtime detects on this CPU (diagnostic, no I/O)
-LiveArchiveEncoder.exe --cpu-info
 ```
+
+```bash
+# …same thing on Linux, minus the extension
+./LiveArchiveEncoder input.mp4 output.rm --encoder rv20 --limit 200 --fps 13
+
+# hardware decode is opt-in and probed before use: any name from
+# `ffmpeg -hwaccels` works, "auto" picks one that decodes a frame
+./LiveArchiveEncoder input.mp4 out.mp4 --encoder mpeg4 --hwaccel auto
+```
+
+No input argument opens the interactive menu. `--list-filters` shows the
+deinterlacers/scalers the selected FFmpeg exposes, `--help` prints the
+argparse-equivalent usage text, and `--cpu-info` prints the instruction sets and
+`Vector<byte>.Count` the runtime reports.
 
 All v6.3.3 flags are supported with identical names and defaults:
 `--start-time/--start`, `--end-time/--end`, `--encoder`, `--audio-encoder`,
@@ -106,6 +168,7 @@ Two flags are additions rather than ports:
 | `--help` / `-h` | argparse-equivalent usage text; exits 0 without touching FFmpeg |
 | `--cpu-info` | prints the instruction sets and `Vector<byte>.Count` the runtime reports |
 | `--audio-mode inline\|separate\|auto` | audio routing; `inline` (default) is v6.3.3 behaviour, see below |
+| `--hwaccel NAME` | hardware decode; `off` (default), `auto`, or any method from `ffmpeg -hwaccels`. The method is probed by actually decoding one frame and falls back to software when it fails |
 
 ### Audio routing
 
@@ -150,7 +213,8 @@ tests/
   media/test_src.mp4          generated 20 s 320x240 h264+aac fixture
   out/                        scratch products, gitignored
 tools/
-  build.ps1                   JIT and/or NativeAOT build helper
+  build.ps1                   JIT and/or NativeAOT build helper (Windows)
+  build.sh                    the same for Linux/macOS
   benchmark.ps1               controller CPU / memory measurement
 reference/
   live_archive_encoder.py     v6.3.3 — the Python baseline the port is measured against
@@ -195,6 +259,13 @@ bitrate maths, preflight steps, and every default value.
 * **AOT is about packaging, not speed.** It yields a single self-contained
   executable and a faster process start; the encode is unchanged because it runs
   in FFmpeg and is paced against the wall clock.
+* **Hardware decode is off by default and stays that way until probed.**
+  `ffmpeg -hwaccels` lists methods that are merely *compiled in*; on a machine
+  with no GPU (or no driver) `--hwaccel cuda` dies at the first frame with
+  `Cannot load libcuda.so.1`. `--hwaccel auto` therefore decodes one real frame
+  per candidate before committing, and falls back to software when nothing works.
+* **Linux NativeAOT is experimental.** The ILCompiler has to link against system
+  libraries whose layout differs per distribution; prefer the JIT build there.
 
 See `docs/test-report-v7.md` for the measured comparison against v6.3.3.
 
