@@ -848,9 +848,42 @@ LiveArchiveEncoder.exe src.mp4 out.rm --watermark "土豆网" ^
   0 几年网站会在两个上角之间来回切换，那是动画——留给 v8。
 - 字号 `0`（默认）= 画面高度的 1/15、下限 8px：160x120 的小画面上得到 8px 的
   年代感水印，而不是盖住六分之一画面的现代大字。
-- 字体自动挑选，**优先 CJK 字体**（中文 Windows 选微软雅黑）——Arial 画不了
-  中文，`drawtext` 会输出一排方块。找不到字体时整个阶段明确报错，不会静默跳过。
-  也可用 `--watermark-font` 或环境变量 `LAE_WATERMARK_FONT` 指定。
+
+### 字体目录
+
+水印字体**不用系统字体**，而是程序自己的 `fonts` 目录——和受管理 FFmpeg 同级：
+
+```
+Windows : %LOCALAPPDATA%\LiveArchiveEncoder\fonts\
+Linux   : ~/.local/share/LiveArchiveEncoder/fonts/
+```
+
+为什么不查系统字体：
+
+- 最小化安装的 Linux（实测 Ubuntu 26.10 云镜像）**根本没有 `/usr/share/fonts/`**，
+  `drawtext` 直接失败，报错看起来像编码器的 bug；
+- 更糟的是，随手挑到一个拉丁字体后**编码会成功、产物却是空的方框**——错了还不
+  报错，这是最难排查的一类问题（Fedora 上就把 Liberation Sans 挑中了）。
+
+挑选顺序：**先 CJK**（`msyh` / `simhei` / `Noto*CJK` / `wqy` / `arphic` …），
+再常见无衬线（dejavu / liberation / notosans …），最后任意。
+
+- **Windows**：目录为空时，首次使用会把系统的微软雅黑 / 黑体 / 宋体复制一份
+  进去，之后一直用这份拷贝。
+- **Linux**：需要你自己放一个（放进去即可，不用改任何设置）。最简单的是从
+  Windows 拷 `msyh.ttc` 或 `simhei.ttf` 过来；也可以从发行版字体包取：
+  ```bash
+  # Debian/Ubuntu
+  sudo apt install fonts-noto-cjk
+  cp /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc \
+     ~/.local/share/LiveArchiveEncoder/fonts/
+  # Fedora/RHEL
+  sudo dnf install google-noto-sans-cjk-fonts
+  cp /usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc \
+     ~/.local/share/LiveArchiveEncoder/fonts/
+  ```
+- 想用别的字体：`--watermark-font <路径>`（或菜单 15 的第 5 项）、环境变量
+  `LAE_WATERMARK_FONT`。指定的文件不存在时会明确报错，不会静默跳过。
 - 水印阶段必然重编码，输出统一为 MP4/H.264（crf 20）：中间产物要能被后续阶段
   读取，没必要在这个阶段复刻 roq/amv 那些尺寸限制。
 
@@ -1028,6 +1061,11 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
    ——这些写法会让 FFmpeg 覆盖你的源文件。校验发生在 live 编码**之前**。
 4. **CLI 语义不变**：`--watermark` / `--recompress` 不读取配置文件里的状态，
    不给就没有；交互菜单里的设置会保存，菜单之间粘性保留。
+5. **字体目录**（§7.12）：水印字体放在程序自己的 `fonts` 目录（与受管理 FFmpeg
+   同级），Windows 和 Linux 都不查系统字体。Linux 实测发现：最小化安装没有
+   `/usr/share/fonts`，随手挑到的拉丁字体还会让中文水印变成方块而编码照报成功
+   ——两种都是"错了不报错"。Windows 首次使用会自动把微软雅黑/黑体/宋体复制进
+   目录；Linux 自己放一个即可。
 
 ---
 
