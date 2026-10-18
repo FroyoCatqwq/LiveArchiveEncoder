@@ -388,43 +388,39 @@ public static class Smb
 
     /// <summary>
     /// FFmpeg options that make a network read survivable instead of hanging
-    /// forever or dying on the first transient disconnect. Only applied to UNC
-    /// inputs: on a local file they would just add overhead.
+    /// forever. Only applied to remote inputs: on a local file they would just
+    /// add overhead.
     ///
-    /// Every entry here was checked against <c>ffmpeg -h full</c> on this build
-    /// (2026-10-18):
+    /// <c>-rw_timeout</c> is the only option here on purpose. Both attempts to
+    /// add protocol-level friends turned into hard failures:
     ///
-    ///   * <c>-rw_timeout</c> is an AVFormatContext option flagged <c>ED</c>, so
-    ///     it covers both reading and writing;
-    ///   * the <c>-reconnect*</c> family is flagged <c>D</c> -- decoding only --
-    ///     which is exactly how we use it, and it is silently accepted even by
-    ///     the plain file protocol;
-    ///   * <c>-stimeout</c> was in the original list but is an <em>ffplay</em>
-    ///     option. FFmpeg rejects it outright with
+    ///   * <c>-stimeout</c> is an <em>ffplay</em> option. FFmpeg rejects it with
     ///     "Unrecognized option 'stimeout'. Error splitting the argument list",
     ///     which made every UNC source fail before a single frame was read.
-    ///     It is gone for that reason.
+    ///   * the <c>-reconnect*</c> family belongs to the HTTP/FTP protocols, not
+    ///     to <c>file</c>. It is listed in <c>ffmpeg -h full</c> as <c>D</c>
+    ///     (decoding only) and older builds ignored it on a UNC path, but a
+    ///     current master build answers
+    ///     "Option reconnect not found. Error opening input file ...".
+    ///     Measured 2026-10-18 on a BtbN linux64 build: a CIFS-mounted source
+    ///     decoded to **zero** frames with it and to 26 frames without it.
+    ///     A share needs no reconnect logic anyway -- the OS (UNC) or the kernel
+    ///     (CIFS mount) already owns that.
     /// </summary>
     public static List<string> RemoteReadArgs(string path)
     {
         if (!IsRemotePath(path)) return [];
-        return
-        [
-            // Give up on a stalled read instead of blocking the whole pipeline.
-            "-rw_timeout", "30000000",
-            "-reconnect", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "5",
-        ];
+        // Give up on a stalled read instead of blocking the whole pipeline.
+        return ["-rw_timeout", "30000000"];
     }
 
     /// <summary>
-    /// Options for a UNC <em>destination</em>.
+    /// Options for a remote <em>destination</em> (UNC share or CIFS mount point).
     ///
-    /// The reconnect family cannot be used here: <c>ffmpeg -h full</c> flags it
-    /// <c>D</c> (decoding only), so on the output side it would be rejected.
     /// <c>-rw_timeout</c> is the one AVFormatContext option that covers writes,
     /// and it is what stops a vanished share from hanging the muxer forever.
+    /// The reconnect family is not used anywhere: see
+    /// <see cref="RemoteReadArgs"/> for what happened when it was.
     /// </summary>
     public static List<string> RemoteWriteArgs(string path)
     {

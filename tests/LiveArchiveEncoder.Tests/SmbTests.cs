@@ -47,19 +47,48 @@ public sealed class SmbTests
     }
 
     /// <summary>
-    /// Regression: v7.3 added <c>-stimeout</c> here. It is an ffplay option --
-    /// <c>ffmpeg -h full</c> does not list it -- and FFmpeg aborts with
-    /// "Unrecognized option 'stimeout'" before reading a single frame, so every
-    /// UNC source failed outright.
+    /// Two options that looked right and broke every remote source.
+    ///
+    /// <c>-stimeout</c> (v7.3) is an ffplay option -- <c>ffmpeg -h full</c> does
+    /// not list it -- and FFmpeg aborts with "Unrecognized option 'stimeout'"
+    /// before reading a single frame.
+    ///
+    /// The <c>-reconnect*</c> family (v7.4) belongs to the HTTP/FTP protocols.
+    /// It is listed as <c>D</c> (decoding only) and older builds ignored it on a
+    /// UNC path, but a current master build answers
+    /// "Option reconnect not found. Error opening input file ...". Measured on a
+    /// BtbN linux64 build against a real CIFS mount: the same 2 s segment
+    /// decoded to 26 frames without it and to 0 frames with it.
+    ///
+    /// A share needs none of it: UNC reconnection is the OS's job and a CIFS
+    /// mount is the kernel's.
     /// </summary>
     [Test]
-    public void RemoteReadArgs_NeverEmitsTheFfplayOnlyStimeout()
+    public void RemoteReadArgs_IsTimeoutOnly()
     {
         List<string> args = Smb.RemoteReadArgs(@"\\nas\share\a.mp4");
 
         Assert.That(args, Does.Not.Contain("-stimeout"));
-        Assert.That(args, Does.Contain("-rw_timeout"));
-        Assert.That(args, Does.Contain("-reconnect"));
+        Assert.That(args, Does.Not.Contain("-reconnect"));
+        Assert.That(args, Does.Not.Contain("-reconnect_streamed"));
+        Assert.That(args, Does.Not.Contain("-reconnect_delay_max"));
+        Assert.That(args, Is.EqualTo(new[] { "-rw_timeout", "30000000" }));
+    }
+
+    /// <summary>
+    /// Read, write and probe must agree: any option that one side can carry and
+    /// another cannot is exactly how the reconnect bug got in.
+    /// </summary>
+    [TestCase(@"\\nas\share\a.mp4")]
+    [TestCase("smb://nas/share/a.mp4")]
+    public void RemoteArgs_AreIdenticalForReadWriteAndProbe(string path)
+    {
+        List<string> read = Smb.RemoteReadArgs(path);
+        List<string> write = Smb.RemoteWriteArgs(path);
+        List<string> probe = Smb.RemoteProbeArgs(path);
+
+        Assert.That(read, Is.EqualTo(write));
+        Assert.That(read, Is.EqualTo(probe));
     }
 
     [Test]
