@@ -42,6 +42,22 @@ live_archive_encoder：把现代视频转码成 RV20 / RoQ / MPEG-1 等**老式�
   脚本里只能用 `.Arguments` 字符串。
 - 自带 ffmpeg（BtbN GPL）在 PATH，35 个 legacy 编码器可用。
 
+## 目录布局（v7.4.3 重组后）
+```
+docs/        usage.md、test-report-v7.md、runs/(历史跑批输出)
+reference/   live_archive_encoder.py —— v6.3.3 基线
+src/LiveArchiveEncoder/{Configuration,Core,FFmpeg,Frames,RateControl,
+                       Encoding,Remote,Localization,UI}
+tests/LiveArchiveEncoder.Tests/   NUnit 5 单测
+tests/e2e/   Python 端到端回归脚本
+tests/media/ test_src.mp4（唯一素材）
+tests/out/   scratch（gitignored；archive/ 是历史输出）
+tools/       build.ps1、benchmark.ps1
+```
+- 端到端脚本用 `ROOT = Path(__file__).resolve().parent.parent.parent` 定位仓库根；
+  `tools/build.ps1` 用 `$repoRoot = Split-Path -Parent $PSScriptRoot`。
+- `.slnx` 里 csproj 必须写 `<Project Path=...>`（写 `<File>` 会找不到工程）。
+
 ## 测试
 - `dotnet test LiveArchiveEncoder.V7.slnx -c Release` — **NUnit 单元测试，121 个**，
   6 秒跑完，不依赖真实编码（v7.4.1 起，v7.4.2 升到 NUnit 5）。
