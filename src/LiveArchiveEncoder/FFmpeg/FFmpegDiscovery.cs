@@ -1,6 +1,7 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using LiveArchiveEncoder.Configuration;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.FFmpeg;
 
@@ -20,13 +21,13 @@ public static partial class FFmpegDiscovery
     /// </summary>
     public static string FindFFmpeg(string? userValue, string? sourceId = null)
     {
-        if (!string.IsNullOrWhiteSpace(userValue)) return ResolveExecutable(userValue);
+        if (userValue.HasText) return ResolveExecutable(userValue);
 
         // A managed build only wins when it was explicitly selected. An
         // untouched configuration must keep using the system FFmpeg: silently
         // switching every scripted run to a build the user installed on a whim
         // would change output nobody asked to change.
-        if (!string.IsNullOrWhiteSpace(sourceId)
+        if (sourceId.HasText
             && !string.Equals(sourceId, "path", StringComparison.OrdinalIgnoreCase)
             && Toolchain.FFmpegFor(sourceId) is { Length: > 0 } managed)
         {
@@ -77,7 +78,7 @@ public static partial class FFmpegDiscovery
 
     public static string FindFFprobe(string? userValue, string ffmpegPath)
     {
-        if (!string.IsNullOrWhiteSpace(userValue)) return ResolveExecutable(userValue);
+        if (userValue.HasText) return ResolveExecutable(userValue);
 
         string? dir = Path.GetDirectoryName(ffmpegPath);
         if (!string.IsNullOrEmpty(dir))
@@ -129,7 +130,7 @@ public static partial class FFmpegDiscovery
     {
         var roots = new List<string>();
         string? env = Environment.GetEnvironmentVariable("BTBN_FFMPEG_DIR");
-        if (!string.IsNullOrWhiteSpace(env)) roots.Add(env);
+        if (env.HasText) roots.Add(env);
         roots.Add(AppContext.BaseDirectory);
         roots.Add(Directory.GetCurrentDirectory());
 
@@ -199,6 +200,22 @@ public static partial class FFmpegDiscovery
     [GeneratedRegex(@"^\s*V([A-Z.]{5})\s+(\S+)\s+(.+?)\s*$")]
     private static partial Regex VideoEncoderLine();
 
+    /// <summary>
+    /// Every legacy encoder name in one alternation, v7.8.1.
+    ///
+    /// It used to be an array of anchored patterns tested one after another (see
+    /// archive/retired/RetiredConstants.cs). One source-generated regex does the
+    /// same job in a single pass, is compiled ahead of time instead of at first
+    /// use, and needs no reflection -- which is what keeps it identical between
+    /// the JIT and NativeAOT builds.
+    /// </summary>
+    [GeneratedRegex(
+        @"^(?:a64multi(?:5)?|amv|asv[12]|cinepak|cljr|flashsv2?|flv|h261|h263(?:p)?"
+        + @"|mjpeg|msmpeg4(?:v2)?|msrle|msvideo1|mpeg[124]video|mpeg4|qtrle|roqvideo"
+        + @"|rpza|rv(?:10|20)|smc|snow|svq1|wmv[12]|zmbv|libtheora|libx264|libxvid|vivo)$",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex LegacyEncoderName();
+
     [GeneratedRegex(@"^\s*A[A-Z.]{5}\s+(\S+)\s+")]
     private static partial Regex AudioEncoderLine();
 
@@ -231,20 +248,15 @@ public static partial class FFmpegDiscovery
             if (lname.StartsWith(prefix, StringComparison.Ordinal)) return null;
         }
 
-        string desc = description.ToLowerInvariant();
-        foreach (string pattern in Constants.LegacyEncoderPatterns)
-        {
-            if (!Regex.IsMatch(lname, pattern, RegexOptions.IgnoreCase)) continue;
+        if (!LegacyEncoderName().IsMatch(lname)) return null;
 
-            if (lname is "libx264" or "libxvid" or "libtheora") return "classic-library";
-            if (lname.StartsWith("mpeg", StringComparison.Ordinal)
-                || lname.StartsWith("msmpeg", StringComparison.Ordinal)) return "mpeg-classic";
-            if (lname.StartsWith("wmv", StringComparison.Ordinal)
-                || lname.StartsWith("rv", StringComparison.Ordinal)) return "proprietary-classic";
-            if (desc.Contains("commodore", StringComparison.Ordinal)) return "home-computer";
-            return "retro/classic";
-        }
-        return null;
+        string desc = description.ToLowerInvariant();
+        if (lname is "libx264" or "libxvid" or "libtheora") return "classic-library";
+        if (lname.StartsWith("mpeg", StringComparison.Ordinal)
+            || lname.StartsWith("msmpeg", StringComparison.Ordinal)) return "mpeg-classic";
+        if (lname.StartsWith("wmv", StringComparison.Ordinal)
+            || lname.StartsWith("rv", StringComparison.Ordinal)) return "proprietary-classic";
+        return desc.Contains("commodore", StringComparison.Ordinal) ? "home-computer" : "retro/classic";
     }
 
     public static (string Ext, string Format) GuessContainer(string name)

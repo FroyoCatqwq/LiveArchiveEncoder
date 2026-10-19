@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
@@ -65,7 +65,7 @@ public static class ParallelEncoder
 
             var results = new EncodeResult[shards];
             var failures = new List<string>();
-            var sync = new object();
+            Lock sync = new();
             var progress = new ShardProgress(shards, o.Verbose);
 
             Parallel.For(0, shards,
@@ -207,7 +207,7 @@ public static class ParallelEncoder
     /// </summary>
     private sealed class ShardProgress
     {
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
         private readonly bool _verbose;
         private readonly int _shards;
         private readonly int[] _slots;

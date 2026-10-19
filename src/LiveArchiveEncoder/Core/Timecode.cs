@@ -75,35 +75,32 @@ public static partial class Timecode
             resolvedEnd = end.Value;
         }
 
-        double? durationValue = sourceDuration;
+        // A non-finite or non-positive duration is the same as "ffprobe could not
+        // tell us": every branch below is skipped and the end time stays whatever
+        // the caller asked for.
+        double? durationValue =
+            sourceDuration is { } d && double.IsFinite(d) && d > 0 ? d : null;
         if (durationValue is not null)
         {
-            if (!double.IsFinite(durationValue.Value) || durationValue.Value <= 0)
+            if (start >= durationValue.Value)
             {
-                durationValue = null;
+                throw new ArgumentException(
+                    $"start time {Format(start)} is at or beyond the source duration "
+                    + $"({Format(durationValue)})");
+            }
+            if (resolvedEnd is not null)
+            {
+                if (resolvedEnd.Value > durationValue.Value + 0.05)
+                {
+                    throw new ArgumentException(
+                        $"end time {Format(resolvedEnd)} exceeds the source duration "
+                        + $"({Format(durationValue)})");
+                }
+                resolvedEnd = Math.Min(resolvedEnd.Value, durationValue.Value);
             }
             else
             {
-                if (start >= durationValue.Value)
-                {
-                    throw new ArgumentException(
-                        $"start time {Format(start)} is at or beyond the source duration "
-                        + $"({Format(durationValue)})");
-                }
-                if (resolvedEnd is not null)
-                {
-                    if (resolvedEnd.Value > durationValue.Value + 0.05)
-                    {
-                        throw new ArgumentException(
-                            $"end time {Format(resolvedEnd)} exceeds the source duration "
-                            + $"({Format(durationValue)})");
-                    }
-                    resolvedEnd = Math.Min(resolvedEnd.Value, durationValue.Value);
-                }
-                else
-                {
-                    resolvedEnd = durationValue.Value;
-                }
+                resolvedEnd = durationValue.Value;
             }
         }
 

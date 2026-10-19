@@ -1,3 +1,4 @@
+using LiveArchiveEncoder.Core;
 namespace LiveArchiveEncoder.PostProcess;
 
 /// <summary>
@@ -209,7 +210,7 @@ public static class EraPresets
 
     public static EraPreset? Find(string? id)
     {
-        if (string.IsNullOrWhiteSpace(id)) return null;
+        if (!id.HasText) return null;
         return All.FirstOrDefault(
             p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
     }

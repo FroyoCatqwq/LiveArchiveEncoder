@@ -155,7 +155,7 @@ public sealed class WatermarkTests
             FontColor = "white",
         };
 
-        string filter = Watermark.BuildFilter(settings, 320, 240, "C:/Fonts/msyh.ttc");
+        string filter = Watermark.BuildFilter(settings, 240, "C:/Fonts/msyh.ttc");
 
         Assert.That(filter, Does.StartWith("drawtext="));
         Assert.That(filter, Does.Contain("fontfile='C\\:/Fonts/msyh.ttc'"));
@@ -172,8 +172,8 @@ public sealed class WatermarkTests
     {
         var settings = new WatermarkSettings { Enabled = true, Text = "x" };
 
-        string small = Watermark.BuildFilter(settings, 160, 120, null);
-        string large = Watermark.BuildFilter(settings, 1280, 720, null);
+        string small = Watermark.BuildFilter(settings, 120, null);
+        string large = Watermark.BuildFilter(settings, 720, null);
 
         Assert.That(small, Does.Contain("fontsize=8"), "120 / 15 floors at 8");
         Assert.That(large, Does.Contain("fontsize=48"), "720 / 15");
@@ -184,7 +184,7 @@ public sealed class WatermarkTests
     {
         var settings = new WatermarkSettings { Enabled = true, Text = "x", FontSize = 24 };
 
-        Assert.That(Watermark.BuildFilter(settings, 160, 120, null), Does.Contain("fontsize=24"));
+        Assert.That(Watermark.BuildFilter(settings, 120, null), Does.Contain("fontsize=24"));
     }
 
     [TestCase("top-left", "x=6", "y=6")]
@@ -196,7 +196,7 @@ public sealed class WatermarkTests
     {
         var settings = new WatermarkSettings { Enabled = true, Text = "x", Position = position };
 
-        string filter = Watermark.BuildFilter(settings, 320, 240, null);
+        string filter = Watermark.BuildFilter(settings, 240, null);
 
         Assert.That(filter, Does.Contain($"{x}:"));
         Assert.That(filter, Does.Contain($"{y}:"));
@@ -207,7 +207,7 @@ public sealed class WatermarkTests
     {
         var settings = new WatermarkSettings { Enabled = true, Text = "x", Position = "somewhere" };
 
-        Assert.That(Watermark.BuildFilter(settings, 320, 240, null), Does.Contain("x=W-tw-"));
+        Assert.That(Watermark.BuildFilter(settings, 240, null), Does.Contain("x=W-tw-"));
     }
 
     [Test]

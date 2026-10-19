@@ -1,4 +1,4 @@
-# Live Archive Encoder v7 (.NET 11 / C#) — 使用教程
+# Live Archive Encoder v7 (.NET 10 / .NET 11 / C#) — 使用教程
 
 面向使用者的操作手册。想了解迁移细节与验证数据，看 `README.md` 和
 `docs/test-report-v7.md`。
@@ -17,7 +17,7 @@
 | | Windows | Linux |
 | --- | --- | --- |
 | 状态 | 主要开发平台 | v7.5 起完整支持 |
-| 构建 | `tools\build.ps1`（JIT / AOT / AOT-AVX2） | `tools/build.sh`（JIT，可加 `--aot`） |
+| 构建 | `tools\build.ps1`（JIT / AOT） | `tools/build.sh`（JIT，可加 `--aot`） |
 | NativeAOT | ✅ 需要 MSVC + Windows SDK | ⚠️ 实验性，需要 `clang` + `zlib` 开发包 |
 | SMB | UNC 路径（`\\host\share`） | CIFS 挂载点（`/mnt/…`），需要 `cifs-utils` |
 | 播放器 | `ffplay` 或 `start` 关联程序 | `ffplay` 或 `xdg-open` |
@@ -38,8 +38,8 @@
 | 需求 | 说明 |
 | --- | --- |
 | FFmpeg + ffprobe | 必须在 `PATH` 里，或用 `--ffmpeg` / `--ffprobe` 显式指定；也可以让本工具自己装一套（见 §7.10） |
-| .NET 11 SDK | 仅**构建**时需要（RC2 即可：`winget install Microsoft.DotNet.SDK.Preview`，Linux 用 `mise use -g dotnet@11.0.100-rc.2`） |
-| 运行 | JIT 版需要 .NET 11 运行时；NativeAOT 版什么都不需要 |
+| .NET SDK | 仅**构建**时需要，.NET 10 或 .NET 11 都行（`winget install Microsoft.DotNet.SDK.Preview`，Linux 用 `mise use -g dotnet@11.0.100-rc.2`） |
+| 运行 | JIT 版只需要 .NET 10 **或** .NET 11 运行时；NativeAOT 版什么都不需要 |
 | Linux 额外 | `xz-utils`（解压 `.tar.xz` 的受管理构建）、`cifs-utils`（挂载 SMB）、`samba`（要开共享时） |
 
 老式编码器（rv20、roqvideo、amv 等）只在完整构建的 FFmpeg 里才有。推荐
@@ -55,17 +55,35 @@
 ```powershell
 # 常规（JIT）构建
 dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
-# -> src\LiveArchiveEncoder\bin\Release\net11.0\LiveArchiveEncoder.exe
+# -> src\LiveArchiveEncoder\bin\Release\net10.0\LiveArchiveEncoder.exe
 
 # 或者用构建脚本，顺便出 NativeAOT 单文件版
 tools\build.ps1 -Aot
-# -> publish\jit\LiveArchiveEncoder.exe       162 KB，需要 .NET 11 运行时
+# -> publish\jit\LiveArchiveEncoder.exe       162 KB，需要 .NET 10 / .NET 11 运行时
 # -> publish\aot\LiveArchiveEncoder.exe       3.8 MB，单个文件、零依赖
 
-# 三套全出（JIT + AOT + AOT-AVX2）
-tools\build.ps1 -Aot -AotAvx2
-# -> publish\aot-avx2\LiveArchiveEncoder.exe  3.9 MB，把指令集基线从 SSE2 抬到 AVX2
+# 按 .NET 11 目标框架构建（默认是 net10.0，见下）
+tools\build.ps1 -Tfm net11.0
 ```
+
+### 目标框架：一个产物，两个运行时（v7.8.1）
+
+默认目标是 **`net10.0`**，并且发布时带 `RollForward=Major`。含义：
+
+- 机器上只有 .NET 10 运行时 → 用它；
+- 机器上只有 .NET 11 运行时 → 自动前滚到 .NET 11，照样能启动。
+
+也就是说 JIT 产物**不需要为两个运行时出两份**。想显式按 .NET 11 编译时，用同一个
+开关（`LaeTfm`，定义在仓库根目录的 `Directory.Build.props`）：
+
+```bash
+tools/build.sh --tfm net11.0
+dotnet build -p:LaeTfm=net11.0
+dotnet test  -p:LaeTfm=net11.0     # CI 就是这么把两套都跑一遍的
+```
+
+NativeAOT 是自包含的，选哪个目标框架都不影响它。脚本里请别再假设 `net11.0`：
+`src\LiveArchiveEncoder\bin\Release\` 下的目录名是 `net10.0`（除非显式换 TFM）。
 
 ### 构建（Linux / macOS）
 
@@ -92,28 +110,24 @@ DOTNET="$HOME/dot" tools/build.sh
 ```
 
 Linux 上的 NativeAOT 是**实验性**的：ILCompiler 在 Linux 上要链接系统库，不同
-发行版的库布局差异很大，出问题优先用 JIT 版。AOT 在 Linux 上也没有 AVX2 变体
-——`IlcInstructionSet` 是 x86 专属开关，而且实测对编码速度没有影响。
+发行版的库布局差异很大，出问题优先用 JIT 版。
 
-三套产物的差别只在 C# 侧（实测 `--cpu-info`）：
+### 只构建两种产物：JIT 与 AOT（v7.8.1 起）
 
-| 产物 | `Vector<byte>.Count` | Avx2 | Avx512F | 特点 |
-| --- | --- | --- | --- | --- |
-| `publish\jit` | 32 | ✅ | ✅ | JIT 运行时按 CPU 分派，指令集最全 |
-| `publish\aot` | **16** | ❌ | ❌ | NativeAOT 默认按 SSE2 基线编译 |
-| `publish\aot-avx2` | 32 | ✅ | ❌ | 显式 `-p:IlcInstructionSet=avx2` |
-
-**别指望 AVX2 能加速编码。** 真正的编码发生在 FFmpeg 子进程里，FFmpeg 自己
-运行时分派 SIMD，跟本项目的指令集基线无关。实测 turbo 20s（mpeg4，各 3 轮）：
+v7.8.1 起不再产出第三种 NativeAOT 变体 `publish\aot-avx2`（
+`-p:IlcInstructionSet=avx2`）。原因：指令集基线只影响本工具的 C# 侧，而真正的编码
+发生在 FFmpeg 子进程里，FFmpeg 自己按 CPU 运行时派发 SIMD。实测（`--cpu-info`
+确认两套的 `Vector<byte>.Count` 分别是 16 与 32）turbo 20s mpeg4 三轮取中位数：
 
 | 产物 | turbo 20s 墙钟 | 进程启动（`--help`） |
 | --- | --- | --- |
 | `publish\jit` | 1.65 s | 0.336 s |
 | `publish\aot` | 1.44 s | 0.268 s |
-| `publish\aot-avx2` | 1.42 s | 0.278 s |
+| ~~`publish\aot-avx2`~~ | ~~1.42 s~~ | ~~0.278 s~~ |
 
-AOT 比 JIT 快约 0.22 s（省掉 JIT 预热），**AVX2 相对 AOT 只有 0.02 s，在噪声内**。
-所以要最快就选 `publish\aot-avx2` + `--turbo`，但别期待 AVX2 本身带来什么。
+AOT 比 JIT 快约 0.22 s（省掉 JIT 预热），**AVX2 相对 AOT 只有 0.02 s，在噪声内**，
+却换来了"只能在 AVX2 CPU 上运行"的代价，所以不再构建。`--turbo` + `publish\aot`
+就是最快的组合。
 
 NativeAOT 需要 Visual Studio 的 **Desktop development with C++** 工作负载（要用到
 `link.exe`）。如果构建环境里 `vcvarsall.bat` 定位不到 Windows SDK，会报
@@ -1225,7 +1239,7 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 ### v7.4.1 新增
 
 1. **引入 NUnit**（`tests/LiveArchiveEncoder.Tests`，当时 121 个用例，v7.6 已达
-   214，v7.7 是 236，v7.8 已达 258）：纯逻辑单测，不依赖 FFmpeg 和网络，几秒跑完；Python harness
+   214，v7.7 是 236，v7.8 已达 258，v7.8.1 是 280）：纯逻辑单测，不依赖 FFmpeg 和网络，几秒跑完；Python harness
    继续负责
    "与 v6.3.3 是否等价"那一层。见 §12。
 2. 首次跑就抓到并修掉了一个真 Bug：`note.*` / `run.*` 共 13 个词条只有英文没有
@@ -1283,6 +1297,8 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
    Windows 用 `winget install Microsoft.DotNet.SDK.Preview`，Linux 用
    `mise use -g dotnet@11.0.100-rc.2.26504.105`（ci1/ci2 都已装好）。
    CI 的 `dotnet-version` 与 Woodpecker 镜像同步升到 11.0。
+   > **v7.8.1 起回退为默认 `net10.0`**，并靠 `RollForward=Major` 让同一份产物同时
+   > 兼容 .NET 10 与 .NET 11 运行时；`-p:LaeTfm=net11.0` 仍然可用，CI 两套都跑。
 4. **Turbo 标记弃用。** `--turbo` 和菜单第 9 项功能完全不变，只是每次使用都会
    打印弃用警告、菜单里标注"（已弃用）"。老脚本不受影响（§7.5）。
 5. **动态档位不能超过基础 FPS。** 阶梯只会往下压，写 `20` 而基础是 `15` 是笔误：
@@ -1290,6 +1306,42 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 6. **档位码率可调。** `--fps-levels` 支持 `FPS:降档码率:升档码率`，
    例如 `12:128:115,5:140:130`；菜单新增 **参数设置 → 27**（§6）。
    不写就是 v7.6 的老行为，默认值一点没变。
+
+### v7.8 新增
+
+1. **按编码器 + 容器扫描音频编码器。** 菜单新增"扫描音频编码器"，只列出当前
+   容器**真的能复用的**音频编码器；显式选择时校验采样率/声道数（§7.13）。
+2. **容器可切换。** mpeg1video / mpeg2video / mpeg4 / libxvid 可用 AVI，
+   libx264 可用 MKV，命令行 `--container avi|mp4|mkv`，菜单 **参数 29**（§7.14）。
+3. **画面比例与三种适配。** 分辨率预设区分 4:3 与 16:9；`--fit crop|fit|stretch`
+   决定 16:9 画面进 4:3 帧时是裁掉、加黑边还是拉伸（§7.15）。
+
+### v7.8.1 新增
+
+1. **一个产物同时支持 .NET 10 与 .NET 11。** 默认目标框架回到 `net10.0`，发布时
+   带 `RollForward=Major`：只有 .NET 11 运行时的机器也能启动，有 .NET 10 的机器
+   继续用 .NET 10。显式 `-p:LaeTfm=net11.0` 可指定 .NET 11，CI 两套都跑
+   （§1）。单测 280 条在两个目标框架下全部通过。
+2. **引入 .NET 10 / C# 14 的语法与库特性**，行为不变：
+   - **扩展成员（extension block）**：`Core/TextExtensions.cs` 提供
+     `value.HasText` / `value.Or(fallback)`，替换了全项目 28 处
+     `string.IsNullOrWhiteSpace(...)`；receiver 上的 `[NotNullWhen(true)]`
+     让编译器照旧做空值流分析。
+   - **`System.Threading.Lock`**：`OutputMonitor`、`ParallelEncoder` 进度器、
+     `RealtimeEncoder` 诊断队列、`Toolchain` 管道捕获改用新的锁类型
+     （更小的对象头、不会被人从外面 `Monitor.Enter`）。
+   - **`FrozenDictionary` / `FrozenSet`**：`Constants` 里所有只读查表（默认码率、
+     容器映射、像素格式、扩展名等）改为冻结集合——构建时多花一点，之后查询最快。
+   - **`[GeneratedRegex]`**：28 条"是否老编码器"的正则合成一条源生成正则，
+     JIT 与 NativeAOT 行为一致，且不再需要运行时编译。
+3. **只构建 JIT 与 AOT。** 第三种产物 `publish\aot-avx2`
+   （`-p:IlcInstructionSet=avx2`）被移除：指令集基线只影响本工具的 C# 侧，
+     编码在 FFmpeg 里由它自己派发 SIMD，实测差异在噪声内（§1）。
+4. **代码整理与归档。** 全项目逐个声明交叉核对引用，把零引用的成员移入
+   `archive/retired/`（不删除，带退役版本和替代说明），删除 3 处无用赋值、
+   2 组未使用参数（`Preflight.Video` 的 width/height、
+   `Watermark.BuildFilter` 的 width）；新增 `Directory.Build.props` 统一
+   属性、`AnalysisLevel=latest-recommended` 让构建自带分析器，现在零告警。
 
 ---
 
@@ -1381,7 +1433,8 @@ python3 tests/e2e/cui_smoke.py
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test     失败 0，通过 258（Linux 是 256 通过 + 1 跳过）
+dotnet test     失败 0，通过 280（Linux 是 278 通过 + 1 跳过）
+dotnet test -p:LaeTfm=net11.0   同样 280，证明 .NET 11 运行时下也全绿
 compare_matrix  total=12 pass=12 fail=0
 error_paths     total=11 fail=0
 feature_sweep   total=35 pass=35 warn=0 fail=0

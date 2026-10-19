@@ -1,5 +1,6 @@
 using System.Globalization;
 using LiveArchiveEncoder.Configuration;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.Core;
 
@@ -166,21 +167,18 @@ public static class AudioCatalog
 
     public static AudioCodecInfo? Find(string? name)
     {
-        if (string.IsNullOrWhiteSpace(name)) return null;
+        if (!name.HasText) return null;
         return Known.FirstOrDefault(
             x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
-    public static IReadOnlyList<string> Names => [.. Known.Select(x => x.Name)];
-
-    /// <summary>True when the codec is one we know; unknown codecs are unconstrained.</summary>
-    public static bool IsKnown(string? name) => Find(name) is not null;
-
-    /// <summary>Codecs known to mux into a container, whether or not this build
-    /// has them. Used for "that container accepts: ..." messages.</summary>
-    public static IReadOnlyList<string> KnownFor(string containerFormat) =>
-        ContainerCodecs.TryGetValue(containerFormat, out string[]? list) ? list : [];
-
+    /// <summary>
+    /// Retired in v7.8.1 and moved to
+    /// <c>archive/retired/RetiredConstants.cs</c>: <c>Names</c>, <c>IsKnown</c>
+    /// and <c>KnownFor</c> returned catalogue entries without checking whether
+    /// this FFmpeg build actually has them. The picker only ever uses
+    /// <see cref="Compatible"/>, which filters by availability.
+    /// </summary>
     public static bool SupportsContainer(string? codec, string containerFormat)
     {
         if (codec is null) return false;

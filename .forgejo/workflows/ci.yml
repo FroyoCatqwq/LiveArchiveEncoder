@@ -59,6 +59,16 @@ jobs:
       - name: Test
         run: dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build
 
+      # v7.8.1: the default build targets net10.0 and rolls forward to .NET 11,
+      # so one archive covers both. Re-running the suite against net11.0 is what
+      # proves that claim -- it is the only place an API that exists in just one
+      # of the two would show up.
+      - name: Build (net11)
+        run: dotnet build LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
+
+      - name: Test (net11)
+        run: dotnet test LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0 --no-build
+
   package:
     name: publish ${{ matrix.rid }}
     needs: test

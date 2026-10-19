@@ -4,6 +4,9 @@
     <File Path="nuget.config" />
     <File Path=".gitignore" />
     <File Path="reference/live_archive_encoder.py" />
+    <File Path="Directory.Build.props" />
+    <File Path="archive/README.md" />
+    <File Path="archive/retired/RetiredConstants.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/">
     <Project Path="src/LiveArchiveEncoder/LiveArchiveEncoder.csproj" />
@@ -21,6 +24,7 @@
     <File Path="src/LiveArchiveEncoder/Core/Interrupt.cs" />
     <File Path="src/LiveArchiveEncoder/Core/PixelFormatUtil.cs" />
     <File Path="src/LiveArchiveEncoder/Core/Timecode.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/TextExtensions.cs" />
     <File Path="src/LiveArchiveEncoder/Core/Validation.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Encoding/">
@@ -79,6 +83,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/ConfigStoreTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/FfmpegCatalogTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/LocalizationTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/ModernisationTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/PlayerTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/PostProcessingTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/ShardingAndLadderTests.cs" />
@@ -96,5 +101,6 @@
   <Folder Name="/tools/">
     <File Path="tools/benchmark.ps1" />
     <File Path="tools/build.ps1" />
+    <File Path="tools/build.sh" />
   </Folder>
 </Solution>

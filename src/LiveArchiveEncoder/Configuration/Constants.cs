@@ -1,34 +1,29 @@
-﻿namespace LiveArchiveEncoder.Configuration;
+using System.Collections.Frozen;
+
+namespace LiveArchiveEncoder.Configuration;
 
 /// <summary>
 /// All tables and magic values ported verbatim from live_archive_encoder.py v6.3.3.
 /// These are the migration baseline: changing any value here changes encoder behaviour.
+///
+/// v7.8.1: every table here is built once and never mutated, so they are frozen
+/// (<see cref="FrozenDictionary{TKey,TValue}"/> / <see cref="FrozenSet{T}"/>).
+/// Freeing them costs a little start-up time and buys the fastest possible
+/// lookups afterwards, which is the right trade for tables read on every frame.
 /// </summary>
 public static class Constants
 {
     public const int DefaultWidth = 256;
     public const int DefaultHeight = 192;
     public const double DefaultFps = 13.0;
-    public const string DefaultFpsLevels = "13,8,5,3";
 
-    public const string BtbnGplReleaseUrl =
-        "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/"
-        + "ffmpeg-master-latest-win64-gpl.zip";
-
-    public static readonly HashSet<string> VideoExtensions =
-        [".avi", ".mov", ".mp4", ".mkv", ".webm", ".wmv", ".mpg", ".mpeg",
-         ".m4v", ".flv", ".rm", ".rmvb", ".ts", ".m2ts", ".vob", ".ogv", ".asf",
-         ".roq", ".amv"];
-
-    public static readonly string[] LegacyEncoderPatterns =
-    [
-        @"^a64multi(?:5)?$", @"^amv$", @"^asv[12]$", @"^cinepak$", @"^cljr$",
-        @"^flashsv2?$", @"^flv$", @"^h261$", @"^h263(?:p)?$", @"^mjpeg$",
-        @"^msmpeg4(?:v2)?$", @"^msrle$", @"^msvideo1$", @"^mpeg[124]video$",
-        @"^mpeg4$", @"^qtrle$", @"^roqvideo$", @"^rpza$", @"^rv(?:10|20)$",
-        @"^smc$", @"^snow$", @"^svq1$", @"^wmv[12]$", @"^zmbv$", @"^libtheora$",
-        @"^libx264$", @"^libxvid$", @"^vivo$",
-    ];
+    public static readonly FrozenSet<string> VideoExtensions =
+        new HashSet<string>
+        {
+            ".avi", ".mov", ".mp4", ".mkv", ".webm", ".wmv", ".mpg", ".mpeg",
+            ".m4v", ".flv", ".rm", ".rmvb", ".ts", ".m2ts", ".vob", ".ogv", ".asf",
+            ".roq", ".amv",
+        }.ToFrozenSet();
 
     public static readonly string[] ModernPrefixes =
     [
@@ -37,47 +32,49 @@ public static class Constants
         "h264_", "av1_", "hevc_",
     ];
 
-    public static readonly HashSet<string> NonArchiveExact =
-    [
-        "rawvideo", "wrapped_avframe",
-        "ffv1", "ffv1_vulkan", "ffvhuff", "huffyuv", "ljpeg", "jpegls",
-        "jpeg2000", "libopenjpeg", "dvvideo", "dnxhd",
-        "prores", "prores_aw", "prores_ks", "prores_ks_vulkan", "cfhd",
-        "dpx", "exr", "fits", "png", "bmp", "gif", "tiff", "qoi",
-        "webp", "libwebp", "libwebp_anim", "libjxl", "libjxl_anim",
-        "r10k", "r210", "v210", "speedhq", "utvideo", "magicyuv", "vc2",
-        "dxv", "sgi", "targa", "ppm", "pgm", "pam", "xbm", "xwd", "xface",
-        "sunrast", "pfm", "phm", "zlib",
-    ];
+    public static readonly FrozenSet<string> NonArchiveExact =
+        new HashSet<string>
+        {
+            "rawvideo", "wrapped_avframe",
+            "ffv1", "ffv1_vulkan", "ffvhuff", "huffyuv", "ljpeg", "jpegls",
+            "jpeg2000", "libopenjpeg", "dvvideo", "dnxhd",
+            "prores", "prores_aw", "prores_ks", "prores_ks_vulkan", "cfhd",
+            "dpx", "exr", "fits", "png", "bmp", "gif", "tiff", "qoi",
+            "webp", "libwebp", "libwebp_anim", "libjxl", "libjxl_anim",
+            "r10k", "r210", "v210", "speedhq", "utvideo", "magicyuv", "vc2",
+            "dxv", "sgi", "targa", "ppm", "pgm", "pam", "xbm", "xwd", "xface",
+            "sunrast", "pfm", "phm", "zlib",
+        }.ToFrozenSet();
 
-    public static readonly Dictionary<string, (string Ext, string Format)> ContainerByEncoder = new()
-    {
-        ["a64multi"] = ("a64", "a64"),
-        ["a64multi5"] = ("a64", "a64"),
-        ["amv"] = ("amv", "amv"),
-        ["wmv1"] = ("wmv", "asf"),
-        ["wmv2"] = ("wmv", "asf"),
-        ["rv10"] = ("rm", "rm"),
-        ["rv20"] = ("rm", "rm"),
-        ["mpeg1video"] = ("mpg", "mpeg"),
-        ["mpeg2video"] = ("mpg", "mpeg"),
-        ["mpeg4"] = ("avi", "avi"),
-        ["libxvid"] = ("avi", "avi"),
-        ["libtheora"] = ("ogv", "ogg"),
-        ["libx264"] = ("mp4", "mp4"),
-        ["flv"] = ("flv", "flv"),
-        ["flashsv"] = ("flv", "flv"),
-        ["flashsv2"] = ("flv", "flv"),
-        ["h261"] = ("h261", "h261"),
-        ["h263"] = ("h263", "h263"),
-        ["h263p"] = ("avi", "avi"),
-        ["mjpeg"] = ("avi", "avi"),
-        ["qtrle"] = ("mov", "mov"),
-        ["rpza"] = ("mov", "mov"),
-        ["smc"] = ("mov", "mov"),
-        ["svq1"] = ("mov", "mov"),
-        ["roqvideo"] = ("roq", "roq"),
-    };
+    public static readonly FrozenDictionary<string, (string Ext, string Format)> ContainerByEncoder =
+        new Dictionary<string, (string Ext, string Format)>
+        {
+            ["a64multi"] = ("a64", "a64"),
+            ["a64multi5"] = ("a64", "a64"),
+            ["amv"] = ("amv", "amv"),
+            ["wmv1"] = ("wmv", "asf"),
+            ["wmv2"] = ("wmv", "asf"),
+            ["rv10"] = ("rm", "rm"),
+            ["rv20"] = ("rm", "rm"),
+            ["mpeg1video"] = ("mpg", "mpeg"),
+            ["mpeg2video"] = ("mpg", "mpeg"),
+            ["mpeg4"] = ("avi", "avi"),
+            ["libxvid"] = ("avi", "avi"),
+            ["libtheora"] = ("ogv", "ogg"),
+            ["libx264"] = ("mp4", "mp4"),
+            ["flv"] = ("flv", "flv"),
+            ["flashsv"] = ("flv", "flv"),
+            ["flashsv2"] = ("flv", "flv"),
+            ["h261"] = ("h261", "h261"),
+            ["h263"] = ("h263", "h263"),
+            ["h263p"] = ("avi", "avi"),
+            ["mjpeg"] = ("avi", "avi"),
+            ["qtrle"] = ("mov", "mov"),
+            ["rpza"] = ("mov", "mov"),
+            ["smc"] = ("mov", "mov"),
+            ["svq1"] = ("mov", "mov"),
+            ["roqvideo"] = ("roq", "roq"),
+        }.ToFrozenDictionary();
 
     /// <summary>
     /// v7.8: every container an encoder may be written to, in preference order.
@@ -89,14 +86,15 @@ public static class Constants
     /// Deliberately not "everything in every container": MPEG-PS in Matroska and
     /// RealVideo in AVI are the kind of pair that muxes and then fails to play.
     /// </summary>
-    public static readonly Dictionary<string, (string Ext, string Format)[]> ContainerChoicesByEncoder = new()
-    {
-        ["mpeg1video"] = [("mpg", "mpeg"), ("avi", "avi")],
-        ["mpeg2video"] = [("mpg", "mpeg"), ("avi", "avi")],
-        ["mpeg4"] = [("avi", "avi"), ("mp4", "mp4")],
-        ["libxvid"] = [("avi", "avi"), ("mp4", "mp4")],
-        ["libx264"] = [("mp4", "mp4"), ("avi", "avi"), ("mkv", "matroska")],
-    };
+    public static readonly FrozenDictionary<string, (string Ext, string Format)[]> ContainerChoicesByEncoder =
+        new Dictionary<string, (string Ext, string Format)[]>
+        {
+            ["mpeg1video"] = [("mpg", "mpeg"), ("avi", "avi")],
+            ["mpeg2video"] = [("mpg", "mpeg"), ("avi", "avi")],
+            ["mpeg4"] = [("avi", "avi"), ("mp4", "mp4")],
+            ["libxvid"] = [("avi", "avi"), ("mp4", "mp4")],
+            ["libx264"] = [("mp4", "mp4"), ("avi", "avi"), ("mkv", "matroska")],
+        }.ToFrozenDictionary();
 
     /// <summary>
     /// How the source frame is made to fill the output frame.
@@ -121,34 +119,37 @@ public static class Constants
         (512, 288, "16:9"), (640, 360, "16:9"), (854, 480, "16:9"), (1280, 720, "16:9"),
     ];
 
-    public static readonly Dictionary<string, int> DefaultQuality = new()
-    {
-        ["libx264"] = 28, ["libtheora"] = 7, ["rv10"] = 8, ["rv20"] = 8,
-        ["wmv1"] = 10, ["wmv2"] = 10, ["mpeg1video"] = 8, ["mpeg2video"] = 8,
-        ["mpeg4"] = 8, ["libxvid"] = 8, ["cinepak"] = 10, ["cljr"] = 10,
-        ["h261"] = 10, ["h263"] = 10, ["h263p"] = 10, ["mjpeg"] = 6,
-        ["flv"] = 10, ["flashsv"] = 10, ["flashsv2"] = 10, ["qtrle"] = 10,
-        ["rpza"] = 10, ["smc"] = 10, ["svq1"] = 10, ["roqvideo"] = 10,
-        ["zmbv"] = 10, ["amv"] = 10, ["asv1"] = 10, ["asv2"] = 10,
-        ["a64multi"] = 10, ["a64multi5"] = 10, ["msmpeg4v2"] = 10,
-        ["msmpeg4"] = 10, ["msvideo1"] = 10, ["msrle"] = 10, ["snow"] = 8,
-    };
+    public static readonly FrozenDictionary<string, int> DefaultQuality =
+        new Dictionary<string, int>
+        {
+            ["libx264"] = 28, ["libtheora"] = 7, ["rv10"] = 8, ["rv20"] = 8,
+            ["wmv1"] = 10, ["wmv2"] = 10, ["mpeg1video"] = 8, ["mpeg2video"] = 8,
+            ["mpeg4"] = 8, ["libxvid"] = 8, ["cinepak"] = 10, ["cljr"] = 10,
+            ["h261"] = 10, ["h263"] = 10, ["h263p"] = 10, ["mjpeg"] = 6,
+            ["flv"] = 10, ["flashsv"] = 10, ["flashsv2"] = 10, ["qtrle"] = 10,
+            ["rpza"] = 10, ["smc"] = 10, ["svq1"] = 10, ["roqvideo"] = 10,
+            ["zmbv"] = 10, ["amv"] = 10, ["asv1"] = 10, ["asv2"] = 10,
+            ["a64multi"] = 10, ["a64multi5"] = 10, ["msmpeg4v2"] = 10,
+            ["msmpeg4"] = 10, ["msvideo1"] = 10, ["msrle"] = 10, ["snow"] = 8,
+        }.ToFrozenDictionary();
 
-    public static readonly Dictionary<string, string[]> DefaultAudioByContainer = new()
-    {
-        ["asf"] = ["wmav2", "wmav1", "libmp3lame"],
-        ["mpeg"] = ["mp2", "mp3_mf", "libmp3lame"],
-        ["avi"] = ["libmp3lame", "mp3_mf", "mp2", "aac"],
-        ["ogg"] = ["libvorbis", "vorbis", "libopus", "opus"],
-        ["rm"] = ["ac3", "aac"],
-        ["mp4"] = ["aac", "libopus", "libmp3lame"],
-        ["flv"] = ["aac", "libmp3lame", "mp3_mf"],
-        ["mov"] = ["aac", "libmp3lame"],
-        ["amv"] = ["adpcm_ima_amv", "adpcm_ima_wav"],
-        ["roq"] = ["roq_dpcm"],
-    };
+    public static readonly FrozenDictionary<string, string[]> DefaultAudioByContainer =
+        new Dictionary<string, string[]>
+        {
+            ["asf"] = ["wmav2", "wmav1", "libmp3lame"],
+            ["mpeg"] = ["mp2", "mp3_mf", "libmp3lame"],
+            ["avi"] = ["libmp3lame", "mp3_mf", "mp2", "aac"],
+            ["ogg"] = ["libvorbis", "vorbis", "libopus", "opus"],
+            ["rm"] = ["ac3", "aac"],
+            ["mp4"] = ["aac", "libopus", "libmp3lame"],
+            ["flv"] = ["aac", "libmp3lame", "mp3_mf"],
+            ["mov"] = ["aac", "libmp3lame"],
+            ["amv"] = ["adpcm_ima_amv", "adpcm_ima_wav"],
+            ["roq"] = ["roq_dpcm"],
+        }.ToFrozenDictionary();
 
-    public static readonly HashSet<string> NoAudioFormats = ["a64", "h261", "h263"];
+    public static readonly FrozenSet<string> NoAudioFormats =
+        new HashSet<string> { "a64", "h261", "h263" }.ToFrozenSet();
 
     /// <summary>
     /// Muxers whose shards can be rejoined with <c>-f concat -c copy</c> without
@@ -166,8 +167,8 @@ public static class Constants
     /// Only formats actually verified are listed; untested ones stay out so the
     /// parallel path never silently damages an archive.
     /// </summary>
-    public static readonly HashSet<string> ConcatSafeFormats =
-        ["avi", "mp4", "flv", "asf", "mpeg"];
+    public static readonly FrozenSet<string> ConcatSafeFormats =
+        new HashSet<string> { "avi", "mp4", "flv", "asf", "mpeg" }.ToFrozenSet();
 
     /// <summary>
     /// Shortest shard worth the two extra FFmpeg process launches. Below this the
@@ -181,23 +182,24 @@ public static class Constants
     /// </summary>
     public const int MaxParallelShards = 8;
 
-    public static readonly Dictionary<string, HashSet<string>> FormatExtensions = new()
-    {
-        ["a64"] = [".a64"],
-        ["amv"] = [".amv"],
-        ["asf"] = [".asf", ".wmv"],
-        ["avi"] = [".avi"],
-        ["flv"] = [".flv"],
-        ["h261"] = [".h261"],
-        ["h263"] = [".h263"],
-        ["mpeg"] = [".mpg", ".mpeg", ".mpe", ".vob"],
-        ["mp4"] = [".mp4", ".m4v"],
-        ["matroska"] = [".mkv"],
-        ["mov"] = [".mov", ".qt"],
-        ["ogg"] = [".ogg", ".ogv"],
-        ["rm"] = [".rm", ".rmvb"],
-        ["roq"] = [".roq"],
-    };
+    public static readonly FrozenDictionary<string, IReadOnlySet<string>> FormatExtensions =
+        new Dictionary<string, IReadOnlySet<string>>
+        {
+            ["a64"] = new HashSet<string> { ".a64" }.ToFrozenSet(),
+            ["amv"] = new HashSet<string> { ".amv" }.ToFrozenSet(),
+            ["asf"] = new HashSet<string> { ".asf", ".wmv" }.ToFrozenSet(),
+            ["avi"] = new HashSet<string> { ".avi" }.ToFrozenSet(),
+            ["flv"] = new HashSet<string> { ".flv" }.ToFrozenSet(),
+            ["h261"] = new HashSet<string> { ".h261" }.ToFrozenSet(),
+            ["h263"] = new HashSet<string> { ".h263" }.ToFrozenSet(),
+            ["mpeg"] = new HashSet<string> { ".mpg", ".mpeg", ".mpe", ".vob" }.ToFrozenSet(),
+            ["mp4"] = new HashSet<string> { ".mp4", ".m4v" }.ToFrozenSet(),
+            ["matroska"] = new HashSet<string> { ".mkv" }.ToFrozenSet(),
+            ["mov"] = new HashSet<string> { ".mov", ".qt" }.ToFrozenSet(),
+            ["ogg"] = new HashSet<string> { ".ogg", ".ogv" }.ToFrozenSet(),
+            ["rm"] = new HashSet<string> { ".rm", ".rmvb" }.ToFrozenSet(),
+            ["roq"] = new HashSet<string> { ".roq" }.ToFrozenSet(),
+        }.ToFrozenDictionary();
 
     public static readonly double[] AmvFps = [10.0, 14.0, 15.0, 18.0, 21.0, 25.0, 30.0];
 
@@ -222,43 +224,47 @@ public static class Constants
     public const int AmvDimensionMultiple = 16;
 
     /// <summary>Containers that cannot be written without an audio stream.</summary>
-    public static readonly HashSet<string> FormatsRequiringAudio = ["amv"];
+    public static readonly FrozenSet<string> FormatsRequiringAudio =
+        new HashSet<string> { "amv" }.ToFrozenSet();
 
     public static readonly double[] Mpeg1RealFps =
         [24000.0 / 1001.0, 24.0, 25.0, 30000.0 / 1001.0, 30.0, 50.0, 60000.0 / 1001.0, 60.0];
 
-    public static readonly Dictionary<string, (int W, int H)[]> SpecialSizes = new()
-    {
-        ["h261"] = [(176, 144), (352, 288)],
-        ["h263"] = [(128, 96), (176, 144), (352, 288), (704, 576), (1408, 1152)],
-    };
+    public static readonly FrozenDictionary<string, (int W, int H)[]> SpecialSizes =
+        new Dictionary<string, (int W, int H)[]>
+        {
+            ["h261"] = [(176, 144), (352, 288)],
+            ["h263"] = [(128, 96), (176, 144), (352, 288), (704, 576), (1408, 1152)],
+        }.ToFrozenDictionary();
 
-    public static readonly Dictionary<string, string> ScaleAlgorithmAliases = new()
-    {
-        ["neighbor"] = "neighbor", ["nearest"] = "neighbor", ["point"] = "neighbor",
-        ["bilinear"] = "bilinear", ["bicubic"] = "bicubic", ["cubic"] = "bicubic",
-        ["lanczos"] = "lanczos", ["spline"] = "spline", ["sinc"] = "sinc",
-        ["area"] = "area", ["gauss"] = "gauss",
-    };
+    public static readonly FrozenDictionary<string, string> ScaleAlgorithmAliases =
+        new Dictionary<string, string>
+        {
+            ["neighbor"] = "neighbor", ["nearest"] = "neighbor", ["point"] = "neighbor",
+            ["bilinear"] = "bilinear", ["bicubic"] = "bicubic", ["cubic"] = "bicubic",
+            ["lanczos"] = "lanczos", ["spline"] = "spline", ["sinc"] = "sinc",
+            ["area"] = "area", ["gauss"] = "gauss",
+        }.ToFrozenDictionary();
 
     public static readonly string[] DeinterlaceFilters = ["bwdif", "yadif", "w3fdif"];
 
-    public static readonly Dictionary<string, double> PixelFormatSize = new()
-    {
-        ["yuv420p"] = 3.0 / 2.0, ["yuv422p"] = 2.0, ["yuv444p"] = 3.0,
-        ["yuv411p"] = 3.0 / 2.0, ["yuv410p"] = 9.0 / 8.0, ["yuv440p"] = 3.0 / 2.0,
-        ["yuvj420p"] = 3.0 / 2.0, ["yuvj422p"] = 2.0, ["yuvj444p"] = 3.0,
-        ["yuvj411p"] = 3.0 / 2.0,
-        ["yuv420p10le"] = 3.0, ["yuv422p10le"] = 4.0, ["yuv444p10le"] = 6.0,
-        ["yuv420p12le"] = 3.0, ["yuv422p12le"] = 4.0, ["yuv444p12le"] = 6.0,
-        ["yuv420p16le"] = 3.0, ["yuv422p16le"] = 4.0, ["yuv444p16le"] = 6.0,
-        ["gray"] = 1.0, ["gray10le"] = 2.0, ["gray16le"] = 2.0,
-        ["rgb24"] = 3.0, ["bgr24"] = 3.0, ["rgba"] = 4.0, ["bgra"] = 4.0,
-        ["argb"] = 4.0, ["abgr"] = 4.0, ["rgb0"] = 4.0, ["bgr0"] = 4.0,
-        ["rgb555le"] = 2.0, ["rgb555be"] = 2.0, ["rgb565le"] = 2.0, ["rgb565be"] = 2.0,
-        ["rgb48le"] = 6.0, ["rgb48be"] = 6.0,
-        ["pal8"] = 1.0, ["rgb8"] = 1.0, ["bgr8"] = 1.0,
-    };
+    public static readonly FrozenDictionary<string, double> PixelFormatSize =
+        new Dictionary<string, double>
+        {
+            ["yuv420p"] = 3.0 / 2.0, ["yuv422p"] = 2.0, ["yuv444p"] = 3.0,
+            ["yuv411p"] = 3.0 / 2.0, ["yuv410p"] = 9.0 / 8.0, ["yuv440p"] = 3.0 / 2.0,
+            ["yuvj420p"] = 3.0 / 2.0, ["yuvj422p"] = 2.0, ["yuvj444p"] = 3.0,
+            ["yuvj411p"] = 3.0 / 2.0,
+            ["yuv420p10le"] = 3.0, ["yuv422p10le"] = 4.0, ["yuv444p10le"] = 6.0,
+            ["yuv420p12le"] = 3.0, ["yuv422p12le"] = 4.0, ["yuv444p12le"] = 6.0,
+            ["yuv420p16le"] = 3.0, ["yuv422p16le"] = 4.0, ["yuv444p16le"] = 6.0,
+            ["gray"] = 1.0, ["gray10le"] = 2.0, ["gray16le"] = 2.0,
+            ["rgb24"] = 3.0, ["bgr24"] = 3.0, ["rgba"] = 4.0, ["bgra"] = 4.0,
+            ["argb"] = 4.0, ["abgr"] = 4.0, ["rgb0"] = 4.0, ["bgr0"] = 4.0,
+            ["rgb555le"] = 2.0, ["rgb555be"] = 2.0, ["rgb565le"] = 2.0, ["rgb565be"] = 2.0,
+            ["rgb48le"] = 6.0, ["rgb48be"] = 6.0,
+            ["pal8"] = 1.0, ["rgb8"] = 1.0, ["bgr8"] = 1.0,
+        }.ToFrozenDictionary();
 
     public static string[] ScaleAlgorithms => [.. ScaleAlgorithmAliases.Keys];
 }

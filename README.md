@@ -1,8 +1,8 @@
-# Live Archive Encoder v7 (.NET 11 / C# 15)
+# Live Archive Encoder v7 (.NET 10 / .NET 11)
 
 CUI/CLI frontend for classic/legacy FFmpeg video encoders. Started as a
 behaviour-preserving port of `live_archive_encoder.py` v6.3.3 (kept verbatim
-under `reference/`) to C# on .NET 11, with the internals rewritten for lower
+under `reference/`) to C#, with the internals rewritten for lower
 allocation and better pipe scheduling. **As of v7.6 it grows past the port**:
 post-processing stages (text watermark, a "video site" recompress pass) and
 per-era presets sit on top of the realtime encoder, all of them off by default —
@@ -21,7 +21,7 @@ remains tied to media duration.
 | | Windows | Linux |
 | --- | --- | --- |
 | Status | primary | supported since v7.5 |
-| Build | `tools\build.ps1` (JIT / AOT / AOT-AVX2) | `tools/build.sh` (JIT, `--aot` optional) |
+| Build | `tools\build.ps1` (JIT / AOT) | `tools/build.sh` (JIT, `--aot` optional) |
 | NativeAOT | yes — needs MSVC + Windows SDK | experimental — needs `clang` + zlib headers |
 | SMB | UNC paths (`\\host\share`) | CIFS mount points; needs `cifs-utils` |
 | Player | `ffplay` or shell file association | `ffplay` or `xdg-open` |
@@ -42,12 +42,31 @@ Windows (PowerShell):
 
 ```powershell
 dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
-# -> src\LiveArchiveEncoder\bin\Release\net11.0\LiveArchiveEncoder.exe
+# -> src\LiveArchiveEncoder\bin\Release\net10.0\LiveArchiveEncoder.exe
 
 tools\build.ps1 -Aot
 # -> publish\jit\LiveArchiveEncoder.exe       (162 KB + shared framework)
 # -> publish\aot\LiveArchiveEncoder.exe       (3.8 MB, single file, no deps)
 ```
+
+**Two flavours, two runtimes.** Only JIT and AOT are built. The JIT build targets
+`net10.0` and is published with `RollForward=Major`, so the same archive starts
+on a machine with .NET 10 *and* on one that only has .NET 11. To compile against
+.NET 11 explicitly:
+
+```bash
+tools/build.sh --tfm net11.0      # or: dotnet build -p:LaeTfm=net11.0
+```
+
+`LaeTfm` is the one switch (see `Directory.Build.props`); CI runs the suite under
+both frameworks, so "works on 10 and 11" is verified rather than assumed.
+NativeAOT output is self-contained and unaffected by either choice.
+
+v7.8.1 also stopped shipping a third flavour: an AOT build with
+`-p:IlcInstructionSet=avx2`. Raising the instruction-set baseline only affects
+the C# side of this tool, while the encoding happens in FFmpeg, which
+runtime-dispatches its own SIMD — measured difference nil, and the result was an
+exe that only runs on AVX2 CPUs.
 
 Linux / macOS:
 
@@ -68,7 +87,7 @@ a shim manager (`mise`, `asdf`) that a non-interactive shell never puts on `PATH
 DOTNET="$HOME/dot" tools/build.sh
 ```
 
-Requires the .NET 11 SDK (RC2 is enough; `winget install Microsoft.DotNet.SDK.Preview`
+Requires the .NET 10 or .NET 11 SDK (`winget install Microsoft.DotNet.SDK.Preview`
 on Windows, `mise use -g dotnet@11.0.100-rc.2` on Linux). Windows NativeAOT additionally needs the **Desktop
 development with C++** workload: it links with `link.exe` and the Windows SDK
 import libraries. If `vcvarsall.bat` cannot locate the SDK on your machine, pass
@@ -85,7 +104,9 @@ At runtime you need an FFmpeg/ffprobe pair on `PATH` (or pass `--ffmpeg` /
 
 ```bash
 # NUnit 5 unit tests — identical command on both platforms
-dotnet test LiveArchiveEncoder.V7.slnx -c Release      # 258 on Windows, 256 on Linux
+dotnet test LiveArchiveEncoder.V7.slnx -c Release      # 280 on Windows, 278 on Linux
+# and the same suite against the other runtime:
+dotnet test LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 ```
 
 The NUnit project covers the pure-logic layers that do not need a real encode:
@@ -223,7 +244,8 @@ src/LiveArchiveEncoder/
   Configuration/  Config, EncoderInfo, EncoderCaps, StreamInfo, constant tables
   Core/           timecode parsing, pixel-format maths, validation, high-res timer,
                   Ctrl+C interrupt, AudioCatalog (v7.8: per-codec sample-rate and
-                  channel limits, container compatibility)
+                  channel limits, container compatibility), TextExtensions (v7.8.1:
+                  C# 14 extension members)
   FFmpeg/         discovery, toolchain (multi-distro install/update/delete),
                   capability probing, ffprobe, process + pipe I/O
   Frames/         bounded pre-allocated frame pool
@@ -297,12 +319,18 @@ bitrate maths, preflight steps, and every default value.
   happens in the FFmpeg child processes, which dispatch on the CPU at runtime.
   Forcing `-cpuflags +avx2` is identical to the default; only *disabling* SIMD
   (`-cpuflags 0`) is slower. There is no vectorisable work in the C# controller —
-  it never touches pixels. The one real knob is `-p:IlcInstructionSet=avx2` for
-  the AOT build, because NativeAOT compiles for the SSE2 baseline by default
-  (`Vector<byte>.Count` 16 vs 32 under the JIT); it makes the exe CPU-specific.
+  it never touches pixels. NativeAOT compiles for the SSE2 baseline by default
+  (`Vector<byte>.Count` 16 vs 32 under the JIT) and `-p:IlcInstructionSet=avx2`
+  can raise that, but v7.8.1 stopped building that flavour: no measurable gain,
+  and an exe that only starts on AVX2 CPUs.
 * **AOT is about packaging, not speed.** It yields a single self-contained
   executable and a faster process start; the encode is unchanged because it runs
-  in FFmpeg and is paced against the wall clock.
+  in FFmpeg and is paced against the wall clock. ReadyToRun is the flavour that
+  would sit between the two; it is not built here because it needs the runtime
+  packs of the *exact* release, which is worth revisiting once .NET 12 ships.
+* **Retired code is archived, not deleted.** `archive/retired/` keeps members no
+  call site reaches any more, each with the version it was retired in and what
+  replaced it. Nothing under `archive/` is compiled.
 * **Hardware decode is off by default and stays that way until probed.**
   `ffmpeg -hwaccels` lists methods that are merely *compiled in*; on a machine
   with no GPU (or no driver) `--hwaccel cuda` dies at the first frame with

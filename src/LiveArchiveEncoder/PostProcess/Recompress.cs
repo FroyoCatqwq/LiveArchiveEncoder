@@ -1,5 +1,6 @@
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.FFmpeg;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.PostProcess;
 
@@ -89,7 +90,7 @@ public static class Recompress
         if (stem.EndsWith("_wm", StringComparison.Ordinal))
             stem = stem[..^"_wm".Length];
 
-        string ext = string.IsNullOrWhiteSpace(container) ? "mp4" : container.TrimStart('.').ToLowerInvariant();
+        string ext = container.Or("mp4").TrimStart('.').ToLowerInvariant();
         return Path.Combine(dir, stem + "_web." + ext);
     }
 

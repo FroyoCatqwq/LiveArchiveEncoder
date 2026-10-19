@@ -1,4 +1,4 @@
-﻿using LiveArchiveEncoder.Configuration;
+using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
@@ -441,11 +441,11 @@ public static class Cli
             if (error is not null)
                 throw new ArgumentException(L.T("post.args.bad", error));
 
-            if (string.IsNullOrWhiteSpace(config.Recompress.Container))
+            if (!config.Recompress.Container.HasText)
                 throw new ArgumentException(L.T("rc.args.empty"));
         }
 
-        if (config.Watermark.Enabled && string.IsNullOrWhiteSpace(config.Watermark.Text))
+        if (config.Watermark.Enabled && !config.Watermark.Text.HasText)
             throw new ArgumentException(L.T("wm.empty"));
     }
 

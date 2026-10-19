@@ -25,11 +25,22 @@ public static class HighResolutionTimer
         if (TimeBeginPeriod(1) == 0) _enabled = true;
     }
 
-    public static void Disable()
+    /// <summary>
+    /// Give the coarse timer back. Returns the raw winmm result so a failure is
+    /// visible to the caller instead of being swallowed -- <c>timeEndPeriod</c>
+    /// reports TIMERR_NOCANDO when the period was never begun, which is exactly
+    /// the mistake worth surfacing.
+    /// </summary>
+    public static uint Disable()
     {
-        if (!_enabled) return;
-        TimeEndPeriod(1);
+        if (!_enabled)
+        {
+            _enabled = false;
+            return 0;
+        }
+        uint result = TimeEndPeriod(1);
         _enabled = false;
+        return result;
     }
 
     /// <summary>Monotonic seconds since boot (same origin as Python's time.monotonic()).</summary>

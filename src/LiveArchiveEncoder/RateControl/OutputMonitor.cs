@@ -14,7 +14,10 @@ public sealed class OutputMonitor
     private const int DiagnosticCapacity = 64;
 
     private readonly double _windowSeconds;
-    private readonly object _sync = new();
+    // .NET 9+ System.Threading.Lock: the same mutual exclusion as lock(object)
+    // with a smaller, non-inflatable object header and no risk of a stray
+    // Monitor.Enter/Exit pair from outside this class.
+    private readonly Lock _sync = new();
 
     private readonly double[] _sampleTime = new double[SampleCapacity];
     private readonly long[] _sampleBytes = new long[SampleCapacity];

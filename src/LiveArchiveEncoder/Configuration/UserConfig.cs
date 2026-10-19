@@ -1,5 +1,6 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.Configuration;
 
@@ -15,7 +16,7 @@ namespace LiveArchiveEncoder.Configuration;
     WriteIndented = true,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(UserConfig))]
-internal partial class UserConfigJsonContext : JsonSerializerContext;
+internal sealed partial class UserConfigJsonContext : JsonSerializerContext;
 
 /// <summary>
 /// Persisted settings for the interactive shell.
@@ -309,7 +310,7 @@ public static class ConfigStore
         c.Height = stored.Height;
         c.FitMode = Core.EncoderMath.CanonicalFitMode(stored.FitMode);
         c.CropAnchor = Core.EncoderMath.CanonicalCropAnchor(stored.CropAnchor);
-        c.PadColor = string.IsNullOrWhiteSpace(stored.PadColor) ? "black" : stored.PadColor.Trim();
+        c.PadColor = stored.PadColor.Or("black").Trim();
         // Migration: "crop 4:3 = no" meant no crop at all, i.e. a plain stretch.
         if (stored.Crop43 is false) c.FitMode = "stretch";
         c.ScaleAlgo = stored.ScaleAlgo;

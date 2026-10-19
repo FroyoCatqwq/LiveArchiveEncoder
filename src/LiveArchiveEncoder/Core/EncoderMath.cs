@@ -1,5 +1,6 @@
 using System.Globalization;
 using LiveArchiveEncoder.Configuration;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.Core;
 
@@ -294,7 +295,7 @@ public static class EncoderMath
     /// </summary>
     public static EncoderInfo? ResolveContainer(EncoderInfo encoder, string? requested)
     {
-        if (string.IsNullOrWhiteSpace(requested)) return encoder;
+        if (!requested.HasText) return encoder;
         IReadOnlyList<(string Ext, string Format)> allowed = AllowedContainers(encoder);
 
         string wanted = requested.Trim().ToLowerInvariant();
@@ -304,7 +305,7 @@ public static class EncoderMath
                 return format == encoder.FormatName ? encoder : encoder.WithContainer(ext, format);
         }
         // The muxer name and the extension are both accepted ("matroska"/"mkv").
-        if (Constants.FormatExtensions.TryGetValue(wanted, out HashSet<string>? exts))
+        if (Constants.FormatExtensions.TryGetValue(wanted, out IReadOnlySet<string>? exts))
         {
             foreach ((string ext, string format) in allowed)
             {
@@ -383,8 +384,4 @@ public static class EncoderMath
         string key = (value ?? "").Trim().ToLowerInvariant();
         return Constants.CropAnchors.Contains(key) ? key : "center";
     }
-
-    // Kept for parity with the Python fallback chain used when no encoder declares
-    // any usable raw transport format.
-    public static string FallbackTransportFormat() => PreferredTransportFallback[0];
 }

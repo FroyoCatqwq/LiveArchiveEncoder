@@ -1,4 +1,5 @@
 using System.Text;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.PostProcess;
 
@@ -26,7 +27,7 @@ public static class PostArgs
     public static List<string> Tokenize(string? fragment)
     {
         var tokens = new List<string>();
-        if (string.IsNullOrWhiteSpace(fragment)) return tokens;
+        if (!fragment.HasText) return tokens;
 
         var current = new StringBuilder();
         char? quote = null;

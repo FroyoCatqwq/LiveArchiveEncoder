@@ -1,15 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net11.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <!-- Same switch as the app: `dotnet test -p:LaeTfm=net11.0` runs the whole
+         suite against the .NET 11 runtime, which is how "supports .NET 10 and
+         .NET 11" is proven rather than assumed. -->
+    <TargetFramework>$(LaeTfm)</TargetFramework>
     <RootNamespace>LiveArchiveEncoder.Tests</RootNamespace>
     <AssemblyName>LiveArchiveEncoder.Tests</AssemblyName>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <!-- No locale-dependent formatting anywhere in this app. -->
-    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>

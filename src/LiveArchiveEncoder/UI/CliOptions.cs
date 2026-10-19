@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 
 namespace LiveArchiveEncoder.UI;
@@ -153,8 +153,6 @@ public sealed class CliOptions
 
     /// <summary>Era preset id to apply; see <see cref="PostProcess.EraPresets"/>.</summary>
     public string? Era { get; init; }
-
-    public double EffectiveRecover => Recover ?? Limit * 0.75;
 }
 
 /// <summary>Minimal, dependency-free parser with argparse-compatible semantics.</summary>

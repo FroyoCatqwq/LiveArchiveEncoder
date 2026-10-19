@@ -107,7 +107,7 @@ public static class Completion
         var sb = new StringBuilder();
         sb.Append("# bash completion for ").Append(exe).Append("  (generated)\n");
         sb.Append("#   LiveArchiveEncoder --completion bash > /etc/bash_completion.d/").Append(exe.ToLowerInvariant()).Append('\n');
-        sb.Append("_").Append(exe.ToLowerInvariant()).Append("_opts='");
+        sb.Append('_').Append(exe.ToLowerInvariant()).Append("_opts='");
         sb.Append(string.Join(' ', FlagOptions.Concat(ValueOptions.Select(o => o.Flag))));
         sb.Append("'\n\n");
         sb.Append('_').Append(exe.ToLowerInvariant()).Append("() {\n");
@@ -147,7 +147,7 @@ public static class Completion
         sb.Append("#compdef ").Append(exe).Append('\n');
         sb.Append("# zsh completion for ").Append(exe).Append("  (generated)\n");
         sb.Append("#   LiveArchiveEncoder --completion zsh > \"${fpath[1]}/_").Append(exe.ToLowerInvariant()).Append("\"\n\n");
-        sb.Append("_").Append(exe.ToLowerInvariant()).Append("() {\n");
+        sb.Append('_').Append(exe.ToLowerInvariant()).Append("() {\n");
         sb.Append("    local -a opts\n    opts=(\n");
         foreach (string flag in FlagOptions) sb.Append("        '").Append(flag).Append("'\n");
         foreach ((string flag, string[] values) in ValueOptions)

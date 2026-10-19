@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
@@ -176,7 +176,7 @@ public static class RealtimeEncoder
         {
             Preflight.Video(
                 ffmpeg: o.FFmpeg, src: src, encoder: o.Encoder, fps: o.Fps, quality: o.Quality,
-                threads: o.Threads, width: width, height: height, vf: vf, muxer: muxer,
+                threads: o.Threads, vf: vf, muxer: muxer,
                 stream: stream,
                 x264Preset: o.Encoder.Name == "libx264" ? o.X264Preset : null,
                 x264Tune: o.Encoder.Name == "libx264" ? o.X264Tune : null,
@@ -265,7 +265,6 @@ public static class RealtimeEncoder
 
         // Probe once with a throwaway pass over the source to know whether audio
         // is even in play before committing to the split pipeline.
-        EncodeResult? inlineFallback = null;
         try
         {
             return RunSplitCore(o, cancellationToken);
@@ -278,9 +277,8 @@ public static class RealtimeEncoder
             {
                 Console.WriteLine(L.T("note.splitunavailable", exc.Message));
             }
-            inlineFallback = Run(o, cancellationToken);
+            return Run(o, cancellationToken);
         }
-        return inlineFallback!;
     }
 
     private static EncodeResult RunSplitCore(RealtimeOptions o, CancellationToken cancellationToken)
@@ -551,7 +549,7 @@ public static class RealtimeEncoder
         var captureState = new CaptureState();
         var captureErrors = new List<string>();
         var decoderDiagnostics = new List<string>();
-        var diagnosticsLock = new object();
+        Lock diagnosticsLock = new();
         long capturedSequence = 0;
         string? decoderError = null;
 
@@ -976,7 +974,7 @@ public static class RealtimeEncoder
                 }
                 catch { /* already gone */ }
             }
-            HighResolutionTimer.Disable();
+            _ = HighResolutionTimer.Disable();
         }
     }
 

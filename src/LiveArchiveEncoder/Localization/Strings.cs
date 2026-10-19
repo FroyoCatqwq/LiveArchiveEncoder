@@ -1,4 +1,4 @@
-﻿namespace LiveArchiveEncoder.Localization;
+namespace LiveArchiveEncoder.Localization;
 
 /// <summary>
 /// Two-language string table for everything a user actually reads.
@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.8 (.NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.8.1 (.NET 10 / .NET 11)",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -437,7 +437,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.8 (.NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.8.1 (.NET 10 / .NET 11)",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 

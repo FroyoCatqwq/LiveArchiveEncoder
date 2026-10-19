@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.FFmpeg;
 
@@ -182,7 +183,7 @@ public static partial class FfmpegCatalog
     /// <summary>Case-insensitive lookup among <see cref="Available"/>; null when unusable here.</summary>
     public static FfmpegDist? Find(string? id)
     {
-        if (string.IsNullOrWhiteSpace(id)) return null;
+        if (!id.HasText) return null;
         foreach (FfmpegDist d in Available)
         {
             if (string.Equals(d.Id, id.Trim(), StringComparison.OrdinalIgnoreCase)) return d;
@@ -195,7 +196,7 @@ public static partial class FfmpegCatalog
 
     public static FfmpegDist? FindKnown(string? id, DistPlatform platform)
     {
-        if (string.IsNullOrWhiteSpace(id)) return null;
+        if (!id.HasText) return null;
         foreach (FfmpegDist d in All)
         {
             if (d.Platform == platform

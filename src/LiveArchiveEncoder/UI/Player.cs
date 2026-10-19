@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using LiveArchiveEncoder.Configuration;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.UI;
 
@@ -32,7 +33,7 @@ public static class Player
     public static string Describe(PlayMode mode, string? externalPlayer, string? ffplayPath) => mode switch
     {
         PlayMode.Ffplay => ffplayPath is null ? "ffplay (not found)" : ffplayPath,
-        PlayMode.External => string.IsNullOrWhiteSpace(externalPlayer)
+        PlayMode.External => !externalPlayer.HasText
             ? "external (system default player)"
             : externalPlayer,
         _ => "off",
@@ -60,7 +61,7 @@ public static class Player
                 return (true, null);
             }
 
-            if (string.IsNullOrWhiteSpace(externalPlayer))
+            if (!externalPlayer.HasText)
             {
                 // Shell association: opens with whatever the user has registered.
                 // On Unix that means xdg-open, which every desktop ships and which

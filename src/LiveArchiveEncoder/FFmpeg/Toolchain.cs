@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Net;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.FFmpeg;
 
@@ -277,7 +278,7 @@ public static class Toolchain
                 "--dir", Path.GetDirectoryName(destination)!,
                 "-o", Path.GetFileName(destination),
             };
-            if (!string.IsNullOrWhiteSpace(proxy))
+            if (proxy.HasText)
             {
                 args.Add("--all-proxy");
                 args.Add(proxy);
@@ -305,7 +306,7 @@ public static class Toolchain
         try
         {
             using var handler = new HttpClientHandler();
-            if (!string.IsNullOrWhiteSpace(proxy))
+            if (proxy.HasText)
             {
                 handler.Proxy = new WebProxy(proxy);
                 handler.UseProxy = true;
@@ -574,13 +575,14 @@ public static class Toolchain
         if (proc is null) return (-1, $"could not start {exe}");
 
         var tail = new System.Text.StringBuilder();
+        var tailGate = new Lock();
         void Pipe(StreamReader reader)
         {
             string? line;
             while ((line = reader.ReadLine()) is not null)
             {
                 log?.Invoke(line);
-                lock (tail)
+                lock (tailGate)
                 {
                     if (tail.Length < 4000)
                     {

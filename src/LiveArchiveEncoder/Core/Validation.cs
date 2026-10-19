@@ -7,7 +7,7 @@ public static class Validation
 {
     public static void ValidateOutputExtension(FileInfo dst, EncoderInfo encoder)
     {
-        if (!Constants.FormatExtensions.TryGetValue(encoder.FormatName, out HashSet<string>? allowed))
+        if (!Constants.FormatExtensions.TryGetValue(encoder.FormatName, out IReadOnlySet<string>? allowed))
             return;
 
         string suffix = dst.Extension.ToLowerInvariant();
@@ -63,7 +63,7 @@ public static class Validation
     /// </summary>
     public static string? ValidateContainer(EncoderInfo encoder, string? requested)
     {
-        if (string.IsNullOrWhiteSpace(requested)) return null;
+        if (!requested.HasText) return null;
         if (EncoderMath.ResolveContainer(encoder, requested) is not null) return null;
 
         string allowed = string.Join(", ",

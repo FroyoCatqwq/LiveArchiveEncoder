@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
@@ -25,8 +25,6 @@ public static class Preflight
         double fps,
         int quality,
         int threads,
-        int width,
-        int height,
         string vf,
         string muxer,
         StreamInfo stream,

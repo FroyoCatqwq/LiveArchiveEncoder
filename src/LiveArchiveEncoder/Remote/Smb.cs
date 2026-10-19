@@ -1,6 +1,7 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using LiveArchiveEncoder.Localization;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.Remote;
 
@@ -35,14 +36,14 @@ public static class Smb
     public static bool IsUncPath(string? path)
     {
         if (IsSmbUrl(path)) return true;
-        if (string.IsNullOrWhiteSpace(path)) return false;
+        if (!path.HasText) return false;
         string p = path.Replace('/', '\\');
         return p.StartsWith(@"\\", StringComparison.Ordinal) && p.Length > 2;
     }
 
     /// <summary>True for <c>smb://server/share/...</c>.</summary>
     public static bool IsSmbUrl(string? path) =>
-        !string.IsNullOrWhiteSpace(path)
+        path.HasText
         && path.StartsWith("smb://", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
@@ -57,7 +58,7 @@ public static class Smb
     /// </summary>
     public static bool IsRemotePath(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return false;
+        if (!path.HasText) return false;
         if (IsUncPath(path)) return true;
         return !OperatingSystem.IsWindows() && MountFor(path) is not null;
     }
@@ -130,7 +131,7 @@ public static class Smb
     /// </summary>
     public static CifsMount? MountFor(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (!path.HasText) return null;
         string full = Path.GetFullPath(path);
         CifsMount? best = null;
 
@@ -227,9 +228,9 @@ public static class Smb
         {
             if (!opt.StartsWith("vers=", StringComparison.OrdinalIgnoreCase)) continue;
             string v = opt["vers=".Length..];
-            return v.StartsWith("3", StringComparison.Ordinal) ? SmbDialect.Smb3
-                : v.StartsWith("2", StringComparison.Ordinal) ? SmbDialect.Smb2
-                : v.StartsWith("1", StringComparison.Ordinal) ? SmbDialect.Smb1
+            return v.StartsWith('3') ? SmbDialect.Smb3
+                : v.StartsWith('2') ? SmbDialect.Smb2
+                : v.StartsWith('1') ? SmbDialect.Smb1
                 : SmbDialect.Unknown;
         }
         return SmbDialect.Unknown;
@@ -243,7 +244,7 @@ public static class Smb
     /// </summary>
     public static string? UnreachableHint(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (!path.HasText) return null;
 
         if (IsSmbUrl(path))
         {
@@ -325,9 +326,9 @@ public static class Smb
             string text = proc.StandardOutput.ReadToEnd().Trim();
             if (text.Length == 0) return null;
 
-            SmbDialect dialect = text.StartsWith("3", StringComparison.Ordinal) ? SmbDialect.Smb3
-                : text.StartsWith("2", StringComparison.Ordinal) ? SmbDialect.Smb2
-                : text.StartsWith("1", StringComparison.Ordinal) ? SmbDialect.Smb1
+            SmbDialect dialect = text.StartsWith('3') ? SmbDialect.Smb3
+                : text.StartsWith('2') ? SmbDialect.Smb2
+                : text.StartsWith('1') ? SmbDialect.Smb1
                 : SmbDialect.Unknown;
             return (dialect, text);
         }

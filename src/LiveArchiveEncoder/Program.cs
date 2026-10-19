@@ -1,4 +1,4 @@
-﻿using LiveArchiveEncoder.Configuration;
+using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
@@ -123,7 +123,7 @@ public static class Program
         HashSet<string> availableScaleAlgorithms;
 
         string? source = cli.FfmpegSource;
-        if (string.IsNullOrWhiteSpace(source)) source = ConfigStore.Load().FfmpegSource;
+        if (!source.HasText) source = ConfigStore.Load().FfmpegSource;
 
         try
         {

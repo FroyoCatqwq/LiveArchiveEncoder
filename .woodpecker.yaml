@@ -18,6 +18,12 @@
 # failures that have nothing to do with the change under review. Run them on a
 # real machine; see docs/usage.md.
 
+# v7.8.1 builds against net10.0 by default and publishes with RollForward=Major,
+# so one output covers .NET 10 and .NET 11 machines. "Runs on both" is verified
+# rather than assumed: the last two steps repeat build+test with
+# -p:LaeTfm=net11.0, which is what would catch an API that only exists in one
+# of the two.
+
 when:
   - event: [push, pull_request]
 
@@ -36,3 +42,13 @@ steps:
     image: mcr.microsoft.com/dotnet/sdk:11.0
     commands:
       - dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build
+
+  - name: build (net11)
+    image: mcr.microsoft.com/dotnet/sdk:11.0
+    commands:
+      - dotnet build LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
+
+  - name: test (net11)
+    image: mcr.microsoft.com/dotnet/sdk:11.0
+    commands:
+      - dotnet test LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0 --no-build

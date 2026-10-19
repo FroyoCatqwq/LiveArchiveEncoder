@@ -2,14 +2,17 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net11.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <!-- See Directory.Build.props: $(LaeTfm) is net10.0 by default and can be
+         overridden with -p:LaeTfm=net11.0 for a .NET 11-targeted build. -->
+    <TargetFramework>$(LaeTfm)</TargetFramework>
     <RootNamespace>LiveArchiveEncoder</RootNamespace>
     <AssemblyName>LiveArchiveEncoder</AssemblyName>
 
-    <!-- No locale-dependent formatting: FFmpeg arguments must be invariant. -->
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Run on the newest installed runtime this major or newer, so a machine
+         with only .NET 11 installed still starts the .NET 10 build. This is what
+         makes one binary cover "supports .NET 10 and .NET 11". -->
+    <RollForward>Major</RollForward>
+
     <!-- Workstation GC keeps pause times low while feeding raw frames. -->
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
@@ -21,9 +24,7 @@
     <Optimize>true</Optimize>
     <DebugType>none</DebugType>
     <!-- Trim runtime services this tool never uses. All of these are offline
-         switches; ReadyToRun/NativeAOT were rejected because they need NuGet
-         runtime packs that cannot be restored behind the local proxy. -->
-    <InvariantGlobalization>true</InvariantGlobalization>
+         switches. -->
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
     <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
@@ -38,7 +39,13 @@
        tiered warm-up cost to a few milliseconds, and the result is one small
        self-contained exe. It does NOT make encoding faster: the encoder runs
        in FFmpeg child processes and the wall clock is pinned by the
-       deliberate realtime pacing. -->
+       deliberate realtime pacing.
+
+       v7.8.1: there used to be a second AVX2 flavour, built with
+       -p:IlcInstructionSet=avx2. It was dropped. The instruction set only
+       affects the C# side of this tool, while the encoding itself happens in
+       FFmpeg, which runtime-dispatches its own SIMD; the measured difference on
+       encode throughput was nil. Two flavours are enough: JIT and AOT. -->
   <PropertyGroup Condition="'$(PublishAot)' == 'true'">
     <!-- Optimise generated code for throughput; also enables the runtime's
          vectorised sort (VxSort) path. -->

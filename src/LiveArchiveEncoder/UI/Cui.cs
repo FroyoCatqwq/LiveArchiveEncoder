@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
@@ -25,7 +25,7 @@ public static class Cui
         UserConfig stored = ConfigStore.Load();
         bool restored = stored.Encoder is not null || stored.SavedAt is not null;
         if (restored) ConfigStore.Apply(stored, c, encoders);
-        if (!string.IsNullOrWhiteSpace(ffmpegSource)) c.FfmpegSource = ffmpegSource;
+        if (ffmpegSource.HasText) c.FfmpegSource = ffmpegSource;
 
         // Precedence: --lang on the command line beats the stored preference,
         // which beats the built-in default.
@@ -479,7 +479,9 @@ public static class Cui
         string raw = (Console.ReadLine() ?? "").Trim();
         if (raw.Length == 0 || raw == "0") return;
 
-        string? pick = null;
+        // Every path below either assigns this or returns early, so there is no
+        // "nothing picked" value to fall back to.
+        string? pick;
         if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx))
         {
             if (idx < 1 || idx > compatible.Count)

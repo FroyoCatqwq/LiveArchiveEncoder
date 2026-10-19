@@ -1,0 +1,59 @@
+<Project>
+
+  <!--
+    Shared MSBuild properties for LiveArchiveEncoder (v7.8.1).
+
+    Target framework
+    ~~~~~~~~~~~~~~~~
+    The tool ships as ONE framework-dependent build that runs on both .NET 10
+    and .NET 11:
+
+        LaeTfm defaults to net10.0
+
+    The app project sets RollForward=Major, so a machine that only has the
+    .NET 11 runtime still starts it, while a machine that has .NET 10 keeps
+    using .NET 10.
+
+    Building against .NET 11 explicitly is one switch and is what CI does in
+    addition to the default build, so "runs on both" is verified rather than
+    assumed:
+
+        dotnet build -p:LaeTfm=net11.0
+        dotnet test  -p:LaeTfm=net11.0
+
+    NativeAOT output is self-contained and therefore unaffected by either
+    choice.
+  -->
+  <PropertyGroup>
+    <LaeTfm Condition="'$(LaeTfm)' == ''">net10.0</LaeTfm>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- No locale-dependent formatting: FFmpeg arguments must be invariant. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Recommended (not "all") analyser set: it catches real defects such as
+         unused members and bad format strings without turning the build into a
+         style debate. -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!-- Warnings that are deliberate in this codebase rather than oversights:
+         CA1031, CA1062    process boundaries catch broad exception types, and
+                           argument sets are guaranteed non-null a line earlier;
+         CA1303, CA1305,
+         CA1310            all output is raw console text, never localised
+                           resources;
+         CA1707, CA1861    test method names use Method_Scenario, and NUnit
+                           needs inline arrays in [TestCase];
+         CA1859, CA1863,
+         CA2016, CA5399    interface return types, culture invariant file names
+                           and fire-and-forget process launches are intentional.
+    -->
+    <NoWarn>$(NoWarn);CA1031;CA1062;CA1303;CA1305;CA1310;CA1707;CA1859;CA1861;CA1863;CA2016;CA5399</NoWarn>
+  </PropertyGroup>
+
+</Project>

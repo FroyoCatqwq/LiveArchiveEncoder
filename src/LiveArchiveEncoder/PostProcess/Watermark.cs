@@ -1,6 +1,7 @@
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.PostProcess;
 
@@ -28,7 +29,7 @@ public static class Watermark
     ///
     /// Exposed separately so it can be asserted on without running FFmpeg.
     /// </summary>
-    public static string BuildFilter(WatermarkSettings settings, int width, int height, string? fontFile)
+    public static string BuildFilter(WatermarkSettings settings, int height, string? fontFile)
     {
         // Scale the mark to the picture: a 16 px watermark on a 160x120 clip
         // would cover a sixth of the frame, and nobody's 1998 player did that.
@@ -67,16 +68,16 @@ public static class Watermark
     {
         if (!settings.Enabled) return (true, null);
 
-        if (string.IsNullOrWhiteSpace(settings.Text))
+        if (!settings.Text.HasText)
             return (false, "watermark is enabled but the text is empty");
 
-        string? font = string.IsNullOrWhiteSpace(settings.FontFile) ? FontResolver.Find() : settings.FontFile;
+        string? font = !settings.FontFile.HasText ? FontResolver.Find() : settings.FontFile;
         if (font is null || !File.Exists(font))
             // Localised sentence first, then the untranslated install command --
             // a shell command should not be rendered in the user's language.
             return (false, $"{L.T("wm.nofont", FontResolver.EnvironmentVariable)} {FontResolver.InstallHint}");
 
-        string filter = BuildFilter(settings, width, height, font);
+        string filter = BuildFilter(settings, height, font);
 
         string? dir = Path.GetDirectoryName(output);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);

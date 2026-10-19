@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.PostProcess;
 
@@ -55,7 +56,7 @@ public static class FontResolver
     public static string? Find()
     {
         string? env = Environment.GetEnvironmentVariable(EnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(env) && File.Exists(env)) return env;
+        if (env.HasText && File.Exists(env)) return env;
 
         string dir = FontDirectory;
         string? found = PickFrom(dir);
