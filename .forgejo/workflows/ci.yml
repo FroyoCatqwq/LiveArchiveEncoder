@@ -90,9 +90,9 @@ jobs:
 
       - name: Package (windows)
         if: matrix.rid == 'win-x64'
+        # `zip` is expected to be installed on the runner: apt-get here would
+        # need a password nobody can type.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y zip
           (cd publish/win-x64 && zip -q -r ../../dist-win-x64.zip .)
 
       # v4 of both artifact actions refuses to run anywhere but GitHub
