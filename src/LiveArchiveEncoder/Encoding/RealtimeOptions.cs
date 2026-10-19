@@ -44,7 +44,10 @@ public sealed class RealtimeOptions
     public string Hwaccel { get; set; } = "off";
     public int Width { get; init; } = Constants.DefaultWidth;
     public int Height { get; init; } = Constants.DefaultHeight;
-    public bool Crop43 { get; init; } = true;
+    /// <summary>crop (fill, discard the edge), fit (pad) or stretch (distort).</summary>
+    public string FitMode { get; init; } = "crop";
+    public string CropAnchor { get; init; } = "center";
+    public string PadColor { get; init; } = "black";
     public string ScaleAlgo { get; init; } = "neighbor";
     public string Deinterlace { get; init; } = "off";
     public string DeintMode { get; init; } = "send_frame";

@@ -81,7 +81,9 @@ public static class RealtimeEncoder
             AudioRate = audioRate,
             Width = o.Width,
             Height = o.Height,
-            Crop43 = o.Crop43,
+            FitMode = o.FitMode,
+            CropAnchor = o.CropAnchor,
+            PadColor = o.PadColor,
             ScaleAlgo = o.ScaleAlgo,
             Deinterlace = o.Deinterlace,
             DeintMode = o.DeintMode,
@@ -151,8 +153,8 @@ public static class RealtimeEncoder
         }
 
         string vf = ArgsBuilder.BuildFilters(
-            width, height, o.Fps, o.Crop43, scaleAlgo, transportFmt,
-            o.Deinterlace, o.DeintMode, o.DeintParity, o.DeintMarkedOnly);
+            width, height, o.Fps, o.FitMode, o.CropAnchor, o.PadColor, scaleAlgo,
+            transportFmt, o.Deinterlace, o.DeintMode, o.DeintParity, o.DeintMarkedOnly);
         int frameSize = PixelFormatUtil.RawFrameSize(width, height, transportFmt);
         int? targetSlots = duration is null ? null : (int)Math.Ceiling(duration.Value * o.Fps - 1e-9);
         string muxer = o.Encoder.FormatName;
@@ -357,7 +359,9 @@ public static class RealtimeEncoder
                 Hwaccel = o.Hwaccel,
                 Width = o.Width,
                 Height = o.Height,
-                Crop43 = o.Crop43,
+                FitMode = o.FitMode,
+                CropAnchor = o.CropAnchor,
+                PadColor = o.PadColor,
                 ScaleAlgo = o.ScaleAlgo,
                 Deinterlace = o.Deinterlace,
                 DeintMode = o.DeintMode,

@@ -28,17 +28,47 @@ public static class Validation
     public static (int? AudioRate, int AudioChannels) EffectiveAudioSettings(
         EncoderInfo encoder, string? audioEncoder, int? audioRate, int audioChannels)
     {
-        if (audioEncoder != "roq_dpcm") return (audioRate, audioChannels);
+        if (audioEncoder == "roq_dpcm")
+        {
+            if (encoder.FormatName != "roq")
+                throw new ArgumentException("roq_dpcm audio is only valid in the RoQ (.roq) container");
+            if (audioChannels is not (1 or 2))
+                throw new ArgumentException("roq_dpcm supports mono or stereo audio only; choose 1 or 2 channels");
+            // FFmpeg's roq_dpcm encoder rejects every sample rate except 22050 Hz.
+            return (22050, audioChannels);
+        }
 
-        if (encoder.FormatName != "roq")
-            throw new ArgumentException("roq_dpcm audio is only valid in the RoQ (.roq) container");
-        if (audioChannels is not (1 or 2))
-            throw new ArgumentException("roq_dpcm supports mono or stereo audio only; choose 1 or 2 channels");
-        if (audioRate is not (null or 22050))
-            throw new ArgumentException("roq_dpcm requires 22050 Hz audio; set audio sample rate to 22050 or auto");
+        // Everything else is snapped instead of rejected: an unsupported rate is
+        // a value the encoder cannot honour, not a decision to refuse the run.
+        // (dialup98 used to ask ac3 for 16 kHz and got a zero-byte file.)
+        return AudioCatalog.Effective(audioEncoder, audioRate, audioChannels);
+    }
 
-        // FFmpeg's roq_dpcm encoder rejects every sample rate except 22050 Hz.
-        return (22050, audioChannels);
+    /// <summary>
+    /// Hard rules for an audio track: what cannot be fixed by snapping a value
+    /// and therefore has to stop the run. Returns a message, or null.
+    /// </summary>
+    public static string? ValidateAudio(Config c)
+    {
+        if (c.Encoder is null || c.AudioEncoder is null) return null;
+        return AudioCatalog.Validate(
+            c.AudioEncoder, c.Encoder.FormatName, c.AudioRate, c.AudioChannels, c.AudioKbps);
+    }
+
+    /// <summary>
+    /// The container the encoder will actually write: null keeps its default.
+    /// Rejected when the encoder cannot write it, which is a real error rather
+    /// than something to fall back from -- a silent fallback would produce a
+    /// file with an extension the user did not ask for.
+    /// </summary>
+    public static string? ValidateContainer(EncoderInfo encoder, string? requested)
+    {
+        if (string.IsNullOrWhiteSpace(requested)) return null;
+        if (EncoderMath.ResolveContainer(encoder, requested) is not null) return null;
+
+        string allowed = string.Join(", ",
+            EncoderMath.AllowedContainers(encoder).Select(x => x.Format));
+        return $"encoder '{encoder.Name}' cannot write '{requested.Trim()}'; it supports: {allowed}";
     }
 
     public static void ValidateCommonConfig(Config c)
@@ -74,12 +104,18 @@ public static class Validation
         if (c.AudioRate is not null && c.AudioRate <= 0)
             throw new ArgumentException("audio sample rate must be > 0");
 
-        if (c.Encoder is not null && c.AudioEncoder == "roq_dpcm")
+        if (c.Encoder is not null)
         {
-            EffectiveAudioSettings(c.Encoder, c.AudioEncoder, c.AudioRate, c.AudioChannels);
+            string? containerError = ValidateContainer(c.Encoder, c.Container);
+            if (containerError is not null) throw new ArgumentException(containerError);
         }
 
+        string? audioError = ValidateAudio(c);
+        if (audioError is not null) throw new ArgumentException(audioError);
+
         c.ScaleAlgo = EncoderMath.CanonicalScaleAlgo(c.ScaleAlgo);
+        c.FitMode = EncoderMath.CanonicalFitMode(c.FitMode);
+        c.CropAnchor = EncoderMath.CanonicalCropAnchor(c.CropAnchor);
         if (c.Deinterlace != "off" && !Constants.DeinterlaceFilters.Contains(c.Deinterlace))
             throw new ArgumentException("unsupported deinterlace filter");
         if (c.DeintMode is not ("send_frame" or "send_field"))

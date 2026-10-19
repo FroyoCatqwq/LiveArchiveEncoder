@@ -40,6 +40,14 @@ public sealed class CliOptions
     public int? AudioRate { get; init; }
     public int Width { get; init; } = 256;
     public int Height { get; init; } = 192;
+
+    /// <summary>v7.8: container override, e.g. avi / mkv / mp4. Null = encoder default.</summary>
+    public string? Container { get; init; }
+
+    /// <summary>v7.8: crop, fit (pad) or stretch. --no-crop still means stretch.</summary>
+    public string FitMode { get; init; } = "crop";
+    public string CropAnchor { get; init; } = "center";
+    public string PadColor { get; init; } = "black";
     public bool NoCrop { get; init; }
     public string ScaleAlgo { get; init; } = "neighbor";
     public string Deinterlace { get; init; } = "off";
@@ -175,6 +183,10 @@ public static class CliParser
         int? audioRate = null;
         int width = 256;
         int height = 192;
+        string? container = null;
+        string fitMode = "crop";
+        string cropAnchor = "center";
+        string padColor = "black";
         bool noCrop = false;
         string scaleAlgo = "neighbor";
         string deinterlace = "off";
@@ -336,6 +348,25 @@ public static class CliParser
                 case "--height":
                     if (!TryValue(out string hRaw) || !int.TryParse(hRaw, out height))
                         return (null, "--height requires an integer");
+                    break;
+                case "--container":
+                    if (!TryValue(out container)) return (null, "--container requires a value");
+                    container = container.TrimStart('.').ToLowerInvariant();
+                    break;
+                case "--fit":
+                    if (!TryValue(out fitMode)) return (null, "--fit requires a value");
+                    fitMode = fitMode.ToLowerInvariant();
+                    if (!Constants.FitModes.Contains(fitMode))
+                        return (null, $"--fit must be one of {string.Join(", ", Constants.FitModes)}");
+                    break;
+                case "--crop-anchor":
+                    if (!TryValue(out cropAnchor)) return (null, "--crop-anchor requires a value");
+                    cropAnchor = cropAnchor.ToLowerInvariant();
+                    if (!Constants.CropAnchors.Contains(cropAnchor))
+                        return (null, $"--crop-anchor must be one of {string.Join(", ", Constants.CropAnchors)}");
+                    break;
+                case "--pad-color":
+                    if (!TryValue(out padColor)) return (null, "--pad-color requires a value");
                     break;
                 case "--no-crop": noCrop = true; break;
                 case "--scale-algo" or "--scale-flags":
@@ -521,6 +552,10 @@ public static class CliParser
             AudioRate = audioRate,
             Width = width,
             Height = height,
+            Container = container,
+            FitMode = noCrop ? "stretch" : fitMode,
+            CropAnchor = cropAnchor,
+            PadColor = padColor,
             NoCrop = noCrop,
             ScaleAlgo = scaleAlgo,
             Deinterlace = deinterlace,
@@ -596,7 +631,13 @@ public static class CliParser
             ("--audio-rate", "HZ", "audio sample rate (default: source)"),
             ("--width", "N", "output width (default: 256)"),
             ("--height", "N", "output height (default: 192)"),
-            ("--no-crop", "", "scale instead of crop to the target size"),
+            ("--container", "NAME", "container override where the encoder allows one, e.g. avi for "
+                                   + "mpeg1video/mpeg2video/mpeg4/libxvid/libx264, mkv for libx264"),
+            ("--fit", "MODE", "crop (fill, cut the edge), fit (keep the whole picture, pad the "
+                            + "rest) or stretch (default: crop)"),
+            ("--crop-anchor", "POS", "which edge survives a crop: center, top, bottom, left, right"),
+            ("--pad-color", "COLOR", "bar colour for --fit, e.g. black or 0x808080 (default: black)"),
+            ("--no-crop", "", "shorthand for --fit stretch"),
             ("--scale-algo, --scale-flags", "NAME", "scaler kernel; cubic is an alias for bicubic (default: neighbor)"),
             ("--deinterlace", "NAME", "off, yadif, bwdif, ... (default: off)"),
             ("--deint-mode", "MODE", "send_frame or send_field (default: send_frame)"),

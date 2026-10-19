@@ -61,8 +61,39 @@ public static class ArgsBuilder
         string deintParity,
         bool deintMarkedOnly)
     {
+        // v7.7's boolean survives as a fit mode: "crop 4:3 = yes" is a crop,
+        // "no" is a stretch. Newer callers pass the mode directly.
+        return BuildFilters(outW, outH, baseFps,
+            crop43 ? "crop" : "stretch", "center", "black", scaleAlgo, transportFmt,
+            deinterlace, deintMode, deintParity, deintMarkedOnly);
+    }
+
+    /// <summary>
+    /// v7.8: the same chain with an explicit fit mode.
+    ///
+    /// crop    -- crop to the output aspect ratio, then scale (fills the frame,
+    ///            discards the overflowing edge)
+    /// fit     -- scale down until both edges fit, then pad (keeps the whole
+    ///            picture: a 16:9 master in a 4:3 frame gains top/bottom bars)
+    /// stretch -- scale straight to the output size (fills the frame, distorts)
+    /// </summary>
+    public static string BuildFilters(
+        int outW,
+        int outH,
+        double baseFps,
+        string fitMode,
+        string cropAnchor,
+        string padColor,
+        string scaleAlgo,
+        string transportFmt,
+        string deinterlace,
+        string deintMode,
+        string deintParity,
+        bool deintMarkedOnly)
+    {
+        string mode = Core.EncoderMath.CanonicalFitMode(fitMode);
         var filters = new List<string>();
-        if (crop43) filters.Add(@"crop=min(iw\,ih*4/3):ih:(iw-min(iw\,ih*4/3))/2:0");
+        if (mode == "crop") filters.Add(Core.EncoderMath.CropFilterExpr(outW, outH, cropAnchor));
 
         string deintExpr = DeinterlaceFilterExpr(deinterlace, deintMode, deintParity, deintMarkedOnly);
         if (deintExpr.Length > 0) filters.Add(deintExpr);
@@ -70,7 +101,17 @@ public static class ArgsBuilder
         // FPS is applied after deinterlacing: in send_field/bob mode putting fps
         // first would discard field-derived pictures before the cadence controller.
         filters.Add(string.Create(CultureInfo.InvariantCulture, $"fps={baseFps:G6}:round=down"));
-        filters.Add($"scale={outW}:{outH}:flags={Core.EncoderMath.CanonicalScaleAlgo(scaleAlgo)}");
+
+        if (mode == "fit")
+        {
+            filters.Add(Core.EncoderMath.FitScaleFilterExpr(outW, outH, scaleAlgo));
+            filters.Add(Core.EncoderMath.PadFilterExpr(outW, outH, padColor));
+        }
+        else
+        {
+            filters.Add($"scale={outW}:{outH}:flags={Core.EncoderMath.CanonicalScaleAlgo(scaleAlgo)}");
+        }
+
         filters.Add($"format={transportFmt}");
         return string.Join(',', filters);
     }

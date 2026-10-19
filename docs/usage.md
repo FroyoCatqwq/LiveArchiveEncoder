@@ -176,8 +176,12 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--audio-kbps` | `32` | 音频码率 |
 | `--audio-channels` | `1` | 声道数 |
 | `--audio-rate` | 跟随源 | 采样率（Hz） |
-| `--width` `--height` | `256` `192` | 输出分辨率 |
-| `--no-crop` | 默认裁剪 | 加上它表示**缩放**到目标尺寸，而不是 4:3 裁切 |
+| `--width` `--height` | `256` `192` | 输出分辨率（16:9 预设见 §7.15） |
+| `--container` | 编码器默认 | 容器切换（见 §7.14） |
+| `--fit` | `crop` | 画面适配：`crop` 裁切填满 / `fit` 完整画面＋补边 / `stretch` 拉伸变形（见 §7.15） |
+| `--crop-anchor` | `center` | `crop` 时保留哪一边：`center` / `top` / `bottom` / `left` / `right` |
+| `--pad-color` | `black` | `fit` 时补边的颜色，FFmpeg 颜色名或 `0xRRGGBB` |
+| `--no-crop` | 默认裁剪 | 旧写法，等价于 `--fit stretch` |
 | `--scale-algo` / `--scale-flags` | `neighbor` | 缩放核；`cubic` 是 `bicubic` 的别名 |
 | `--deinterlace` | `off` | `bwdif` / `yadif` / `w3fdif` |
 | `--deint-mode` | `send_frame` | `send_frame` 或 `send_field` |
@@ -226,19 +230,25 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
  2. Output file       留空＝自动命名 <原名>_live.<扩展名>
  3. Video encoder     从 FFmpeg 探测到的老式编码器列表里选
  4. Parameters        参数页（见下）
- 5. Rescan encoders   重新扫一遍编码器
- 6. Show FFmpeg filters
- 7. Show configuration
- 8. Start encoding
- 9. Turbo mode        开关，默认关闭（见 §7.5）
+ 5. Rescan encoders   重新扫一遍视频编码器
+ 6. Audio encoder     扫描音频编码器：只列出"当前视频编码器 + 容器"装得下的（见 §7.13）
+ 7. Show FFmpeg filters
+ 8. Show configuration
+ 9. Start encoding
 10. Language          界面语言，en / zh
 11. Parallel shards   并行分片数，1＝关闭（见 §7.5）
 12. FFmpeg toolchain  切换/下载/删除 FFmpeg 构建（见 §7.10）
 13. Playback after run 编码完成后用什么播放（见 §7.11）
+14. Era preset        时代预设（见 §7.12）
+15. Watermark         文字水印（见 §7.12）
+16. Recompress        二次压缩（见 §7.12）
  0. Exit
 ```
 
-9 – 13 改完立即写进配置文件，下一次打开就是这次的值。
+6 – 16 改完立即写进配置文件，下一次打开就是这次的值。
+
+**Turbo 已不在菜单里**（v7.7 起弃用）。命令行 `--turbo` 还能用，只是每次都会
+打印弃用警告；配置文件里已有的 `Turbo: true` 仍然生效。
 
 选编码器时会自动做三件事：把不支持的帧率吸附到合法值、把尺寸归一化到编码器
 支持的尺寸、按容器挑一个默认音频编码器。AMV 和 RoQ 还会额外强制音频参数
@@ -250,20 +260,23 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
 ```
  1. limit            2. recover          3. window           4. base FPS
  5. FPS levels       6. CRF / q:v        7. threads          8. capture buffer
- 9. size            10. crop 4:3        11. scale algorithm 12. deinterlace
+ 9. size (含比例)   10. picture fit     11. scale algorithm 12. deinterlace
 13. deint mode      14. field parity    15. deint marked only
 16. audio bitrate   17. audio channels  18. audio sample rate
 19. hardware decode 20. audio encoder
 21. x264 preset     22. x264 tune       23. x264 profile    24. x264 level
                     （21–24 仅在编码器是 libx264 时出现）
-25. segment start   26. segment end
+25. segment start   26. segment end     27. level bitrates
+28. container       29. crop anchor     30. bar colour      31. resolution presets
  0. Back
 ```
 
-每一项都是"回车＝保留当前值"。10、15、19 是开关，选中即翻转。`26` 可以填
-`end` / `none` / `eof` 表示"到源尾"。
+每一项都是"回车＝保留当前值"。15、19 是开关，选中即翻转。`26` 可以填
+`end` / `none` / `eof` 表示"到源尾"。17/18 会按音频编码器的能力**自动纠正**
+（例如选了 ac3 却填 22050 Hz，会改成 32000 并说明原因），20 只允许填当前容器
+装得下的编码器。
 
-选 `8` 之后会再打印一遍完整配置并问 `Start encoding? [Y/n]`，回车即开始。
+选 `9` 之后会再打印一遍完整配置并问 `Start encoding? [Y/n]`，回车即开始。
 
 ---
 
@@ -397,9 +410,11 @@ LiveArchiveEncoder src.mp4 out.avi --encoder mpeg4 --fps 15 \
 
 ## 7.5 提速：`--turbo` 与 `--parallel`
 
-交互式菜单里也有这两个开关：主菜单第 9 项 `Turbo mode`、第 11 项
-`Parallel shards`，改完立即写进配置（**默认都是关闭**，turbo 会改变产物，
-不该默认打开）。命令行则用 `--turbo` / `--parallel N`（分片上限 8）。
+> **v7.8 起 Turbo 不再出现在主菜单**，只有命令行 `--turbo` 还在（每次打印弃用
+> 警告）。配置文件里已有的 `Turbo: true` 仍然生效，所以老脚本不会被打断。
+
+并行分片在交互式菜单里是主菜单第 11 项 `Parallel shards`，改完立即写进配置
+（**默认关闭**）。命令行用 `--parallel N`（分片上限 8）。
 
 ### 前提：默认慢是**故意的**，不是性能问题
 
@@ -958,6 +973,126 @@ Linux   : ~/.local/share/LiveArchiveEncoder/fonts/
 
 ---
 
+## 7.13 音频编码器：扫描、匹配与参数校验（v7.8）
+
+v7.7 及以前只有一张"按容器挑默认值"的对照表，从不检查参数。于是 `dialup98`
+预设（rv20 → RealMedia → ac3 @ 16 kHz）在 FFmpeg 报
+`Specified sample rate 16000 is not supported by the ac3 encoder` 之后**照样
+留下一个 0 字节的产物**：整轮编码跑完了才失败。v7.8 改了三处。
+
+**① 主菜单第 6 项「扫描音频编码器」**：先扫出 FFmpeg 里所有音频编码器，再过
+滤成"当前视频编码器的容器装得下"的那些，并显示各自的采样率与声道限制：
+
+```
+=== Audio encoders ===
+rm container: 84 audio encoders in this build, 2 of them mux here.
+   1. ac3             32000, 44100, 48000      1-6ch  (32 / 44.1 / 48 kHz only) <
+   2. aac             8000-96000               1-8ch
+ 0. Back
+```
+
+选完之后，若当前采样率/声道数不合法会自动纠正，并打印改成了什么。
+
+**② 参数校验**（命令行拒绝，菜单纠正）：
+
+| 编码器 | 采样率 | 声道 |
+| --- | --- | --- |
+| `ac3` / `eac3` | **32000 / 44100 / 48000** | 1–6 |
+| `mp2` | 22050 / 24000 / 32000 / 44100 / 48000 | 1–2 |
+| `libmp3lame` / `mp3_mf` | 8000–48000 | 1–2 |
+| `aac` | 8000–96000 | 1–8 |
+| `wmav1` / `wmav2` | 8000–48000 | 1–2 |
+| `libvorbis` / `vorbis` | 8000–48000 | 1–8 |
+| `libopus` / `opus` | 8000 / 12000 / 16000 / 24000 / 48000 | 1–8 |
+| `adpcm_ima_amv` | 22050 | 1 |
+| `roq_dpcm` | 22050 | 1–2 |
+| `flac` / `pcm_*` / `adpcm_ima_wav` | 不限 | 1–8 |
+
+命令行**显式**给的采样率严格校验（写错就报）：
+
+```
+$ LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --audio-encoder ac3 --audio-rate 16000
+ERROR: 'ac3' does not support 16000 Hz; supported sample rates: 32000, 44100, 48000
+```
+
+**时代预设**带来的采样率算建议值，会被就近纠正（16 kHz → 32 kHz）并说明原因
+——预设是为"那个年代"写的，不是为容器强制的那个编码器写的。
+
+**③ 容器匹配**：装不进容器的编码器直接拒绝，例如 `--encoder rv20
+--audio-encoder libvorbis` 会报 `cannot be muxed into 'rm'`。白名单大致是：
+`rm` 只有 ac3/aac，`ogg` 只有 vorbis/opus/flac，`matroska` 最宽。表里没建模
+的编码器一律放行——宁可不检查，也不能误杀一个能用的编码器。
+
+## 7.14 容器切换（v7.8）
+
+"编码器 → 容器"不再是一对一写死：
+
+| 编码器 | 可选容器（**加粗是默认**） |
+| --- | --- |
+| `mpeg1video` | **mpg**，avi |
+| `mpeg2video` | **mpg**，avi |
+| `mpeg4` | **avi**，mp4 |
+| `libxvid` | **avi**，mp4 |
+| `libx264` | **mp4**，avi，mkv |
+| 其它 | 保持原来的单一容器 |
+
+```bash
+# mpeg1video 写进 AVI
+LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg1video --container avi
+# libx264 写进 Matroska
+LiveArchiveEncoder.exe src.mp4 out.mkv --encoder libx264 --container mkv
+```
+
+`--container` 认封装器名也认扩展名（`mkv` 和 `matroska` 都行）。菜单在
+**参数设置 → 28**；换视频编码器时若新编码器写不了当前容器，会提示并回退。
+
+输出扩展名必须和新容器一致，否则照旧报扩展名不匹配。选不了的组合（例如
+`--encoder rv20 --container mkv`）**直接报错而不是静默回退**——静默回退会给
+你一个没点过的扩展名。
+
+默认容器一个都没动，所以 35 个编码器的扫描结果跟 v7.7 完全一致。
+
+## 7.15 画面比例：16:9 与三种适配方式（v7.8）
+
+分辨率预设现在 4:3 和 16:9 都有（菜单**参数设置 → 31**）：
+
+| 4:3 | 16:9 |
+| --- | --- |
+| 160x120、256x192、320x240、384x288、512x384、640x480 | 160x90、256x144、320x180、384x216、512x288、640x360、854x480、1280x720 |
+
+三种适配方式（`--fit`，菜单**参数设置 → 10**）：
+
+| 模式 | 做法 | 什么时候用 |
+| --- | --- | --- |
+| `crop`（默认，v7.7 及以前的行为） | 裁到目标比例再缩放，填满画面、丢掉多的一边 | 老式录档的标准做法 |
+| `fit` | 缩放到两边都放得下，剩下**补边**（`--pad-color` 定颜色） | **16:9 母带存进 4:3 画面**：保留完整画面，上下黑边 |
+| `stretch` | 直接拉到目标尺寸，画面变形 | 老播放器经常这么干 |
+
+```bash
+# 16:9 源 -> 320x240 的 4:3 画面，上下黑边
+LiveArchiveEncoder.exe wide.mp4 out.avi --encoder mpeg4 --width 320 --height 240 --fit fit
+# 只想压成 16:9，就用 16:9 的预设尺寸
+LiveArchiveEncoder.exe wide.mp4 out.mp4 --encoder libx264 --width 640 --height 360
+```
+
+`crop` 还能指定留哪一边（`--crop-anchor`，菜单第 29 项）：`center`（默认）/
+`top` / `bottom` / `left` / `right`。16:9 → 4:3 裁的是左右，所以 `left` /
+`right` 决定留哪边；反过来 4:3 → 16:9 裁的是上下。
+
+对应滤镜链：
+
+```
+crop   : crop=min(iw\,ih*W/H):min(ih\,iw*H/W):<x>:<y>,fps=…,scale=W:H:flags=…,format=…
+fit    : fps=…,scale=W:H:force_original_aspect_ratio=decrease:flags=…,pad=W:H:(ow-iw)/2:(oh-ih)/2:black,format=…
+stretch: fps=…,scale=W:H:flags=…,format=…
+```
+
+`--no-crop` 保留为 `--fit stretch` 的旧写法。实测：640x360 源用
+`--fit fit --width 320 --height 240` 得到的帧，顶部和底部 10 行亮度为 0（黑
+边），中间 131，画面完整保留。
+
+---
+
 ## 8. 实用命令示例
 
 ```powershell
@@ -973,7 +1108,6 @@ LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --limit 80 --fps-levels 13,
 # MPEG-4 / AVI，320x240，bicubic 缩放，不裁 4:3
 LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --width 320 --height 240 ^
     --no-crop --scale-algo bicubic
-
 # H.264 对照用：CRF 23、 faster 预设（注意 --qv 对 libx264 是 CRF）
 LiveArchiveEncoder.exe src.mp4 out.mp4 --encoder libx264 --qv 23 --x264-preset faster
 

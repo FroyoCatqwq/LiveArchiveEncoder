@@ -85,7 +85,7 @@ At runtime you need an FFmpeg/ffprobe pair on `PATH` (or pass `--ffmpeg` /
 
 ```bash
 # NUnit 5 unit tests — identical command on both platforms
-dotnet test LiveArchiveEncoder.V7.slnx -c Release      # 236 on Windows, 234 on Linux
+dotnet test LiveArchiveEncoder.V7.slnx -c Release      # 258 on Windows, 256 on Linux
 ```
 
 The NUnit project covers the pure-logic layers that do not need a real encode:
@@ -222,7 +222,8 @@ pipeline when the muxer rejects the split. Measured numbers are in
 src/LiveArchiveEncoder/
   Configuration/  Config, EncoderInfo, EncoderCaps, StreamInfo, constant tables
   Core/           timecode parsing, pixel-format maths, validation, high-res timer,
-                  Ctrl+C interrupt
+                  Ctrl+C interrupt, AudioCatalog (v7.8: per-codec sample-rate and
+                  channel limits, container compatibility)
   FFmpeg/         discovery, toolchain (multi-distro install/update/delete),
                   capability probing, ffprobe, process + pipe I/O
   Frames/         bounded pre-allocated frame pool

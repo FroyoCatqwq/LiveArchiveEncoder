@@ -28,6 +28,11 @@ public static class Completion
         ("--qv", []), ("--threads", []), ("--buffer-frames", []),
         ("--audio-kbps", []), ("--audio-channels", ["1", "2"]), ("--audio-rate", ["22050", "44100"]),
         ("--width", []), ("--height", []),
+        // v7.8: container choice and picture fit.
+        ("--container", ["avi", "mp4", "mkv", "mpg", "mpeg"]),
+        ("--fit", [.. Constants.FitModes]),
+        ("--crop-anchor", [.. Constants.CropAnchors]),
+        ("--pad-color", ["black", "white", "gray", "0x808080"]),
         ("--scale-algo", [.. Constants.ScaleAlgorithmAliases.Keys.OrderBy(x => x, StringComparer.Ordinal)]),
         ("--scale-flags", [.. Constants.ScaleAlgorithmAliases.Keys.OrderBy(x => x, StringComparer.Ordinal)]),
         ("--deinterlace", ["off", .. Constants.DeinterlaceFilters]),

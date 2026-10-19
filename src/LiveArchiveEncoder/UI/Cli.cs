@@ -55,6 +55,24 @@ public static class Cli
         }
         encoder.Caps = FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, encoder);
 
+        // v7.8: the container is part of the encoder selection, so it is
+        // applied before anything reads FormatName -- the output extension
+        // check, the audio codec choice and the muxer argument all follow it.
+        if (args.Container is { Length: > 0 } wantedContainer)
+        {
+            EncoderInfo? retargeted = EncoderMath.ResolveContainer(encoder, wantedContainer);
+            if (retargeted is null)
+            {
+                string allowed = string.Join(", ",
+                    EncoderMath.AllowedContainers(encoder).Select(x => x.Format));
+                Console.Error.WriteLine($"ERROR: encoder '{encoder.Name}' cannot write "
+                    + $"'{wantedContainer}'; it supports: {allowed}");
+                return 2;
+            }
+            encoder = retargeted;
+            encoder.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, encoder);
+        }
+
         var src = new FileInfo(args.Input ?? "");
         if (!src.Exists)
         {
@@ -134,7 +152,11 @@ public static class Cli
             return 2;
         }
 
-        int? audioRate = era?.AudioRate ?? args.AudioRate;
+        // An explicit --audio-rate is validated; an era preset's rate is a
+        // suggestion and gets snapped, because a preset is written for a period
+        // rather than for the codec the container happens to force.
+        int? audioRate = args.AudioRate ?? era?.AudioRate;
+        bool audioRateExplicit = args.AudioRate is not null;
         int audioChannels = era?.AudioChannels ?? args.AudioChannels;
         if (encoder.Name == "amv")
         {
@@ -155,6 +177,17 @@ public static class Cli
                     "ERROR: roq_dpcm requires --audio-rate 22050 (or leave it unset for automatic correction)");
                 return 2;
             }
+        }
+
+        if (!audioRateExplicit) audioRate = AudioCatalog.NearestRate(audioEncoder, audioRate);
+        audioChannels = AudioCatalog.ClampChannels(audioEncoder, audioChannels);
+        string? audioError = AudioCatalog.Validate(
+            audioEncoder, encoder.FormatName, audioRate, audioChannels,
+            era?.AudioKbps ?? args.AudioKbps);
+        if (audioError is not null)
+        {
+            Console.Error.WriteLine($"ERROR: {audioError}");
+            return 2;
         }
 
         string deinterlace = args.Deinterlace.ToLowerInvariant();
@@ -191,9 +224,12 @@ public static class Cli
                 AudioKbps = era?.AudioKbps ?? args.AudioKbps,
                 AudioChannels = audioChannels,
                 AudioRate = audioRate,
+                Container = args.Container,
                 Width = width,
                 Height = height,
-                Crop43 = !args.NoCrop,
+                FitMode = args.FitMode,
+                CropAnchor = args.CropAnchor,
+                PadColor = args.PadColor,
                 ScaleAlgo = scaleAlgo,
                 Deinterlace = deinterlace,
                 DeintMode = args.DeintMode,
@@ -262,7 +298,9 @@ public static class Cli
             Hwaccel = config.Hwaccel,
             Width = config.Width,
             Height = config.Height,
-            Crop43 = config.Crop43,
+            FitMode = config.FitMode,
+            CropAnchor = config.CropAnchor,
+            PadColor = config.PadColor,
             ScaleAlgo = config.ScaleAlgo,
             Deinterlace = config.Deinterlace,
             DeintMode = config.DeintMode,

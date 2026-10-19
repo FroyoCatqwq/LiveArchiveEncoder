@@ -54,8 +54,14 @@ public static class Report
         Line(L.T("report.limit"), L.T("report.kbps", $"{c.Limit:G6}"));
         Line(L.T("report.recover"), L.T("report.kbps", $"{c.Recover:G6}"));
         Line(L.T("report.window"), L.T("report.seconds", $"{c.Window:G6}"));
-        Line(L.T("report.resolution"), $"{c.Width}x{c.Height}");
-        Line(L.T("report.crop43"), L.YesNo(c.Crop43));
+        Line(L.T("report.resolution"),
+            $"{c.Width}x{c.Height} ({AspectLabel(c.Width, c.Height)})");
+        Line(L.T("report.fitmode"), c.FitMode switch
+        {
+            "fit" => L.T("report.fit.fit", c.PadColor),
+            "stretch" => L.T("report.fit.stretch"),
+            _ => L.T("report.fit.crop", c.CropAnchor),
+        });
         Line(L.T("report.scalealgo"), EncoderMath.CanonicalScaleAlgo(c.ScaleAlgo));
         Line(L.T("report.deinterlace"), c.Deinterlace);
         Line(L.T("report.deintmode"),
@@ -65,6 +71,8 @@ public static class Report
             c.AudioKbps.ToString(CultureInfo.InvariantCulture),
             c.AudioChannels.ToString(CultureInfo.InvariantCulture),
             c.AudioRate?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto")));
+        if (c.AudioEncoder is { Length: > 0 } codec)
+            Line(L.T("report.audiorates"), AudioCatalog.DescribeRates(codec));
         if (c.Encoder is not null && c.Encoder.Name == "roqvideo")
         {
             string? warning = EncoderMath.ValidateRoqDimensions(c.Width, c.Height);
@@ -96,6 +104,17 @@ public static class Report
             Line(L.T("param.x264profile"), c.X264Profile.Length == 0 ? L.T("value.auto") : c.X264Profile);
             Line(L.T("param.x264level"), c.X264Level.Length == 0 ? L.T("value.auto") : c.X264Level);
         }
+    }
+
+    /// <summary>"4:3" / "16:9" / a rounded ratio, so a 16:9 master stored in a
+    /// 4:3 frame is obvious from the configuration dump.</summary>
+    private static string AspectLabel(int width, int height)
+    {
+        if (width <= 0 || height <= 0) return "?";
+        double ratio = (double)width / height;
+        if (Math.Abs(ratio - 4.0 / 3.0) < 0.02) return "4:3";
+        if (Math.Abs(ratio - 16.0 / 9.0) < 0.02) return "16:9";
+        return $"{ratio:F2}:1";
     }
 
     public static void PrintFilterList(

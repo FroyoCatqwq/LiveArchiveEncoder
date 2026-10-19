@@ -45,6 +45,25 @@ public sealed class EncoderInfo
     public string Extension { get; init; } = "avi";
     public string FormatName { get; init; } = "avi";
     public EncoderCaps? Caps { get; set; }
+
+    /// <summary>
+    /// The same encoder writing another container. Everything downstream
+    /// (muxer argument, output extension check, audio codec choice, concat
+    /// eligibility) reads <see cref="FormatName"/>, so the selection is applied
+    /// by swapping in a copy rather than by threading a second value through
+    /// every call site.
+    /// </summary>
+    public EncoderInfo WithContainer(string extension, string formatName) => new()
+    {
+        Name = Name,
+        Flags = Flags,
+        Description = Description,
+        Codec = Codec,
+        Family = Family,
+        Extension = extension,
+        FormatName = formatName,
+        Caps = Caps,
+    };
 }
 
 /// <summary>
@@ -81,6 +100,14 @@ public sealed class Config
     public double StartTimeSeconds { get; set; }
     public double? EndTimeSeconds { get; set; }
     public EncoderInfo? Encoder { get; set; }
+
+    /// <summary>
+    /// Requested container ("avi", "mkv", "mp4", ...). Null means the encoder's
+    /// own default. Only containers this encoder can actually write are
+    /// accepted -- see <see cref="Constants.ContainerChoicesByEncoder"/>.
+    /// </summary>
+    public string? Container { get; set; }
+
     public string? AudioEncoder { get; set; } = "libmp3lame";
     public double Fps { get; set; } = Constants.DefaultFps;
     public List<double> FpsLevels { get; set; } = [13.0, 8.0, 5.0, 3.0];
@@ -103,7 +130,19 @@ public sealed class Config
     public int? AudioRate { get; set; }
     public int Width { get; set; } = Constants.DefaultWidth;
     public int Height { get; set; } = Constants.DefaultHeight;
-    public bool Crop43 { get; set; } = true;
+    /// <summary>
+    /// How the picture is fitted into <see cref="Width"/>x<see cref="Height"/>:
+    /// "crop" (fill, discard the overflow), "fit" (keep the whole frame and pad
+    /// the remainder -- a 16:9 master inside a 4:3 frame gets top/bottom bars),
+    /// or "stretch" (fill and distort).
+    /// </summary>
+    public string FitMode { get; set; } = "crop";
+
+    /// <summary>Which edge survives a crop: center (default), top, bottom, left, right.</summary>
+    public string CropAnchor { get; set; } = "center";
+
+    /// <summary>Bar colour for "fit", e.g. black, white or 0xRRGGBB.</summary>
+    public string PadColor { get; set; } = "black";
     public string ScaleAlgo { get; set; } = "neighbor";
     public string Deinterlace { get; set; } = "off";
     public string DeintMode { get; set; } = "send_frame";

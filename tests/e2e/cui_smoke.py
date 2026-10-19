@@ -67,19 +67,26 @@ def main():
 
     try:
         # ---------------------------------------------------------------- run 1
-        # Fresh start: no stored settings. Switch to Chinese, turn turbo on,
-        # set 4 parallel shards, then exit.
+        # Fresh start: no stored settings. Switch to Chinese, set 4 parallel
+        # shards, then exit. Turbo is gone from the menu as of v7.8 (still
+        # available from the command line), and the audio encoder has its own
+        # row, so both are asserted here.
         if CONFIG.exists():
             CONFIG.unlink()
-        p1 = cui([], "10\nzh\n9\n11\n4\n0\n")
+        p1 = cui([], "6\n10\nzh\n11\n4\n0\n")
         check("run1 exit code 0", p1.returncode == 0, f"rc={p1.returncode}")
-        check("run1 menu offers turbo", "9." in p1.stdout and "Turbo" in p1.stdout)
+        check("run1 turbo gone from the menu", "Turbo" not in p1.stdout)
+        check("run1 start encoding moved to 9", " 9. Start encoding" in p1.stdout)
+        check("run1 audio encoder row present", " 6. Audio encoder" in p1.stdout)
+        # With no video encoder chosen there is no container to match against.
+        check("run1 audio scan needs a video encoder",
+              "Choose a video encoder first" in p1.stdout)
         check("run1 language switched to zh", "zh" in p1.stdout)
         check("run1 parallel menu present", "11." in p1.stdout)
         c1 = read_config()
         check("run1 settings file written", c1 is not None)
         if c1:
-            check("run1 turbo persisted", c1.get("Turbo") is True, str(c1.get("Turbo")))
+            check("run1 turbo not persisted", c1.get("Turbo") is not True, str(c1.get("Turbo")))
             check("run1 language persisted", c1.get("Language") == "zh", str(c1.get("Language")))
             check("run1 parallel persisted", c1.get("Parallel") == 4, str(c1.get("Parallel")))
 
@@ -90,7 +97,8 @@ def main():
         check("run2 reports restored settings", "已恢复上次配置" in p2.stdout)
         check("run2 banner is chinese", "交互界面" in p2.stdout)
         check("run2 menu is chinese", "开始编码" in p2.stdout and "退出" in p2.stdout)
-        check("run2 turbo still on", "开启（无实时节流）" in p2.stdout)
+        check("run2 chinese menu keeps start at 9", " 9. 开始编码" in p2.stdout)
+        check("run2 chinese menu has the audio row", " 6. 音频编码器" in p2.stdout)
         check("run2 parallel shows 4", "并行分片数" in p2.stdout and "4" in p2.stdout)
 
         # ---------------------------------------------------------------- run 3

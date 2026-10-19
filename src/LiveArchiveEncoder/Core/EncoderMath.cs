@@ -271,18 +271,117 @@ public static class EncoderMath
             $"unknown scale algorithm '{value}'; choose: {string.Join(", ", Constants.ScaleAlgorithms)}");
     }
 
+    /// <summary>
+    /// Containers this encoder may be written to, default first. Most encoders
+    /// have exactly one; the ones in
+    /// <see cref="Constants.ContainerChoicesByEncoder"/> offer a real choice.
+    /// </summary>
+    public static IReadOnlyList<(string Ext, string Format)> AllowedContainers(EncoderInfo encoder)
+    {
+        if (Constants.ContainerChoicesByEncoder.TryGetValue(
+                encoder.Name, out (string Ext, string Format)[]? choices) && choices.Length > 0)
+        {
+            return choices;
+        }
+        return [(encoder.Extension, encoder.FormatName)];
+    }
+
+    /// <summary>
+    /// Apply a container request, returning the encoder copy that writes it.
+    /// An unknown or empty request keeps the default; a request this encoder
+    /// cannot write returns null so the caller can say so instead of producing
+    /// a file that no player will open.
+    /// </summary>
+    public static EncoderInfo? ResolveContainer(EncoderInfo encoder, string? requested)
+    {
+        if (string.IsNullOrWhiteSpace(requested)) return encoder;
+        IReadOnlyList<(string Ext, string Format)> allowed = AllowedContainers(encoder);
+
+        string wanted = requested.Trim().ToLowerInvariant();
+        foreach ((string ext, string format) in allowed)
+        {
+            if (format == wanted || "." + format == "." + wanted || ext == wanted.TrimStart('.'))
+                return format == encoder.FormatName ? encoder : encoder.WithContainer(ext, format);
+        }
+        // The muxer name and the extension are both accepted ("matroska"/"mkv").
+        if (Constants.FormatExtensions.TryGetValue(wanted, out HashSet<string>? exts))
+        {
+            foreach ((string ext, string format) in allowed)
+            {
+                if (exts.Contains("." + ext)) return encoder.WithContainer(ext, format);
+            }
+        }
+        return null;
+    }
+
     public static string? ChooseAudioEncoder(string container, ICollection<string> available)
     {
         if (Constants.NoAudioFormats.Contains(container)) return null;
-        if (!Constants.DefaultAudioByContainer.TryGetValue(container, out string[]? candidates))
-        {
-            candidates = ["aac", "libmp3lame"];
-        }
-        foreach (string candidate in candidates)
-        {
-            if (available.Contains(candidate)) return candidate;
-        }
-        return null;
+
+        // Preferred codecs for this container first, then everything else that
+        // muxes into it -- so the automatic choice is unchanged but a build
+        // without the preferred codec still gets a working one.
+        List<string> compatible = AudioCatalog.Compatible(container, available);
+        return compatible.Count > 0 ? compatible[0] : null;
+    }
+
+    /// <summary>
+    /// v7.8: crop the source down to the output aspect ratio before scaling.
+    /// Exactly one dimension is reduced: <c>min(iw, ih*W/H)</c> keeps the
+    /// source's own width when it is already the narrower one, and the
+    /// companion expression does the same for height -- so a portrait source
+    /// crops vertically and a landscape one crops horizontally, without having
+    /// to probe the source first.
+    /// </summary>
+    public static string CropFilterExpr(int outW, int outH, string cropAnchor)
+    {
+        string cw = $"min(iw\\,ih*{outW}/{outH})";
+        string ch = $"min(ih\\,iw*{outH}/{outW})";
+        string ow = $"(iw-{cw})";
+        string oh = $"(ih-{ch})";
+
+        // Anchoring only matters along the axis that is actually cropped; the
+        // other axis is already flush, so its offset expression evaluates to 0.
+        string x = CanonicalCropAnchor(cropAnchor) switch { "left" => "0", "right" => ow, _ => $"{ow}/2" };
+        string y = CanonicalCropAnchor(cropAnchor) switch { "top" => "0", "bottom" => oh, _ => $"{oh}/2" };
+        return $"crop={cw}:{ch}:{x}:{y}";
+    }
+
+    /// <summary>
+    /// "Keep the whole picture" scaling: shrink until both edges fit, then let
+    /// <see cref="PadFilterExpr"/> add the bars. That is how a 16:9 master ends
+    /// up inside a 4:3 frame with black top and bottom instead of being cropped
+    /// or squashed.
+    /// </summary>
+    public static string FitScaleFilterExpr(int outW, int outH, string scaleAlgo) =>
+        $"scale={outW}:{outH}:force_original_aspect_ratio=decrease:flags={CanonicalScaleAlgo(scaleAlgo)}";
+
+    public static string PadFilterExpr(int outW, int outH, string? padColor) =>
+        $"pad={outW}:{outH}:(ow-iw)/2:(oh-ih)/2:{PadColorExpr(padColor)}";
+
+    /// <summary>pad= takes a colour name or 0xRRGGBB; anything else would be
+    /// parsed as an option and break the filter graph.</summary>
+    private static string PadColorExpr(string? color)
+    {
+        string value = (color ?? "").Trim();
+        return value.Length == 0 ? "black" : value;
+    }
+
+    public static string CanonicalFitMode(string? value)
+    {
+        string key = (value ?? "").Trim().ToLowerInvariant();
+        // v7.7's boolean lives on as "crop"/"stretch": an old settings file with
+        // "crop 4:3 = yes" is a crop, and "no" is a stretch.
+        if (key is "no" or "none" or "off" or "false") return "stretch";
+        if (key is "yes" or "true" or "on" or "crop43" or "4:3") return "crop";
+        if (key is "pad" or "letterbox" or "pillarbox" or "box") return "fit";
+        return Constants.FitModes.Contains(key) ? key : "crop";
+    }
+
+    public static string CanonicalCropAnchor(string? value)
+    {
+        string key = (value ?? "").Trim().ToLowerInvariant();
+        return Constants.CropAnchors.Contains(key) ? key : "center";
     }
 
     // Kept for parity with the Python fallback chain used when no encoder declares

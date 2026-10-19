@@ -62,12 +62,15 @@ public static class Cui
             Console.WriteLine($" 3. {L.Pad(L.T("menu.encoder"), 22)} = {c.Encoder?.Name ?? L.T("menu.notselected")}");
             Console.WriteLine($" 4. {L.T("menu.parameters")}");
             Console.WriteLine($" 5. {L.T("menu.rescan")}");
-            Console.WriteLine($" 6. {L.T("menu.filters")}");
-            Console.WriteLine($" 7. {L.T("menu.showconfig")}");
-            Console.WriteLine($" 8. {L.T("menu.start")}");
-            // v7.7: Turbo still works, but it is deprecated and says so here so
-            // nobody discovers it from the menu and assumes it is recommended.
-            Console.WriteLine($" 9. {L.Pad(L.T("turbo.menu.deprecated"), 22)} = {(c.Turbo ? L.T("turbo.on") : L.T("turbo.off"))}");
+            // v7.8: the audio encoder is picked from what the selected video
+            // encoder and container can actually hold, so it gets its own entry
+            // instead of being a free-text field in the parameters menu.
+            Console.WriteLine($" 6. {L.Pad(L.T("menu.audioencoder"), 22)} = {c.AudioEncoder ?? L.T("value.none")}");
+            Console.WriteLine($" 7. {L.T("menu.filters")}");
+            Console.WriteLine($" 8. {L.T("menu.showconfig")}");
+            Console.WriteLine($" 9. {L.T("menu.start")}");
+            // No Turbo entry: it is deprecated as of v7.7 and only reachable
+            // from the command line (or from a settings file written earlier).
             Console.WriteLine($"10. {L.Pad(L.T("menu.language"), 22)} = {c.Language}");
             Console.WriteLine($"11. {L.Pad(L.T("menu.parallel"), 22)} = {(c.Parallel > 1 ? c.Parallel.ToString(CultureInfo.InvariantCulture) : L.T("menu.parallel.off"))}");
             Console.WriteLine($"12. {L.Pad(L.T("menu.toolchain"), 22)} = {c.FfmpegSource}");
@@ -124,20 +127,18 @@ public static class Cui
                     catch (Exception exc) { Console.WriteLine($"{L.T("error.prefix")}{exc.Message}"); }
                     break;
                 case "6":
-                    Report.PrintFilterList(ffmpeg, availableFilters, availableScaleAlgorithms);
+                    ScanAudioEncoders(c, ffmpeg, ref audioAvailable);
+                    Persist(c);
                     break;
                 case "7":
-                    Report.PrintConfig(c, ffmpeg, btbn, encoders.Count, availableFilters, availableScaleAlgorithms);
+                    Report.PrintFilterList(ffmpeg, availableFilters, availableScaleAlgorithms);
                     break;
                 case "8":
-                    StartEncoding(c, ffmpeg, ffprobe, btbn, encoders, audioAvailable,
-                        availableFilters, availableScaleAlgorithms);
+                    Report.PrintConfig(c, ffmpeg, btbn, encoders.Count, availableFilters, availableScaleAlgorithms);
                     break;
                 case "9":
-                    c.Turbo = !c.Turbo;
-                    Console.WriteLine(c.Turbo ? L.T("turbo.enabled") : L.T("turbo.disabled"));
-                    if (c.Turbo) Console.WriteLine(L.T("turbo.deprecated"));
-                    Persist(c);
+                    StartEncoding(c, ffmpeg, ffprobe, btbn, encoders, audioAvailable,
+                        availableFilters, availableScaleAlgorithms);
                     break;
                 case "10":
                     Console.Write(L.T("lang.prompt", c.Language));
@@ -339,7 +340,26 @@ public static class Cui
 
             EncoderInfo chosen = encoders[idx - 1];
             chosen.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, chosen);
-            c.Encoder = chosen;
+
+            // v7.8: a container the new encoder cannot write is dropped rather
+            // than carried over -- otherwise selecting mpeg1video after libx264
+            // would leave ".mkv" on a file the muxer will refuse.
+            if (c.Container is { Length: > 0 } wanted
+                && EncoderMath.ResolveContainer(chosen, wanted) is null)
+            {
+                Console.WriteLine(L.T("encoder.containerdropped", wanted, chosen.Name));
+                c.Container = null;
+            }
+            c.Encoder = EncoderMath.ResolveContainer(chosen, c.Container) ?? chosen;
+            EncoderInfo effective = c.Encoder;
+
+            IReadOnlyList<(string Ext, string Format)> containers =
+                EncoderMath.AllowedContainers(effective);
+            if (containers.Count > 1)
+            {
+                Console.WriteLine(L.T("encoder.containers",
+                    string.Join(", ", containers.Select(x => x.Format))));
+            }
 
             (double baseFps, bool exact) = EncoderMath.ChooseBaseFps(c.Fps, chosen.Caps);
             if (!exact)
@@ -352,16 +372,26 @@ public static class Cui
             (c.Width, c.Height, bool sizeExact) = EncoderMath.NormalizeDimensions(chosen.Name, c.Width, c.Height);
             if (!sizeExact) Console.WriteLine(L.T("encoder.sizesdjusted", chosen.Name, c.Width, c.Height));
 
-            c.Qv = EncoderMath.DefaultQuality(chosen.Name);
-            c.AudioEncoder = EncoderMath.ChooseAudioEncoder(chosen.FormatName, audioAvailable);
+            c.Qv = EncoderMath.DefaultQuality(effective.Name);
 
-            if (chosen.Name == "amv")
+            // Audio follows the container: whatever was selected stays only if
+            // it still muxes, otherwise the container's own preference wins.
+            if (c.AudioEncoder is { Length: > 0 } current
+                && !AudioCatalog.SupportsContainer(current, effective.FormatName))
+            {
+                c.AudioEncoder = null;
+            }
+            c.AudioEncoder = EncoderMath.ChooseAudioEncoder(effective.FormatName, audioAvailable);
+            (c.AudioRate, c.AudioChannels) = AudioCatalog.Effective(
+                c.AudioEncoder, c.AudioRate, c.AudioChannels);
+
+            if (effective.Name == "amv")
             {
                 Console.WriteLine(L.T("encoder.amvnote"));
                 if (audioAvailable.Contains("adpcm_ima_amv")) c.AudioEncoder = "adpcm_ima_amv";
                 c.AudioRate = 22050;
             }
-            else if (chosen.Name == "roqvideo")
+            else if (effective.Name == "roqvideo")
             {
                 if (audioAvailable.Contains("roq_dpcm"))
                 {
@@ -380,8 +410,8 @@ public static class Cui
             }
 
             if (c.AudioEncoder is null)
-                Console.WriteLine(L.T("encoder.videoonly", chosen.Name, chosen.FormatName));
-            if (chosen.Name != "libx264")
+                Console.WriteLine(L.T("encoder.videoonly", effective.Name, effective.FormatName));
+            if (effective.Name != "libx264")
             {
                 c.X264Preset = "medium";
                 c.X264Tune = "";
@@ -389,12 +419,106 @@ public static class Cui
                 c.X264Level = "";
             }
             if (c.OutputIsAuto && c.InputPath is not null)
-                c.OutputPath = DefaultOutput(c.InputPath, chosen);
+                c.OutputPath = DefaultOutput(c.InputPath, effective);
         }
         catch (Exception exc) when (exc is ArgumentException or InvalidOperationException or FormatException)
         {
             Console.WriteLine(L.T("encoder.invalid", exc.Message));
         }
+    }
+
+    /// <summary>
+    /// v7.8 menu row 6: list the audio encoders this build has <em>and</em> the
+    /// selected video encoder's container can hold, then pick one.
+    ///
+    /// The list is filtered twice on purpose. `ffmpeg -encoders` happily prints
+    /// codecs the muxer will refuse (ac3 in Ogg, vorbis in ASF), and the
+    /// sample-rate limits are invisible until FFmpeg aborts -- so both are shown
+    /// here instead.
+    /// </summary>
+    private static void ScanAudioEncoders(Config c, string ffmpeg, ref HashSet<string> audioAvailable)
+    {
+        if (c.Encoder is null)
+        {
+            Console.WriteLine(L.T("audio.selectvideo"));
+            return;
+        }
+
+        try
+        {
+            audioAvailable = FFmpegDiscovery.DetectAudioEncoders(ffmpeg);
+        }
+        catch (Exception exc) when (exc is InvalidOperationException or TimeoutException)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{exc.Message}");
+            return;
+        }
+
+        string container = c.Encoder.FormatName;
+        List<string> compatible = AudioCatalog.Compatible(container, audioAvailable);
+        Console.WriteLine($"\n{L.T("audio.heading")}");
+        Console.WriteLine(L.T("audio.scanned", container, audioAvailable.Count, compatible.Count));
+        if (compatible.Count == 0)
+        {
+            Console.WriteLine(L.T("audio.none", container));
+            return;
+        }
+
+        for (int i = 0; i < compatible.Count; i++)
+        {
+            string name = compatible[i];
+            AudioCodecInfo? info = AudioCatalog.Find(name);
+            string marker = string.Equals(c.AudioEncoder, name, StringComparison.OrdinalIgnoreCase) ? " <" : "";
+            Console.WriteLine($" {i + 1,3}. {name,-16}{AudioCatalog.DescribeRates(name),-34}"
+                + $"{(info is null ? "" : $"{info.MinChannels}-{info.MaxChannels}ch")}"
+                + (info?.Note.Length > 0 ? $"  ({info.Note})" : "") + marker);
+        }
+        Console.WriteLine($" 0. {L.T("param.back")}");
+        Console.Write(L.T("audio.prompt"));
+
+        string raw = (Console.ReadLine() ?? "").Trim();
+        if (raw.Length == 0 || raw == "0") return;
+
+        string? pick = null;
+        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx))
+        {
+            if (idx < 1 || idx > compatible.Count)
+            {
+                Console.WriteLine(L.T("audio.badpick"));
+                return;
+            }
+            pick = compatible[idx - 1];
+        }
+        else if (audioAvailable.Contains(raw))
+        {
+            // Typing a name is allowed, but only inside the compatible list --
+            // picking an unmuxable codec here would fail the same way it does
+            // when the encoder starts, just later.
+            if (!compatible.Contains(raw, StringComparer.OrdinalIgnoreCase))
+            {
+                Console.WriteLine(L.T("audio.nomux", raw, container,
+                    string.Join(", ", compatible)));
+                return;
+            }
+            pick = raw;
+        }
+        else
+        {
+            Console.WriteLine(L.T("audio.notfound", raw));
+            return;
+        }
+
+        int? rateBefore = c.AudioRate;
+        int channelsBefore = c.AudioChannels;
+        c.AudioEncoder = pick;
+        (c.AudioRate, c.AudioChannels) = AudioCatalog.Effective(pick, c.AudioRate, c.AudioChannels);
+        if (c.AudioChannels != channelsBefore)
+            Console.WriteLine(L.T("audio.channelsadjusted", channelsBefore, c.AudioChannels));
+        if (c.AudioRate != rateBefore)
+            Console.WriteLine(L.T("audio.rateadjusted",
+                rateBefore?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto"),
+                c.AudioRate?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto")));
+        Console.WriteLine(L.T("audio.set", pick, AudioCatalog.DescribeRates(pick)));
     }
 
     private static void EditSettings(
@@ -417,8 +541,8 @@ public static class Cui
             Row(6, qualityLabel, c.Qv.ToString(CultureInfo.InvariantCulture));
             Row(7, L.T("param.threads"), c.Threads.ToString(CultureInfo.InvariantCulture));
             Row(8, L.T("param.buffer"), c.BufferFrames.ToString(CultureInfo.InvariantCulture));
-            Row(9, L.T("param.size"), $"{c.Width}x{c.Height}");
-            Row(10, L.T("param.crop43"), L.YesNo(c.Crop43));
+            Row(9, L.T("param.size"), $"{c.Width}x{c.Height} ({DescribeAspect(c.Width, c.Height)})");
+            Row(10, L.T("param.fitmode"), DescribeFit(c));
             Row(11, L.T("param.scalealgo"), c.ScaleAlgo);
             Row(12, L.T("param.deinterlace"), c.Deinterlace);
             Row(13, L.T("param.deintmode"), c.DeintMode);
@@ -439,6 +563,10 @@ public static class Cui
             Row(25, L.T("param.start"), Timecode.Format(c.StartTimeSeconds));
             Row(26, L.T("param.end"), Timecode.Format(c.EndTimeSeconds));
             Row(27, L.T("param.levelkbps"), DescribeRungBitrates(c));
+            Row(28, L.T("param.container"), DescribeContainer(c));
+            Row(29, L.T("param.cropanchor"), c.FitMode == "crop" ? c.CropAnchor : "-");
+            Row(30, L.T("param.padcolor"), c.FitMode == "fit" ? c.PadColor : "-");
+            Row(31, L.T("param.sizepreset"), L.T("param.sizepreset.hint"));
             Console.WriteLine($"    {L.T("param.availdeint")}     = {string.Join(", ", deintOptions)}");
             Console.WriteLine($" 0. {L.T("param.back")}");
             Console.Write(L.T("param.select"));
@@ -503,7 +631,19 @@ public static class Cui
                             c.Height = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
                         }
                         break;
-                    case "10": c.Crop43 = !c.Crop43; break;
+                    case "10":
+                        // v7.8: crop/fit/stretch replaced the old "crop 4:3"
+                        // switch. "fit" is what keeps a 16:9 master whole inside
+                        // a 4:3 frame instead of cutting its sides off.
+                        string fitRaw = ReadRaw(L.T("param.prompt.fitmode",
+                            string.Join(" / ", Constants.FitModes), c.FitMode)).ToLowerInvariant();
+                        if (fitRaw.Length > 0)
+                        {
+                            if (!Constants.FitModes.Contains(fitRaw))
+                                throw new FormatException(L.T("param.fitbad", string.Join(", ", Constants.FitModes)));
+                            c.FitMode = fitRaw;
+                        }
+                        break;
                     case "11":
                         string scaleRaw = ReadRaw(L.T("param.prompt.scalealgo", c.ScaleAlgo,
                                 string.Join(", ", availableScaleAlgorithms.OrderBy(x => x, StringComparer.Ordinal))))
@@ -549,13 +689,31 @@ public static class Cui
                     case "16":
                         c.AudioKbps = ReadInt(L.T("param.prompt.audiokbps", c.AudioKbps), c.AudioKbps);
                         break;
+                    // Audio numbers are validated against the codec, not just
+                    // for being positive: ac3 aborts on anything but 32/44.1/48
+                    // kHz, and it used to do that halfway through an encode.
                     case "17":
                         c.AudioChannels = ReadInt(L.T("param.prompt.audiochannels", c.AudioChannels), c.AudioChannels);
+                        int clamped = AudioCatalog.ClampChannels(c.AudioEncoder, c.AudioChannels);
+                        if (clamped != c.AudioChannels)
+                        {
+                            Console.WriteLine(L.T("audio.channelsadjusted", c.AudioChannels, clamped));
+                            c.AudioChannels = clamped;
+                        }
                         break;
                     case "18":
                         string rateRaw = ReadRaw(L.T("param.prompt.audiorate",
                             c.AudioRate?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto")));
-                        c.AudioRate = rateRaw.Length > 0 ? int.Parse(rateRaw, CultureInfo.InvariantCulture) : null;
+                        int? requested = rateRaw.Length > 0
+                            ? int.Parse(rateRaw, CultureInfo.InvariantCulture) : null;
+                        int? snapped = AudioCatalog.NearestRate(c.AudioEncoder, requested);
+                        if (snapped != requested)
+                        {
+                            Console.WriteLine(L.T("audio.rateadjusted",
+                                requested?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto"),
+                                snapped?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto")));
+                        }
+                        c.AudioRate = snapped;
                         break;
                     case "19":
                         // Cycle off -> auto -> each method this FFmpeg was built
@@ -566,7 +724,25 @@ public static class Cui
                     case "20":
                         string audioRaw = ReadRaw(
                             L.T("param.prompt.audioencoder", c.AudioEncoder ?? L.T("value.none"))).ToLowerInvariant();
-                        c.AudioEncoder = audioRaw.Length > 0 ? audioRaw : null;
+                        if (audioRaw.Length == 0)
+                        {
+                            c.AudioEncoder = null;
+                            break;
+                        }
+                        string? reject = c.Encoder is null
+                            ? null
+                            : AudioCatalog.Validate(audioRaw, c.Encoder.FormatName,
+                                c.AudioRate, c.AudioChannels, c.AudioKbps);
+                        if (reject is not null)
+                        {
+                            Console.WriteLine($"{L.T("error.prefix")}{reject}");
+                            break;
+                        }
+                        c.AudioEncoder = audioRaw;
+                        // The new codec may not accept the old numbers.
+                        (c.AudioRate, c.AudioChannels) = AudioCatalog.Effective(
+                            audioRaw, c.AudioRate, c.AudioChannels);
+                        Console.WriteLine(L.T("audio.set", audioRaw, AudioCatalog.DescribeRates(audioRaw)));
                         break;
                     case "21" when enc == "libx264":
                         c.X264Preset = ReadRaw(L.T("param.prompt.preset", c.X264Preset)) is var p && p.Length > 0 ? p : c.X264Preset;
@@ -605,6 +781,26 @@ public static class Cui
                     case "27":
                         EditRungBitrates(c);
                         break;
+                    case "28":
+                        EditContainer(c);
+                        break;
+                    case "29":
+                        string anchorRaw = ReadRaw(L.T("param.prompt.cropanchor",
+                            string.Join(" / ", Constants.CropAnchors), c.CropAnchor)).ToLowerInvariant();
+                        if (anchorRaw.Length > 0)
+                        {
+                            if (!Constants.CropAnchors.Contains(anchorRaw))
+                                throw new FormatException(L.T("param.anchorbad", string.Join(", ", Constants.CropAnchors)));
+                            c.CropAnchor = anchorRaw;
+                        }
+                        break;
+                    case "30":
+                        string padRaw = ReadRaw(L.T("param.prompt.padcolor", c.PadColor));
+                        if (padRaw.Length > 0) c.PadColor = padRaw;
+                        break;
+                    case "31":
+                        PickResolutionPreset(c);
+                        break;
                     default:
                         Console.WriteLine(L.T("param.invalid"));
                         break;
@@ -618,6 +814,147 @@ public static class Cui
             try { Validation.ValidateCommonConfig(c); }
             catch (ArgumentException exc) { Console.WriteLine(L.T("param.badconfig", exc.Message)); }
         }
+    }
+
+    /// <summary>"4:3", "16:9" or the rounded ratio when it is neither.</summary>
+    private static string DescribeAspect(int width, int height)
+    {
+        if (width <= 0 || height <= 0) return "?";
+        double ratio = (double)width / height;
+        if (Math.Abs(ratio - 4.0 / 3.0) < 0.02) return "4:3";
+        if (Math.Abs(ratio - 16.0 / 9.0) < 0.02) return "16:9";
+        return $"{ratio:F2}:1";
+    }
+
+    private static string DescribeFit(Config c) => c.FitMode switch
+    {
+        "fit" => L.T("param.fit.fit", c.PadColor),
+        "stretch" => L.T("param.fit.stretch"),
+        _ => L.T("param.fit.crop", c.CropAnchor),
+    };
+
+    private static string DescribeContainer(Config c)
+    {
+        if (c.Encoder is null) return L.T("value.none");
+        string current = $"{c.Encoder.FormatName} (.{c.Encoder.Extension})";
+        IReadOnlyList<(string Ext, string Format)> allowed = EncoderMath.AllowedContainers(c.Encoder);
+        return allowed.Count > 1
+            ? $"{current}   [{string.Join(", ", allowed.Select(x => x.Format))}]"
+            : current;
+    }
+
+    /// <summary>
+    /// Row 28: pick another container for the current encoder. Only the
+    /// combinations that actually mux are offered (mpeg1/2video gain AVI,
+    /// libx264 gains AVI and Matroska).
+    /// </summary>
+    private static void EditContainer(Config c)
+    {
+        if (c.Encoder is null)
+        {
+            Console.WriteLine(L.T("encoder.selectfirst"));
+            return;
+        }
+
+        IReadOnlyList<(string Ext, string Format)> allowed = EncoderMath.AllowedContainers(c.Encoder);
+        if (allowed.Count < 2)
+        {
+            Console.WriteLine(L.T("container.only", c.Encoder.Name, c.Encoder.FormatName));
+            return;
+        }
+
+        Console.WriteLine($"\n{L.T("container.heading", c.Encoder.Name)}");
+        for (int i = 0; i < allowed.Count; i++)
+        {
+            string marker = allowed[i].Format == c.Encoder.FormatName ? " <" : "";
+            Console.WriteLine($" {i + 1,2}. {allowed[i].Format,-10} (.{allowed[i].Ext}){marker}");
+        }
+        Console.Write(L.T("container.prompt"));
+
+        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        if (raw.Length == 0) return;
+
+        string wanted = int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
+            && idx >= 1 && idx <= allowed.Count
+                ? allowed[idx - 1].Format
+                : raw;
+
+        EncoderInfo? resolved = EncoderMath.ResolveContainer(c.Encoder, wanted);
+        if (resolved is null)
+        {
+            Console.WriteLine(L.T("container.bad", wanted, string.Join(", ", allowed.Select(x => x.Format))));
+            return;
+        }
+
+        c.Encoder = resolved;
+        // "null" means the encoder's own default, so the file stays portable
+        // and a later encoder change does not drag a stale override along.
+        IReadOnlyList<(string Ext, string Format)> after = EncoderMath.AllowedContainers(resolved);
+        c.Container = after[0].Format == resolved.FormatName ? null : resolved.FormatName;
+
+        // A different muxer means a different set of audio codecs.
+        if (c.AudioEncoder is { Length: > 0 } current
+            && !AudioCatalog.SupportsContainer(current, resolved.FormatName))
+        {
+            Console.WriteLine(L.T("audio.replaced", current, resolved.FormatName));
+            c.AudioEncoder = null;
+        }
+        (c.AudioRate, c.AudioChannels) = AudioCatalog.Effective(
+            c.AudioEncoder, c.AudioRate, c.AudioChannels);
+
+        if (c.OutputIsAuto && c.InputPath is not null)
+            c.OutputPath = DefaultOutput(c.InputPath, resolved);
+        Console.WriteLine(L.T("container.set", resolved.FormatName, resolved.Extension));
+    }
+
+    /// <summary>
+    /// Row 31: frame-size presets, grouped by aspect ratio. Picking a 16:9 pair
+    /// is the other half of "store the whole 16:9 picture inside a 4:3 frame" --
+    /// the fit mode decides what happens to the leftover space.
+    /// </summary>
+    private static void PickResolutionPreset(Config c)
+    {
+        (int W, int H, string Label)[] presets = Constants.ResolutionPresets;
+        Console.WriteLine($"\n{L.T("param.size.heading")}");
+        for (int i = 0; i < presets.Length; i++)
+        {
+            string marker = presets[i].W == c.Width && presets[i].H == c.Height ? " <" : "";
+            Console.WriteLine($" {i + 1,2}. {presets[i].W}x{presets[i].H,-6} {presets[i].Label}{marker}");
+        }
+        Console.WriteLine(L.T("param.size.free"));
+        Console.Write(L.T("param.size.prompt"));
+
+        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        if (raw.Length == 0) return;
+
+        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
+            && idx >= 1 && idx <= presets.Length)
+        {
+            ApplySize(c, presets[idx - 1].W, presets[idx - 1].H);
+            return;
+        }
+
+        Match m = Regex.Match(raw, @"^(\d+)x(\d+)$");
+        if (!m.Success)
+        {
+            Console.WriteLine(L.T("param.sizefmt"));
+            return;
+        }
+        ApplySize(c, int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture),
+            int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture));
+    }
+
+    private static void ApplySize(Config c, int width, int height)
+    {
+        c.Width = width;
+        c.Height = height;
+        if (c.Encoder is not null)
+        {
+            (c.Width, c.Height, bool sizeExact) = EncoderMath.NormalizeDimensions(
+                c.Encoder.Name, width, height);
+            if (!sizeExact) Console.WriteLine(L.T("encoder.sizesdjusted", c.Encoder.Name, c.Width, c.Height));
+        }
+        Console.WriteLine(L.T("param.size.set", c.Width, c.Height, DescribeAspect(c.Width, c.Height)));
     }
 
     /// <summary>Row 27: "auto" until at least one rung carries an explicit threshold.</summary>
@@ -797,7 +1134,9 @@ public static class Cui
                 Hwaccel = c.Hwaccel,
                 Width = c.Width,
                 Height = c.Height,
-                Crop43 = c.Crop43,
+                FitMode = c.FitMode,
+                CropAnchor = c.CropAnchor,
+                PadColor = c.PadColor,
                 ScaleAlgo = c.ScaleAlgo,
                 Deinterlace = c.Deinterlace,
                 DeintMode = c.DeintMode,

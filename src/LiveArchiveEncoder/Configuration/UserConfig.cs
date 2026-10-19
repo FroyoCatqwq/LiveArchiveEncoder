@@ -26,7 +26,7 @@ internal partial class UserConfigJsonContext : JsonSerializerContext;
 /// </summary>
 public sealed class UserConfig
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -35,6 +35,10 @@ public sealed class UserConfig
     public bool OutputIsAuto { get; set; } = true;
 
     public string? Encoder { get; set; }
+
+    /// <summary>Container override ("avi", "mkv", ...); null = the encoder's default.</summary>
+    public string? Container { get; set; }
+
     public string? AudioEncoder { get; set; }
 
     public double StartTimeSeconds { get; set; }
@@ -59,7 +63,23 @@ public sealed class UserConfig
     public int? AudioRate { get; set; }
     public int Width { get; set; } = Constants.DefaultWidth;
     public int Height { get; set; } = Constants.DefaultHeight;
-    public bool Crop43 { get; set; } = true;
+
+    /// <summary>
+    /// v7.8: how the picture is fitted into the frame. "crop" fills it and
+    /// discards the overflow (the old "crop 4:3" behaviour), "fit" keeps the
+    /// whole picture and pads it, "stretch" fills it and distorts.
+    /// </summary>
+    public string FitMode { get; set; } = "crop";
+    public string CropAnchor { get; set; } = "center";
+    public string PadColor { get; set; } = "black";
+
+    /// <summary>
+    /// v7.7 and earlier stored "crop 4:3" as a boolean. Kept so an old file
+    /// still means what it meant -- "no" was a plain stretch -- and left null
+    /// by <see cref="ConfigStore.Capture"/> from v7.8 on.
+    /// </summary>
+    public bool? Crop43 { get; set; }
+
     public string ScaleAlgo { get; set; } = "neighbor";
     public string Deinterlace { get; set; } = "off";
     public string DeintMode { get; set; } = "send_frame";
@@ -172,6 +192,7 @@ public static class ConfigStore
         OutputPath = c.OutputPath?.FullName,
         OutputIsAuto = c.OutputIsAuto,
         Encoder = c.Encoder?.Name,
+        Container = c.Container,
         AudioEncoder = c.AudioEncoder,
         StartTimeSeconds = c.StartTimeSeconds,
         EndTimeSeconds = c.EndTimeSeconds,
@@ -189,7 +210,9 @@ public static class ConfigStore
         AudioRate = c.AudioRate,
         Width = c.Width,
         Height = c.Height,
-        Crop43 = c.Crop43,
+        FitMode = c.FitMode,
+        CropAnchor = c.CropAnchor,
+        PadColor = c.PadColor,
         ScaleAlgo = c.ScaleAlgo,
         Deinterlace = c.Deinterlace,
         DeintMode = c.DeintMode,
@@ -261,6 +284,8 @@ public static class ConfigStore
             if (match is not null) c.Encoder = match;
         }
 
+        if (stored.Container is { Length: > 0 } container) c.Container = container;
+
         if (stored.AudioEncoder is { Length: > 0 } audio) c.AudioEncoder = audio;
 
         c.StartTimeSeconds = stored.StartTimeSeconds;
@@ -282,7 +307,11 @@ public static class ConfigStore
         c.AudioRate = stored.AudioRate;
         c.Width = stored.Width;
         c.Height = stored.Height;
-        c.Crop43 = stored.Crop43;
+        c.FitMode = Core.EncoderMath.CanonicalFitMode(stored.FitMode);
+        c.CropAnchor = Core.EncoderMath.CanonicalCropAnchor(stored.CropAnchor);
+        c.PadColor = string.IsNullOrWhiteSpace(stored.PadColor) ? "black" : stored.PadColor.Trim();
+        // Migration: "crop 4:3 = no" meant no crop at all, i.e. a plain stretch.
+        if (stored.Crop43 is false) c.FitMode = "stretch";
         c.ScaleAlgo = stored.ScaleAlgo;
         c.Deinterlace = stored.Deinterlace;
         c.DeintMode = stored.DeintMode;

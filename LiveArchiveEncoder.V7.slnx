@@ -15,6 +15,7 @@
     <File Path="src/LiveArchiveEncoder/Configuration/UserConfig.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Core/">
+    <File Path="src/LiveArchiveEncoder/Core/AudioCatalog.cs" />
     <File Path="src/LiveArchiveEncoder/Core/EncoderMath.cs" />
     <File Path="src/LiveArchiveEncoder/Core/HighResolutionTimer.cs" />
     <File Path="src/LiveArchiveEncoder/Core/Interrupt.cs" />
@@ -73,6 +74,7 @@
   </Folder>
   <Folder Name="/tests/LiveArchiveEncoder.Tests/">
     <Project Path="tests/LiveArchiveEncoder.Tests/LiveArchiveEncoder.Tests.csproj" />
+    <File Path="tests/LiveArchiveEncoder.Tests/AudioAndFrameFitTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/CliParserTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/ConfigStoreTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/FfmpegCatalogTests.cs" />

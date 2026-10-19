@@ -1,4 +1,4 @@
-namespace LiveArchiveEncoder.Configuration;
+﻿namespace LiveArchiveEncoder.Configuration;
 
 /// <summary>
 /// All tables and magic values ported verbatim from live_archive_encoder.py v6.3.3.
@@ -79,6 +79,48 @@ public static class Constants
         ["roqvideo"] = ("roq", "roq"),
     };
 
+    /// <summary>
+    /// v7.8: every container an encoder may be written to, in preference order.
+    /// The first entry is the default, so no encoder changes container unless the
+    /// user asks -- mpeg4/libxvid keep AVI, mpeg1/2video keep MPEG-PS, libx264
+    /// keeps MP4, but AVI and Matroska become selectable where the combination
+    /// actually muxes.
+    ///
+    /// Deliberately not "everything in every container": MPEG-PS in Matroska and
+    /// RealVideo in AVI are the kind of pair that muxes and then fails to play.
+    /// </summary>
+    public static readonly Dictionary<string, (string Ext, string Format)[]> ContainerChoicesByEncoder = new()
+    {
+        ["mpeg1video"] = [("mpg", "mpeg"), ("avi", "avi")],
+        ["mpeg2video"] = [("mpg", "mpeg"), ("avi", "avi")],
+        ["mpeg4"] = [("avi", "avi"), ("mp4", "mp4")],
+        ["libxvid"] = [("avi", "avi"), ("mp4", "mp4")],
+        ["libx264"] = [("mp4", "mp4"), ("avi", "avi"), ("mkv", "matroska")],
+    };
+
+    /// <summary>
+    /// How the source frame is made to fill the output frame.
+    /// crop = fill and discard the overflow, fit = keep everything and pad,
+    /// stretch = fill and distort.
+    /// </summary>
+    public static readonly string[] FitModes = ["crop", "fit", "stretch"];
+
+    /// <summary>Which part survives when <c>crop</c> has to discard an edge.</summary>
+    public static readonly string[] CropAnchors = ["center", "top", "bottom", "left", "right"];
+
+    /// <summary>
+    /// v7.8: preset frame sizes, grouped by aspect ratio. Handy because a 16:9
+    /// master stored as 4:3 (or the reverse) needs the right pair of numbers --
+    /// 320x180 rather than 320x240 -- before any padding or cropping is applied.
+    /// </summary>
+    public static readonly (int W, int H, string Label)[] ResolutionPresets =
+    [
+        (160, 120, "4:3"), (256, 192, "4:3"), (320, 240, "4:3"),
+        (384, 288, "4:3"), (512, 384, "4:3"), (640, 480, "4:3"),
+        (160, 90, "16:9"), (256, 144, "16:9"), (320, 180, "16:9"), (384, 216, "16:9"),
+        (512, 288, "16:9"), (640, 360, "16:9"), (854, 480, "16:9"), (1280, 720, "16:9"),
+    ];
+
     public static readonly Dictionary<string, int> DefaultQuality = new()
     {
         ["libx264"] = 28, ["libtheora"] = 7, ["rv10"] = 8, ["rv20"] = 8,
@@ -150,6 +192,7 @@ public static class Constants
         ["h263"] = [".h263"],
         ["mpeg"] = [".mpg", ".mpeg", ".mpe", ".vob"],
         ["mp4"] = [".mp4", ".m4v"],
+        ["matroska"] = [".mkv"],
         ["mov"] = [".mov", ".qt"],
         ["ogg"] = [".ogg", ".ogv"],
         ["rm"] = [".rm", ".rmvb"],

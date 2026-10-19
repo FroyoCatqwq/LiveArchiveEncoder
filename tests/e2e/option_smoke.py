@@ -81,6 +81,40 @@ CASES = [
                          "--recompress", "--recompress-keep",
                          "--recompress-args", "-vf scale=320:240,fps=15 "
                                               "-c:v libx264 -crf 28 -ac 1 -b:a 32k"], "avi"),
+
+    # ---- v7.8 #4: container choice ----
+    # mpeg1video/mpeg2video/mpeg4/libxvid/libx264 gain AVI, libx264 gains MKV.
+    # The default container is unchanged, which is why every case above still
+    # names the same extension it always did.
+    ("container_m1v_avi",  ["--encoder", "mpeg1video", "--container", "avi",
+                            "--turbo"],                                       "avi"),
+    ("container_m2v_avi",  ["--encoder", "mpeg2video", "--container", "avi",
+                            "--turbo"],                                       "avi"),
+    ("container_xvid_mp4", ["--encoder", "libxvid", "--container", "mp4",
+                            "--turbo"],                                       "mp4"),
+    ("container_x264_avi", ["--encoder", "libx264", "--container", "avi",
+                            "--turbo"],                                       "avi"),
+    ("container_x264_mkv", ["--encoder", "libx264", "--container", "mkv",
+                            "--turbo"],                                       "mkv"),
+
+    # ---- v7.8 #5/#6: 16:9 output and the three fit modes ----
+    ("size_169",        ["--encoder", "libx264", "--width", "640", "--height", "360",
+                         "--turbo"],                                          "mp4"),
+    ("fit_letterbox",   ["--encoder", "mpeg4", "--width", "320", "--height", "240",
+                         "--fit", "fit", "--turbo"],                           "avi"),
+    ("fit_pad_colour",  ["--encoder", "mpeg4", "--width", "320", "--height", "240",
+                         "--fit", "fit", "--pad-color", "0x404040", "--turbo"], "avi"),
+    ("fit_stretch",     ["--encoder", "mpeg4", "--fit", "stretch", "--turbo"],  "avi"),
+    ("fit_crop_left",   ["--encoder", "mpeg4", "--fit", "crop",
+                         "--crop-anchor", "left", "--turbo"],                   "avi"),
+
+    # ---- v7.8 #3: audio encoders matched to the container ----
+    # ac3 in RealMedia at the source's own 44.1 kHz: valid, and it used to be
+    # the pair that broke when a preset asked for 16 kHz.
+    ("audio_ac3",       ["--encoder", "rv20", "--audio-encoder", "ac3",
+                         "--turbo"],                                           "rm"),
+    ("audio_mp2",       ["--encoder", "mpeg2video", "--container", "avi",
+                         "--audio-encoder", "mp2", "--turbo"],                 "avi"),
 ]
 
 # v7.6: files the post-processing stages leave next to the main product.
@@ -124,6 +158,28 @@ OPTION_CHECKS = [
     ("level_bad_spec",    ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
                            "--fps-levels", "12:128:130",
                            str(SRC), str(OUT / "lv_bad.avi")],  2, "must be below"),
+    # ---- v7.8 #3: an explicit sample rate the codec cannot honour is refused
+    # before FFmpeg starts. ac3 takes 32/44.1/48 kHz and nothing else.
+    ("audio_rate_bad",    ["--lang", "en", "--no-cui", "--encoder", "rv20",
+                           "--audio-encoder", "ac3", "--audio-rate", "16000",
+                           str(SRC), str(OUT / "ar_bad.rm")],   2, "does not support 16000 Hz"),
+    # ...and a codec the container cannot hold is refused the same way.
+    ("audio_nomux",       ["--lang", "en", "--no-cui", "--encoder", "rv20",
+                           "--audio-encoder", "libvorbis",
+                           str(SRC), str(OUT / "am_bad.rm")],   2, "cannot be muxed"),
+    # ---- v7.8 #4: only containers the encoder can write are accepted; a wrong
+    # one is an error rather than a silent fallback to another extension.
+    ("container_bad",     ["--lang", "en", "--no-cui", "--encoder", "rv20",
+                           "--container", "mkv",
+                           str(SRC), str(OUT / "ct_bad.mkv")],  2, "cannot write"),
+    # ---- v7.8 #5/#6: fit modes and anchors are validated at parse time.
+    ("fit_bad",           ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
+                           "--fit", "squash",
+                           str(SRC), str(OUT / "fit_bad.avi")], 2, "--fit must be one of"),
+    ("anchor_bad",        ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
+                           "--crop-anchor", "sideways",
+                           str(SRC), str(OUT / "an_bad.avi")],  2, "--crop-anchor must be one of"),
+    ("completion_new_opts", ["--completion", "bash"],             0, "--container"),
 ]
 
 
