@@ -1,0 +1,27 @@
+[Unit]
+Description=Forgejo Actions runner (LiveArchiveEncoder)
+Documentation=https://forgejo.org/docs/next/user/actions/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ci1
+WorkingDirectory=/home/ci1/forgejo-runner
+# Host mode: jobs run straight on this box, no container runtime. The label
+# must match `runs-on:` in .forgejo/workflows/ci.yml.
+ExecStart=/usr/local/bin/forgejo-runner daemon \
+  --config /home/ci1/forgejo-runner/config.yml \
+  --url https://codeberg.org/ \
+  --uuid cb1b6b90-692f-4ac0-a6b8-0707c89c5dfd \
+  --token-url file:///home/ci1/forgejo-runner/token \
+  --label ubuntu-latest:host
+Restart=always
+RestartSec=5
+# The runner writes job logs and the .runner state under WorkingDirectory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target

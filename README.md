@@ -146,6 +146,12 @@ registered under your account or the repository
 Runner* with at least the `ubuntu-latest` label). Without one the job simply
 stays queued; dispatch it by hand with `fj actions dispatch ci main`.
 
+v7.7 registered a self-hosted one: `forgejo-runner` v13.2.0 in **host mode**
+(label `ubuntu-latest:host`, so no container runtime is needed) with a systemd
+unit and the mise SDK on `PATH`. See `tools/forgejo-runner.service` and
+`tools/forgejo-runner-config.yml` — the only machine-specific parts are the home
+directory in the env block and the `--uuid` / token file.
+
 The Python harnesses run on none of them on purpose — see the note in `## Tests`.
 
 ## Usage
@@ -222,7 +228,7 @@ src/LiveArchiveEncoder/
   Frames/         bounded pre-allocated frame pool
   RateControl/    rolling bitrate monitor fed by `ffmpeg -progress`
   Encoding/       argument builders, preflight, the realtime encode loop, audio
-                  routing, optional parallel sharding
+                  routing, optional parallel sharding, ShardPlanner (v7.7)
   Remote/         SMB/UNC argument construction for read and write
   Localization/   en/zh string tables (every key must exist in both)
   UI/             CLI parser + help, CUI menus, shared reporting, --cpu-info,
@@ -251,6 +257,8 @@ tools/
   build.ps1                   JIT and/or NativeAOT build helper (Windows)
   build.sh                    the same for Linux/macOS
   benchmark.ps1               controller CPU / memory measurement
+  forgejo-runner.service      systemd unit for the self-hosted Codeberg runner
+  forgejo-runner-config.yml   its config (host mode, mise SDK on PATH)
 reference/
   live_archive_encoder.py     v6.3.3 — the Python baseline the port is measured against
 docs/

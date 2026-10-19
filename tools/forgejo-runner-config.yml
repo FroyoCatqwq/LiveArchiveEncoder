@@ -1,0 +1,28 @@
+# Forgejo Actions runner for the LiveArchiveEncoder repo on Codeberg.
+#
+# Host mode (label ":host"): jobs run directly on this box, no container
+# runtime. The SDK lives in mise, which a non-interactive shell never puts on
+# PATH, so PATH and DOTNET_ROOT are injected here instead of in the workflow --
+# that keeps .forgejo/workflows/ci.yml usable on any runner.
+log:
+  level: info
+  job_level: info
+
+runner:
+  file: .runner
+  capacity: 1
+  envs:
+    DOTNET_ROOT: /home/ci1/.local/share/mise/dotnet-root
+    PATH: /home/ci1/.local/share/mise/shims:/home/ci1/.local/share/LiveArchiveEncoder/ffmpeg/btbn/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  env_file: .env
+  timeout: 3h
+  shutdown_timeout: 3h
+  insecure: false
+  fetch_timeout: 30s
+  fetch_interval: 2s
+  report_interval: 1s
+  labels:
+    - ubuntu-latest:host
+
+cache:
+  enabled: false
