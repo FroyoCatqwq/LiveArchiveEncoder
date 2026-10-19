@@ -36,15 +36,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 11.0.x
-
-      # Purely so the tests that probe a real FFmpeg run instead of skipping.
-      - name: Install FFmpeg
+      # No actions/setup-dotnet and no apt-get here: this workflow runs on a
+      # self-hosted host-mode runner, whose config already puts the mise-managed
+      # .NET 11 SDK and an FFmpeg build on PATH. The setup action insists on
+      # installing into /usr/share/dotnet, which an unprivileged runner cannot
+      # create, and `sudo apt-get` would need a password nobody can type.
+      #
+      # The capabilities are printed rather than assumed: a failing CI job should
+      # say which tool is missing.
+      - name: Environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg xz-utils
+          dotnet --list-sdks
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
 
       - name: Restore
         run: dotnet restore LiveArchiveEncoder.V7.slnx
@@ -66,9 +70,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 11.0.x
+      # Same SDK story as above: the runner supplies it.
+      - name: Environment
+        run: dotnet --list-sdks
 
       - name: Publish
         run: |
