@@ -95,16 +95,19 @@ jobs:
           sudo apt-get install -y zip
           (cd publish/win-x64 && zip -q -r ../../dist-win-x64.zip .)
 
+      # v4 of both artifact actions refuses to run anywhere but GitHub
+      # ("not currently supported on GHES"); v3 uses the older protocol that
+      # Forgejo implements.
       - name: Upload (linux)
         if: matrix.rid == 'linux-x64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: LiveArchiveEncoder-linux-x64
           path: dist-linux-x64.tar.gz
 
       - name: Upload (windows)
         if: matrix.rid == 'win-x64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: LiveArchiveEncoder-win-x64
           path: dist-win-x64.zip
