@@ -1225,7 +1225,7 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 ### v7.4.1 新增
 
 1. **引入 NUnit**（`tests/LiveArchiveEncoder.Tests`，当时 121 个用例，v7.6 已达
-   214，v7.7 已达 236）：纯逻辑单测，不依赖 FFmpeg 和网络，几秒跑完；Python harness
+   214，v7.7 是 236，v7.8 已达 258）：纯逻辑单测，不依赖 FFmpeg 和网络，几秒跑完；Python harness
    继续负责
    "与 v6.3.3 是否等价"那一层。见 §12。
 2. 首次跑就抓到并修掉了一个真 Bug：`note.*` / `run.*` 共 13 个词条只有英文没有
@@ -1381,12 +1381,12 @@ python3 tests/e2e/cui_smoke.py
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test     失败 0，通过 236（Linux 是 234 通过 + 1 跳过）
+dotnet test     失败 0，通过 258（Linux 是 256 通过 + 1 跳过）
 compare_matrix  total=12 pass=12 fail=0
 error_paths     total=11 fail=0
 feature_sweep   total=35 pass=35 warn=0 fail=0
-option_smoke    total=37 pass=37 fail=0
-cui_smoke       total=30 pass=30 fail=0（Linux 是 31）
+option_smoke    total=55 pass=55 fail=0
+cui_smoke       total=34 pass=34 fail=0（Linux 是 35）
 ```
 
 Linux 少一条是因为 `PathMeansSystemFfmpeg` 需要 PATH 上的系统 FFmpeg；cui_smoke
