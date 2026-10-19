@@ -65,7 +65,9 @@ public static class Cui
             Console.WriteLine($" 6. {L.T("menu.filters")}");
             Console.WriteLine($" 7. {L.T("menu.showconfig")}");
             Console.WriteLine($" 8. {L.T("menu.start")}");
-            Console.WriteLine($" 9. {L.Pad(L.T("menu.turbo"), 22)} = {(c.Turbo ? L.T("turbo.on") : L.T("turbo.off"))}");
+            // v7.7: Turbo still works, but it is deprecated and says so here so
+            // nobody discovers it from the menu and assumes it is recommended.
+            Console.WriteLine($" 9. {L.Pad(L.T("turbo.menu.deprecated"), 22)} = {(c.Turbo ? L.T("turbo.on") : L.T("turbo.off"))}");
             Console.WriteLine($"10. {L.Pad(L.T("menu.language"), 22)} = {c.Language}");
             Console.WriteLine($"11. {L.Pad(L.T("menu.parallel"), 22)} = {(c.Parallel > 1 ? c.Parallel.ToString(CultureInfo.InvariantCulture) : L.T("menu.parallel.off"))}");
             Console.WriteLine($"12. {L.Pad(L.T("menu.toolchain"), 22)} = {c.FfmpegSource}");
@@ -134,6 +136,7 @@ public static class Cui
                 case "9":
                     c.Turbo = !c.Turbo;
                     Console.WriteLine(c.Turbo ? L.T("turbo.enabled") : L.T("turbo.disabled"));
+                    if (c.Turbo) Console.WriteLine(L.T("turbo.deprecated"));
                     Persist(c);
                     break;
                 case "10":
@@ -345,6 +348,7 @@ public static class Cui
                 c.Fps = baseFps;
             }
             c.FpsLevels = EncoderMath.SelectLevels(c.Fps, null);
+            c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
             (c.Width, c.Height, bool sizeExact) = EncoderMath.NormalizeDimensions(chosen.Name, c.Width, c.Height);
             if (!sizeExact) Console.WriteLine(L.T("encoder.sizesdjusted", chosen.Name, c.Width, c.Height));
 
@@ -409,7 +413,7 @@ public static class Cui
             Row(2, L.T("param.recover"), $"{c.Recover:G6}");
             Row(3, L.T("param.window"), $"{c.Window:G6}");
             Row(4, L.T("param.basefps"), $"{c.Fps:G6}");
-            Row(5, L.T("param.levels"), string.Join(",", c.FpsLevels.Select(x => x.ToString("G6"))));
+            Row(5, L.T("param.levels"), EncoderMath.FormatLadder(c.Fps, c.FpsLevels, c.FpsLevelKbps));
             Row(6, qualityLabel, c.Qv.ToString(CultureInfo.InvariantCulture));
             Row(7, L.T("param.threads"), c.Threads.ToString(CultureInfo.InvariantCulture));
             Row(8, L.T("param.buffer"), c.BufferFrames.ToString(CultureInfo.InvariantCulture));
@@ -434,6 +438,7 @@ public static class Cui
             }
             Row(25, L.T("param.start"), Timecode.Format(c.StartTimeSeconds));
             Row(26, L.T("param.end"), Timecode.Format(c.EndTimeSeconds));
+            Row(27, L.T("param.levelkbps"), DescribeRungBitrates(c));
             Console.WriteLine($"    {L.T("param.availdeint")}     = {string.Join(", ", deintOptions)}");
             Console.WriteLine($" 0. {L.T("param.back")}");
             Console.Write(L.T("param.select"));
@@ -456,14 +461,28 @@ public static class Cui
                             if (!fpsExact) Console.WriteLine(L.T("param.fpsadjusted", $"{c.Fps:G6}"));
                         }
                         c.FpsLevels = EncoderMath.SelectLevels(c.Fps, null);
+                        // A rung above the new base rate cannot be reached, so
+                        // its thresholds are dropped along with it.
+                        c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
                         break;
                     case "5":
-                        string levelsRaw = ReadRaw(L.T("param.prompt.levels", string.Join(",", c.FpsLevels.Select(x => x.ToString("G6")))));
-                        if (levelsRaw.Length > 0)
+                        string levelsRaw = ReadRaw(L.T("param.prompt.levels",
+                            EncoderMath.FormatLadder(c.Fps, c.FpsLevels, c.FpsLevelKbps)));
+                        if (levelsRaw.Length == 0) break;
+
+                        (List<double> levelFps, List<FpsRungSetting> rungs, string? levelError) =
+                            EncoderMath.ParseLevelSpec(levelsRaw);
+                        if (levelError is not null) throw new FormatException(levelError);
+
+                        // A motion level faster than the base rate is a typo: the
+                        // ladder only ever throttles downwards.
+                        foreach (double candidate in levelFps)
                         {
-                            c.FpsLevels = EncoderMath.SelectLevels(
-                                c.Fps, levelsRaw.Split(',').Select(x => double.Parse(x, CultureInfo.InvariantCulture)));
+                            if (candidate > c.Fps + 1e-9)
+                                throw new FormatException(L.T("param.levelstoofast", $"{candidate:G6}", $"{c.Fps:G6}"));
                         }
+                        c.FpsLevels = EncoderMath.SelectLevels(c.Fps, levelFps);
+                        c.FpsLevelKbps = EncoderMath.PruneRungs(rungs, c.FpsLevels);
                         break;
                     case "6":
                         c.Qv = ReadInt(L.T("param.prompt.quality", qualityLabel, c.Qv), c.Qv);
@@ -583,6 +602,9 @@ public static class Cui
                             c.EndTimeSeconds = newEnd;
                         }
                         break;
+                    case "27":
+                        EditRungBitrates(c);
+                        break;
                     default:
                         Console.WriteLine(L.T("param.invalid"));
                         break;
@@ -595,6 +617,73 @@ public static class Cui
 
             try { Validation.ValidateCommonConfig(c); }
             catch (ArgumentException exc) { Console.WriteLine(L.T("param.badconfig", exc.Message)); }
+        }
+    }
+
+    /// <summary>Row 27: "auto" until at least one rung carries an explicit threshold.</summary>
+    private static string DescribeRungBitrates(Config c)
+    {
+        if (c.FpsLevelKbps.Count == 0) return L.T("value.auto");
+        List<FpsRung> ladder = EncoderMath.BuildLadder(
+            c.Fps, c.FpsLevels, c.FpsLevelKbps, c.Limit, c.Recover);
+        return string.Join(", ", ladder.Skip(1).Select(
+            r => $"{r.Fps:G6}:{r.DropAboveKbps:G6}/{r.RiseBelowKbps:G6}"));
+    }
+
+    /// <summary>
+    /// Per-rung bitrate editor. The ladder itself is row 5; this is where the
+    /// kbps that selects each rung are set, e.g. "drop to 12 fps at 128 kbps,
+    /// climb back at 115".
+    /// </summary>
+    private static void EditRungBitrates(Config c)
+    {
+        while (true)
+        {
+            List<FpsRung> ladder = EncoderMath.BuildLadder(
+                c.Fps, c.FpsLevels, c.FpsLevelKbps, c.Limit, c.Recover);
+
+            Console.WriteLine($"\n{L.T("param.rung.heading")}");
+            Console.WriteLine($" {L.T("param.rung.base")}: {c.Fps:G6}");
+            for (int i = 1; i < ladder.Count; i++)
+            {
+                Console.WriteLine($" {i,2}. " + L.T("param.rung.row",
+                    $"{ladder[i].Fps:G6}", $"{ladder[i].DropAboveKbps:G6}", $"{ladder[i].RiseBelowKbps:G6}"));
+            }
+            Console.WriteLine($" 0. {L.T("param.back")}");
+            Console.Write(L.T("param.rung.pick"));
+
+            string pick = (Console.ReadLine() ?? "").Trim();
+            if (pick == "0") return;
+            if (!int.TryParse(pick, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index)
+                || index < 1 || index >= ladder.Count)
+            {
+                Console.WriteLine(L.T("param.invalid"));
+                continue;
+            }
+
+            double fps = ladder[index].Fps;
+            FpsRungSetting? rung = c.FpsLevelKbps.FirstOrDefault(x => Math.Abs(x.Fps - fps) < 1e-6);
+            double dropNow = rung?.DropAboveKbps ?? ladder[index].DropAboveKbps;
+            double riseNow = rung?.RiseBelowKbps ?? ladder[index].RiseBelowKbps;
+
+            try
+            {
+                double drop = ReadDouble(L.T("param.rung.prompt.drop", $"{fps:G6}", $"{dropNow:G6}"), dropNow);
+                double rise = ReadDouble(L.T("param.rung.prompt.rise", $"{fps:G6}", $"{riseNow:G6}"), riseNow);
+                if (drop <= 0 || rise <= 0 || rise >= drop) throw new FormatException(L.T("param.rung.bad"));
+
+                if (rung is null)
+                {
+                    rung = new FpsRungSetting { Fps = fps };
+                    c.FpsLevelKbps.Add(rung);
+                }
+                rung.DropAboveKbps = drop;
+                rung.RiseBelowKbps = rise;
+            }
+            catch (Exception exc) when (exc is FormatException or ArgumentException or OverflowException)
+            {
+                Console.WriteLine(L.T("param.badvalue", exc.Message));
+            }
         }
     }
 
@@ -694,6 +783,7 @@ public static class Cui
                 Encoder = c.Encoder,
                 Fps = c.Fps,
                 FpsLevels = c.FpsLevels,
+                FpsLevelKbps = c.FpsLevelKbps,
                 Quality = c.Qv,
                 Threads = c.Threads,
                 LimitKbps = c.Limit,

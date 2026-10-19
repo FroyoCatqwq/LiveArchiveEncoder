@@ -23,16 +23,16 @@ when:
 
 steps:
   - name: restore
-    image: mcr.microsoft.com/dotnet/sdk:10.0
+    image: mcr.microsoft.com/dotnet/sdk:11.0
     commands:
       - dotnet restore LiveArchiveEncoder.V7.slnx
 
   - name: build
-    image: mcr.microsoft.com/dotnet/sdk:10.0
+    image: mcr.microsoft.com/dotnet/sdk:11.0
     commands:
       - dotnet build LiveArchiveEncoder.V7.slnx -c Release --no-restore
 
   - name: test
-    image: mcr.microsoft.com/dotnet/sdk:10.0
+    image: mcr.microsoft.com/dotnet/sdk:11.0
     commands:
       - dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build

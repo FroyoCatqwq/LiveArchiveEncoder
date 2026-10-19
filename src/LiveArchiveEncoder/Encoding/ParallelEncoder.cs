@@ -50,35 +50,23 @@ public static class ParallelEncoder
         try
         {
             double span = duration!.Value;
-            int fpsSlots = (int)Math.Ceiling(span * o.Fps - 1e-9);
-            if (fpsSlots < shards) shards = Math.Max(1, fpsSlots);
 
-            // Distribute whole output slots, not raw seconds. A shard boundary that
-            // lands mid-slot would make the shard slot counts fail to add up to the
-            // total, silently shortening or lengthening the joined file.
-            int baseSlots = fpsSlots / shards;
-            int remainder = fpsSlots % shards;
-
-            var ranges = new (double Start, double End, int Slots)[shards];
-            double cursor = o.StartSeconds;
-            for (int i = 0; i < shards; i++)
-            {
-                int count = baseSlots + (i < remainder ? 1 : 0);
-                double end = cursor + count / o.Fps;
-                ranges[i] = (cursor, end, count);
-                cursor = end;
-            }
+            // Whole-slot boundaries, clamped so no shard ever asks for a time
+            // past the end of the source (see ShardPlanner).
+            List<ShardRange> ranges = ShardPlanner.Plan(o.StartSeconds, span, o.Fps, shards);
+            shards = ranges.Count;
 
             if (o.Verbose)
             {
                 Console.WriteLine(
-                    $"Sharding         : {shards} shards x {ranges[0].Slots} slots "
+                    $"{L.Pad(L.T("shard.heading"), 17)}: {shards} shards x {ranges[0].Slots} slots "
                     + $"({ranges[0].Slots / o.Fps:F3}s each), format '{o.Encoder.FormatName}'");
             }
 
             var results = new EncodeResult[shards];
             var failures = new List<string>();
             var sync = new object();
+            var progress = new ShardProgress(shards, o.Verbose);
 
             Parallel.For(0, shards,
                 new ParallelOptions { MaxDegreeOfParallelism = shards, CancellationToken = cancellationToken },
@@ -129,8 +117,10 @@ public static class ParallelEncoder
                             Turbo = o.Turbo,
                             // Never recurse into sharding a shard.
                             Parallel = 1,
+                            Progress = (done, target) => progress.Report(i, done, target),
                         };
                         results[i] = RealtimeEncoder.RunSingle(shardOptions, cancellationToken);
+                        progress.Finish(i, results[i].Slots);
                     }
                     catch (Exception ex)
                     {
@@ -138,6 +128,7 @@ public static class ParallelEncoder
                     }
                 });
 
+            progress.Render(force: true);
             if (failures.Count > 0)
                 throw new InvalidOperationException("shard encoding failed: " + string.Join(" | ", failures));
 
@@ -201,6 +192,100 @@ public static class ParallelEncoder
         finally
         {
             try { Directory.Delete(stageDir, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    /// <summary>
+    /// One aggregate progress line for all shards.
+    ///
+    /// A shard cannot print its own status: seven of them writing \r lines to the
+    /// same console is unreadable. Instead every shard reports its slot counter
+    /// here and the last one to move renders a single line that is throttled to
+    /// five updates a second.
+    /// </summary>
+    private sealed class ShardProgress
+    {
+        private readonly object _gate = new();
+        private readonly bool _verbose;
+        private readonly int _shards;
+        private readonly int[] _slots;
+        private readonly int[] _targets;
+        private readonly bool[] _finished;
+        private readonly long _started = Environment.TickCount64;
+        private int _done;
+        private long _lastRender;
+        private int _width;
+
+        public ShardProgress(int shards, bool verbose)
+        {
+            _shards = shards;
+            _verbose = verbose;
+            _slots = new int[shards];
+            _targets = new int[shards];
+            _finished = new bool[shards];
+        }
+
+        public void Report(int shard, int slots, int? target)
+        {
+            lock (_gate)
+            {
+                _slots[shard] = slots;
+                if (target is not null) _targets[shard] = Math.Max(target.Value, slots);
+                MaybeRender(false);
+            }
+        }
+
+        /// <summary>Mark a shard done. <paramref name="slots"/> is its real final
+        /// count: the throttled reports can lag behind by up to 0.2s, and a
+        /// finished shard must never be shown as one slot short.</summary>
+        public void Finish(int shard, int slots)
+        {
+            lock (_gate)
+            {
+                _slots[shard] = Math.Max(_slots[shard], slots);
+                if (_targets[shard] < _slots[shard]) _targets[shard] = _slots[shard];
+                if (!_finished[shard])
+                {
+                    _finished[shard] = true;
+                    _done++;
+                }
+                MaybeRender(false);
+            }
+        }
+
+        /// <summary>Force a final render. Always terminates the line.</summary>
+        public void Render(bool force)
+        {
+            lock (_gate) MaybeRender(force);
+        }
+
+        private void MaybeRender(bool force)
+        {
+            if (!_verbose) return;
+
+            long now = Environment.TickCount64;
+            if (!force && now - _lastRender < 200) return;
+            _lastRender = now;
+
+            int slots = 0;
+            int targets = 0;
+            for (int i = 0; i < _shards; i++)
+            {
+                slots += _slots[i];
+                targets += _targets[i];
+            }
+
+            double elapsed = (now - _started) / 1000.0;
+            string text = targets > 0
+                ? L.T("shard.progress", _done, _shards, slots, targets,
+                    Math.Clamp((int)(slots * 100.0 / targets), 0, 100), Timecode.Format(elapsed))
+                : L.T("shard.progress.open", _done, _shards, slots, Timecode.Format(elapsed));
+
+            string line = $"{L.Pad(L.T("shard.label"), 17)}: {text}";
+            if (line.Length < _width) line += new string(' ', _width - line.Length);
+            _width = line.Length;
+            Console.Write('\r' + line);
+            if (force) Console.WriteLine();
         }
     }
 

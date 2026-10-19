@@ -48,6 +48,16 @@ CASES = [
                          "--end-time", "00:00:08"],             "avi"),
     ("fps_levels",      ["--encoder", "mpeg4", "--fps", "25",
                          "--fps-levels", "25,15,10,5"],         "avi"),
+    # v7.7 #6: per-rung bitrate thresholds. 10 fps is entered at 120 kbps and
+    # 5 fps at 150 kbps, instead of the multiples of --limit the ladder used.
+    ("level_kbps",      ["--encoder", "mpeg4", "--turbo",
+                         "--fps-levels", "10:120:110,5:150"],   "avi"),
+    # v7.7 #1: 19.010s at 15 fps is 285.15 slots, so the slot grid reaches
+    # 19.067s -- past the end of the source. This case failed with
+    # "end time ... exceeds the source duration" before the planner clamped the
+    # last boundary to the end of the range.
+    ("shard_rounding",  ["--encoder", "mpeg4", "--turbo", "--parallel", "4",
+                         "--end-time", "00:00:19.010"],         "avi"),
     ("x264",            ["--encoder", "libx264", "--qv", "23",
                          "--x264-preset", "faster"],            "mp4"),
     ("amv_forced",      ["--encoder", "amv"],                   "amv"),
@@ -105,6 +115,15 @@ OPTION_CHECKS = [
                            "--watermark-position", "middle",
                            str(SRC), str(OUT / "wm_bad.mp4")],      2, "watermark-position"),
     ("era_help_lists",    ["--completion", "bash"],                 0, "--era"),
+    # v7.7 #5: a motion level may never be faster than the base rate. The ladder
+    # only throttles downwards, so 25 with --fps 15 is a typo, not a setting.
+    ("level_too_fast",    ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
+                           "--fps", "15", "--fps-levels", "25,10",
+                           str(SRC), str(OUT / "lv_fast.avi")], 2, "faster than the base FPS"),
+    # A bad threshold is a parse error, caught before any encode starts.
+    ("level_bad_spec",    ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
+                           "--fps-levels", "12:128:130",
+                           str(SRC), str(OUT / "lv_bad.avi")],  2, "must be below"),
 ]
 
 

@@ -38,7 +38,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 11.0.x
 
       # Purely so the tests that probe a real FFmpeg run instead of skipping.
       - name: Install FFmpeg
@@ -68,7 +68,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 11.0.x
 
       - name: Publish
         run: |

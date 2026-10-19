@@ -1,4 +1,4 @@
-# Live Archive Encoder v7 (.NET 10 / C#) — 使用教程
+# Live Archive Encoder v7 (.NET 11 / C#) — 使用教程
 
 面向使用者的操作手册。想了解迁移细节与验证数据，看 `README.md` 和
 `docs/test-report-v7.md`。
@@ -38,8 +38,8 @@
 | 需求 | 说明 |
 | --- | --- |
 | FFmpeg + ffprobe | 必须在 `PATH` 里，或用 `--ffmpeg` / `--ffprobe` 显式指定；也可以让本工具自己装一套（见 §7.10） |
-| .NET 10 SDK | 仅**构建**时需要 |
-| 运行 | JIT 版需要 .NET 10 运行时；NativeAOT 版什么都不需要 |
+| .NET 11 SDK | 仅**构建**时需要（RC2 即可：`winget install Microsoft.DotNet.SDK.Preview`，Linux 用 `mise use -g dotnet@11.0.100-rc.2`） |
+| 运行 | JIT 版需要 .NET 11 运行时；NativeAOT 版什么都不需要 |
 | Linux 额外 | `xz-utils`（解压 `.tar.xz` 的受管理构建）、`cifs-utils`（挂载 SMB）、`samba`（要开共享时） |
 
 老式编码器（rv20、roqvideo、amv 等）只在完整构建的 FFmpeg 里才有。推荐
@@ -55,11 +55,11 @@
 ```powershell
 # 常规（JIT）构建
 dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
-# -> src\LiveArchiveEncoder\bin\Release\net10.0\LiveArchiveEncoder.exe
+# -> src\LiveArchiveEncoder\bin\Release\net11.0\LiveArchiveEncoder.exe
 
 # 或者用构建脚本，顺便出 NativeAOT 单文件版
 tools\build.ps1 -Aot
-# -> publish\jit\LiveArchiveEncoder.exe       162 KB，需要 .NET 10 运行时
+# -> publish\jit\LiveArchiveEncoder.exe       162 KB，需要 .NET 11 运行时
 # -> publish\aot\LiveArchiveEncoder.exe       3.8 MB，单个文件、零依赖
 
 # 三套全出（JIT + AOT + AOT-AVX2）
@@ -330,6 +330,47 @@ bug**，它模拟的就是"带宽不够时画面卡住"。
 `--recover` 必须大于 0 且小于 `--limit`，否则报错
 `recover must be > 0 and < limit`。
 
+### 每档位的码率阈值（v7.7）
+
+阶梯不只是"几档帧率"，还可以直接规定**哪一档在多少 kbps 时切入、多少 kbps 时退出**。
+写法是给 `--fps-levels` 的每一项加冒号：
+
+| 写法 | 含义 |
+| --- | --- |
+| `12` | 只给帧率，阈值按 `--limit` / `--recover` 推导（v7.6 及以前的老行为） |
+| `12:128` | 视频码率到 **128 kbps 就降到 12 fps**，升档阈值仍用 `--recover` |
+| `12:128:115` | 降到 12 fps 的阈值 128 kbps，**回落到 115 kbps 才升回上一档** |
+
+```bash
+# 基础 15 fps；到 128 kbps 降 12 fps、到 140 kbps 降 5 fps，回落到 115/130 才升回
+LiveArchiveEncoder src.mp4 out.avi --encoder mpeg4 --fps 15 \
+    --fps-levels 12:128:115,5:140:130
+```
+
+交互菜单里同样写在 **参数设置 → 5（动态 FPS 档位）**；
+**参数设置 → 27（档位码率）** 是逐档问答式的编辑器，会先列出每档当前的推导值：
+
+```text
+=== 动态 FPS 档位码率 ===
+ 基础 FPS: 15
+  1. 12 fps：视频达到 225 kbps 降到该档，回落到 168.75 kbps 升回上一档
+  2. 10 fps：视频达到 281.25 kbps 降到该档，回落到 168.75 kbps 升回上一档
+  3. 5 fps：视频达到 360 kbps 降到该档，回落到 168.75 kbps 升回上一档
+ 0. 返回
+```
+
+规则与边界：
+
+- **升档阈值必须低于降档阈值**，否则阶梯会来回横跳，输入时直接报错。
+- **档位帧率不得超过基础帧率**：阶梯只会往下压，写 `20` 而基础是 `15` 是笔误，
+  菜单里拒绝并提示，命令行显式写了 `--fps-levels` 时报 rc=2。
+  没写 `--fps-levels` 时**不做**这个检查——默认阶梯 13 fps 起，而 mpeg2video
+  这类编码器会把基础帧率吸附到 12，那是正常情况，不是笔误。
+- 阈值按**帧率值**记住，不是按位置：改阶梯顺序或删掉一档，阈值不会串到别的档上；
+  基础帧率调低之后，已经够不着的档位连同它的阈值一起被丢弃。
+- 不写阈值就是老行为：第 1 档 `--limit`×1.00、第 2 档 ×1.25、第 3 档 ×1.60，
+  升档统一用 `--recover`。
+
 ---
 
 ## 7. 音频通路：`--audio-mode`
@@ -372,7 +413,11 @@ v7 按 1/fps 的墙钟节奏输出，用来模拟直播录档。实测 20 秒素
 也就是说默认模式 96% 的时间在 sleep，CPU 只用了约 1.4%。
 `--limit` 是码率上限（触发降 FPS），**不是速度开关**，调大它不会加速。
 
-### `--turbo`
+### `--turbo`（v7.7 起弃用）
+
+> **已弃用。** 功能照旧可用，老脚本不会坏，但每次使用都会打印一行
+> `WARNING: DEPRECATED: ...`，菜单第 9 项也标了"（已弃用）"。
+> 它去掉的是本工具存在的理由（模拟直播录档的节奏），后续版本会移除。
 
 去掉输出循环和采集线程两处墙钟节流，改为「等采集线程真的交出下一帧」。
 滞回判定的 0.18 / 0.30 / 0.75 / 0.80 秒从墙钟改为**媒体时间**，
@@ -405,6 +450,23 @@ LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --turbo
 | `roq` | ❌ 回退 | **第二段整段丢失**（250 帧 → 125 帧，990KB → 222KB） |
 
 另外每段不足 4 秒也回退——每段要额外付约 1.5s 的进程启动开销。
+
+v7.7 起分片会打进度（每 0.2 秒刷新同一行，不会被 7 个分片刷屏）：
+
+```text
+Sharding         : 7 shards x 69 slots (4.600s each), format 'avi'
+Shards           : 3/7 done, 214/481 slots (44%) 00:00:02.1
+```
+
+分片的边界按**整帧槽**划分（落在槽中间会让各段的槽数凑不齐，悄悄把成品改长或改短），
+但帧槽网格比媒体时间轴粗：`ceil(时长×fps)` 个槽覆盖的时间比源多一点点。
+v7.7 之前最后一个分片会因此要一个超过片尾的时间，被 ffprobe 直接拒绝：
+
+```text
+错误：shard encoding failed: shard 6: end time 00:03:34.333 exceeds the source duration (00:03:34.280)
+```
+
+现在每个边界都夹在片段终点上，最后一片精确对齐到终点——既不会越界，也不会少尾巴。
 
 ```powershell
 # 只在 avi/mp4/flv/asf/mpeg 上真正生效
@@ -1029,7 +1091,8 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 ### v7.4.1 新增
 
 1. **引入 NUnit**（`tests/LiveArchiveEncoder.Tests`，当时 121 个用例，v7.6 已达
-   214）：纯逻辑单测，不依赖 FFmpeg 和网络，几秒跑完；Python harness 继续负责
+   214，v7.7 已达 236）：纯逻辑单测，不依赖 FFmpeg 和网络，几秒跑完；Python harness
+   继续负责
    "与 v6.3.3 是否等价"那一层。见 §12。
 2. 首次跑就抓到并修掉了一个真 Bug：`note.*` / `run.*` 共 13 个词条只有英文没有
    中文，中文界面下会漏回英文并把对齐顶歪。现在有词条完整性测试盯着。
@@ -1073,6 +1136,26 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
    `/usr/share/fonts`，随手挑到的拉丁字体还会让中文水印变成方块而编码照报成功
    ——两种都是"错了不报错"。Windows 首次使用会自动把微软雅黑/黑体/宋体复制进
    目录；Linux 自己放一个即可。
+
+### v7.7 新增
+
+1. **修复：并行分片末尾越界。** 帧槽网格比媒体时间轴粗，最后一个分片会要一个
+   超过片尾的时间（`end time 00:03:34.333 exceeds the source duration
+   (00:03:34.280)`），整次编码直接失败。现在边界全部夹在片段终点内，
+   最后一片精确对齐终点（§7.5）。规划逻辑抽成了 `ShardPlanner`，有单测覆盖。
+2. **并行分片显示进度。** 7 个分片各打一行是没法看的，改成共享一行聚合进度
+   （已完成片数 / 总帧槽 / 百分比 / 用时），每 0.2 秒刷新（§7.5）。
+3. **升级到 .NET 11 / C# 15。** 两个工程 `TargetFramework` 改为 `net11.0`；
+   Windows 用 `winget install Microsoft.DotNet.SDK.Preview`，Linux 用
+   `mise use -g dotnet@11.0.100-rc.2.26504.105`（ci1/ci2 都已装好）。
+   CI 的 `dotnet-version` 与 Woodpecker 镜像同步升到 11.0。
+4. **Turbo 标记弃用。** `--turbo` 和菜单第 9 项功能完全不变，只是每次使用都会
+   打印弃用警告、菜单里标注"（已弃用）"。老脚本不受影响（§7.5）。
+5. **动态档位不能超过基础 FPS。** 阶梯只会往下压，写 `20` 而基础是 `15` 是笔误：
+   菜单里拒绝并提示，命令行显式给了 `--fps-levels` 时报 rc=2（§6）。
+6. **档位码率可调。** `--fps-levels` 支持 `FPS:降档码率:升档码率`，
+   例如 `12:128:115,5:140:130`；菜单新增 **参数设置 → 27**（§6）。
+   不写就是 v7.6 的老行为，默认值一点没变。
 
 ---
 
@@ -1164,11 +1247,11 @@ python3 tests/e2e/cui_smoke.py
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test     失败 0，通过 214（Linux 是 212 通过 + 1 跳过）
+dotnet test     失败 0，通过 236（Linux 是 234 通过 + 1 跳过）
 compare_matrix  total=12 pass=12 fail=0
 error_paths     total=11 fail=0
 feature_sweep   total=35 pass=35 warn=0 fail=0
-option_smoke    total=33 pass=33 fail=0
+option_smoke    total=37 pass=37 fail=0
 cui_smoke       total=30 pass=30 fail=0（Linux 是 31）
 ```
 

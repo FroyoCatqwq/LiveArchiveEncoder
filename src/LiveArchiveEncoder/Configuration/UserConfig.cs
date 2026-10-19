@@ -26,7 +26,7 @@ internal partial class UserConfigJsonContext : JsonSerializerContext;
 /// </summary>
 public sealed class UserConfig
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -41,6 +41,13 @@ public sealed class UserConfig
     public double? EndTimeSeconds { get; set; }
     public double Fps { get; set; } = Constants.DefaultFps;
     public List<double> FpsLevels { get; set; } = [13.0, 8.0, 5.0, 3.0];
+
+    /// <summary>
+    /// v7.7: bitrate thresholds per ladder rung. Absent from v2 files, which is
+    /// fine -- an empty list means "derive from Limit/Recover", i.e. v7.6 rules.
+    /// </summary>
+    public List<FpsRungSetting> FpsLevelKbps { get; set; } = [];
+
     public double Limit { get; set; } = 200.0;
     public double Recover { get; set; } = 150.0;
     public double Window { get; set; } = 2.0;
@@ -170,6 +177,7 @@ public static class ConfigStore
         EndTimeSeconds = c.EndTimeSeconds,
         Fps = c.Fps,
         FpsLevels = [.. c.FpsLevels],
+        FpsLevelKbps = [.. c.FpsLevelKbps.Select(CloneRung)],
         Limit = c.Limit,
         Recover = c.Recover,
         Window = c.Window,
@@ -215,6 +223,13 @@ public static class ConfigStore
         FontFile = s.FontFile,
     };
 
+    private static FpsRungSetting CloneRung(FpsRungSetting s) => new()
+    {
+        Fps = s.Fps,
+        DropAboveKbps = s.DropAboveKbps,
+        RiseBelowKbps = s.RiseBelowKbps,
+    };
+
     private static RecompressSettings CloneRecompress(RecompressSettings s) => new()
     {
         Enabled = s.Enabled,
@@ -252,6 +267,10 @@ public static class ConfigStore
         c.EndTimeSeconds = stored.EndTimeSeconds;
         c.Fps = stored.Fps;
         if (stored.FpsLevels.Count > 0) c.FpsLevels = [.. stored.FpsLevels];
+        // Thresholds are keyed by FPS, so a rung that is no longer on the ladder
+        // is dropped here instead of silently resurrecting a stale value later.
+        if (stored.FpsLevelKbps.Count > 0)
+            c.FpsLevelKbps = [.. stored.FpsLevelKbps.Select(CloneRung)];
         c.Limit = stored.Limit;
         c.Recover = stored.Recover;
         c.Window = stored.Window;

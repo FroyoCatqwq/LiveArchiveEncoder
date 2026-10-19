@@ -91,14 +91,38 @@ public static class Cli
         if (!sizeExact)
             Console.WriteLine(L.T("note.specialsizes", encoder.Name, width, height));
 
-        List<double> levels = EncoderMath.SelectLevels(
-            baseFps,
-            string.IsNullOrWhiteSpace(args.FpsLevels)
-                ? null
-                : args.FpsLevels.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(x => double.Parse(x, System.Globalization.CultureInfo.InvariantCulture)));
+        // The ladder is written FPS[:drop kbps[:rise kbps]] per entry; a bare FPS
+        // keeps the threshold derived from limit/recover, so the old
+        // "--fps-levels 13,8,5,3" still means exactly what it always did.
+        (List<double> levelFps, List<FpsRungSetting> levelRungs, string? levelError) =
+            EncoderMath.ParseLevelSpec(args.FpsLevels);
+        if (levelError is not null)
+        {
+            Console.Error.WriteLine($"ERROR: --fps-levels: {levelError}");
+            return 2;
+        }
 
         double recover = args.Recover ?? effectiveLimit * 0.75;
+
+        List<double> levels = EncoderMath.SelectLevels(baseFps, levelFps);
+        // A rung faster than the base rate is a mistake: the ladder only ever
+        // throttles downwards, and a value above baseFps can never be selected.
+        // Only a ladder the user typed is validated. The built-in one starts at
+        // 13 fps and an encoder may snap the base rate lower than that
+        // (mpeg2video lands on 12); rejecting the default there would break
+        // every encoder whose rate list does not contain the default.
+        if (args.FpsLevelsExplicit)
+        {
+            foreach (double candidate in levelFps)
+            {
+                if (candidate <= baseFps + 1e-9) continue;
+                Console.Error.WriteLine(
+                    $"ERROR: --fps-levels: {L.T("param.levelstoofast", $"{candidate:G6}", $"{baseFps:G6}")}");
+                return 2;
+            }
+        }
+        List<FpsRungSetting> levelKbps = EncoderMath.PruneRungs(levelRungs, levels);
+
         HashSet<string> audioAvailable = audioEncodersTask.GetAwaiter().GetResult();
         string? audioEncoder = string.IsNullOrEmpty(args.AudioEncoder)
             ? EncoderMath.ChooseAudioEncoder(encoder.FormatName, audioAvailable)
@@ -157,6 +181,7 @@ public static class Cli
                 AudioEncoder = audioEncoder,
                 Fps = baseFps,
                 FpsLevels = levels,
+                FpsLevelKbps = levelKbps,
                 Limit = effectiveLimit,
                 Recover = recover,
                 Window = args.Window,
@@ -223,6 +248,7 @@ public static class Cli
             Encoder = encoder,
             Fps = config.Fps,
             FpsLevels = levels,
+            FpsLevelKbps = levelKbps,
             Quality = config.Qv,
             Threads = config.Threads,
             LimitKbps = config.Limit,

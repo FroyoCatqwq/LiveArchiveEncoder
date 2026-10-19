@@ -24,6 +24,14 @@ public sealed class CliOptions
     public double Window { get; init; } = 2.0;
     public double Fps { get; init; } = 13.0;
     public string FpsLevels { get; init; } = "13,8,5,3";
+
+    /// <summary>
+    /// True when <c>--fps-levels</c> appeared on the command line. The default
+    /// ladder starts at 13 fps, and an encoder that snaps the base rate below
+    /// that (mpeg2video lands on 12, for example) must keep working: only a
+    /// ladder the user actually typed is validated against the base rate.
+    /// </summary>
+    public bool FpsLevelsExplicit { get; init; }
     public int? Qv { get; init; }
     public int Threads { get; init; } = 16;
     public int BufferFrames { get; init; } = 6;
@@ -70,6 +78,10 @@ public sealed class CliOptions
     /// Drop the deliberate 1/fps wall-clock pacing. Measured ~58x on a 20s source.
     /// The fresh/repeat mix and the adaptive-FPS ladder are wall-clock driven, so
     /// this changes the output; it stays opt-in for that reason.
+    ///
+    /// DEPRECATED in v7.7: still honoured so old scripts keep working, but it
+    /// fights the point of the tool -- a live recording simulation -- and prints
+    /// a warning on every use. It will be removed in a later release.
     /// </summary>
     public bool Turbo { get; init; }
 
@@ -154,6 +166,7 @@ public static class CliParser
         double window = 2.0;
         double fps = 13.0;
         string fpsLevels = "13,8,5,3";
+        bool fpsLevelsExplicit = false;
         int? qv = null;
         int threads = 16;
         int bufferFrames = 6;
@@ -288,6 +301,7 @@ public static class CliParser
                     break;
                 case "--fps-levels":
                     if (!TryValue(out fpsLevels)) return (null, "--fps-levels requires a value");
+                    fpsLevelsExplicit = true;
                     break;
                 case "--qv":
                     if (!TryValue(out string qvRaw) || !int.TryParse(qvRaw, out int qvValue))
@@ -498,6 +512,7 @@ public static class CliParser
             Window = window,
             Fps = fps,
             FpsLevels = fpsLevels,
+            FpsLevelsExplicit = fpsLevelsExplicit,
             Qv = qv,
             Threads = threads,
             BufferFrames = bufferFrames,
@@ -571,7 +586,8 @@ public static class CliParser
             ("--recover", "KBPS", "bitrate floor that allows an upgrade (default: limit * 0.75)"),
             ("--window", "SEC", "rolling window for the bitrate average (default: 2)"),
             ("--fps", "FPS", "target frame rate (default: 13)"),
-            ("--fps-levels", "LIST", "adaptive FPS ladder (default: 13,8,5,3)"),
+            ("--fps-levels", "LIST", "adaptive FPS ladder; per entry FPS, FPS:drop-kbps or "
+                                      + "FPS:drop-kbps:rise-kbps (default: 13,8,5,3)"),
             ("--qv", "N", "video quality: CRF for libx264, q:v for other codecs"),
             ("--threads", "N", "FFmpeg thread count (default: 16)"),
             ("--buffer-frames", "N", "capture buffer depth (default: 6)"),
@@ -599,7 +615,7 @@ public static class CliParser
             ("--audio-mode", "MODE", "auto, inline or separate (default: inline)"),
             ("--lang", "CODE", "UI language: en or zh (default: en)"),
             ("--completion", "SHELL", "print a completion script (bash/zsh/fish/powershell) and exit"),
-            ("--turbo", "", "drop the 1/fps realtime pacing (much faster; output differs)"),
+            ("--turbo", "", "DEPRECATED: drop the 1/fps realtime pacing (much faster; output differs)"),
             ("--parallel", "N", "shard the range and encode concurrently (default: 1)"),
             ("--quiet", "", "suppress the progress banner"),
             ("--no-cui", "", "never enter the interactive UI"),

@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.4 (.NET 10)",
+        ["app.title"] = "Live Archive Encoder CUI v7.7 (.NET 11)",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -68,6 +68,12 @@ public static class L
             + "fresh/repeat mix and the adaptive bitrate ladder change, so the result no longer "
             + "matches a genuine live recording.",
         ["turbo.disabled"] = "Turbo off: realtime pacing restored.",
+        // v7.7: still honoured, no longer advertised. It fights what this tool is
+        // for -- a live recording simulation -- so it is on its way out.
+        ["turbo.deprecated"] = "DEPRECATED: Turbo is deprecated and will be removed in a later "
+            + "version. It skips the realtime pacing, so the result is no longer what a live "
+            + "archive would have looked like.",
+        ["turbo.menu.deprecated"] = "Turbo mode (deprecated)",
 
         ["config.settingsfile"] = "Settings file",
         ["config.restored"] = "Restored settings",
@@ -175,6 +181,25 @@ public static class L
         ["note.shardingskipped"] = "Sharding skipped: {0}",
         ["note.hwaccelfallback"] = "NOTE: {0} decoded the probe frame but failed the real preflight; "
             + "using software decode.",
+        ["note.levelsclamped"] = "NOTE: {0} exceeded the base FPS {1} and was dropped; a motion "
+            + "level can never be faster than the base rate.",
+
+        ["shard.heading"] = "Sharding",
+        ["shard.label"] = "Shards",
+        ["shard.progress"] = "{0}/{1} done, {2}/{3} slots ({4}%) {5}",
+        ["shard.progress.open"] = "{0}/{1} done, {2} slots {3}",
+
+        ["param.levelkbps"] = "level bitrates (per rung)",
+        ["param.levelsyntax"] = "use FPS, FPS:drop or FPS:drop:rise per entry, e.g. 12:128,5:140",
+        ["param.levelstoofast"] = "level {0} is faster than the base FPS {1}; a motion level may "
+            + "not exceed the base rate",
+        ["param.rung.heading"] = "=== Motion FPS rung bitrates ===",
+        ["param.rung.base"] = "base FPS",
+        ["param.rung.row"] = "{0} fps: drop at >= {1} kbps, recover at <= {2} kbps",
+        ["param.rung.pick"] = "Rung to edit (0 = back): ",
+        ["param.rung.prompt.drop"] = "drop onto {0} fps when video reaches (kbps) [{1}]: ",
+        ["param.rung.prompt.rise"] = "climb back from {0} fps when video falls to (kbps) [{1}]: ",
+        ["param.rung.bad"] = "the recovery threshold must be below the drop threshold",
 
         ["run.encodercommand"] = "Encoder command",
         ["run.sourcepix"] = "Source pix_fmt",
@@ -371,7 +396,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.4 (.NET 10)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.7 (.NET 11)",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 
@@ -422,6 +447,9 @@ public static class L
         ["turbo.enabled"] = "Turbo 已开启：1/fps 实时节流被关闭。速度大幅提升，但 fresh/repeat 比例和"
             + "自适应码率阶梯都会改变，产物不再等同于真实的直播录制。",
         ["turbo.disabled"] = "Turbo 已关闭：恢复实时节流。",
+        ["turbo.deprecated"] = "已弃用：Turbo 模式已弃用，将在后续版本移除。它跳过实时节流，产物不再是"
+            + "真实直播录档应有的样子。",
+        ["turbo.menu.deprecated"] = "Turbo 模式（已弃用）",
 
         ["config.settingsfile"] = "配置文件",
         ["config.restored"] = "已恢复上次配置",
@@ -527,6 +555,23 @@ public static class L
         ["note.splitmux"] = "注意：分离音频通路不可用（{0}），改用单进程编码。",
         ["note.shardingskipped"] = "已跳过分片：{0}",
         ["note.hwaccelfallback"] = "注意：{0} 通过了探测帧，但在正式预检中失败，改用软件解码。",
+        ["note.levelsclamped"] = "注意：{0} 超过基础 FPS {1}，已忽略；动态档位不得快于基础帧率。",
+
+        ["shard.heading"] = "分片",
+        ["shard.label"] = "分片进度",
+        ["shard.progress"] = "{0}/{1} 已完成，{2}/{3} 帧槽（{4}%） {5}",
+        ["shard.progress.open"] = "{0}/{1} 已完成，{2} 帧槽 {3}",
+
+        ["param.levelkbps"] = "档位码率（每档）",
+        ["param.levelsyntax"] = "每项可写 FPS、FPS:降档码率 或 FPS:降档码率:升档码率，如 12:128,5:140",
+        ["param.levelstoofast"] = "档位 {0} 快于基础 FPS {1}；动态档位不得超过基础帧率",
+        ["param.rung.heading"] = "=== 动态 FPS 档位码率 ===",
+        ["param.rung.base"] = "基础 FPS",
+        ["param.rung.row"] = "{0} fps：视频达到 {1} kbps 降到该档，回落到 {2} kbps 升回上一档",
+        ["param.rung.pick"] = "要编辑的档位编号（0=返回）: ",
+        ["param.rung.prompt.drop"] = "视频达到多少 kbps 时降到 {0} fps [{1}]: ",
+        ["param.rung.prompt.rise"] = "视频回落到多少 kbps 时从 {0} fps 升回 [{1}]: ",
+        ["param.rung.bad"] = "升档码率必须低于降档码率",
 
         ["run.encodercommand"] = "编码器命令",
         ["run.sourcepix"] = "源像素格式",

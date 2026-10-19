@@ -657,7 +657,11 @@ public static class RealtimeEncoder
 
         var captureThread = new Thread(CaptureWorker) { IsBackground = true, Name = "frame-capture" };
 
-        List<double> levels = EncoderMath.SelectLevels(o.Fps, o.FpsLevels);
+        // v7.7: a rung carries its own bitrate thresholds, so the controller no
+        // longer has to guess them from the ceiling alone.
+        List<FpsRung> ladder = EncoderMath.BuildLadder(
+            o.Fps, o.FpsLevels, o.FpsLevelKbps, o.LimitKbps, o.RecoverKbps);
+        List<double> levels = [.. ladder.Select(r => r.Fps)];
         int currentLevel = 0;
         double effectiveFps = levels[0];
         double cadence = 1.0;
@@ -666,6 +670,7 @@ public static class RealtimeEncoder
         int fresh = 0;
         int repeated = 0;
         double lastStatus = 0.0;
+        double lastProgress = -1.0;
         double? highSince = null;
         double? lowSince = null;
 
@@ -743,7 +748,7 @@ public static class RealtimeEncoder
                 {
                     lowSince = null;
                     highSince ??= now;
-                    int target = EncoderMath.TargetLevel(videoRate, o.LimitKbps, levels);
+                    int target = EncoderMath.TargetLevel(videoRate, ladder);
                     if (target > currentLevel)
                     {
                         double hold = videoRate >= o.LimitKbps * 1.25 ? 0.18 : 0.30;
@@ -754,11 +759,11 @@ public static class RealtimeEncoder
                         if (now - highSince.Value >= 0.80) currentLevel--;
                     }
                 }
-                else if (videoRate <= o.RecoverKbps)
+                else if (currentLevel > 0 && videoRate <= ladder[currentLevel].RiseBelowKbps)
                 {
                     highSince = null;
                     lowSince ??= now;
-                    if (currentLevel > 0 && now - lowSince.Value >= 0.75) currentLevel--;
+                    if (now - lowSince.Value >= 0.75) currentLevel--;
                 }
                 else
                 {
@@ -849,6 +854,11 @@ public static class RealtimeEncoder
                 }
 
                 double elapsed = HighResolutionTimer.SecondsSince(start);
+                if (o.Progress is not null && elapsed - lastProgress >= 0.2)
+                {
+                    lastProgress = elapsed;
+                    o.Progress(slots, targetSlots);
+                }
                 if (o.Verbose && elapsed - lastStatus >= 0.5)
                 {
                     string state = currentLevel == 0 ? "LIVE" : "THROTTLED";

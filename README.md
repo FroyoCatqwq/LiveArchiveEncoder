@@ -1,8 +1,8 @@
-# Live Archive Encoder v7 (.NET 10 / C# 14)
+# Live Archive Encoder v7 (.NET 11 / C# 15)
 
 CUI/CLI frontend for classic/legacy FFmpeg video encoders. Started as a
 behaviour-preserving port of `live_archive_encoder.py` v6.3.3 (kept verbatim
-under `reference/`) to C# on .NET 10, with the internals rewritten for lower
+under `reference/`) to C# on .NET 11, with the internals rewritten for lower
 allocation and better pipe scheduling. **As of v7.6 it grows past the port**:
 post-processing stages (text watermark, a "video site" recompress pass) and
 per-era presets sit on top of the realtime encoder, all of them off by default —
@@ -42,7 +42,7 @@ Windows (PowerShell):
 
 ```powershell
 dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
-# -> src\LiveArchiveEncoder\bin\Release\net10.0\LiveArchiveEncoder.exe
+# -> src\LiveArchiveEncoder\bin\Release\net11.0\LiveArchiveEncoder.exe
 
 tools\build.ps1 -Aot
 # -> publish\jit\LiveArchiveEncoder.exe       (162 KB + shared framework)
@@ -68,7 +68,8 @@ a shim manager (`mise`, `asdf`) that a non-interactive shell never puts on `PATH
 DOTNET="$HOME/dot" tools/build.sh
 ```
 
-Requires the .NET 10 SDK. Windows NativeAOT additionally needs the **Desktop
+Requires the .NET 11 SDK (RC2 is enough; `winget install Microsoft.DotNet.SDK.Preview`
+on Windows, `mise use -g dotnet@11.0.100-rc.2` on Linux). Windows NativeAOT additionally needs the **Desktop
 development with C++** workload: it links with `link.exe` and the Windows SDK
 import libraries. If `vcvarsall.bat` cannot locate the SDK on your machine, pass
 the directories explicitly:
@@ -84,7 +85,7 @@ At runtime you need an FFmpeg/ffprobe pair on `PATH` (or pass `--ffmpeg` /
 
 ```bash
 # NUnit 5 unit tests — identical command on both platforms
-dotnet test LiveArchiveEncoder.V7.slnx -c Release      # 214 on Windows, 213 on Linux
+dotnet test LiveArchiveEncoder.V7.slnx -c Release      # 236 on Windows, 234 on Linux
 ```
 
 The NUnit project covers the pure-logic layers that do not need a real encode:

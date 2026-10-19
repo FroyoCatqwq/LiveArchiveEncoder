@@ -47,6 +47,31 @@ public sealed class EncoderInfo
     public EncoderCaps? Caps { get; set; }
 }
 
+/// <summary>
+/// A rung of the adaptive FPS ladder as the user configured it.
+///
+/// <see cref="Fps"/> is the only mandatory part. When a threshold is null the
+/// encoder derives it from the run's limit/recover values, which is exactly what
+/// every version up to v7.6 did -- so an old settings file keeps behaving the
+/// same way after the upgrade.
+/// </summary>
+public sealed class FpsRungSetting
+{
+    public double Fps { get; set; }
+
+    /// <summary>Descend onto this rung once the video bitrate reaches this value.</summary>
+    public double? DropAboveKbps { get; set; }
+
+    /// <summary>Climb back off this rung once the bitrate falls to this value.</summary>
+    public double? RiseBelowKbps { get; set; }
+}
+
+/// <summary>
+/// A fully resolved ladder rung. Rung 0 is the base rate and is never entered
+/// from below, so its drop threshold is infinite.
+/// </summary>
+public readonly record struct FpsRung(double Fps, double DropAboveKbps, double RiseBelowKbps);
+
 /// <summary>Full user configuration shared by CUI and CLI.</summary>
 public sealed class Config
 {
@@ -59,6 +84,14 @@ public sealed class Config
     public string? AudioEncoder { get; set; } = "libmp3lame";
     public double Fps { get; set; } = Constants.DefaultFps;
     public List<double> FpsLevels { get; set; } = [13.0, 8.0, 5.0, 3.0];
+
+    /// <summary>
+    /// Bitrate thresholds per ladder rung, keyed by FPS rather than by position,
+    /// so editing the ladder never silently shifts a threshold onto another rung.
+    /// Empty means "derive everything from Limit/Recover" (the v7.6 behaviour).
+    /// </summary>
+    public List<FpsRungSetting> FpsLevelKbps { get; set; } = [];
+
     public double Limit { get; set; } = 200.0;
     public double Recover { get; set; } = 150.0;
     public double Window { get; set; } = 2.0;

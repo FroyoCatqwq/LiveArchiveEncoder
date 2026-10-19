@@ -30,6 +30,10 @@ public static class Program
         // the CUI banner follow it.
         L.SetLanguage(cli.Language);
 
+        // v7.7: Turbo still behaves exactly as before, but it is on its way out
+        // and anyone still scripting it deserves to know that up front.
+        if (cli.Turbo) Console.Error.WriteLine($"WARNING: {L.T("turbo.deprecated")}");
+
         // argparse prints help without touching FFmpeg first, and so do we.
         if (cli.Help)
         {

@@ -30,6 +30,7 @@
     <File Path="src/LiveArchiveEncoder/Encoding/Preflight.cs" />
     <File Path="src/LiveArchiveEncoder/Encoding/RealtimeEncoder.cs" />
     <File Path="src/LiveArchiveEncoder/Encoding/RealtimeOptions.cs" />
+    <File Path="src/LiveArchiveEncoder/Encoding/ShardPlanner.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/FFmpeg/">
     <File Path="src/LiveArchiveEncoder/FFmpeg/FFmpegCapabilities.cs" />
@@ -45,6 +46,14 @@
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Localization/">
     <File Path="src/LiveArchiveEncoder/Localization/Strings.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/PostProcess/">
+    <File Path="src/LiveArchiveEncoder/PostProcess/EraPreset.cs" />
+    <File Path="src/LiveArchiveEncoder/PostProcess/FontResolver.cs" />
+    <File Path="src/LiveArchiveEncoder/PostProcess/PostArgs.cs" />
+    <File Path="src/LiveArchiveEncoder/PostProcess/PostPipeline.cs" />
+    <File Path="src/LiveArchiveEncoder/PostProcess/Recompress.cs" />
+    <File Path="src/LiveArchiveEncoder/PostProcess/Watermark.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/RateControl/">
     <File Path="src/LiveArchiveEncoder/RateControl/OutputMonitor.cs" />
@@ -69,6 +78,8 @@
     <File Path="tests/LiveArchiveEncoder.Tests/FfmpegCatalogTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/LocalizationTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/PlayerTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/PostProcessingTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/ShardingAndLadderTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/SmbTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/ToolchainTests.cs" />
   </Folder>

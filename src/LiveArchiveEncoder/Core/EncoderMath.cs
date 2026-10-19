@@ -1,3 +1,4 @@
+using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 
 namespace LiveArchiveEncoder.Core;
@@ -45,14 +46,147 @@ public static class EncoderMath
         return result.Count > 0 ? result : [baseFps];
     }
 
-    public static int TargetLevel(double rate, double limit, List<double> levels)
+    /// <summary>
+    /// Resolve the ladder: one rung per FPS value, with the bitrate that drops
+    /// the encoder onto that rung and the bitrate that lets it climb back.
+    ///
+    /// Rung 0 is always the base rate. Its drop threshold is infinite because
+    /// there is no rung above it to descend from.
+    /// </summary>
+    public static List<FpsRung> BuildLadder(
+        double baseFps, IEnumerable<double>? levels,
+        IEnumerable<FpsRungSetting>? settings, double limit, double recover)
     {
-        if (levels.Count <= 1 || limit <= 0) return 0;
-        double ratio = rate / limit;
-        if (ratio >= 1.60) return levels.Count - 1;
-        if (ratio >= 1.25) return Math.Min(2, levels.Count - 1);
-        if (ratio >= 1.00) return Math.Min(1, levels.Count - 1);
-        return 0;
+        List<double> fps = SelectLevels(baseFps, levels);
+        List<FpsRungSetting>? rungs = settings?.ToList();
+
+        var ladder = new List<FpsRung>(fps.Count);
+        for (int i = 0; i < fps.Count; i++)
+        {
+            FpsRungSetting? configured = rungs?.FirstOrDefault(x => Math.Abs(x.Fps - fps[i]) < 1e-6);
+            double drop = i == 0
+                ? double.PositiveInfinity
+                : configured?.DropAboveKbps ?? DefaultDropKbps(i, limit);
+            double rise = configured?.RiseBelowKbps ?? recover;
+            ladder.Add(new FpsRung(fps[i], drop, rise));
+        }
+        return ladder;
+    }
+
+    /// <summary>
+    /// Default "descend onto rung N" threshold: the v7.6 multipliers of the
+    /// bitrate ceiling, so an unconfigured ladder behaves exactly as before.
+    /// </summary>
+    public static double DefaultDropKbps(int rung, double limit)
+    {
+        double[] multipliers = [1.00, 1.25, 1.60];
+        int index = rung - 1;   // rung 0 is the base rate and has no threshold
+        double factor = index < multipliers.Length
+            ? multipliers[index]
+            : multipliers[^1] + 0.35 * (index - multipliers.Length + 1);
+        return limit * factor;
+    }
+
+    /// <summary>
+    /// The rung a bitrate belongs on: the deepest rung whose drop threshold the
+    /// rate has reached. Taking the maximum rather than the last match keeps a
+    /// user-supplied non-monotonic ladder from stranding the controller on a
+    /// shallow rung.
+    /// </summary>
+    public static int TargetLevel(double rate, List<FpsRung> ladder)
+    {
+        if (ladder.Count <= 1) return 0;
+        int target = 0;
+        for (int i = 1; i < ladder.Count; i++)
+        {
+            if (rate >= ladder[i].DropAboveKbps) target = Math.Max(target, i);
+        }
+        return target;
+    }
+
+    /// <summary>
+    /// Parse an FPS ladder written as <c>12</c>, <c>12:128</c> or
+    /// <c>12:128:115</c> per entry (FPS, drop-above kbps, rise-below kbps),
+    /// separated by commas or semicolons. A bare FPS keeps the derived
+    /// thresholds, so <c>--fps-levels 13,8,5,3</c> still means what it always did.
+    /// </summary>
+    public static (List<double> Fps, List<FpsRungSetting> Settings, string? Error) ParseLevelSpec(
+        string raw)
+    {
+        var fps = new List<double>();
+        var settings = new List<FpsRungSetting>();
+
+        foreach (string token in raw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] parts = token.Split(':', StringSplitOptions.TrimEntries);
+            if (parts.Length > 3)
+                return ([], [], $"'{token.Trim()}' has too many fields; use FPS, FPS:drop or FPS:drop:rise");
+
+            if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+                || !double.IsFinite(value) || value <= 0)
+            {
+                return ([], [], $"'{parts[0]}' is not a positive FPS value");
+            }
+
+            double? drop = null;
+            double? rise = null;
+            if (parts.Length >= 2 && parts[1].Length > 0)
+            {
+                if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double d)
+                    || !double.IsFinite(d) || d <= 0)
+                    return ([], [], $"'{parts[1]}' is not a positive bitrate (kbps)");
+                drop = d;
+            }
+            if (parts.Length == 3 && parts[2].Length > 0)
+            {
+                if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double r)
+                    || !double.IsFinite(r) || r <= 0)
+                    return ([], [], $"'{parts[2]}' is not a positive bitrate (kbps)");
+                rise = r;
+            }
+            if (drop is not null && rise is not null && rise >= drop)
+            {
+                return ([], [], $"rise threshold {rise:G6} must be below the drop threshold {drop:G6}");
+            }
+
+            fps.Add(Math.Round(value, 6));
+            settings.Add(new FpsRungSetting { Fps = Math.Round(value, 6), DropAboveKbps = drop, RiseBelowKbps = rise });
+        }
+
+        return (fps, settings, null);
+    }
+
+    /// <summary>
+    /// Render a ladder the same way it can be typed back in, e.g.
+    /// <c>15,12:128,10:150,5:200</c>. Thresholds are only printed when the user
+    /// actually set them.
+    /// </summary>
+    public static string FormatLadder(
+        double baseFps, IEnumerable<double>? levels, IEnumerable<FpsRungSetting>? settings)
+    {
+        List<FpsRungSetting>? rungs = settings?.ToList();
+        return string.Join(",", SelectLevels(baseFps, levels).Select(fps =>
+        {
+            FpsRungSetting? rung = rungs?.FirstOrDefault(x => Math.Abs(x.Fps - fps) < 1e-6);
+            if (rung is null) return fps.ToString("G6");
+            string text = rung.DropAboveKbps is { } drop
+                ? $"{fps:G6}:{drop:G6}"
+                : fps.ToString("G6");
+            if (rung.RiseBelowKbps is { } rise) text += $":{rise:G6}";
+            return text;
+        }));
+    }
+
+    /// <summary>
+    /// Drop the thresholds of rungs that are no longer on the ladder. Without
+    /// this, lowering the base FPS would leave the settings file carrying
+    /// thresholds for rates the encoder can never use.
+    /// </summary>
+    public static List<FpsRungSetting> PruneRungs(
+        IEnumerable<FpsRungSetting>? settings, IEnumerable<double> levels)
+    {
+        List<double> keep = [.. levels];
+        return [.. (settings ?? []).Where(s => keep.Any(v => Math.Abs(v - s.Fps) < 1e-6))];
     }
 
     /// <summary>

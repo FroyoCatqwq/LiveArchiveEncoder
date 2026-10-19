@@ -41,7 +41,16 @@ public static class Report
         string qualityLabel = c.Encoder is not null && c.Encoder.Name == "libx264" ? "CRF" : "q:v";
         Line(L.T("report.quality"), $"{qualityLabel} {c.Qv}");
         Line(L.T("report.fps"),
-            $"{c.Fps:G6} -> {string.Join(",", c.FpsLevels.Select(x => x.ToString("G6")))}");
+            $"{c.Fps:G6} -> {EncoderMath.FormatLadder(c.Fps, c.FpsLevels, c.FpsLevelKbps)}");
+        // Only shown when the user actually pinned a threshold: the default
+        // ladder is derived from the ceiling and would just repeat the numbers.
+        if (c.FpsLevelKbps.Count > 0)
+        {
+            List<FpsRung> ladder = EncoderMath.BuildLadder(
+                c.Fps, c.FpsLevels, c.FpsLevelKbps, c.Limit, c.Recover);
+            Line(L.T("param.levelkbps"), string.Join(", ", ladder.Skip(1).Select(
+                r => $"{r.Fps:G6}:{r.DropAboveKbps:G6}/{r.RiseBelowKbps:G6}")));
+        }
         Line(L.T("report.limit"), L.T("report.kbps", $"{c.Limit:G6}"));
         Line(L.T("report.recover"), L.T("report.kbps", $"{c.Recover:G6}"));
         Line(L.T("report.window"), L.T("report.seconds", $"{c.Window:G6}"));
@@ -73,7 +82,8 @@ public static class Report
         Line(L.T("report.impairments"), "use frame_damage.py (separate post-processing tool)");
         // Turbo and the shard count change what the run actually does, so they
         // belong in the configuration dump even though they are not encoder state.
-        Line(L.T("menu.turbo"), c.Turbo ? L.T("turbo.on") : L.T("turbo.off"));
+        // v7.7: Turbo is deprecated but still honoured, so it says so here.
+        Line(L.T("turbo.menu.deprecated"), c.Turbo ? L.T("turbo.on") : L.T("turbo.off"));
         Line(L.T("menu.parallel"),
             c.Parallel > 1 ? c.Parallel.ToString(CultureInfo.InvariantCulture) : L.T("menu.parallel.off"));
         Line(L.T("menu.language"), c.Language);

@@ -12,6 +12,12 @@ public sealed class RealtimeOptions
     public required EncoderInfo Encoder { get; init; }
     public double Fps { get; init; } = Constants.DefaultFps;
     public List<double> FpsLevels { get; init; } = [13.0, 8.0, 5.0, 3.0];
+
+    /// <summary>
+    /// Per-rung bitrate thresholds, keyed by FPS. Empty derives them from
+    /// <see cref="LimitKbps"/>/<see cref="RecoverKbps"/>, which is the v7.6 rule.
+    /// </summary>
+    public List<FpsRungSetting> FpsLevelKbps { get; init; } = [];
     public int Quality { get; init; } = 8;
     public int Threads { get; init; } = 16;
     public double LimitKbps { get; init; } = 200.0;
@@ -53,6 +59,14 @@ public sealed class RealtimeOptions
     public HashSet<string>? AvailableFilters { get; init; }
     public HashSet<string>? AvailableScaleAlgorithms { get; init; }
     public bool Verbose { get; init; } = true;
+
+    /// <summary>
+    /// Progress sink for the shard pipeline: called with (slots emitted so far,
+    /// target slot count or null) roughly every 0.2s. Only the parallel pipeline
+    /// sets it -- a single pass already prints its own status line, and seven
+    /// shards talking over each other would be unreadable.
+    /// </summary>
+    public Action<int, int?>? Progress { get; init; }
 
     /// <summary>
     /// Audio routing. <see cref="AudioMode.Inline"/> is the default and reproduces
