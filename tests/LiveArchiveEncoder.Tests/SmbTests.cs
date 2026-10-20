@@ -8,42 +8,43 @@ namespace LiveArchiveEncoder.Tests;
 /// These run without a share: everything asserted here is pure string and
 /// argument-vector logic, which is exactly what went wrong in v7.3.
 /// </summary>
-[TestFixture]
 public sealed class SmbTests
 {
-    [TestCase(@"\\nas\share\clip.mp4")]
-    [TestCase("//nas/share/clip.mp4")]
-    [TestCase(@"\\nas\share")]
-    public void IsUncPath_AcceptsBothSlashFlavours(string path) =>
-        Assert.That(Smb.IsUncPath(path), Is.True);
-
-    [TestCase(@"C:\video\clip.mp4")]
-    [TestCase("clip.mp4")]
-    [TestCase("")]
-    [TestCase(@"\\")]
-    [TestCase(null)]
-    public void IsUncPath_RejectsLocalAndEmpty(string? path) =>
-        Assert.That(Smb.IsUncPath(path), Is.False);
+    [Test]
+    [Arguments(@"\\nas\share\clip.mp4")]
+    [Arguments("//nas/share/clip.mp4")]
+    [Arguments(@"\\nas\share")]
+    public async Task IsUncPath_AcceptsBothSlashFlavours(string path) =>
+        await Assert.That(Smb.IsUncPath(path)).IsTrue();
 
     [Test]
-    public void Normalize_TurnsForwardSlashesIntoBackslashes() =>
-        Assert.That(Smb.Normalize("//nas/share/a.mp4"), Is.EqualTo(@"\\nas\share\a.mp4"));
+    [Arguments(@"C:\video\clip.mp4")]
+    [Arguments("clip.mp4")]
+    [Arguments("")]
+    [Arguments(@"\\")]
+    [Arguments(null)]
+    public async Task IsUncPath_RejectsLocalAndEmpty(string? path) =>
+        await Assert.That(Smb.IsUncPath(path)).IsFalse();
 
     [Test]
-    public void ShareRoot_ReturnsServerAndShareOnly()
+    public async Task Normalize_TurnsForwardSlashesIntoBackslashes() =>
+        await Assert.That(Smb.Normalize("//nas/share/a.mp4")).IsEqualTo(@"\\nas\share\a.mp4");
+
+    [Test]
+    public async Task ShareRoot_ReturnsServerAndShareOnly()
     {
-        Assert.That(Smb.ShareRoot(@"\\nas\share\deep\a.mp4"), Is.EqualTo(@"\\nas\share"));
-        Assert.That(Smb.ShareRoot(@"C:\video\a.mp4"), Is.Null);
+        await Assert.That(Smb.ShareRoot(@"\\nas\share\deep\a.mp4")).IsEqualTo(@"\\nas\share");
+        await Assert.That(Smb.ShareRoot(@"C:\video\a.mp4")).IsNull();
     }
 
     [Test]
-    public void Split_ExposesServerShareRemainder()
+    public async Task Split_ExposesServerShareRemainder()
     {
         var parts = Smb.Split(@"\\nas\share\deep\a.mp4");
-        Assert.That(parts, Is.Not.Null);
-        Assert.That(parts!.Value.Server, Is.EqualTo("nas"));
-        Assert.That(parts.Value.Share, Is.EqualTo("share"));
-        Assert.That(parts.Value.Remainder, Is.EqualTo(@"deep\a.mp4"));
+        await Assert.That(parts).IsNotNull();
+        await Assert.That(parts!.Value.Server).IsEqualTo("nas");
+        await Assert.That(parts.Value.Share).IsEqualTo("share");
+        await Assert.That(parts.Value.Remainder).IsEqualTo(@"deep\a.mp4");
     }
 
     /// <summary>
@@ -64,36 +65,37 @@ public sealed class SmbTests
     /// mount is the kernel's.
     /// </summary>
     [Test]
-    public void RemoteReadArgs_IsTimeoutOnly()
+    public async Task RemoteReadArgs_IsTimeoutOnly()
     {
         List<string> args = Smb.RemoteReadArgs(@"\\nas\share\a.mp4");
 
-        Assert.That(args, Does.Not.Contain("-stimeout"));
-        Assert.That(args, Does.Not.Contain("-reconnect"));
-        Assert.That(args, Does.Not.Contain("-reconnect_streamed"));
-        Assert.That(args, Does.Not.Contain("-reconnect_delay_max"));
-        Assert.That(args, Is.EqualTo(new[] { "-rw_timeout", "30000000" }));
+        await Assert.That(args).DoesNotContain("-stimeout");
+        await Assert.That(args).DoesNotContain("-reconnect");
+        await Assert.That(args).DoesNotContain("-reconnect_streamed");
+        await Assert.That(args).DoesNotContain("-reconnect_delay_max");
+        await Assert.That(args).IsEquivalentTo(new[] { "-rw_timeout", "30000000" });
     }
 
     /// <summary>
     /// Read, write and probe must agree: any option that one side can carry and
     /// another cannot is exactly how the reconnect bug got in.
     /// </summary>
-    [TestCase(@"\\nas\share\a.mp4")]
-    [TestCase("smb://nas/share/a.mp4")]
-    public void RemoteArgs_AreIdenticalForReadWriteAndProbe(string path)
+    [Test]
+    [Arguments(@"\\nas\share\a.mp4")]
+    [Arguments("smb://nas/share/a.mp4")]
+    public async Task RemoteArgs_AreIdenticalForReadWriteAndProbe(string path)
     {
         List<string> read = Smb.RemoteReadArgs(path);
         List<string> write = Smb.RemoteWriteArgs(path);
         List<string> probe = Smb.RemoteProbeArgs(path);
 
-        Assert.That(read, Is.EqualTo(write));
-        Assert.That(read, Is.EqualTo(probe));
+        await Assert.That(read).IsEquivalentTo(write);
+        await Assert.That(read).IsEquivalentTo(probe);
     }
 
     [Test]
-    public void RemoteReadArgs_LocalFileGetsNothing() =>
-        Assert.That(Smb.RemoteReadArgs(@"C:\video\a.mp4"), Is.Empty);
+    public async Task RemoteReadArgs_LocalFileGetsNothing() =>
+        await Assert.That(Smb.RemoteReadArgs(@"C:\video\a.mp4")).IsEmpty();
 
     /// <summary>
     /// The <c>-reconnect</c> family is flagged <c>D</c> (decoding only) in
@@ -101,25 +103,24 @@ public sealed class SmbTests
     /// <c>-rw_timeout</c> is flagged <c>ED</c> and is the only option left.
     /// </summary>
     [Test]
-    public void RemoteWriteArgs_IsTimeoutOnly()
+    public async Task RemoteWriteArgs_IsTimeoutOnly()
     {
         List<string> args = Smb.RemoteWriteArgs(@"\\nas\share\out.rm");
 
-        Assert.That(args, Is.EqualTo(new[] { "-rw_timeout", "30000000" }));
-        Assert.That(Smb.RemoteWriteArgs(@"C:\video\out.rm"), Is.Empty);
+        await Assert.That(args).IsEquivalentTo(new[] { "-rw_timeout", "30000000" });
+        await Assert.That(Smb.RemoteWriteArgs(@"C:\video\out.rm")).IsEmpty();
     }
 
     [Test]
-    public void RemoteProbeArgs_UsesTheOnlyOptionFfprobeKnows() =>
-        Assert.That(Smb.RemoteProbeArgs(@"\\nas\share\a.mp4"),
-            Is.EqualTo(new[] { "-rw_timeout", "30000000" }));
+    public async Task RemoteProbeArgs_UsesTheOnlyOptionFfprobeKnows() =>
+        await Assert.That(Smb.RemoteProbeArgs(@"\\nas\share\a.mp4")).IsEquivalentTo(new[] { "-rw_timeout", "30000000" });
 
     [Test]
-    public void Describe_ReportsSomethingForUncAndNothingForLocal()
+    public async Task Describe_ReportsSomethingForUncAndNothingForLocal()
     {
-        Assert.That(Smb.Describe(@"\\nas\share\a.mp4"), Is.Not.Null);
-        Assert.That(Smb.DescribeOutput(@"\\nas\share\out.rm"), Is.Not.Null);
-        Assert.That(Smb.Describe(@"C:\video\a.mp4"), Is.Null);
+        await Assert.That(Smb.Describe(@"\\nas\share\a.mp4")).IsNotNull();
+        await Assert.That(Smb.DescribeOutput(@"\\nas\share\out.rm")).IsNotNull();
+        await Assert.That(Smb.Describe(@"C:\video\a.mp4")).IsNull();
     }
 
     /// <summary>
@@ -128,25 +129,23 @@ public sealed class SmbTests
     /// it never throws and never leaves a marker behind.
     /// </summary>
     [Test]
-    public void CanWriteDirectory_ProbesWithoutLeavingAMarkerBehind()
+    public async Task CanWriteDirectory_ProbesWithoutLeavingAMarkerBehind()
     {
         string dir = Path.Combine(Path.GetTempPath(), "lae-smb-probe-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
 
-        Assert.That(Smb.CanWriteDirectory(dir), Is.True);
-        Assert.That(Directory.EnumerateFileSystemEntries(dir), Is.Empty,
-            "the marker file must be deleted again");
+        await Assert.That(Smb.CanWriteDirectory(dir)).IsTrue();
+        await Assert.That(Directory.EnumerateFileSystemEntries(dir)).IsEmpty().Because("the marker file must be deleted again");
 
         Directory.Delete(dir, recursive: true);
     }
 
     [Test]
-    public void CanWriteDirectory_LocalPathIsAlwaysYesWithoutTouchingDisk()
+    public async Task CanWriteDirectory_LocalPathIsAlwaysYesWithoutTouchingDisk()
     {
         string dir = Path.Combine(Path.GetTempPath(), "lae-never-" + Guid.NewGuid().ToString("N"));
 
-        Assert.That(Smb.CanWriteDirectory(dir), Is.True);
-        Assert.That(Directory.Exists(dir), Is.False,
-            "a local destination must not be created by a probe");
+        await Assert.That(Smb.CanWriteDirectory(dir)).IsTrue();
+        await Assert.That(Directory.Exists(dir)).IsFalse().Because("a local destination must not be created by a probe");
     }
 }

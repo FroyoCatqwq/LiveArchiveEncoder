@@ -9,40 +9,40 @@ namespace LiveArchiveEncoder.Tests;
 /// everything no call site reached. Both are refactors, so both need guards --
 /// these cases pin the behaviour that had to survive them.
 /// </summary>
-[TestFixture]
 public sealed class ModernisationTests
 {
     // ---- C# 14 extension members ------------------------------------------
 
-    [TestCase(null, false)]
-    [TestCase("", false)]
-    [TestCase("   ", false)]
-    [TestCase("\t\n", false)]
-    [TestCase("a", true)]
-    [TestCase(" a ", true)]
-    public void HasTextIsTheNegationOfIsNullOrWhiteSpace(string? value, bool expected)
+    [Test]
+    [Arguments(null, false)]
+    [Arguments("", false)]
+    [Arguments("   ", false)]
+    [Arguments("\t\n", false)]
+    [Arguments("a", true)]
+    [Arguments(" a ", true)]
+    public async Task HasTextIsTheNegationOfIsNullOrWhiteSpace(string? value, bool expected)
     {
-        Assert.That(value.HasText, Is.EqualTo(expected));
-        Assert.That(value.HasText, Is.EqualTo(!string.IsNullOrWhiteSpace(value)));
+        await Assert.That(value.HasText).IsEqualTo(expected);
+        await Assert.That(value.HasText).IsEqualTo(!string.IsNullOrWhiteSpace(value));
     }
 
     [Test]
-    public void OrFallsBackOnlyWhenTheTextHasNothing()
+    public async Task OrFallsBackOnlyWhenTheTextHasNothing()
     {
-        Assert.That(((string?)null).Or("black"), Is.EqualTo("black"));
-        Assert.That(((string?)"  ").Or("black"), Is.EqualTo("black"));
-        Assert.That(((string?)"0x00FF00").Or("black"), Is.EqualTo("0x00FF00"));
+        await Assert.That(((string?)null).Or("black")).IsEqualTo("black");
+        await Assert.That(((string?)"  ").Or("black")).IsEqualTo("black");
+        await Assert.That(((string?)"0x00FF00").Or("black")).IsEqualTo("0x00FF00");
     }
 
     [Test]
-    public void HasTextNarrowsTheValueForTheCompiler()
+    public async Task HasTextNarrowsTheValueForTheCompiler()
     {
         // The [NotNullWhen(true)] on the extension receiver is what makes this
         // compile without a nullable warning; if it is ever dropped, the build
         // says so here rather than in fifty call sites.
         string? maybe = "value";
-        if (!maybe.HasText) Assert.Fail("unreachable");
-        Assert.That(maybe.Length, Is.EqualTo(5));
+        if (!maybe.HasText) Fail.Test("unreachable");
+        await Assert.That(maybe.Length).IsEqualTo(5);
     }
 
     // ---- One generated regex replaces 28 patterns -------------------------
@@ -64,84 +64,85 @@ public sealed class ModernisationTests
     ];
 
     [Test]
-    public void EveryNameTheOldPatternListAcceptedIsStillLegacy()
+    public async Task EveryNameTheOldPatternListAcceptedIsStillLegacy()
     {
         foreach (string name in LegacyNames)
         {
-            Assert.That(FFmpegDiscovery.LegacyFamily(name, ""), Is.Not.Null,
-                $"{name} stopped being recognised as a legacy encoder");
+            await Assert.That(FFmpegDiscovery.LegacyFamily(name, "")).IsNotNull().Because($"{name} stopped being recognised as a legacy encoder");
         }
     }
 
-    [TestCase("libx265")]
-    [TestCase("h264_nvenc")]
-    [TestCase("av1_nvenc")]
-    [TestCase("libvpx")]
-    [TestCase("libaom-av1")]
-    [TestCase("hevc_qsv")]
-    [TestCase("rawvideo")]
-    [TestCase("png")]
-    [TestCase("mpeg2_qsv")]
-    public void ModernAndNonArchiveEncodersAreStillRejected(string name)
+    [Test]
+    [Arguments("libx265")]
+    [Arguments("h264_nvenc")]
+    [Arguments("av1_nvenc")]
+    [Arguments("libvpx")]
+    [Arguments("libaom-av1")]
+    [Arguments("hevc_qsv")]
+    [Arguments("rawvideo")]
+    [Arguments("png")]
+    [Arguments("mpeg2_qsv")]
+    public async Task ModernAndNonArchiveEncodersAreStillRejected(string name)
     {
-        Assert.That(FFmpegDiscovery.LegacyFamily(name, ""), Is.Null);
+        await Assert.That(FFmpegDiscovery.LegacyFamily(name, "")).IsNull();
     }
 
     [Test]
-    public void LegacyFamilyKeepsAssigningFamilies()
+    public async Task LegacyFamilyKeepsAssigningFamilies()
     {
-        Assert.That(FFmpegDiscovery.LegacyFamily("libx264", ""), Is.EqualTo("classic-library"));
-        Assert.That(FFmpegDiscovery.LegacyFamily("mpeg4", ""), Is.EqualTo("mpeg-classic"));
-        Assert.That(FFmpegDiscovery.LegacyFamily("wmv2", ""), Is.EqualTo("proprietary-classic"));
-        Assert.That(FFmpegDiscovery.LegacyFamily("a64multi", "Commodore 64"),
-            Is.EqualTo("home-computer"));
-        Assert.That(FFmpegDiscovery.LegacyFamily("snow", ""), Is.EqualTo("retro/classic"));
+        await Assert.That(FFmpegDiscovery.LegacyFamily("libx264", "")).IsEqualTo("classic-library");
+        await Assert.That(FFmpegDiscovery.LegacyFamily("mpeg4", "")).IsEqualTo("mpeg-classic");
+        await Assert.That(FFmpegDiscovery.LegacyFamily("wmv2", "")).IsEqualTo("proprietary-classic");
+        await Assert.That(FFmpegDiscovery.LegacyFamily("a64multi", "Commodore 64")).IsEqualTo("home-computer");
+        await Assert.That(FFmpegDiscovery.LegacyFamily("snow", "")).IsEqualTo("retro/classic");
     }
 
     // ---- Frozen lookup tables ---------------------------------------------
 
     [Test]
-    public void FrozenTablesStillAnswerExactlyAsBefore()
+    public async Task FrozenTablesStillAnswerExactlyAsBefore()
     {
-        Assert.That(Constants.DefaultQuality["mjpeg"], Is.EqualTo(6));
-        Assert.That(EncoderMath.DefaultQuality("mjpeg"), Is.EqualTo(6));
-        Assert.That(EncoderMath.DefaultQuality("never-heard-of-it"), Is.EqualTo(10));
+        await Assert.That(Constants.DefaultQuality["mjpeg"]).IsEqualTo(6);
+        await Assert.That(EncoderMath.DefaultQuality("mjpeg")).IsEqualTo(6);
+        await Assert.That(EncoderMath.DefaultQuality("never-heard-of-it")).IsEqualTo(10);
 
-        Assert.That(Constants.FormatExtensions["matroska"], Does.Contain(".mkv"));
-        Assert.That(Constants.FormatExtensions.ContainsKey("matroska"), Is.True);
+        await Assert.That(Constants.FormatExtensions["matroska"]).Contains(".mkv");
+        await Assert.That(Constants.FormatExtensions.ContainsKey("matroska")).IsTrue();
         // Ordinal, as it always was: the call sites lower-case before asking.
-        Assert.That(Constants.FormatExtensions.ContainsKey("MATROSKA"), Is.False);
+        await Assert.That(Constants.FormatExtensions.ContainsKey("MATROSKA")).IsFalse();
 
-        Assert.That(Constants.NoAudioFormats.Contains("h261"), Is.True);
-        Assert.That(Constants.ConcatSafeFormats.Contains("roq"), Is.False);
-        Assert.That(Constants.VideoExtensions.Contains(".AVI"), Is.False);
+        await Assert.That(Constants.NoAudioFormats.Contains("h261")).IsTrue();
+        await Assert.That(Constants.ConcatSafeFormats.Contains("roq")).IsFalse();
+        await Assert.That(Constants.VideoExtensions.Contains(".AVI")).IsFalse();
     }
 
     // ---- ResolveRange: a dead assignment removed --------------------------
 
     [Test]
-    public void AnUnusableSourceDurationIsTreatedAsUnknown()
+    public async Task AnUnusableSourceDurationIsTreatedAsUnknown()
     {
         // ffprobe answers "N/A" as 0 or NaN for some containers. Both must fall
         // through to "no duration known" instead of throwing, which is what the
         // removed `durationValue = null;` branch used to do.
-        Assert.That(Timecode.ResolveRange(0, null, 0).Duration, Is.Null);
-        Assert.That(Timecode.ResolveRange(0, null, double.NaN).Duration, Is.Null);
-        Assert.That(Timecode.ResolveRange(0, null, -5).Duration, Is.Null);
+        await Assert.That(Timecode.ResolveRange(0, null, 0).Duration).IsNull();
+        await Assert.That(Timecode.ResolveRange(0, null, double.NaN).Duration).IsNull();
+        await Assert.That(Timecode.ResolveRange(0, null, -5).Duration).IsNull();
     }
 
     [Test]
-    public void AKnownSourceDurationStillClampsTheEndTime()
+    public async Task AKnownSourceDurationStillClampsTheEndTime()
     {
         (double? end, double? duration) = Timecode.ResolveRange(1.0, 9.0, 10.0);
-        Assert.That(end, Is.EqualTo(9.0).Within(1e-9));
-        Assert.That(duration, Is.EqualTo(8.0).Within(1e-9));
+        // TUnit's Within() rides on the non-nullable double assertion, so a
+        // nullable operand is compared as a distance instead.
+        await Assert.That(Math.Abs(end!.Value - 9.0)).IsLessThan(1e-9);
+        await Assert.That(Math.Abs(duration!.Value - 8.0)).IsLessThan(1e-9);
 
         // No end time: the source duration becomes the end of the range.
-        Assert.That(Timecode.ResolveRange(1.0, null, 10.0).Duration, Is.EqualTo(9.0).Within(1e-9));
+        await Assert.That(Math.Abs(Timecode.ResolveRange(1.0, null, 10.0).Duration!.Value - 9.0)).IsLessThan(1e-9);
 
         // A start at or past the end, or an end past the source, is still an error.
-        Assert.That(() => Timecode.ResolveRange(20.0, null, 10.0), Throws.ArgumentException);
-        Assert.That(() => Timecode.ResolveRange(1.0, 90.0, 10.0), Throws.ArgumentException);
+        await Assert.That(() => Timecode.ResolveRange(20.0, null, 10.0)).Throws<ArgumentException>();
+        await Assert.That(() => Timecode.ResolveRange(1.0, 90.0, 10.0)).Throws<ArgumentException>();
     }
 }

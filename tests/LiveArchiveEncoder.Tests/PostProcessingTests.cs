@@ -9,128 +9,124 @@ namespace LiveArchiveEncoder.Tests;
 /// these tests attack the vetting from both sides: fragments that must be
 /// accepted, and fragments that would hijack the input or the output.
 /// </summary>
-[TestFixture]
 public sealed class PostArgsTests
 {
     // ---- tokenising ----
 
     [Test]
-    public void SplitsOnWhitespace()
+    public async Task SplitsOnWhitespace()
     {
-        Assert.That(PostArgs.Tokenize("-crf 28 -ac 1"),
-            Is.EqualTo(new[] { "-crf", "28", "-ac", "1" }));
+        await Assert.That(PostArgs.Tokenize("-crf 28 -ac 1")).IsEquivalentTo(new[] { "-crf", "28", "-ac", "1" });
     }
 
     [Test]
-    public void KeepsQuotedFilterChainsTogether()
+    public async Task KeepsQuotedFilterChainsTogether()
     {
-        Assert.That(PostArgs.Tokenize("-vf \"scale=320:240,fps=15\" -c:v libx264"),
-            Is.EqualTo(new[] { "-vf", "scale=320:240,fps=15", "-c:v", "libx264" }));
+        await Assert.That(PostArgs.Tokenize("-vf \"scale=320:240,fps=15\" -c:v libx264")).IsEquivalentTo(new[] { "-vf", "scale=320:240,fps=15", "-c:v", "libx264" });
     }
 
     [Test]
-    public void SingleQuotesWorkToo()
+    public async Task SingleQuotesWorkToo()
     {
-        Assert.That(PostArgs.Tokenize("-vf 'yadif,fps=15'"),
-            Is.EqualTo(new[] { "-vf", "yadif,fps=15" }));
+        await Assert.That(PostArgs.Tokenize("-vf 'yadif,fps=15'")).IsEquivalentTo(new[] { "-vf", "yadif,fps=15" });
     }
 
     [Test]
-    public void BackslashesAreLiteralWindowsPaths()
+    public async Task BackslashesAreLiteralWindowsPaths()
     {
         // Escaping backslashes would break "drawtext=fontfile=C:\Windows\...":
         // the separator has to survive tokenising untouched.
-        Assert.That(PostArgs.Tokenize(@"-vf ""drawtext=fontfile=C:\Windows\Fonts\msyh.ttc:text=hi"""),
-            Is.EqualTo(new[] { "-vf", @"drawtext=fontfile=C:\Windows\Fonts\msyh.ttc:text=hi" }));
+        await Assert.That(PostArgs.Tokenize(@"-vf ""drawtext=fontfile=C:\Windows\Fonts\msyh.ttc:text=hi""")).IsEquivalentTo(new[] { "-vf", @"drawtext=fontfile=C:\Windows\Fonts\msyh.ttc:text=hi" });
     }
 
     [Test]
-    public void EmptyAndNullProduceNoTokens()
+    public async Task EmptyAndNullProduceNoTokens()
     {
-        Assert.That(PostArgs.Tokenize(null), Is.Empty);
-        Assert.That(PostArgs.Tokenize("   "), Is.Empty);
-        Assert.That(PostArgs.Tokenize(""), Is.Empty);
+        await Assert.That(PostArgs.Tokenize(null)).IsEmpty();
+        await Assert.That(PostArgs.Tokenize("   ")).IsEmpty();
+        await Assert.That(PostArgs.Tokenize("")).IsEmpty();
     }
 
     // ---- validation: accepted ----
 
     [Test]
-    public void OrdinaryFragmentIsAccepted()
+    public async Task OrdinaryFragmentIsAccepted()
     {
         var (ok, error) = PostArgs.Validate(
             ["-vf", "scale=320:240,fps=15", "-c:v", "libx264", "-crf", "28", "-ac", "1", "-b:a", "32k"]);
 
-        Assert.That(ok, Is.True, error);
+        await Assert.That(ok).IsTrue().Because(error ?? "validation said nothing");
     }
 
     [Test]
-    public void OptionValuesWithoutDashesAreAccepted()
+    public async Task OptionValuesWithoutDashesAreAccepted()
     {
         // "-crf 28" ends with "28", which is a value, not an output path.
         var (ok, error) = PostArgs.Validate(["-crf", "28"]);
 
-        Assert.That(ok, Is.True, error);
+        await Assert.That(ok).IsTrue().Because(error ?? "validation said nothing");
     }
 
     // ---- validation: rejected ----
 
     [Test]
-    public void EmptyFragmentIsRejected()
+    public async Task EmptyFragmentIsRejected()
     {
-        Assert.That(PostArgs.Validate([]).Ok, Is.False);
+        await Assert.That(PostArgs.Validate([]).Ok).IsFalse();
     }
 
     [Test]
-    public void SecondInputIsRejected()
+    public async Task SecondInputIsRejected()
     {
         var (ok, error) = PostArgs.Validate(["-c:v", "libx264", "-i", "other.mp4"]);
 
-        Assert.That(ok, Is.False);
-        Assert.That(error, Does.Contain("-i"));
+        await Assert.That(ok).IsFalse();
+        await Assert.That(error).Contains("-i");
     }
 
     [Test]
-    public void OutputFlagIsRejected()
+    public async Task OutputFlagIsRejected()
     {
-        Assert.That(PostArgs.Validate(["-o", "out.mp4"]).Ok, Is.False);
+        await Assert.That(PostArgs.Validate(["-o", "out.mp4"]).Ok).IsFalse();
     }
 
-    [TestCase("out.mp4")]
-    [TestCase("videos/out.mp4")]
-    [TestCase(@"C:\Temp\out.mp4")]
-    public void TrailingOutputPathIsRejected(string trailing)
+    [Test]
+    [Arguments("out.mp4")]
+    [Arguments("videos/out.mp4")]
+    [Arguments(@"C:\Temp\out.mp4")]
+    public async Task TrailingOutputPathIsRejected(string trailing)
     {
         var (ok, error) = PostArgs.Validate(["-c:v", "libx264", trailing]);
 
-        Assert.That(ok, Is.False, $"a trailing '{trailing}' must be rejected");
-        Assert.That(error, Does.Contain(trailing));
+        await Assert.That(ok).IsFalse().Because($"a trailing '{trailing}' must be rejected");
+        await Assert.That(error).Contains(trailing);
     }
 
     [Test]
-    public void BareContainerExtensionCountsAsAPath()
+    public async Task BareContainerExtensionCountsAsAPath()
     {
         // "clip.rm" is a path even without a separator.
-        Assert.That(PostArgs.Validate(["-c", "copy", "clip.rm"]).Ok, Is.False);
+        await Assert.That(PostArgs.Validate(["-c", "copy", "clip.rm"]).Ok).IsFalse();
     }
 
     // ---- filter escaping ----
 
     [Test]
-    public void FilterValueEscapesTheSpecialCharacters()
+    public async Task FilterValueEscapesTheSpecialCharacters()
     {
         // Every one of these ends a drawtext option early if left alone.
-        Assert.That(PostArgs.EscapeFilterValue(@"a\b"), Is.EqualTo(@"a\\b"));
-        Assert.That(PostArgs.EscapeFilterValue("a:b"), Is.EqualTo("a\\:b"));
-        Assert.That(PostArgs.EscapeFilterValue("a'b"), Is.EqualTo("a\\'b"));
-        Assert.That(PostArgs.EscapeFilterValue("a,b"), Is.EqualTo("a\\,b"));
-        Assert.That(PostArgs.EscapeFilterValue("a;b"), Is.EqualTo("a\\;b"));
-        Assert.That(PostArgs.EscapeFilterValue("a[b]"), Is.EqualTo("a\\[b\\]"));
+        await Assert.That(PostArgs.EscapeFilterValue(@"a\b")).IsEqualTo(@"a\\b");
+        await Assert.That(PostArgs.EscapeFilterValue("a:b")).IsEqualTo("a\\:b");
+        await Assert.That(PostArgs.EscapeFilterValue("a'b")).IsEqualTo("a\\'b");
+        await Assert.That(PostArgs.EscapeFilterValue("a,b")).IsEqualTo("a\\,b");
+        await Assert.That(PostArgs.EscapeFilterValue("a;b")).IsEqualTo("a\\;b");
+        await Assert.That(PostArgs.EscapeFilterValue("a[b]")).IsEqualTo("a\\[b\\]");
     }
 
     [Test]
-    public void ChineseTextSurvivesEscapingUnchanged()
+    public async Task ChineseTextSurvivesEscapingUnchanged()
     {
-        Assert.That(PostArgs.EscapeFilterValue("测试水印"), Is.EqualTo("测试水印"));
+        await Assert.That(PostArgs.EscapeFilterValue("测试水印")).IsEqualTo("测试水印");
     }
 }
 
@@ -139,11 +135,10 @@ public sealed class PostArgsTests
 /// drive colon, CJK text, and x/y expressions that depend on the text size.
 /// Built once here and exercised against FFmpeg by the e2e harness.
 /// </summary>
-[TestFixture]
 public sealed class WatermarkTests
 {
     [Test]
-    public void FilterCarriesTextPositionAndSize()
+    public async Task FilterCarriesTextPositionAndSize()
     {
         var settings = new WatermarkSettings
         {
@@ -157,68 +152,68 @@ public sealed class WatermarkTests
 
         string filter = Watermark.BuildFilter(settings, 240, "C:/Fonts/msyh.ttc");
 
-        Assert.That(filter, Does.StartWith("drawtext="));
-        Assert.That(filter, Does.Contain("fontfile='C\\:/Fonts/msyh.ttc'"));
-        Assert.That(filter, Does.Contain("text='优酷'"));
-        Assert.That(filter, Does.Contain("fontsize=16"));
-        Assert.That(filter, Does.Contain("fontcolor=white"));
+        await Assert.That(filter).StartsWith("drawtext=");
+        await Assert.That(filter).Contains("fontfile='C\\:/Fonts/msyh.ttc'");
+        await Assert.That(filter).Contains("text='优酷'");
+        await Assert.That(filter).Contains("fontsize=16");
+        await Assert.That(filter).Contains("fontcolor=white");
         // top-right pins the right edge of the text to the frame width.
-        Assert.That(filter, Does.Contain("x=W-tw-10"));
-        Assert.That(filter, Does.Contain("y=10"));
+        await Assert.That(filter).Contains("x=W-tw-10");
+        await Assert.That(filter).Contains("y=10");
     }
 
     [Test]
-    public void FontSizeScalesDownForSmallFrames()
+    public async Task FontSizeScalesDownForSmallFrames()
     {
         var settings = new WatermarkSettings { Enabled = true, Text = "x" };
 
         string small = Watermark.BuildFilter(settings, 120, null);
         string large = Watermark.BuildFilter(settings, 720, null);
 
-        Assert.That(small, Does.Contain("fontsize=8"), "120 / 15 floors at 8");
-        Assert.That(large, Does.Contain("fontsize=48"), "720 / 15");
+        await Assert.That(small).Contains("fontsize=8").Because("120 / 15 floors at 8");
+        await Assert.That(large).Contains("fontsize=48").Because("720 / 15");
     }
 
     [Test]
-    public void ExplicitFontSizeWinsOverTheAutomaticOne()
+    public async Task ExplicitFontSizeWinsOverTheAutomaticOne()
     {
         var settings = new WatermarkSettings { Enabled = true, Text = "x", FontSize = 24 };
 
-        Assert.That(Watermark.BuildFilter(settings, 120, null), Does.Contain("fontsize=24"));
+        await Assert.That(Watermark.BuildFilter(settings, 120, null)).Contains("fontsize=24");
     }
 
-    [TestCase("top-left", "x=6", "y=6")]
-    [TestCase("top-right", "x=W-tw-6", "y=6")]
-    [TestCase("bottom-left", "x=6", "y=H-th-6")]
-    [TestCase("bottom-right", "x=W-tw-6", "y=H-th-6")]
-    [TestCase("center", "x=(W-tw)/2", "y=(H-th)/2")]
-    public void EveryPositionProducesExpressions(string position, string x, string y)
+    [Test]
+    [Arguments("top-left", "x=6", "y=6")]
+    [Arguments("top-right", "x=W-tw-6", "y=6")]
+    [Arguments("bottom-left", "x=6", "y=H-th-6")]
+    [Arguments("bottom-right", "x=W-tw-6", "y=H-th-6")]
+    [Arguments("center", "x=(W-tw)/2", "y=(H-th)/2")]
+    public async Task EveryPositionProducesExpressions(string position, string x, string y)
     {
         var settings = new WatermarkSettings { Enabled = true, Text = "x", Position = position };
 
         string filter = Watermark.BuildFilter(settings, 240, null);
 
-        Assert.That(filter, Does.Contain($"{x}:"));
-        Assert.That(filter, Does.Contain($"{y}:"));
+        await Assert.That(filter).Contains($"{x}:");
+        await Assert.That(filter).Contains($"{y}:");
     }
 
     [Test]
-    public void UnknownPositionFallsBackToTopRight()
+    public async Task UnknownPositionFallsBackToTopRight()
     {
         var settings = new WatermarkSettings { Enabled = true, Text = "x", Position = "somewhere" };
 
-        Assert.That(Watermark.BuildFilter(settings, 240, null), Does.Contain("x=W-tw-"));
+        await Assert.That(Watermark.BuildFilter(settings, 240, null)).Contains("x=W-tw-");
     }
 
     [Test]
-    public void OutputPathInsertsWmBeforeTheExtension()
+    public async Task OutputPathInsertsWmBeforeTheExtension()
     {
-        Assert.That(Watermark.DeriveOutputPath(Path.Combine("d", "clip_live.rm")),
-            Is.EqualTo(Path.Combine("d", "clip_live_wm.mp4")));
+        await Assert.That(Watermark.DeriveOutputPath(Path.Combine("d", "clip_live.rm"))).IsEqualTo(Path.Combine("d", "clip_live_wm.mp4"));
     }
 
     [Test]
-    public void EmptyTextIsReportedAsAnErrorNotRun()
+    public async Task EmptyTextIsReportedAsAnErrorNotRun()
     {
         // The stage must fail before FFmpeg is started, or a misconfigured run
         // wastes a whole live encode.
@@ -227,12 +222,13 @@ public sealed class WatermarkTests
         (bool ok, string? error) = Watermark.Apply(
             "ffmpeg-does-not-exist", "in.mp4", "out.mp4", settings, 320, 240);
 
-        Assert.That(ok, Is.False);
-        Assert.That(error, Does.Contain("empty").IgnoreCase);
+        await Assert.That(ok).IsFalse();
+        // TUnit has no case-insensitive Contains overload; a plain substring
+        // check on the message is the same statement.
+        await Assert.That(error!.Contains("empty", StringComparison.OrdinalIgnoreCase)).IsTrue();
     }
 }
 
-[TestFixture]
 public sealed class RecompressTests
 {
     private static RecompressSettings Settings(string args, string container = "mp4") => new()
@@ -243,42 +239,42 @@ public sealed class RecompressTests
     };
 
     [Test]
-    public void ArgvWrapsTheFragmentBetweenInputAndOutput()
+    public async Task ArgvWrapsTheFragmentBetweenInputAndOutput()
     {
         (List<string> argv, string? error) = Recompress.BuildArgv(
             "ffmpeg", "in.rm", "out.mp4", Settings("-c:v libx264 -crf 28"));
 
-        Assert.That(error, Is.Null);
-        Assert.That(argv[0], Is.EqualTo("ffmpeg"));
-        Assert.That(argv, Does.Contain("-i").And.Contain("in.rm"));
-        Assert.That(argv[^1], Is.EqualTo("out.mp4"), "output is always last");
+        await Assert.That(error).IsNull();
+        await Assert.That(argv[0]).IsEqualTo("ffmpeg");
+        await Assert.That(argv).Contains("-i").And.Contains("in.rm");
+        await Assert.That(argv[^1]).IsEqualTo("out.mp4").Because("output is always last");
         // Nothing the user wrote may come after the output.
-        Assert.That(argv.IndexOf("out.mp4"), Is.EqualTo(argv.Count - 1));
+        await Assert.That(argv.IndexOf("out.mp4")).IsEqualTo(argv.Count - 1);
     }
 
     [Test]
-    public void BadFragmentStopsTheBuild()
+    public async Task BadFragmentStopsTheBuild()
     {
         (List<string> argv, string? error) = Recompress.BuildArgv(
             "ffmpeg", "in.rm", "out.mp4", Settings("-i other.mp4"));
 
-        Assert.That(error, Is.Not.Null);
-        Assert.That(argv, Is.Empty);
+        await Assert.That(error).IsNotNull();
+        await Assert.That(argv).IsEmpty();
     }
 
     [Test]
-    public void DisabledStageIsANoOp()
+    public async Task DisabledStageIsANoOp()
     {
         (bool ok, string? error) = Recompress.Apply(
             "ffmpeg-does-not-exist", "in.rm", "out.mp4",
             new RecompressSettings { Enabled = false, Args = "-c:v libx264" });
 
-        Assert.That(ok, Is.True);
-        Assert.That(error, Is.Null);
+        await Assert.That(ok).IsTrue();
+        await Assert.That(error).IsNull();
     }
 
     [Test]
-    public void MissingInputIsReportedNotThrown()
+    public async Task MissingInputIsReportedNotThrown()
     {
         // A stage that throws would take the live product's reporting down with
         // it; it has to come back as an error message instead.
@@ -286,66 +282,65 @@ public sealed class RecompressTests
             "ffmpeg-does-not-exist", "no-such-file.rm", "out.mp4",
             Settings("-c:v libx264"));
 
-        Assert.That(ok, Is.False);
-        Assert.That(error, Is.Not.Empty);
+        await Assert.That(ok).IsFalse();
+        await Assert.That(error).IsNotEmpty();
     }
 
     [Test]
-    public void WebOutputReplacesTheWmMark()
+    public async Task WebOutputReplacesTheWmMark()
     {
         string dir = Path.Combine("d", "sub");
 
-        Assert.That(Recompress.DeriveOutputPath(Path.Combine(dir, "clip_live_wm.mp4"), "mp4"),
-            Is.EqualTo(Path.Combine(dir, "clip_live_web.mp4")));
-        Assert.That(Recompress.DeriveOutputPath(Path.Combine(dir, "clip_live.rm"), "mp4"),
-            Is.EqualTo(Path.Combine(dir, "clip_live_web.mp4")));
-        Assert.That(Recompress.DeriveOutputPath(Path.Combine(dir, "clip_live.rm"), ".mkv"),
-            Is.EqualTo(Path.Combine(dir, "clip_live_web.mkv")));
+        await Assert.That(Recompress.DeriveOutputPath(Path.Combine(dir, "clip_live_wm.mp4"), "mp4")).IsEqualTo(Path.Combine(dir, "clip_live_web.mp4"));
+        await Assert.That(Recompress.DeriveOutputPath(Path.Combine(dir, "clip_live.rm"), "mp4")).IsEqualTo(Path.Combine(dir, "clip_live_web.mp4"));
+        await Assert.That(Recompress.DeriveOutputPath(Path.Combine(dir, "clip_live.rm"), ".mkv")).IsEqualTo(Path.Combine(dir, "clip_live_web.mkv"));
     }
 }
 
-[TestFixture]
 public sealed class EraPresetTests
 {
     [Test]
-    public void IdsAreUniqueAndLowercase()
+    public async Task IdsAreUniqueAndLowercase()
     {
         List<string> ids = EraPresets.All.Select(p => p.Id).ToList();
 
-        Assert.That(ids, Is.Unique);
-        Assert.That(ids, Is.All.Match(@"^[a-z0-9_]+$"));
-    }
-
-    [Test]
-    public void EveryPresetCoversBothLayers()
-    {
-        foreach (EraPreset preset in EraPresets.All)
+        await Assert.That(ids.Distinct().Count()).IsEqualTo(ids.Count);
+        foreach (string id in ids)
         {
-            Assert.That(preset.Encoder, Is.Not.Empty, preset.Id);
-            Assert.That(preset.Width, Is.Positive, preset.Id);
-            Assert.That(preset.Height, Is.Positive, preset.Id);
-            Assert.That(preset.Fps, Is.Positive, preset.Id);
-            Assert.That(preset.LimitKbps, Is.Positive, preset.Id);
-            Assert.That(preset.RecompressArgs, Is.Not.Empty, preset.Id);
-            Assert.That(preset.RecompressContainer, Is.Not.Empty, preset.Id);
+            await Assert.That(System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-z0-9_]+$")).IsTrue();
         }
     }
 
     [Test]
-    public void RecompressArgumentsPassTheOwnValidator()
+    public async Task EveryPresetCoversBothLayers()
+    {
+        foreach (EraPreset preset in EraPresets.All)
+        {
+            await Assert.That(preset.Encoder).IsNotEmpty().Because(preset.Id);
+            await Assert.That(preset.Width).IsPositive().Because(preset.Id);
+            await Assert.That(preset.Height).IsPositive().Because(preset.Id);
+            await Assert.That(preset.Fps).IsPositive().Because(preset.Id);
+            await Assert.That(preset.LimitKbps).IsPositive().Because(preset.Id);
+            await Assert.That(preset.RecompressArgs).IsNotEmpty().Because(preset.Id);
+            await Assert.That(preset.RecompressContainer).IsNotEmpty().Because(preset.Id);
+        }
+    }
+
+    [Test]
+    public async Task RecompressArgumentsPassTheOwnValidator()
     {
         // A preset that its own pipeline would reject would fail at encode time,
         // which is exactly the failure the validator exists to move earlier.
         foreach (EraPreset preset in EraPresets.All)
         {
             (List<string> tokens, string? error) = PostArgs.Parse(preset.RecompressArgs);
-            Assert.That(error, Is.Null, $"{preset.Id}: {error}");
-            Assert.That(tokens, Is.Not.Empty, preset.Id);
+            await Assert.That(error).IsNull().Because($"{preset.Id}: {error}");
+            await Assert.That(tokens).IsNotEmpty().Because(preset.Id);
         }
     }
 
     [Test]
-    public void ErasAdvanceInResolutionAndBitrate()
+    public async Task ErasAdvanceInResolutionAndBitrate()
     {
         // The point of the table: later eras are bigger and fatter. A regression
         // here means someone reordered the history.
@@ -354,53 +349,50 @@ public sealed class EraPresetTests
             EraPreset older = EraPresets.All[i - 1];
             EraPreset newer = EraPresets.All[i];
 
-            Assert.That(newer.Width * newer.Height, Is.GreaterThan(older.Width * older.Height),
-                $"{newer.Id} should have more pixels than {older.Id}");
-            Assert.That(newer.LimitKbps, Is.GreaterThan(older.LimitKbps),
-                $"{newer.Id} should allow more bitrate than {older.Id}");
+            await Assert.That(newer.Width * newer.Height).IsGreaterThan(older.Width * older.Height).Because($"{newer.Id} should have more pixels than {older.Id}");
+            await Assert.That(newer.LimitKbps).IsGreaterThan(older.LimitKbps).Because($"{newer.Id} should allow more bitrate than {older.Id}");
         }
     }
 
     [Test]
-    public void LiveLayerAppliesWithoutArmingRecompress()
+    public async Task LiveLayerAppliesWithoutArmingRecompress()
     {
         // Picking an era must not silently start re-encoding the output: that
         // stage is opt-in, and "default off" is a user-visible promise.
         var config = new Config();
         EraPresets.Find("flv07")!.ApplyLive(config);
 
-        Assert.That(config.Width, Is.EqualTo(352));
-        Assert.That(config.Height, Is.EqualTo(264));
-        Assert.That(config.Fps, Is.EqualTo(15));
-        Assert.That(config.Limit, Is.EqualTo(300));
-        Assert.That(config.ScaleAlgo, Is.EqualTo("bicubic"));
-        Assert.That(config.Recompress.Enabled, Is.False, "a preset must not arm recompress");
+        await Assert.That(config.Width).IsEqualTo(352);
+        await Assert.That(config.Height).IsEqualTo(264);
+        await Assert.That(config.Fps).IsEqualTo(15);
+        await Assert.That(config.Limit).IsEqualTo(300);
+        await Assert.That(config.ScaleAlgo).IsEqualTo("bicubic");
+        await Assert.That(config.Recompress.Enabled).IsFalse().Because("a preset must not arm recompress");
     }
 
     [Test]
-    public void FindIsCaseInsensitiveAndRejectsUnknowns()
+    public async Task FindIsCaseInsensitiveAndRejectsUnknowns()
     {
-        Assert.That(EraPresets.Find("FLV07")!.Id, Is.EqualTo("flv07"));
-        Assert.That(EraPresets.Find("nope"), Is.Null);
-        Assert.That(EraPresets.Find(""), Is.Null);
-        Assert.That(EraPresets.Find(null), Is.Null);
+        await Assert.That(EraPresets.Find("FLV07")!.Id).IsEqualTo("flv07");
+        await Assert.That(EraPresets.Find("nope")).IsNull();
+        await Assert.That(EraPresets.Find("")).IsNull();
+        await Assert.That(EraPresets.Find(null)).IsNull();
     }
 }
 
-[TestFixture]
 public sealed class PostProcessingConfigTests
 {
     [Test]
-    public void BothStagesAreOffByDefault()
+    public async Task BothStagesAreOffByDefault()
     {
         var config = new Config();
 
-        Assert.That(config.Watermark.Enabled, Is.False, "watermark defaults to off");
-        Assert.That(config.Recompress.Enabled, Is.False, "recompress defaults to off");
+        await Assert.That(config.Watermark.Enabled).IsFalse().Because("watermark defaults to off");
+        await Assert.That(config.Recompress.Enabled).IsFalse().Because("recompress defaults to off");
     }
 
     [Test]
-    public void WatermarkAndRecompressRoundTripThroughUserConfig()
+    public async Task WatermarkAndRecompressRoundTripThroughUserConfig()
     {
         var source = new Config
         {
@@ -420,25 +412,25 @@ public sealed class PostProcessingConfigTests
         };
 
         UserConfig stored = ConfigStore.Capture(source);
-        UserConfig roundTripped = RoundTrip(stored);
+        UserConfig roundTripped = await RoundTrip(stored);
 
         var restored = new Config();
         ConfigStore.Apply(roundTripped, restored, []);
 
-        Assert.That(restored.Watermark.Enabled, Is.True);
-        Assert.That(restored.Watermark.Text, Is.EqualTo("新浪播客"));
-        Assert.That(restored.Watermark.Position, Is.EqualTo("bottom-left"));
-        Assert.That(restored.Watermark.FontSize, Is.EqualTo(20));
-        Assert.That(restored.Watermark.FontColor, Is.EqualTo("yellow"));
-        Assert.That(restored.Recompress.Enabled, Is.True);
-        Assert.That(restored.Recompress.Args, Does.Contain("crf 28"));
-        Assert.That(restored.Recompress.Container, Is.EqualTo("mkv"));
-        Assert.That(restored.Recompress.KeepIntermediate, Is.True);
-        Assert.That(restored.EraPreset, Is.EqualTo("flv07"));
+        await Assert.That(restored.Watermark.Enabled).IsTrue();
+        await Assert.That(restored.Watermark.Text).IsEqualTo("新浪播客");
+        await Assert.That(restored.Watermark.Position).IsEqualTo("bottom-left");
+        await Assert.That(restored.Watermark.FontSize).IsEqualTo(20);
+        await Assert.That(restored.Watermark.FontColor).IsEqualTo("yellow");
+        await Assert.That(restored.Recompress.Enabled).IsTrue();
+        await Assert.That(restored.Recompress.Args).Contains("crf 28");
+        await Assert.That(restored.Recompress.Container).IsEqualTo("mkv");
+        await Assert.That(restored.Recompress.KeepIntermediate).IsTrue();
+        await Assert.That(restored.EraPreset).IsEqualTo("flv07");
     }
 
     [Test]
-    public void AVersion1ConfigFileStillLoadsWithBothStagesOff()
+    public async Task AVersion1ConfigFileStillLoadsWithBothStagesOff()
     {
         // The v7.5 shape, before the stages existed. It must read back as a
         // normal config with the new stages at their defaults, not as nulls.
@@ -460,11 +452,11 @@ public sealed class PostProcessingConfigTests
             File.WriteAllText(path, legacyJson);
             UserConfig loaded = ConfigStore.Load(path);
 
-            Assert.That(loaded.Encoder, Is.EqualTo("rv20"));
-            Assert.That(loaded.Watermark, Is.Not.Null);
-            Assert.That(loaded.Watermark.Enabled, Is.False);
-            Assert.That(loaded.Recompress, Is.Not.Null);
-            Assert.That(loaded.Recompress.Enabled, Is.False);
+            await Assert.That(loaded.Encoder).IsEqualTo("rv20");
+            await Assert.That(loaded.Watermark).IsNotNull();
+            await Assert.That(loaded.Watermark.Enabled).IsFalse();
+            await Assert.That(loaded.Recompress).IsNotNull();
+            await Assert.That(loaded.Recompress.Enabled).IsFalse();
         }
         finally
         {
@@ -473,20 +465,20 @@ public sealed class PostProcessingConfigTests
     }
 
     [Test]
-    public void PositionIsNormalisedAndUnknownValuesFallBack()
+    public async Task PositionIsNormalisedAndUnknownValuesFallBack()
     {
-        Assert.That(WatermarkSettings.CanonicalPosition("TOP_RIGHT"), Is.EqualTo("top-right"));
-        Assert.That(WatermarkSettings.CanonicalPosition("center"), Is.EqualTo("center"));
-        Assert.That(WatermarkSettings.CanonicalPosition(null), Is.EqualTo("top-right"));
-        Assert.That(WatermarkSettings.CanonicalPosition("nonsense"), Is.EqualTo("top-right"));
+        await Assert.That(WatermarkSettings.CanonicalPosition("TOP_RIGHT")).IsEqualTo("top-right");
+        await Assert.That(WatermarkSettings.CanonicalPosition("center")).IsEqualTo("center");
+        await Assert.That(WatermarkSettings.CanonicalPosition(null)).IsEqualTo("top-right");
+        await Assert.That(WatermarkSettings.CanonicalPosition("nonsense")).IsEqualTo("top-right");
     }
 
-    private static UserConfig RoundTrip(UserConfig cfg)
+    private static async Task<UserConfig> RoundTrip(UserConfig cfg)
     {
         string path = Path.Combine(Path.GetTempPath(), $"lae-rt-{Guid.NewGuid():N}.json");
         try
         {
-            Assert.That(ConfigStore.Save(cfg, path), Is.True);
+            await Assert.That(ConfigStore.Save(cfg, path)).IsTrue();
             return ConfigStore.Load(path);
         }
         finally

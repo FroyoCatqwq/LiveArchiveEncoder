@@ -83,6 +83,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/CliParserTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/ConfigStoreTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/FfmpegCatalogTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/HwaccelTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/LocalizationTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/ModernisationTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/PlayerTests.cs" />

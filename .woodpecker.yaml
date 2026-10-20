@@ -41,7 +41,10 @@ steps:
   - name: test
     image: mcr.microsoft.com/dotnet/sdk:11.0
     commands:
-      - dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build
+      # TUnit runs on Microsoft.Testing.Platform; the SDK routes `dotnet test`
+      # there via the test.runner section of global.json, and in that mode the
+      # solution is named with --solution rather than a positional argument.
+      - dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release --no-build
 
   - name: build (net11)
     image: mcr.microsoft.com/dotnet/sdk:11.0
@@ -51,4 +54,4 @@ steps:
   - name: test (net11)
     image: mcr.microsoft.com/dotnet/sdk:11.0
     commands:
-      - dotnet test LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0 --no-build
+      - dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0 --no-build

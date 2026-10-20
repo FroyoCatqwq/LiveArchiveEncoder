@@ -9,28 +9,26 @@ namespace LiveArchiveEncoder.Tests;
 /// default, and a method that cannot be verified here degrades to software
 /// instead of being handed to FFmpeg and failing mid-encode.
 /// </summary>
-[TestFixture]
 public sealed class HwaccelTests
 {
     private static readonly FileInfo NoSource = new("no-such-media.mp4");
 
-    [TestCase("off")]
-    [TestCase("OFF")]
-    [TestCase("")]
-    [TestCase(null)]
-    public void OffResolvesWithoutTouchingFFmpeg(string? ask) =>
-        Assert.That(Hwaccel.Resolve(ask, "definitely-not-ffmpeg", NoSource, null),
-            Is.EqualTo(Hwaccel.Off));
+    [Test]
+    [Arguments("off")]
+    [Arguments("OFF")]
+    [Arguments("")]
+    [Arguments(null)]
+    public async Task OffResolvesWithoutTouchingFFmpeg(string? ask) =>
+        await Assert.That(Hwaccel.Resolve(ask, "definitely-not-ffmpeg", NoSource, null)).IsEqualTo(Hwaccel.Off);
 
     [Test]
-    public void DefaultIsOff()
+    public async Task DefaultIsOff()
     {
         // The regression this guards: v7.4 defaulted to CUDA on, and every
         // headless box (all Linux CI, any Windows box without an NVIDIA stack)
         // died on the first frame with "Cannot load libcuda.so.1".
-        Assert.That(Hwaccel.Off, Is.EqualTo("off"));
-        Assert.That(Hwaccel.Resolve(null, "definitely-not-ffmpeg", NoSource, null),
-            Is.EqualTo(Hwaccel.Off));
+        await Assert.That(Hwaccel.Off).IsEqualTo("off");
+        await Assert.That(Hwaccel.Resolve(null, "definitely-not-ffmpeg", NoSource, null)).IsEqualTo(Hwaccel.Off);
     }
 
     /// <summary>
@@ -38,33 +36,34 @@ public sealed class HwaccelTests
     /// must degrade to software -- never throw, never pass something broken to
     /// FFmpeg.
     /// </summary>
-    [TestCase("cuda")]
-    [TestCase("vaapi")]
-    [TestCase("not-a-method")]
-    [TestCase("auto")]
-    public void AnythingUnverifiableFallsBackToSoftware(string ask)
+    [Test]
+    [Arguments("cuda")]
+    [Arguments("vaapi")]
+    [Arguments("not-a-method")]
+    [Arguments("auto")]
+    public async Task AnythingUnverifiableFallsBackToSoftware(string ask)
     {
         var notes = new List<string>();
 
-        Assert.That(Hwaccel.Resolve(ask, "definitely-not-ffmpeg", NoSource, notes.Add),
-            Is.EqualTo(Hwaccel.Off));
-        Assert.That(notes, Is.Not.Empty, "the fallback has to be visible to the user");
+        await Assert.That(Hwaccel.Resolve(ask, "definitely-not-ffmpeg", NoSource, notes.Add)).IsEqualTo(Hwaccel.Off);
+        await Assert.That(notes).IsNotEmpty().Because("the fallback has to be visible to the user");
     }
 
     [Test]
-    public void PreferenceOrderStartsWithThePlatformsOwnMethod()
+    public async Task PreferenceOrderStartsWithThePlatformsOwnMethod()
     {
         IReadOnlyList<string> order = Hwaccel.PreferenceOrder;
 
-        Assert.That(order, Is.Not.Empty);
-        Assert.That(order, Does.Contain("cuda"));
-        Assert.That(order[0], OperatingSystem.IsWindows()
-            ? Is.EqualTo("cuda")
-            : Is.EqualTo("vaapi"));
-        Assert.That(order.Distinct().Count(), Is.EqualTo(order.Count));
+        await Assert.That(order).IsNotEmpty();
+        await Assert.That(order).Contains("cuda");
+        // Windows leads with cuda, Linux with vaapi; the original expressed
+        // that as a conditional constraint, which the fluent API cannot take.
+        string expected = OperatingSystem.IsWindows() ? "cuda" : "vaapi";
+        await Assert.That(order[0]).IsEqualTo(expected);
+        await Assert.That(order.Distinct().Count()).IsEqualTo(order.Count);
     }
 
     [Test]
-    public void CompiledIn_NeverThrowsOnAMissingBinary() =>
-        Assert.That(Hwaccel.CompiledIn("definitely-not-ffmpeg"), Is.Empty);
+    public async Task CompiledIn_NeverThrowsOnAMissingBinary() =>
+        await Assert.That(Hwaccel.CompiledIn("definitely-not-ffmpeg")).IsEmpty();
 }

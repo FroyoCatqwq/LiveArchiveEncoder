@@ -12,62 +12,60 @@ namespace LiveArchiveEncoder.Tests;
 /// therefore passes on both Windows and Linux. Assertions about "what is
 /// offered here" go through <see cref="FfmpegCatalog.Available"/>.
 /// </summary>
-[TestFixture]
 public sealed class FfmpegCatalogTests
 {
     private const DistPlatform Win = DistPlatform.Windows;
     private const DistPlatform Lin = DistPlatform.Linux;
 
     [Test]
-    public void DefaultIsTheBtbnDailyBuild()
+    public async Task DefaultIsTheBtbnDailyBuild()
     {
-        Assert.That(FfmpegCatalog.DefaultId, Is.EqualTo("btbn"));
-        Assert.That(FfmpegCatalog.Find(FfmpegCatalog.DefaultId), Is.Not.Null);
-        Assert.That(FfmpegCatalog.Find(FfmpegCatalog.DefaultId)!.Daily, Is.True);
+        await Assert.That(FfmpegCatalog.DefaultId).IsEqualTo("btbn");
+        await Assert.That(FfmpegCatalog.Find(FfmpegCatalog.DefaultId)).IsNotNull();
+        await Assert.That(FfmpegCatalog.Find(FfmpegCatalog.DefaultId)!.Daily).IsTrue();
     }
 
-    [TestCase("btbn")]
-    [TestCase("BTBN")]
-    [TestCase("  nonfree  ")]
-    public void Find_IsCaseAndWhitespaceInsensitive(string id) =>
-        Assert.That(FfmpegCatalog.Find(id), Is.Not.Null);
+    [Test]
+    [Arguments("btbn")]
+    [Arguments("BTBN")]
+    [Arguments("  nonfree  ")]
+    public async Task Find_IsCaseAndWhitespaceInsensitive(string id) =>
+        await Assert.That(FfmpegCatalog.Find(id)).IsNotNull();
 
     [Test]
-    public void Find_GyanOnlyOnWindows()
+    public async Task Find_GyanOnlyOnWindows()
     {
         // gyan.dev publishes no Linux build, so the source cannot leak into
         // the Linux menu -- and must still be there on Windows.
-        Assert.That(FfmpegCatalog.FindKnown("gyan", Win), Is.Not.Null);
-        Assert.That(FfmpegCatalog.FindKnown("gyan", Lin), Is.Null);
+        await Assert.That(FfmpegCatalog.FindKnown("gyan", Win)).IsNotNull();
+        await Assert.That(FfmpegCatalog.FindKnown("gyan", Lin)).IsNull();
 
-        Assert.That(FfmpegCatalog.Find("gyan") is not null,
-            Is.EqualTo(FfmpegCatalog.Current == Win));
+        await Assert.That(FfmpegCatalog.Find("gyan") is not null).IsEqualTo(FfmpegCatalog.Current == Win);
     }
 
-    [TestCase("")]
-    [TestCase("   ")]
-    [TestCase(null)]
-    [TestCase("not-a-source")]
-    public void Find_UnknownGivesNull(string? id) =>
-        Assert.That(FfmpegCatalog.Find(id), Is.Null);
+    [Test]
+    [Arguments("")]
+    [Arguments("   ")]
+    [Arguments(null)]
+    [Arguments("not-a-source")]
+    public async Task Find_UnknownGivesNull(string? id) =>
+        await Assert.That(FfmpegCatalog.Find(id)).IsNull();
 
     /// <summary>
     /// The id set is per platform: gyan is the only source without a Linux
     /// build, everything else mirrors across.
     /// </summary>
     [Test]
-    public void SourcesAreUniquePerPlatform()
+    public async Task SourcesAreUniquePerPlatform()
     {
-        Assert.That(FfmpegCatalog.All.Where(d => d.Platform == Win).Select(d => d.Id),
-            Is.EquivalentTo(new[] { "btbn", "gyan", "avbuild", "nonfree" }));
-        Assert.That(FfmpegCatalog.All.Where(d => d.Platform == Lin).Select(d => d.Id),
-            Is.EquivalentTo(new[] { "btbn", "avbuild", "nonfree" }));
+        await Assert.That(FfmpegCatalog.All.Where(d => d.Platform == Win).Select(d => d.Id)).IsEquivalentTo(new[] { "btbn", "gyan", "avbuild", "nonfree" });
+        await Assert.That(FfmpegCatalog.All.Where(d => d.Platform == Lin).Select(d => d.Id)).IsEquivalentTo(new[] { "btbn", "avbuild", "nonfree" });
 
         // Available is exactly this platform's slice, with no duplicate ids --
         // a duplicate would make Installed() list the same build twice.
         string[] offered = FfmpegCatalog.Available.Select(d => d.Id).ToArray();
-        Assert.That(offered.Distinct().Count(), Is.EqualTo(offered.Length));
-        Assert.That(offered, Does.Contain("btbn"));
+        await Assert.That(offered.Distinct().Count()).IsEqualTo(offered.Length);
+        await Assert.That(offered).Contains("btbn");
     }
 
     /// <summary>
@@ -76,65 +74,67 @@ public sealed class FfmpegCatalogTests
     /// either platform.
     /// </summary>
     [Test]
-    public void OnlyAvbuildNeedsAManualDownload()
+    public async Task OnlyAvbuildNeedsAManualDownload()
     {
-        Assert.That(FfmpegCatalog.All.Where(d => !d.AutoDownload).Select(d => d.Id).Distinct(),
-            Is.EquivalentTo(new[] { "avbuild" }));
-        Assert.That(FfmpegCatalog.AutomaticIds, Does.Contain("btbn"));
-        Assert.That(FfmpegCatalog.AutomaticIds, Does.Not.Contain("avbuild"));
+        await Assert.That(FfmpegCatalog.All.Where(d => !d.AutoDownload).Select(d => d.Id).Distinct()).IsEquivalentTo(new[] { "avbuild" });
+        await Assert.That(FfmpegCatalog.AutomaticIds).Contains("btbn");
+        await Assert.That(FfmpegCatalog.AutomaticIds).DoesNotContain("avbuild");
     }
 
     [Test]
-    public void AutomaticSourcesPointAtTheRollingArtefact()
+    public async Task AutomaticSourcesPointAtTheRollingArtefact()
     {
-        Assert.That(FfmpegCatalog.FindKnown("btbn", Win)!.Url,
-            Does.Contain("ffmpeg-master-latest-win64-gpl.zip"));
-        Assert.That(FfmpegCatalog.FindKnown("gyan", Win)!.Url, Does.Contain("ffmpeg-git-full.7z"));
-        Assert.That(FfmpegCatalog.FindKnown("nonfree", Win)!.Url,
-            Does.Contain("ffmpeg-master-latest-win64-nonfree.zip"));
+        await Assert.That(FfmpegCatalog.FindKnown("btbn", Win)!.Url).Contains("ffmpeg-master-latest-win64-gpl.zip");
+        await Assert.That(FfmpegCatalog.FindKnown("gyan", Win)!.Url).Contains("ffmpeg-git-full.7z");
+        await Assert.That(FfmpegCatalog.FindKnown("nonfree", Win)!.Url).Contains("ffmpeg-master-latest-win64-nonfree.zip");
 
-        Assert.That(FfmpegCatalog.FindKnown("btbn", Lin)!.Url,
-            Does.Contain("ffmpeg-master-latest-linux64-gpl.tar.xz"));
-        Assert.That(FfmpegCatalog.FindKnown("nonfree", Lin)!.Url,
-            Does.Contain("ffmpeg-master-latest-linux64-nonfree.tar.xz"));
+        await Assert.That(FfmpegCatalog.FindKnown("btbn", Lin)!.Url).Contains("ffmpeg-master-latest-linux64-gpl.tar.xz");
+        await Assert.That(FfmpegCatalog.FindKnown("nonfree", Lin)!.Url).Contains("ffmpeg-master-latest-linux64-nonfree.tar.xz");
     }
 
     [Test]
-    public void ArchiveKindMatchesTheExtensionTheSourcePublishes()
+    public async Task ArchiveKindMatchesTheExtensionTheSourcePublishes()
     {
-        Assert.That(FfmpegCatalog.FindKnown("btbn", Win)!.Archive, Is.EqualTo(ArchiveKind.Zip));
-        Assert.That(FfmpegCatalog.FindKnown("gyan", Win)!.Archive, Is.EqualTo(ArchiveKind.SevenZip));
-        Assert.That(FfmpegCatalog.FindKnown("avbuild", Win)!.Archive, Is.EqualTo(ArchiveKind.SevenZip));
+        await Assert.That(FfmpegCatalog.FindKnown("btbn", Win)!.Archive).IsEqualTo(ArchiveKind.Zip);
+        await Assert.That(FfmpegCatalog.FindKnown("gyan", Win)!.Archive).IsEqualTo(ArchiveKind.SevenZip);
+        await Assert.That(FfmpegCatalog.FindKnown("avbuild", Win)!.Archive).IsEqualTo(ArchiveKind.SevenZip);
 
-        Assert.That(FfmpegCatalog.FindKnown("btbn", Lin)!.Archive, Is.EqualTo(ArchiveKind.TarXz));
-        Assert.That(FfmpegCatalog.FindKnown("nonfree", Lin)!.Archive, Is.EqualTo(ArchiveKind.TarXz));
+        await Assert.That(FfmpegCatalog.FindKnown("btbn", Lin)!.Archive).IsEqualTo(ArchiveKind.TarXz);
+        await Assert.That(FfmpegCatalog.FindKnown("nonfree", Lin)!.Archive).IsEqualTo(ArchiveKind.TarXz);
 
-        Assert.That(FfmpegCatalog.FindKnown("btbn", Win)!.ArchiveExtension, Is.EqualTo(".zip"));
-        Assert.That(FfmpegCatalog.FindKnown("gyan", Win)!.ArchiveExtension, Is.EqualTo(".7z"));
-        Assert.That(FfmpegCatalog.FindKnown("btbn", Lin)!.ArchiveExtension, Is.EqualTo(".tar.xz"));
+        await Assert.That(FfmpegCatalog.FindKnown("btbn", Win)!.ArchiveExtension).IsEqualTo(".zip");
+        await Assert.That(FfmpegCatalog.FindKnown("gyan", Win)!.ArchiveExtension).IsEqualTo(".7z");
+        await Assert.That(FfmpegCatalog.FindKnown("btbn", Lin)!.ArchiveExtension).IsEqualTo(".tar.xz");
     }
 
-    [TestCase("build.zip", ArchiveKind.Zip)]
-    [TestCase("BUILD.ZIP", ArchiveKind.Zip)]
-    [TestCase("build.7z", ArchiveKind.SevenZip)]
-    [TestCase("build.tar.xz", ArchiveKind.TarXz)]
-    [TestCase("build.TXZ", ArchiveKind.TarXz)]
-    public void KindOfFile_ReadsTheExtension(string name, ArchiveKind expected) =>
-        Assert.That(FfmpegCatalog.KindOfFile(name), Is.EqualTo(expected));
+    [Test]
+    [Arguments("build.zip", ArchiveKind.Zip)]
+    [Arguments("BUILD.ZIP", ArchiveKind.Zip)]
+    [Arguments("build.7z", ArchiveKind.SevenZip)]
+    [Arguments("build.tar.xz", ArchiveKind.TarXz)]
+    [Arguments("build.TXZ", ArchiveKind.TarXz)]
+    public async Task KindOfFile_ReadsTheExtension(string name, ArchiveKind expected) =>
+        await Assert.That(FfmpegCatalog.KindOfFile(name)).IsEqualTo(expected);
 
-    [TestCase("build")]
-    [TestCase("build.tar")]
-    [TestCase("build.xz")]
-    [TestCase("")]
-    public void KindOfFile_RejectsAnythingElse(string name) =>
-        Assert.That(FfmpegCatalog.KindOfFile(name), Is.Null);
+    [Test]
+    [Arguments("build")]
+    [Arguments("build.tar")]
+    [Arguments("build.xz")]
+    [Arguments("")]
+    public async Task KindOfFile_RejectsAnythingElse(string name) =>
+        await Assert.That(FfmpegCatalog.KindOfFile(name)).IsNull();
 
     /// <summary>TarXz is the format every Linux source ships; the extractor and
     /// the magic-byte check both key off this.</summary>
     [Test]
-    public void LinuxSourcesAllUseTarXz() =>
-        Assert.That(FfmpegCatalog.All.Where(d => d.Platform == Lin && d.AutoDownload)
-            .Select(d => d.Archive), Is.All.EqualTo(ArchiveKind.TarXz));
+    public async Task LinuxSourcesAllUseTarXz()
+    {
+        foreach (ArchiveKind archive in FfmpegCatalog.All.Where(d => d.Platform == Lin && d.AutoDownload)
+            .Select(d => d.Archive))
+        {
+            await Assert.That(archive).IsEqualTo(ArchiveKind.TarXz);
+        }
+    }
 }
 
 /// <summary>
@@ -144,51 +144,53 @@ public sealed class FfmpegCatalogTests
 /// that is the point, because the Linux half has to be covered by CI runners
 /// nobody logs into.
 /// </summary>
-[TestFixture]
 public sealed class SmbUnixTests
 {
-    [TestCase("smb://nas/share/clip.mp4")]
-    [TestCase("SMB://nas/share/clip.mp4")]
-    [TestCase("smb://nas/share")]
-    public void IsSmbUrl_AcceptsTheUrlForm(string path)
+    [Test]
+    [Arguments("smb://nas/share/clip.mp4")]
+    [Arguments("SMB://nas/share/clip.mp4")]
+    [Arguments("smb://nas/share")]
+    public async Task IsSmbUrl_AcceptsTheUrlForm(string path)
     {
-        Assert.That(Smb.IsSmbUrl(path), Is.True);
-        Assert.That(Smb.IsUncPath(path), Is.True, "a URL still counts as remote input");
-        Assert.That(Smb.IsRemotePath(path), Is.True);
+        await Assert.That(Smb.IsSmbUrl(path)).IsTrue();
+        await Assert.That(Smb.IsUncPath(path)).IsTrue().Because("a URL still counts as remote input");
+        await Assert.That(Smb.IsRemotePath(path)).IsTrue();
     }
 
-    [TestCase(@"\\nas\share\clip.mp4")]
-    [TestCase("C:\\video\\clip.mp4")]
-    [TestCase("")]
-    [TestCase(null)]
-    public void IsSmbUrl_RejectsLocalAndUnc(string? path) =>
-        Assert.That(Smb.IsSmbUrl(path), Is.False);
+    [Test]
+    [Arguments(@"\\nas\share\clip.mp4")]
+    [Arguments("C:\\video\\clip.mp4")]
+    [Arguments("")]
+    [Arguments(null)]
+    public async Task IsSmbUrl_RejectsLocalAndUnc(string? path) =>
+        await Assert.That(Smb.IsSmbUrl(path)).IsFalse();
 
     [Test]
-    public void Split_ReadsServerShareAndRestFromAUrl()
+    public async Task Split_ReadsServerShareAndRestFromAUrl()
     {
         var parts = Smb.Split("smb://nas/share/deep/clip.mp4");
 
-        Assert.That(parts, Is.Not.Null);
-        Assert.That(parts!.Value.Server, Is.EqualTo("nas"));
-        Assert.That(parts.Value.Share, Is.EqualTo("share"));
-        Assert.That(parts.Value.Remainder, Is.EqualTo("deep/clip.mp4"));
+        await Assert.That(parts).IsNotNull();
+        await Assert.That(parts!.Value.Server).IsEqualTo("nas");
+        await Assert.That(parts.Value.Share).IsEqualTo("share");
+        await Assert.That(parts.Value.Remainder).IsEqualTo("deep/clip.mp4");
     }
 
     [Test]
-    public void ShareRoot_KeepsTheUrlForm()
+    public async Task ShareRoot_KeepsTheUrlForm()
     {
-        Assert.That(Smb.ShareRoot("smb://nas/share/deep/clip.mp4"), Is.EqualTo("smb://nas/share"));
-        Assert.That(Smb.ShareRoot(@"\\nas\share\deep\clip.mp4"), Is.EqualTo(@"\\nas\share"));
+        await Assert.That(Smb.ShareRoot("smb://nas/share/deep/clip.mp4")).IsEqualTo("smb://nas/share");
+        await Assert.That(Smb.ShareRoot(@"\\nas\share\deep\clip.mp4")).IsEqualTo(@"\\nas\share");
     }
 
-    [TestCase("vers=3.1.1", SmbDialect.Smb3)]
-    [TestCase("rw,vers=3.02,sec=ntlmssp", SmbDialect.Smb3)]
-    [TestCase("rw,vers=2.1", SmbDialect.Smb2)]
-    [TestCase("rw,vers=1.0", SmbDialect.Smb1)]
-    [TestCase("rw", SmbDialect.Unknown)]
-    public void DialectFromOptions_ReadsTheKernelVersOption(string options, SmbDialect expected) =>
-        Assert.That(Smb.DialectFromOptions(options), Is.EqualTo(expected));
+    [Test]
+    [Arguments("vers=3.1.1", SmbDialect.Smb3)]
+    [Arguments("rw,vers=3.02,sec=ntlmssp", SmbDialect.Smb3)]
+    [Arguments("rw,vers=2.1", SmbDialect.Smb2)]
+    [Arguments("rw,vers=1.0", SmbDialect.Smb1)]
+    [Arguments("rw", SmbDialect.Unknown)]
+    public async Task DialectFromOptions_ReadsTheKernelVersOption(string options, SmbDialect expected) =>
+        await Assert.That(Smb.DialectFromOptions(options)).IsEqualTo(expected);
 
     /// <summary>
     /// The whole point of the hint: FFmpeg has no SMB protocol on any platform,
@@ -196,30 +198,35 @@ public sealed class SmbUnixTests
     /// "mount it first".
     /// </summary>
     [Test]
-    public void UnreachableHint_IsNullForEverydayPaths()
+    public async Task UnreachableHint_IsNullForEverydayPaths()
     {
-        Assert.That(Smb.UnreachableHint("/home/ci/clip.mp4"), Is.Null);
-        Assert.That(Smb.UnreachableHint(@"C:\video\clip.mp4"), Is.Null);
-        Assert.That(Smb.UnreachableHint(null), Is.Null);
+        await Assert.That(Smb.UnreachableHint("/home/ci/clip.mp4")).IsNull();
+        await Assert.That(Smb.UnreachableHint(@"C:\video\clip.mp4")).IsNull();
+        await Assert.That(Smb.UnreachableHint(null)).IsNull();
     }
 
     [Test]
-    public void UnreachableHint_SuggestsAMountOrAUnc()
+    public async Task UnreachableHint_SuggestsAMountOrAUnc()
     {
         string? hint = Smb.UnreachableHint("smb://nas/share/clip.mp4");
 
-        Assert.That(hint, Is.Not.Null);
-        Assert.That(hint, OperatingSystem.IsWindows()
-            ? Does.Contain(@"\\nas\share")
-            : Does.Contain("mount -t cifs //nas/share"));
+        await Assert.That(hint).IsNotNull();
+        // The hint names a UNC path on Windows and a mount command elsewhere;
+        // the original picked the expectation with a conditional constraint,
+        // which TUnit's fluent API has no room for -- pick the text instead.
+        string expected = OperatingSystem.IsWindows()
+            ? @"\\nas\share"
+            : "mount -t cifs //nas/share";
+        await Assert.That(hint).Contains(expected);
     }
 
-    [TestCase("smb://nas/share/clip.mp4")]
-    [TestCase(@"\\nas\share\clip.mp4")]
-    public void RemoteArgs_ApplyToBothRemoteSpellings(string path)
+    [Test]
+    [Arguments("smb://nas/share/clip.mp4")]
+    [Arguments(@"\\nas\share\clip.mp4")]
+    public async Task RemoteArgs_ApplyToBothRemoteSpellings(string path)
     {
-        Assert.That(Smb.RemoteReadArgs(path), Does.Contain("-rw_timeout"));
-        Assert.That(Smb.RemoteWriteArgs(path), Does.Contain("-rw_timeout"));
-        Assert.That(Smb.RemoteProbeArgs(path), Does.Contain("-rw_timeout"));
+        await Assert.That(Smb.RemoteReadArgs(path)).Contains("-rw_timeout");
+        await Assert.That(Smb.RemoteWriteArgs(path)).Contains("-rw_timeout");
+        await Assert.That(Smb.RemoteProbeArgs(path)).Contains("-rw_timeout");
     }
 }

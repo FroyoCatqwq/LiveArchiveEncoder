@@ -47,8 +47,8 @@
          CA1303, CA1305,
          CA1310            all output is raw console text, never localised
                            resources;
-         CA1707, CA1861    test method names use Method_Scenario, and NUnit
-                           needs inline arrays in [TestCase];
+         CA1707, CA1861    test method names use Method_Scenario, and TUnit
+                           needs inline arrays in [Arguments];
          CA1859, CA1863,
          CA2016, CA5399    interface return types, culture invariant file names
                            and fire-and-forget process launches are intentional.

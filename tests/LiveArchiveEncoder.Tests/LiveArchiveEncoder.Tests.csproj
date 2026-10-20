@@ -9,14 +9,17 @@
     <AssemblyName>LiveArchiveEncoder.Tests</AssemblyName>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- TUnit runs on Microsoft.Testing.Platform. The SDK picks that up from
+         the test.runner section of global.json, so plain `dotnet test` works;
+         the test binary also runs standalone: LiveArchiveEncoder.Tests.exe. -->
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- NUnit 5 (framework 5.x + adapter 6.x). The adapter package is still
-         called NUnit3TestAdapter; it is what serves both NUnit 4 and 5. -->
+    <!-- TUnit 1.75.0: core + engine + assertions in the single package.
+         Compile-time discovery, no reflection over the test assembly, and
+         `dotnet test` keeps working through the bundled MTP bridge. -->
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
-    <PackageReference Include="NUnit" Version="5.*" />
-    <PackageReference Include="NUnit3TestAdapter" Version="6.*" />
+    <PackageReference Include="TUnit" Version="1.75.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,7 +27,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Using Include="NUnit.Framework" />
+    <Using Include="TUnit.Core" />
+    <Using Include="TUnit.Assertions" />
   </ItemGroup>
 
 </Project>

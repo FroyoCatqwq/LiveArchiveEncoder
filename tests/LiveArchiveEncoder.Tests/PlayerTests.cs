@@ -4,75 +4,72 @@ using LiveArchiveEncoder.UI;
 namespace LiveArchiveEncoder.Tests;
 
 /// <summary>Post-encode playback selection. Nothing here launches a process.</summary>
-[TestFixture]
 public sealed class PlayerTests
 {
-    [TestCase("off", PlayMode.Off)]
-    [TestCase("ffplay", PlayMode.Ffplay)]
-    [TestCase("external", PlayMode.External)]
-    [TestCase("EXT", PlayMode.External)]
-    [TestCase("  ffplay  ", PlayMode.Ffplay)]
-    public void ParseMode_UnderstandsTheThreeModes(string raw, PlayMode expected) =>
-        Assert.That(Player.ParseMode(raw), Is.EqualTo(expected));
-
-    [TestCase("bogus")]
-    [TestCase("")]
-    [TestCase(null)]
-    public void ParseMode_AnythingUnknownIsOff(string? raw) =>
-        Assert.That(Player.ParseMode(raw), Is.EqualTo(PlayMode.Off));
+    [Test]
+    [Arguments("off", PlayMode.Off)]
+    [Arguments("ffplay", PlayMode.Ffplay)]
+    [Arguments("external", PlayMode.External)]
+    [Arguments("EXT", PlayMode.External)]
+    [Arguments("  ffplay  ", PlayMode.Ffplay)]
+    public async Task ParseMode_UnderstandsTheThreeModes(string raw, PlayMode expected) =>
+        await Assert.That(Player.ParseMode(raw)).IsEqualTo(expected);
 
     [Test]
-    public void ModeName_IsWhatTheParserAcceptsBack()
+    [Arguments("bogus")]
+    [Arguments("")]
+    [Arguments(null)]
+    public async Task ParseMode_AnythingUnknownIsOff(string? raw) =>
+        await Assert.That(Player.ParseMode(raw)).IsEqualTo(PlayMode.Off);
+
+    [Test]
+    public async Task ModeName_IsWhatTheParserAcceptsBack()
     {
-        Assert.That(Player.ModeName(PlayMode.Off), Is.EqualTo("off"));
-        Assert.That(Player.ModeName(PlayMode.Ffplay), Is.EqualTo("ffplay"));
-        Assert.That(Player.ModeName(PlayMode.External), Is.EqualTo("external"));
+        await Assert.That(Player.ModeName(PlayMode.Off)).IsEqualTo("off");
+        await Assert.That(Player.ModeName(PlayMode.Ffplay)).IsEqualTo("ffplay");
+        await Assert.That(Player.ModeName(PlayMode.External)).IsEqualTo("external");
     }
 
     [Test]
-    public void Describe_OffIsJustOff() =>
-        Assert.That(Player.Describe(PlayMode.Off, null, null), Is.EqualTo("off"));
+    public async Task Describe_OffIsJustOff() =>
+        await Assert.That(Player.Describe(PlayMode.Off, null, null)).IsEqualTo("off");
 
     [Test]
-    public void Describe_FfplayNamesTheBinaryWhenItIsMissing()
+    public async Task Describe_FfplayNamesTheBinaryWhenItIsMissing()
     {
-        Assert.That(Player.Describe(PlayMode.Ffplay, null, null),
-            Is.EqualTo("ffplay (not found)"));
-        Assert.That(Player.Describe(PlayMode.Ffplay, null, @"C:\ff\ffplay.exe"),
-            Is.EqualTo(@"C:\ff\ffplay.exe"));
+        await Assert.That(Player.Describe(PlayMode.Ffplay, null, null)).IsEqualTo("ffplay (not found)");
+        await Assert.That(Player.Describe(PlayMode.Ffplay, null, @"C:\ff\ffplay.exe")).IsEqualTo(@"C:\ff\ffplay.exe");
     }
 
     [Test]
-    public void Describe_ExternalFallsBackToTheShellAssociation()
+    public async Task Describe_ExternalFallsBackToTheShellAssociation()
     {
-        Assert.That(Player.Describe(PlayMode.External, null, null),
-            Is.EqualTo("external (system default player)"));
-        Assert.That(Player.Describe(PlayMode.External, @"C:\mpc\mpc-hc64.exe", null),
-            Is.EqualTo(@"C:\mpc\mpc-hc64.exe"));
+        await Assert.That(Player.Describe(PlayMode.External, null, null)).IsEqualTo("external (system default player)");
+        await Assert.That(Player.Describe(PlayMode.External, @"C:\mpc\mpc-hc64.exe", null)).IsEqualTo(@"C:\mpc\mpc-hc64.exe");
     }
 
     [Test]
-    public void Launch_OffDoesNothingEvenWhenTheFileIsGone()
+    public async Task Launch_OffDoesNothingEvenWhenTheFileIsGone()
     {
         (bool ok, string? error) = Player.Launch(
             PlayMode.Off, @"C:\definitely\not\here.rm", "ffmpeg", null);
 
-        Assert.That(ok, Is.False);
-        Assert.That(error, Is.Null, "off is a no-op, not an error");
+        await Assert.That(ok).IsFalse();
+        await Assert.That(error).IsNull().Because("off is a no-op, not an error");
     }
 
     [Test]
-    public void Launch_MissingOutputIsReportedNotThrown()
+    public async Task Launch_MissingOutputIsReportedNotThrown()
     {
         (bool ok, string? error) = Player.Launch(
             PlayMode.Ffplay, @"C:\definitely\not\here.rm", "ffmpeg", null);
 
-        Assert.That(ok, Is.False);
-        Assert.That(error, Does.Contain("output file is gone"));
+        await Assert.That(ok).IsFalse();
+        await Assert.That(error).Contains("output file is gone");
     }
 
     [Test]
-    public void Launch_ExternalPlayerThatDoesNotExistIsReported()
+    public async Task Launch_ExternalPlayerThatDoesNotExistIsReported()
     {
         string file = Path.Combine(Path.GetTempPath(), "lae-play-" + Guid.NewGuid().ToString("N") + ".rm");
         File.WriteAllText(file, "x");
@@ -82,8 +79,8 @@ public sealed class PlayerTests
             (bool ok, string? error) = Player.Launch(
                 PlayMode.External, file, "ffmpeg", @"C:\definitely\not\player.exe");
 
-            Assert.That(ok, Is.False);
-            Assert.That(error, Does.Contain("external player not found"));
+            await Assert.That(ok).IsFalse();
+            await Assert.That(error).Contains("external player not found");
         }
         finally
         {

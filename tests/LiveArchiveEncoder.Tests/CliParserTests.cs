@@ -8,14 +8,13 @@ namespace LiveArchiveEncoder.Tests;
 /// Command-line parsing, with the emphasis on the v7.4 options: source
 /// selection, toolchain management and playback.
 /// </summary>
-[TestFixture]
 public sealed class CliParserTests
 {
-    private static CliOptions Parse(params string[] args)
+    private static async Task<CliOptions> Parse(params string[] args)
     {
         (CliOptions? options, string? error) = CliParser.Parse(args);
-        Assert.That(error, Is.Null, $"unexpected parse error: {error}");
-        Assert.That(options, Is.Not.Null);
+        await Assert.That(error).IsNull().Because($"unexpected parse error: {error}");
+        await Assert.That(options).IsNotNull();
         return options!;
     }
 
@@ -26,7 +25,9 @@ public sealed class CliParserTests
     /// so it is only part of the set on Windows; avbuild exists on both and is
     /// the non-default id these tests use instead.
     /// </summary>
-    private static IEnumerable<string> KnownIds()
+    // Public because TUnit's source generator reaches into the class to build
+    // the data-driven cases; NUnit reflected over it instead.
+    public static IEnumerable<string> KnownIds()
     {
         yield return "btbn";
         if (FfmpegCatalog.Find("gyan") is not null) yield return "gyan";
@@ -46,59 +47,62 @@ public sealed class CliParserTests
     /// NVIDIA stack) used to die on the first frame with "Cannot load libcuda.so.1".
     /// </summary>
     [Test]
-    public void Hwaccel_DefaultsToOff() =>
-        Assert.That(Parse().Hwaccel, Is.EqualTo("off"));
-
-    [TestCase("off")]
-    [TestCase("auto")]
-    [TestCase("cuda")]
-    [TestCase("vaapi")]
-    [TestCase("qsv")]
-    public void Hwaccel_AcceptsAMethodName(string method) =>
-        Assert.That(Parse("--hwaccel", method).Hwaccel, Is.EqualTo(method));
+    public async Task Hwaccel_DefaultsToOff() =>
+        await Assert.That((await Parse()).Hwaccel).IsEqualTo("off");
 
     [Test]
-    public void Hwaccel_NeedsAValue() =>
-        Assert.That(Error("--hwaccel"), Does.Contain("--hwaccel requires a value"));
+    [Arguments("off")]
+    [Arguments("auto")]
+    [Arguments("cuda")]
+    [Arguments("vaapi")]
+    [Arguments("qsv")]
+    public async Task Hwaccel_AcceptsAMethodName(string method) =>
+        await Assert.That((await Parse("--hwaccel", method)).Hwaccel).IsEqualTo(method);
+
+    [Test]
+    public async Task Hwaccel_NeedsAValue() =>
+        await Assert.That(Error("--hwaccel")).Contains("--hwaccel requires a value");
 
     /// <summary>v7.4 scripts pass --no-cuda; it is "off", not a removed flag.</summary>
     [Test]
-    public void NoCudaIsShorthandForOff()
+    public async Task NoCudaIsShorthandForOff()
     {
-        Assert.That(Parse("--no-cuda").Hwaccel, Is.EqualTo("off"));
-        Assert.That(Parse("--hwaccel", "cuda", "--no-cuda").Hwaccel, Is.EqualTo("off"));
+        await Assert.That((await Parse("--no-cuda")).Hwaccel).IsEqualTo("off");
+        await Assert.That((await Parse("--hwaccel", "cuda", "--no-cuda")).Hwaccel).IsEqualTo("off");
     }
 
     // ------------------------------------------------------------------ source
 
-    [TestCaseSource(nameof(KnownIds))]
-    public void FfmpegSource_AcceptsEveryKnownIdAndPath(string id) =>
-        Assert.That(Parse("--ffmpeg-source", id).FfmpegSource, Is.EqualTo(id));
+    [Test]
+    [MethodDataSource(nameof(KnownIds))]
+    public async Task FfmpegSource_AcceptsEveryKnownIdAndPath(string id) =>
+        await Assert.That((await Parse("--ffmpeg-source", id)).FfmpegSource).IsEqualTo(id);
 
     [Test]
-    public void FfmpegSource_DefaultsToTheDailyBtbnBuild() =>
-        Assert.That(Parse().FfmpegSource, Is.EqualTo("btbn"));
+    public async Task FfmpegSource_DefaultsToTheDailyBtbnBuild() =>
+        await Assert.That((await Parse()).FfmpegSource).IsEqualTo("btbn");
 
     [Test]
-    public void FfmpegSource_RejectsUnknownIds()
+    public async Task FfmpegSource_RejectsUnknownIds()
     {
         string? error = Error("--ffmpeg-source", "bogus");
 
-        Assert.That(error, Is.Not.Null);
-        Assert.That(error, Does.Contain("must be one of"));
-        Assert.That(error, Does.Contain("path"));
+        await Assert.That(error).IsNotNull();
+        await Assert.That(error).Contains("must be one of");
+        await Assert.That(error).Contains("path");
     }
 
     // ---------------------------------------------------------------- download
 
     [Test]
-    public void FfmpegDownload_BareDefaultsToBtbn() =>
-        Assert.That(Parse("--ffmpeg-download").FfmpegDownload, Is.EqualTo("btbn"));
+    public async Task FfmpegDownload_BareDefaultsToBtbn() =>
+        await Assert.That((await Parse("--ffmpeg-download")).FfmpegDownload).IsEqualTo("btbn");
 
-    [TestCase("avbuild")]
-    [TestCase("nonfree")]
-    public void FfmpegDownload_WithAnIdUsesIt(string id) =>
-        Assert.That(Parse("--ffmpeg-download", id).FfmpegDownload, Is.EqualTo(id));
+    [Test]
+    [Arguments("avbuild")]
+    [Arguments("nonfree")]
+    public async Task FfmpegDownload_WithAnIdUsesIt(string id) =>
+        await Assert.That((await Parse("--ffmpeg-download", id)).FfmpegDownload).IsEqualTo(id);
 
     /// <summary>
     /// <c>--ffmpeg-download</c> is usable bare, so its value must only be
@@ -106,109 +110,108 @@ public sealed class CliParserTests
     /// <c>--quiet</c> would be swallowed as the source id.
     /// </summary>
     [Test]
-    public void FfmpegDownload_BareDoesNotSwallowTheNextFlag()
+    public async Task FfmpegDownload_BareDoesNotSwallowTheNextFlag()
     {
-        CliOptions options = Parse("--ffmpeg-download", "--quiet");
+        CliOptions options = (await Parse("--ffmpeg-download", "--quiet"));
 
-        Assert.That(options.FfmpegDownload, Is.EqualTo("btbn"));
-        Assert.That(options.Quiet, Is.True);
+        await Assert.That(options.FfmpegDownload).IsEqualTo("btbn");
+        await Assert.That(options.Quiet).IsTrue();
     }
 
     [Test]
-    public void FfmpegDownload_EqualsSyntaxWorks() =>
-        Assert.That(Parse("--ffmpeg-download=" + OtherId).FfmpegDownload, Is.EqualTo(OtherId));
+    public async Task FfmpegDownload_EqualsSyntaxWorks() =>
+        await Assert.That((await Parse("--ffmpeg-download=" + OtherId)).FfmpegDownload).IsEqualTo(OtherId);
 
     // ----------------------------------------------------------------- delete
 
     [Test]
-    public void FfmpegDelete_RequiresAKnownSource()
+    public async Task FfmpegDelete_RequiresAKnownSource()
     {
-        Assert.That(Parse("--ffmpeg-delete", OtherId).FfmpegDelete, Is.EqualTo(OtherId));
-        Assert.That(Error("--ffmpeg-delete", "bogus"), Does.Contain("--ffmpeg-delete requires"));
+        await Assert.That((await Parse("--ffmpeg-delete", OtherId)).FfmpegDelete).IsEqualTo(OtherId);
+        await Assert.That(Error("--ffmpeg-delete", "bogus")).Contains("--ffmpeg-delete requires");
     }
 
     // ---------------------------------------------------------------- archive
 
     [Test]
-    public void FfmpegArchive_KeepsThePath()
+    public async Task FfmpegArchive_KeepsThePath()
     {
-        CliOptions options = Parse("--ffmpeg-download", "avbuild",
-            "--ffmpeg-archive", @"C:\dl\master.7z");
+        CliOptions options = (await Parse("--ffmpeg-download", "avbuild",
+            "--ffmpeg-archive", @"C:\dl\master.7z"));
 
-        Assert.That(options.FfmpegDownload, Is.EqualTo("avbuild"));
-        Assert.That(options.FfmpegArchive, Is.EqualTo(@"C:\dl\master.7z"));
+        await Assert.That(options.FfmpegDownload).IsEqualTo("avbuild");
+        await Assert.That(options.FfmpegArchive).IsEqualTo(@"C:\dl\master.7z");
     }
 
     // ------------------------------------------------------------------- play
 
-    [TestCase("off", PlayMode.Off)]
-    [TestCase("ffplay", PlayMode.Ffplay)]
-    [TestCase("external", PlayMode.External)]
-    public void Play_AcceptsTheThreeModes(string raw, PlayMode expected) =>
-        Assert.That(Parse("--play", raw).Play, Is.EqualTo(expected));
+    [Test]
+    [Arguments("off", PlayMode.Off)]
+    [Arguments("ffplay", PlayMode.Ffplay)]
+    [Arguments("external", PlayMode.External)]
+    public async Task Play_AcceptsTheThreeModes(string raw, PlayMode expected) =>
+        await Assert.That((await Parse("--play", raw)).Play).IsEqualTo(expected);
 
     [Test]
-    public void Play_DefaultsToOffSoScriptsNeverPopAWindow() =>
-        Assert.That(Parse().Play, Is.EqualTo(PlayMode.Off));
+    public async Task Play_DefaultsToOffSoScriptsNeverPopAWindow() =>
+        await Assert.That((await Parse()).Play).IsEqualTo(PlayMode.Off);
 
     [Test]
-    public void Play_RejectsUnknownModes() =>
-        Assert.That(Error("--play", "vlc"), Does.Contain("--play supports"));
+    public async Task Play_RejectsUnknownModes() =>
+        await Assert.That(Error("--play", "vlc")).Contains("--play supports");
 
     [Test]
-    public void Player_KeepsThePath() =>
-        Assert.That(Parse("--player", @"C:\mpc\mpc-hc64.exe").PlayerPath,
-            Is.EqualTo(@"C:\mpc\mpc-hc64.exe"));
+    public async Task Player_KeepsThePath() =>
+        await Assert.That((await Parse("--player", @"C:\mpc\mpc-hc64.exe")).PlayerPath).IsEqualTo(@"C:\mpc\mpc-hc64.exe");
 
     // ------------------------------------------------------------------ proxy
 
     [Test]
-    public void Proxy_IsRememberedForDownloads() =>
-        Assert.That(Parse("--proxy", "http://127.0.0.1:10808").FfmpegProxy,
-            Is.EqualTo("http://127.0.0.1:10808"));
+    public async Task Proxy_IsRememberedForDownloads() =>
+        await Assert.That((await Parse("--proxy", "http://127.0.0.1:10808")).FfmpegProxy).IsEqualTo("http://127.0.0.1:10808");
 
     [Test]
-    public void Proxy_IsUnsetByDefault() => Assert.That(Parse().FfmpegProxy, Is.Null);
+    public async Task Proxy_IsUnsetByDefault() => await Assert.That((await Parse()).FfmpegProxy).IsNull();
 
     // ------------------------------------------------------- existing contract
 
     [Test]
-    public void LongstandingOptionsStillParse()
+    public async Task LongstandingOptionsStillParse()
     {
-        CliOptions options = Parse("in.mp4", "out.rm", "--encoder", "rv20",
-            "--fps", "13", "--fps-levels", "13,8,5,3", "--turbo", "--parallel", "4");
+        CliOptions options = (await Parse("in.mp4", "out.rm", "--encoder", "rv20",
+            "--fps", "13", "--fps-levels", "13,8,5,3", "--turbo", "--parallel", "4"));
 
-        Assert.That(options.Input, Is.EqualTo("in.mp4"));
-        Assert.That(options.Output, Is.EqualTo("out.rm"));
-        Assert.That(options.Encoder, Is.EqualTo("rv20"));
-        Assert.That(options.Turbo, Is.True);
-        Assert.That(options.Parallel, Is.EqualTo(4));
+        await Assert.That(options.Input).IsEqualTo("in.mp4");
+        await Assert.That(options.Output).IsEqualTo("out.rm");
+        await Assert.That(options.Encoder).IsEqualTo("rv20");
+        await Assert.That(options.Turbo).IsTrue();
+        await Assert.That(options.Parallel).IsEqualTo(4);
     }
 
     [Test]
-    public void HelpAndCpuInfoStillWork()
+    public async Task HelpAndCpuInfoStillWork()
     {
-        Assert.That(Parse("--help").Help, Is.True);
-        Assert.That(Parse("-h").Help, Is.True);
-        Assert.That(Parse("--cpu-info").CpuInfo, Is.True);
+        await Assert.That((await Parse("--help")).Help).IsTrue();
+        await Assert.That((await Parse("-h")).Help).IsTrue();
+        await Assert.That((await Parse("--cpu-info")).CpuInfo).IsTrue();
     }
 
     [Test]
-    public void UnknownArgumentsAreStillRejected() =>
-        Assert.That(Error("--bogus-flag"), Does.Contain("unrecognized argument"));
+    public async Task UnknownArgumentsAreStillRejected() =>
+        await Assert.That(Error("--bogus-flag")).Contains("unrecognized argument");
 
     [Test]
-    public void Usage_ListsTheNewOptions()
+    public async Task Usage_ListsTheNewOptions()
     {
         string usage = CliParser.Usage();
 
-        Assert.That(usage, Does.Contain("--ffmpeg-source"));
-        Assert.That(usage, Does.Contain("--ffmpeg-download"));
-        Assert.That(usage, Does.Contain("--ffmpeg-archive"));
-        Assert.That(usage, Does.Contain("--ffmpeg-delete"));
-        Assert.That(usage, Does.Contain("--ffmpeg-list"));
-        Assert.That(usage, Does.Contain("--proxy"));
-        Assert.That(usage, Does.Contain("--play"));
-        Assert.That(usage, Does.Contain("--player"));
+        await Assert.That(usage).Contains("--ffmpeg-source");
+        await Assert.That(usage).Contains("--ffmpeg-download");
+        await Assert.That(usage).Contains("--ffmpeg-archive");
+        await Assert.That(usage).Contains("--ffmpeg-delete");
+        await Assert.That(usage).Contains("--ffmpeg-list");
+        await Assert.That(usage).Contains("--proxy");
+        await Assert.That(usage).Contains("--play");
+        await Assert.That(usage).Contains("--player");
     }
 }

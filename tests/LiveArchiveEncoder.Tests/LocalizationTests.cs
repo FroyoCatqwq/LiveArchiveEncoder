@@ -9,73 +9,76 @@ namespace LiveArchiveEncoder.Tests;
 /// The parity test exists because a missing key renders as the key itself or
 /// falls back to English, which in a label list silently breaks the column
 /// alignment -- a bug that already shipped once.
+///
+/// [NotInParallel] because every method flips the process-wide language and
+/// restores it afterwards: under NUnit's sequential fixtures that was safe,
+/// and TUnit's default parallelism would race two of them.
 /// </summary>
-[TestFixture]
+[NotInParallel]
 public sealed class LocalizationTests
 {
     private string _original = "";
 
-    [SetUp]
+    [Before(Test)]
     public void SetUp() => _original = L.Lang;
 
-    [TearDown]
+    [After(Test)]
     public void TearDown() => L.SetLanguage(_original);
 
     [Test]
-    public void EveryKeyExistsInEveryLanguage()
+    public async Task EveryKeyExistsInEveryLanguage()
     {
         foreach (string language in L.Languages)
         {
             IReadOnlyCollection<string> missing = L.AllKeys.Except(L.KeysFor(language)).ToList();
-            Assert.That(missing, Is.Empty,
-                $"{language} is missing: {string.Join(", ", missing)}");
+            await Assert.That(missing).IsEmpty().Because($"{language} is missing: {string.Join(", ", missing)}");
         }
     }
 
     [Test]
-    public void EveryKeyHasBothTranslations()
+    public async Task EveryKeyHasBothTranslations()
     {
         IReadOnlyCollection<string> english = L.KeysFor(L.English);
         IReadOnlyCollection<string> chinese = L.KeysFor(L.Chinese);
 
-        Assert.That(chinese, Is.EquivalentTo(english));
+        await Assert.That(chinese).IsEquivalentTo(english);
     }
 
     [Test]
-    public void SetLanguageNormalisesTheCommonSpellings()
+    public async Task SetLanguageNormalisesTheCommonSpellings()
     {
-        Assert.That(L.SetLanguage("zh"), Is.EqualTo(L.Chinese));
-        Assert.That(L.SetLanguage("ZH"), Is.EqualTo(L.Chinese));
-        Assert.That(L.SetLanguage("zh-CN"), Is.EqualTo(L.Chinese));
-        Assert.That(L.SetLanguage("zh_Hans"), Is.EqualTo(L.Chinese));
-        Assert.That(L.SetLanguage("中文"), Is.EqualTo(L.Chinese));
-        Assert.That(L.SetLanguage("en"), Is.EqualTo(L.English));
-        Assert.That(L.SetLanguage("klingon"), Is.EqualTo(L.English));
+        await Assert.That(L.SetLanguage("zh")).IsEqualTo(L.Chinese);
+        await Assert.That(L.SetLanguage("ZH")).IsEqualTo(L.Chinese);
+        await Assert.That(L.SetLanguage("zh-CN")).IsEqualTo(L.Chinese);
+        await Assert.That(L.SetLanguage("zh_Hans")).IsEqualTo(L.Chinese);
+        await Assert.That(L.SetLanguage("中文")).IsEqualTo(L.Chinese);
+        await Assert.That(L.SetLanguage("en")).IsEqualTo(L.English);
+        await Assert.That(L.SetLanguage("klingon")).IsEqualTo(L.English);
     }
 
     [Test]
-    public void UnknownKeyRendersAsTheKeyInsteadOfFailing()
-    {
-        L.SetLanguage(L.English);
-        Assert.That(L.T("no.such.key"), Is.EqualTo("no.such.key"));
-    }
-
-    [Test]
-    public void SubstitutesPositionalArguments()
+    public async Task UnknownKeyRendersAsTheKeyInsteadOfFailing()
     {
         L.SetLanguage(L.English);
-
-        Assert.That(L.T("banner.legacycount", 35), Is.EqualTo("35 detected from ffmpeg -encoders"));
+        await Assert.That(L.T("no.such.key")).IsEqualTo("no.such.key");
     }
 
     [Test]
-    public void YesNoFollowsTheLanguage()
+    public async Task SubstitutesPositionalArguments()
     {
         L.SetLanguage(L.English);
-        Assert.That(L.YesNo(true), Is.EqualTo("yes"));
+
+        await Assert.That(L.T("banner.legacycount", 35)).IsEqualTo("35 detected from ffmpeg -encoders");
+    }
+
+    [Test]
+    public async Task YesNoFollowsTheLanguage()
+    {
+        L.SetLanguage(L.English);
+        await Assert.That(L.YesNo(true)).IsEqualTo("yes");
 
         L.SetLanguage(L.Chinese);
-        Assert.That(L.YesNo(true), Is.EqualTo("是"));
+        await Assert.That(L.YesNo(true)).IsEqualTo("是");
     }
 
     /// <summary>
@@ -83,62 +86,64 @@ public sealed class LocalizationTests
     /// leaves the colons of a label list ragged.
     /// </summary>
     [Test]
-    public void DisplayWidthCountsCjkAsTwoColumns()
+    public async Task DisplayWidthCountsCjkAsTwoColumns()
     {
-        Assert.That(L.DisplayWidth("abc"), Is.EqualTo(3));
-        Assert.That(L.DisplayWidth("界面语言"), Is.EqualTo(8));
+        await Assert.That(L.DisplayWidth("abc")).IsEqualTo(3);
+        await Assert.That(L.DisplayWidth("界面语言")).IsEqualTo(8);
     }
 
     [Test]
-    public void PadTargetsDisplayWidthNotCharacterCount()
+    public async Task PadTargetsDisplayWidthNotCharacterCount()
     {
-        Assert.That(L.DisplayWidth(L.Pad("abc", 10)), Is.EqualTo(10));
-        Assert.That(L.DisplayWidth(L.Pad("界面语言", 10)), Is.EqualTo(10));
-        Assert.That(L.Pad("界面语言", 2), Is.EqualTo("界面语言"),
-            "padding never truncates");
+        await Assert.That(L.DisplayWidth(L.Pad("abc", 10))).IsEqualTo(10);
+        await Assert.That(L.DisplayWidth(L.Pad("界面语言", 10))).IsEqualTo(10);
+        await Assert.That(L.Pad("界面语言", 2)).IsEqualTo("界面语言").Because("padding never truncates");
     }
 }
 
 /// <summary>Pure helpers that the whole app leans on.</summary>
-[TestFixture]
 public sealed class CoreTests
 {
-    [TestCase("00:00:00", 0.0)]
-    [TestCase("00:01:02", 62.0)]
-    [TestCase("00:01:02.500", 62.5)]
-    [TestCase("01:02:03", 3723.0)]
-    public void Timecode_ParsesHgMmsSs(string text, double expected) =>
-        Assert.That(Timecode.Parse(text), Is.EqualTo(expected).Within(0.001));
-
-    [TestCase("00:99:00")]
-    [TestCase("nonsense")]
-    [TestCase("")]
-    public void Timecode_RejectsOutOfRangeAndGarbage(string text) =>
-        Assert.That(() => Timecode.Parse(text), Throws.InstanceOf<FormatException>());
+    [Test]
+    [Arguments("00:00:00", 0.0)]
+    [Arguments("00:01:02", 62.0)]
+    [Arguments("00:01:02.500", 62.5)]
+    [Arguments("01:02:03", 3723.0)]
+    public async Task Timecode_ParsesHgMmsSs(string text, double expected) =>
+        await Assert.That(Timecode.Parse(text)).IsEqualTo(expected).Within(0.001);
 
     [Test]
-    public void Timecode_FormatsBackToTheSameString() =>
-        Assert.That(Timecode.Format(3723.0), Is.EqualTo("01:02:03"));
+    [Arguments("00:99:00")]
+    [Arguments("nonsense")]
+    [Arguments("")]
+    public async Task Timecode_RejectsOutOfRangeAndGarbage(string text) =>
+        await Assert.That(() => Timecode.Parse(text)).Throws<FormatException>();
 
     [Test]
-    public void Timecode_FormatsNullAsEndOfSource() =>
-        Assert.That(Timecode.Format(null), Is.EqualTo("end of source"));
+    public async Task Timecode_FormatsBackToTheSameString() =>
+        await Assert.That(Timecode.Format(3723.0)).IsEqualTo("01:02:03");
+
+    [Test]
+    public async Task Timecode_FormatsNullAsEndOfSource() =>
+        await Assert.That(Timecode.Format(null)).IsEqualTo("end of source");
 
     /// <summary>
     /// These codecs have no rate control: FFmpeg silently ignores -b:a, so
     /// emitting it only misleads whoever reads the command.
     /// </summary>
-    [TestCase("adpcm_ima_amv")]
-    [TestCase("adpcm_ima_wav")]
-    [TestCase("pcm_s16le")]
-    [TestCase("roq_dpcm")]
-    public void AudioIgnoresBitrate_TrueForUncompressedCodecs(string encoder) =>
-        Assert.That(EncoderMath.AudioIgnoresBitrate(encoder), Is.True);
+    [Test]
+    [Arguments("adpcm_ima_amv")]
+    [Arguments("adpcm_ima_wav")]
+    [Arguments("pcm_s16le")]
+    [Arguments("roq_dpcm")]
+    public async Task AudioIgnoresBitrate_TrueForUncompressedCodecs(string encoder) =>
+        await Assert.That(EncoderMath.AudioIgnoresBitrate(encoder)).IsTrue();
 
-    [TestCase("libmp3lame")]
-    [TestCase("aac")]
-    [TestCase("ac3")]
-    [TestCase(null)]
-    public void AudioIgnoresBitrate_FalseWhereRateControlExists(string? encoder) =>
-        Assert.That(EncoderMath.AudioIgnoresBitrate(encoder), Is.False);
+    [Test]
+    [Arguments("libmp3lame")]
+    [Arguments("aac")]
+    [Arguments("ac3")]
+    [Arguments(null)]
+    public async Task AudioIgnoresBitrate_FalseWhereRateControlExists(string? encoder) =>
+        await Assert.That(EncoderMath.AudioIgnoresBitrate(encoder)).IsFalse();
 }

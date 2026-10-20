@@ -7,13 +7,12 @@ namespace LiveArchiveEncoder.Tests;
 /// JSON settings round-trip, written to a temp file so the real
 /// <c>%LOCALAPPDATA%</c> configuration is never touched.
 /// </summary>
-[TestFixture]
 public sealed class ConfigStoreTests
 {
     private string _dir = "";
     private string _file = "";
 
-    [SetUp]
+    [Before(Test)]
     public void SetUp()
     {
         _dir = Path.Combine(Path.GetTempPath(), "lae-cfg-" + Guid.NewGuid().ToString("N"));
@@ -21,35 +20,35 @@ public sealed class ConfigStoreTests
         _file = Path.Combine(_dir, "config.json");
     }
 
-    [TearDown]
+    [After(Test)]
     public void TearDown()
     {
         try { Directory.Delete(_dir, recursive: true); } catch { /* best effort */ }
     }
 
     [Test]
-    public void MissingFileGivesDefaults()
+    public async Task MissingFileGivesDefaults()
     {
         UserConfig loaded = ConfigStore.Load(Path.Combine(_dir, "nope.json"));
 
-        Assert.That(loaded.FfmpegSource, Is.EqualTo(FfmpegCatalog.DefaultId));
-        Assert.That(loaded.Parallel, Is.EqualTo(1));
+        await Assert.That(loaded.FfmpegSource).IsEqualTo(FfmpegCatalog.DefaultId);
+        await Assert.That(loaded.Parallel).IsEqualTo(1);
     }
 
     /// <summary>A corrupt file must never keep the program from starting.</summary>
     [Test]
-    public void CorruptJsonFallsBackToDefaults()
+    public async Task CorruptJsonFallsBackToDefaults()
     {
         File.WriteAllText(_file, "{ this is not json");
 
         UserConfig loaded = ConfigStore.Load(_file);
 
-        Assert.That(loaded.FfmpegSource, Is.EqualTo(FfmpegCatalog.DefaultId));
-        Assert.That(loaded.Language, Is.EqualTo("en"));
+        await Assert.That(loaded.FfmpegSource).IsEqualTo(FfmpegCatalog.DefaultId);
+        await Assert.That(loaded.Language).IsEqualTo("en");
     }
 
     [Test]
-    public void ToolchainAndPlaybackSettingsSurviveARoundTrip()
+    public async Task ToolchainAndPlaybackSettingsSurviveARoundTrip()
     {
         // avbuild, not gyan: gyan.dev ships no Linux build, so storing it and
         // reading it back would be rejected by the catalogue on that platform
@@ -67,19 +66,19 @@ public sealed class ConfigStoreTests
             Parallel = 4,
         };
 
-        Assert.That(ConfigStore.Save(ConfigStore.Capture(c), _file), Is.True);
+        await Assert.That(ConfigStore.Save(ConfigStore.Capture(c), _file)).IsTrue();
 
         var restored = new Config();
         ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
 
-        Assert.That(restored.Hwaccel, Is.EqualTo("cuda"));
-        Assert.That(restored.FfmpegSource, Is.EqualTo("avbuild"));
-        Assert.That(restored.FfmpegProxy, Is.EqualTo("http://127.0.0.1:10808"));
-        Assert.That(restored.Play, Is.EqualTo(PlayMode.External));
-        Assert.That(restored.PlayerPath, Is.EqualTo(@"C:\mpc\mpc-hc64.exe"));
-        Assert.That(restored.Language, Is.EqualTo("zh"));
-        Assert.That(restored.Turbo, Is.True);
-        Assert.That(restored.Parallel, Is.EqualTo(4));
+        await Assert.That(restored.Hwaccel).IsEqualTo("cuda");
+        await Assert.That(restored.FfmpegSource).IsEqualTo("avbuild");
+        await Assert.That(restored.FfmpegProxy).IsEqualTo("http://127.0.0.1:10808");
+        await Assert.That(restored.Play).IsEqualTo(PlayMode.External);
+        await Assert.That(restored.PlayerPath).IsEqualTo(@"C:\mpc\mpc-hc64.exe");
+        await Assert.That(restored.Language).IsEqualTo("zh");
+        await Assert.That(restored.Turbo).IsTrue();
+        await Assert.That(restored.Parallel).IsEqualTo(4);
     }
 
     /// <summary>
@@ -87,20 +86,21 @@ public sealed class ConfigStoreTests
     /// encode time by decoding a frame. What must be rejected at load is garbage,
     /// with "off" as the safe answer.
     /// </summary>
-    [TestCase("cuda", "cuda")]
-    [TestCase("VAAPI", "vaapi")]
-    [TestCase("auto", "auto")]
-    [TestCase("", "off")]
-    [TestCase("some method with spaces", "off")]
-    [TestCase(null, "off")]
-    public void Hwaccel_IsSanitisedOnLoad(string? stored, string expected)
+    [Test]
+    [Arguments("cuda", "cuda")]
+    [Arguments("VAAPI", "vaapi")]
+    [Arguments("auto", "auto")]
+    [Arguments("", "off")]
+    [Arguments("some method with spaces", "off")]
+    [Arguments(null, "off")]
+    public async Task Hwaccel_IsSanitisedOnLoad(string? stored, string expected)
     {
         ConfigStore.Save(new UserConfig { Hwaccel = stored! }, _file);
 
         var restored = new Config();
         ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
 
-        Assert.That(restored.Hwaccel, Is.EqualTo(expected));
+        await Assert.That(restored.Hwaccel).IsEqualTo(expected);
     }
 
     /// <summary>
@@ -108,7 +108,7 @@ public sealed class ConfigStoreTests
     /// distribution id, so a naive "normalise unknown ids" would drop it.
     /// </summary>
     [Test]
-    public void PathSourceIsPreservedNotNormalisedAway()
+    public async Task PathSourceIsPreservedNotNormalisedAway()
     {
         var stored = new UserConfig { FfmpegSource = "path" };
         ConfigStore.Save(stored, _file);
@@ -116,49 +116,50 @@ public sealed class ConfigStoreTests
         var restored = new Config();
         ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
 
-        Assert.That(restored.FfmpegSource, Is.EqualTo("path"));
+        await Assert.That(restored.FfmpegSource).IsEqualTo("path");
     }
 
     [Test]
-    public void UnknownSourceFallsBackToTheDefault()
+    public async Task UnknownSourceFallsBackToTheDefault()
     {
         ConfigStore.Save(new UserConfig { FfmpegSource = "typo" }, _file);
 
         var restored = new Config();
         ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
 
-        Assert.That(restored.FfmpegSource, Is.EqualTo(FfmpegCatalog.DefaultId));
+        await Assert.That(restored.FfmpegSource).IsEqualTo(FfmpegCatalog.DefaultId);
     }
 
     /// <summary>A nonsense shard count from an older file must never be restored.</summary>
-    [TestCase(0)]
-    [TestCase(-3)]
-    public void ShardCountIsClamped(int storedValue)
+    [Test]
+    [Arguments(0)]
+    [Arguments(-3)]
+    public async Task ShardCountIsClamped(int storedValue)
     {
         ConfigStore.Save(new UserConfig { Parallel = storedValue }, _file);
 
         var restored = new Config();
         ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
 
-        Assert.That(restored.Parallel, Is.EqualTo(1));
+        await Assert.That(restored.Parallel).IsEqualTo(1);
     }
 
     [Test]
-    public void MissingInputFileIsIgnoredOnRestore()
+    public async Task MissingInputFileIsIgnoredOnRestore()
     {
         ConfigStore.Save(new UserConfig { InputPath = @"C:\definitely\not\here.mp4" }, _file);
 
         var restored = new Config();
         ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
 
-        Assert.That(restored.InputPath, Is.Null);
+        await Assert.That(restored.InputPath).IsNull();
     }
 
     [Test]
-    public void SavedAtIsStampedOnWrite()
+    public async Task SavedAtIsStampedOnWrite()
     {
         ConfigStore.Save(new UserConfig(), _file);
 
-        Assert.That(ConfigStore.Load(_file).SavedAt, Is.Not.Null);
+        await Assert.That(ConfigStore.Load(_file).SavedAt).IsNotNull();
     }
 }

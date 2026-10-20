@@ -12,6 +12,9 @@ artifacts/
 tests/out/
 tests/_cui_backup/
 
+# Microsoft.Testing.Platform (the TUnit runner) drops its reports here.
+TestResults/
+
 # Python
 __pycache__/
 *.py[cod]

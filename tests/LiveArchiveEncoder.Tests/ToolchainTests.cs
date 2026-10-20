@@ -12,62 +12,60 @@ namespace LiveArchiveEncoder.Tests;
 /// otherwise installing a build silently changes what every scripted run
 /// produces.
 /// </summary>
-[TestFixture]
 public sealed class ToolchainTests
 {
     [Test]
-    public void RootLivesUnderThePerUserApplicationData()
+    public async Task RootLivesUnderThePerUserApplicationData()
     {
         string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
-        Assert.That(Toolchain.Root, Does.StartWith(appData));
-        Assert.That(Toolchain.Root, Does.EndWith(Path.Combine("LiveArchiveEncoder", "ffmpeg")));
+        await Assert.That(Toolchain.Root).StartsWith(appData);
+        await Assert.That(Toolchain.Root).EndsWith(Path.Combine("LiveArchiveEncoder", "ffmpeg"));
     }
 
     [Test]
-    public void HomeAndBinFollowTheDocumentedLayout()
+    public async Task HomeAndBinFollowTheDocumentedLayout()
     {
-        Assert.That(Toolchain.Home("btbn"),
-            Is.EqualTo(Path.Combine(Toolchain.Root, "btbn")));
-        Assert.That(Toolchain.BinDir("btbn"),
-            Is.EqualTo(Path.Combine(Toolchain.Root, "btbn", "bin")));
-    }
-
-    [TestCase("bogus")]
-    [TestCase("")]
-    public void UnknownSourceIsNeverInstalled(string id)
-    {
-        Assert.That(Toolchain.IsInstalled(id), Is.False);
-        Assert.That(Toolchain.FFmpegFor(id), Is.Null);
-        Assert.That(Toolchain.Exe(id, "ffmpeg"), Is.Null);
+        await Assert.That(Toolchain.Home("btbn")).IsEqualTo(Path.Combine(Toolchain.Root, "btbn"));
+        await Assert.That(Toolchain.BinDir("btbn")).IsEqualTo(Path.Combine(Toolchain.Root, "btbn", "bin"));
     }
 
     [Test]
-    public void DeletingAnUnknownSourceFailsInsteadOfThrowing()
+    [Arguments("bogus")]
+    [Arguments("")]
+    public async Task UnknownSourceIsNeverInstalled(string id)
+    {
+        await Assert.That(Toolchain.IsInstalled(id)).IsFalse();
+        await Assert.That(Toolchain.FFmpegFor(id)).IsNull();
+        await Assert.That(Toolchain.Exe(id, "ffmpeg")).IsNull();
+    }
+
+    [Test]
+    public async Task DeletingAnUnknownSourceFailsInsteadOfThrowing()
     {
         (bool ok, string? error) = Toolchain.Delete("bogus");
 
-        Assert.That(ok, Is.False);
-        Assert.That(error, Does.Contain("bogus"));
+        await Assert.That(ok).IsFalse();
+        await Assert.That(error).Contains("bogus");
     }
 
     [Test]
-    public void DeletingSomethingThatIsNotInstalledReportsIt()
+    public async Task DeletingSomethingThatIsNotInstalledReportsIt()
     {
         // "avbuild" is a real source, but this box may or may not have it; the
         // contract under test is only that failure is reported, never thrown.
         (bool ok, string? error) = Toolchain.Delete("avbuild");
 
-        Assert.That(ok || error is not null, Is.True);
+        await Assert.That(ok || error is not null).IsTrue();
     }
 
     [Test]
-    public void Installed_OnlyListsSourcesThatActuallyExistOnDisk()
+    public async Task Installed_OnlyListsSourcesThatActuallyExistOnDisk()
     {
         foreach (InstalledToolchain item in Toolchain.Installed())
         {
-            Assert.That(File.Exists(item.FFmpeg), Is.True, $"{item.Id} reported a missing ffmpeg");
-            Assert.That(item.Home, Is.EqualTo(Toolchain.Home(item.Id)));
+            await Assert.That(File.Exists(item.FFmpeg)).IsTrue().Because($"{item.Id} reported a missing ffmpeg");
+            await Assert.That(item.Home).IsEqualTo(Toolchain.Home(item.Id));
         }
     }
 
@@ -76,16 +74,15 @@ public sealed class ToolchainTests
     /// reported rather than silently falling back.
     /// </summary>
     [Test]
-    public void ExplicitFfmpegPathWins()
+    public async Task ExplicitFfmpegPathWins()
     {
         string probe = Path.Combine(Path.GetTempPath(), "lae-not-ffmpeg.exe");
 
-        Assert.That(() => FFmpegDiscovery.FindFFmpeg(probe),
-            Throws.InstanceOf<FileNotFoundException>());
+        await Assert.That(() => FFmpegDiscovery.FindFFmpeg(probe)).Throws<FileNotFoundException>();
     }
 
     [Test]
-    public void PathMeansSystemFfmpeg()
+    public async Task PathMeansSystemFfmpeg()
     {
         string resolved;
         try
@@ -94,11 +91,11 @@ public sealed class ToolchainTests
         }
         catch (FileNotFoundException)
         {
-            Assert.Ignore("no FFmpeg on PATH; the 'path' source cannot be exercised here");
+            Skip.Test("no FFmpeg on PATH; the 'path' source cannot be exercised here");
             return;
         }
 
-        Assert.That(resolved, Does.Contain("ffmpeg"));
+        await Assert.That(resolved).Contains("ffmpeg");
         if (Toolchain.FFmpegFor("btbn") is { } managed)
         {
             // The contract is that "path" does not consult the managed install
@@ -106,10 +103,9 @@ public sealed class ToolchainTests
             // put that very build on PATH, both routes legitimately agree, so
             // there is nothing to distinguish here.
             if (IsOnPath(managed))
-                Assert.Ignore("the managed build is on PATH; 'path' and 'btbn' resolve to the same file");
+                Skip.Test("the managed build is on PATH; 'path' and 'btbn' resolve to the same file");
 
-            Assert.That(resolved, Is.Not.EqualTo(managed),
-                "--ffmpeg-source path must not pick the managed build");
+            await Assert.That(resolved).IsNotEqualTo(managed).Because("--ffmpeg-source path must not pick the managed build");
         }
     }
 
@@ -143,23 +139,21 @@ public sealed class ToolchainTests
     /// "btbn" both show up and the menu offers a build that cannot be installed.
     /// </summary>
     [Test]
-    public void SourceListsNeverMixPlatforms()
+    public async Task SourceListsNeverMixPlatforms()
     {
         foreach (FfmpegDist dist in FfmpegCatalog.Available)
-            Assert.That(dist.Platform, Is.EqualTo(FfmpegCatalog.Current));
+            await Assert.That(dist.Platform).IsEqualTo(FfmpegCatalog.Current);
 
         string script = Completion.Generate("bash", []);
-        Assert.That(script, Does.Contain("btbn"));
-        Assert.That(script.Contains("gyan"),
-            Is.EqualTo(FfmpegCatalog.Current == DistPlatform.Windows),
-            "gyan.dev publishes no Linux build");
+        await Assert.That(script).Contains("btbn");
+        await Assert.That(script.Contains("gyan")).IsEqualTo(FfmpegCatalog.Current == DistPlatform.Windows).Because("gyan.dev publishes no Linux build");
     }
 
     [Test]
-    public void PlayModeNamesRoundTrip()
+    public async Task PlayModeNamesRoundTrip()
     {
-        Assert.That(Player.ParseMode(Player.ModeName(PlayMode.Ffplay)), Is.EqualTo(PlayMode.Ffplay));
-        Assert.That(Player.ParseMode(Player.ModeName(PlayMode.External)), Is.EqualTo(PlayMode.External));
-        Assert.That(Player.ParseMode(Player.ModeName(PlayMode.Off)), Is.EqualTo(PlayMode.Off));
+        await Assert.That(Player.ParseMode(Player.ModeName(PlayMode.Ffplay))).IsEqualTo(PlayMode.Ffplay);
+        await Assert.That(Player.ParseMode(Player.ModeName(PlayMode.External))).IsEqualTo(PlayMode.External);
+        await Assert.That(Player.ParseMode(Player.ModeName(PlayMode.Off))).IsEqualTo(PlayMode.Off);
     }
 }

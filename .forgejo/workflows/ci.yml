@@ -57,7 +57,10 @@ jobs:
         run: dotnet build LiveArchiveEncoder.V7.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build
+        # TUnit rides on Microsoft.Testing.Platform; global.json's test.runner
+        # section routes `dotnet test` there, where the solution is named with
+        # --solution instead of a positional path.
+        run: dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release --no-build
 
       # v7.8.1: the default build targets net10.0 and rolls forward to .NET 11,
       # so one archive covers both. Re-running the suite against net11.0 is what
@@ -67,7 +70,7 @@ jobs:
         run: dotnet build LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 
       - name: Test (net11)
-        run: dotnet test LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0 --no-build
+        run: dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0 --no-build
 
   package:
     name: publish ${{ matrix.rid }}
