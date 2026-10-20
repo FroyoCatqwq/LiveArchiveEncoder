@@ -743,17 +743,17 @@ v6.3.3 的 AMV 是**完全不能用的**——无论怎么调都只产出 0 字�
 ### 全编码器扫描
 
 ```powershell
-python tests\e2e\feature_sweep.py                                   # 默认 JIT
-CS_EXE=publish\aot\LiveArchiveEncoder.exe python tests\e2e\feature_sweep.py
+pytest tests\e2e\test_feature_sweep.py                             # 默认 JIT
+CS_EXE=publish\aot\LiveArchiveEncoder.exe pytest tests\e2e\test_feature_sweep.py
 ```
 
 对当前 FFmpeg 探测到的**全部 35 个** legacy 编码器各跑 2 秒片段，检查退出码、
 产物非空、包含视频流、时长合理，并留一份产物在 `tests\out\sweep\`。
 
-三种结果：`PASS` 正常；`WARN` 容器不写时长（amv / h263 / roq / h261 是容器本身的
-行为，用纯 ffmpeg 生成的对照文件同样没有时长，不是本程序的问题）；`NOPROBE` 指
-FFmpeg 只有 muxer、没有 demuxer（例如 a64），产物写出来了但 ffprobe 读不回来。
-只有 `FAIL` 才是真问题。
+三种结局：`PASSED` 正常；`SKIPPED` 指 FFmpeg 只有 muxer、没有 demuxer（例如
+a64），产物写出来了但 ffprobe 读不回来——这是 FFmpeg 的属性，不是本程序的问题；
+容器不写时长（amv / h263 / roq / h261）算通过，只打印一条 note（同样是容器
+本身的行为，用纯 ffmpeg 生成的对照文件也没有时长）。只有 `FAILED` 才是真问题。
 
 v7.3 实测 35/35 无非预期失败。少数编码器会自动修正参数并给出提示，属正常行为：
 
@@ -1396,6 +1396,20 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
    `-strict` 才会打开，选了必然失败；现在直接报错提示换 `libvorbis` / `libopus`，
    OGG 的默认音频列表也只剩这两个。单测 298 条（新增 18 条边界护栏）。
 
+### v7.8.3 新增
+
+1. **测试框架双换代**（§12）：单元测试从 NUnit 迁到 **TUnit 1.75.0**（原生
+   AOT 友好、源码生成、无反射），e2e 六个独立脚本合并为 **pytest 9.1.1**
+   套件（`tests/e2e/test_*.py` + 共享 `harness.py`）。用例数不变、判据不变，
+   只是换引擎：`dotnet test --solution ...` 走 Microsoft.Testing.Platform，
+   `pytest` 一把跑完 123 个 e2e 用例。迁移中顺修了 NUnit 时代遗留的集合
+   断言按引用比较的问题（TUnit 的 `IsEqualTo` 对集合是引用相等，统一改
+   `IsEquivalentTo`）。
+2. **并行分片 + SMB 韧性修复取消。** v7.8.3 开发周期中原计划修复"并行分片时
+   SMB 不稳定导致画面冻结"（解码器提前 EOF 时旧代码静默用上一帧填满槽位），
+   实测定位到根因后决定**不修**：该静默行为是 option_smoke 既有断言的依赖项，
+   修复会改变长年稳定的输出形态。根因记录留在代码注释里，留待 v8 评估。
+
 ---
 
 ## 12. 自测
@@ -1404,19 +1418,21 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
 
 | 层 | 工具 | 管什么 | 怎么跑 |
 | --- | --- | --- | --- |
-| 单元 | **NUnit**（`tests/LiveArchiveEncoder.Tests`） | 纯逻辑：SMB 参数、CLI 解析、配置往返、词条完整性、工具链元数据 | `dotnet test` |
-| 等价性回归 | Python harness | 与 v6.3.3 的**产物是否等价**、错误路径、全编码器扫描 | `python tests\e2e\*.py` |
+| 单元 | **TUnit**（`tests/LiveArchiveEncoder.Tests`，v7.8.3 前是 NUnit） | 纯逻辑：SMB 参数、CLI 解析、配置往返、词条完整性、工具链元数据 | `dotnet test --solution LiveArchiveEncoder.V7.slnx` |
+| 等价性回归 | **pytest** 套件（`tests/e2e/test_*.py`，v7.8.3 前是六个独立脚本） | 与 v6.3.3 的**产物是否等价**、错误路径、全编码器扫描、CUI 冒烟、时长漂移 | `pytest` |
 
-### NUnit 单元测试（v7.4.1 起）
+### TUnit 单元测试（v7.4.1 起 NUnit，v7.8.3 起 TUnit）
 
 ```powershell
-# Windows
-dotnet test LiveArchiveEncoder.V7.slnx -c Release
+# Windows —— TUnit 跑在 Microsoft.Testing.Platform 上，用 --solution 位置参数
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release
+# 第二个目标框架（.NET 11 运行时）同样要全绿
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 ```
 
 ```bash
 # Linux —— 同一条命令；SDK 只装在 mise/asdf 里时给它一个包装脚本
-DOTNET="$HOME/dot" dotnet test LiveArchiveEncoder.V7.slnx -c Release   # 见 §1
+DOTNET="$HOME/dot" dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release   # 见 §1
 ```
 
 不需要 FFmpeg、不需要网络、几秒跑完，覆盖：
@@ -1447,56 +1463,66 @@ DOTNET="$HOME/dot" dotnet test LiveArchiveEncoder.V7.slnx -c Release   # 见 §1
 > 词条完整性这一条刚建好就抓到了真东西：`note.*` 和 `run.*` 共 13 个词条只有英文，
 > 中文界面下会漏回英文并把那一列的对齐顶歪。已补齐。
 
-包：`NUnit` **5.x** + `NUnit3TestAdapter` **6.x**（适配器包名没变，NUnit 4/5 都用它）
-+ `Microsoft.NET.Test.Sdk` **18.x**，走 `nuget.config` 里的代理还原。
+包：`TUnit` **1.75.0**（单个 NuGet 包含 Core + Engine + Assertions，源码生成、
+无反射，NativeAOT 下也能跑）+ `Microsoft.NET.Test.Sdk` **18.x**，走
+`nuget.config` 里的代理还原。`global.json` 里的 `test.runner:
+Microsoft.Testing.Platform` 段负责把 `dotnet test` 切到 MTP 模式。
 
-### 与 Python 基线的等价性回归
+### 与 Python 基线的等价性回归（pytest）
 
-所有脚本都支持 `CS_EXE=<路径>` 切换被测 exe（用来验 AOT 产物）。三套产物都跑一遍
-才算过——NativeAOT 下反射型 API 会直接崩，JIT 上却完全正常，只验 JIT 会漏。
+六个独立脚本在 v7.8.3 合并成一个 pytest 套件：共享 plumbing 住在
+`tests/e2e/harness.py`，公共 fixture 在 `conftest.py`，每个脚本对应一个
+`test_*.py`（用例数、判据、环境变量全部不变）。装好依赖后**在仓库根目录**跑
+`pytest` 即可（`pytest.ini` 的 `testpaths` 指向 `tests/e2e`）：
 
 ```powershell
 # Windows
-python tests\e2e\compare_matrix.py
-python tests\e2e\error_paths.py
-python tests\e2e\feature_sweep.py
-python tests\e2e\option_smoke.py
-python tests\e2e\cui_smoke.py
+pip install -r tests\e2e\requirements.txt          # pytest==9.1.1
+pytest                                               # 全部 123 个用例
+pytest tests\e2e\test_feature_sweep.py              # 只跑一个模块
+pytest tests\e2e\test_compare_matrix.py -k wmv2     # 只跑一条（替代旧 CM_ONLY）
+CS_EXE=publish\aot\LiveArchiveEncoder.exe pytest     # 切换被测 exe（验 AOT 产物）
 ```
 
 ```bash
-# Linux —— 脚本本身平台无关，用 python3 跑即可
-python3 tests/e2e/compare_matrix.py
-python3 tests/e2e/error_paths.py
-python3 tests/e2e/feature_sweep.py
-python3 tests/e2e/option_smoke.py
-python3 tests/e2e/cui_smoke.py
+# Linux —— 同几条命令，套件本身平台无关（可执行文件名差异由 harness 处理）
+pip install -r tests/e2e/requirements.txt
+pytest
 ```
 
-两份清单里的脚本都是同一批文件；可执行文件名的差异由脚本里的 `EXE_NAME` 处理。
+三套产物（JIT / NativeAOT × 两个目标框架）都跑一遍才算过——NativeAOT 下反射型
+API 会直接崩，JIT 上却完全正常，只验 JIT 会漏。`CS_EXE` 就是用来切产物的。
 
-`compare_matrix` / `error_paths` / `feature_sweep` / `option_smoke` 都需要
-`tests/media/test_src.mp4`（20 秒 320x240 h264+aac 素材）、PATH 里的 ffprobe，
-以及**Python 基线也要能用系统 FFmpeg**——Linux 上如果只装了受管理构建，把它的
-`bin` 目录临时加进 `PATH` 即可。
+`compare_matrix` / `error_paths` / `feature_sweep` / `option_smoke` /
+`ab_duration` 都需要 `tests/media/test_src.mp4`（20 秒 320x240 h264+aac 素材）、
+PATH 里的 ffprobe，以及**Python 基线也要能用系统 FFmpeg**——Linux 上如果只装了
+受管理构建，把它的 `bin` 目录临时加进 `PATH` 即可。
 
-需要注意：`compare_matrix` 依赖实时节流下的帧选择，跑的时候**别同时跑别的重活**，
-否则 fresh/repeat 计数会被 CPU 争用扰动（这是自适应控制器的正常反应，不是 bug）。
+需要注意：`compare_matrix` 和 `ab_duration` 依赖实时节流下的帧选择，跑的时候
+**别同时跑别的重活**，也不要加 `pytest -n`（xdist）——并行 worker 会扰动
+fresh/repeat 计数和时长中位数（这是自适应控制器对 CPU 争用的正常反应，不是 bug）。
+套件因此设计为严格顺序执行，`conftest.py` 里有注释守着这条。
 
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test     失败 0，通过 280（Linux 是 278 通过 + 1 跳过）
-dotnet test -p:LaeTfm=net11.0   同样 280，证明 .NET 11 运行时下也全绿
-compare_matrix  total=12 pass=12 fail=0
-error_paths     total=11 fail=0
-feature_sweep   total=35 pass=35 warn=0 fail=0
-option_smoke    total=55 pass=55 fail=0
-cui_smoke       total=34 pass=34 fail=0（Linux 是 35）
+dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 298
+dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 298
+pytest  123 项（Windows 实测 121 通过 + 2 跳过）：
+  option_smoke   55（37 组参数 + 18 项参数检查）
+  error_paths    11
+  compare_matrix 12
+  feature_sweep  35（33 通过 + 2 跳过：a64multi / a64multi5 只有 muxer 没有 demuxer）
+  cui_smoke       8 个阶段（内含 34 项检查，Linux 35）
+  ab_duration     2（mpeg1video / wmv2 各 4 变体 × 4 runs 的中位数对比）
 ```
 
-Linux 少一条是因为 `PathMeansSystemFfmpeg` 需要 PATH 上的系统 FFmpeg；cui_smoke
-多一条是因为非 Windows 上会额外断言 `gyan` 不出现在清单里。
+Linux 少一条检查是因为 `PathMeansSystemFfmpeg` 需要 PATH 上的系统 FFmpeg；
+cui_smoke 多一条是因为非 Windows 上会额外断言 `gyan` 不出现在清单里。
+
+`cui_smoke` 会**备份并恢复真实配置文件**（`%LOCALAPPDATA%` / `~/.local/share`
+下的 `config.json`）——持久化检查读的就是它；跑之前不需要特殊准备，跑完之后
+配置原样归还。
 
 `option_smoke` 里的 `era_flv` / `watermark_only` / `post_full_chain` 三个用例需要
 `fonts` 目录里有字体（见 §7.12）。另外 `compare_matrix` 现在只是**回归检查**——

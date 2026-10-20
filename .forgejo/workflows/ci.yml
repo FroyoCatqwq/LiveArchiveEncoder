@@ -125,7 +125,7 @@ jobs:
           name: LiveArchiveEncoder-win-x64
           path: dist-win-x64.zip
 
-# The Python harnesses under tests/e2e/ are deliberately not run here: they
-# compare this build against the v6.3.3 baseline, need an FFmpeg carrying the
-# legacy encoders, and pick frames against the wall clock, so a busy runner
+# The pytest suite under tests/e2e/ is deliberately not run here: it
+# compares this build against the v6.3.3 baseline, needs an FFmpeg carrying the
+# legacy encoders, and picks frames against the wall clock, so a busy runner
 # reports failures that have nothing to do with the change under review.

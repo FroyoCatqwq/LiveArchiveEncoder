@@ -1,31 +1,20 @@
-#!/usr/bin/env python3
-"""Option-path smoke test.
+"""Option-path smoke test (pytest).
 
-The encoder matrix (tests/e2e/feature_sweep.py) covers "does this codec work"; this
+The encoder matrix (test_compare_matrix.py) covers "does this codec work"; this
 one covers "do the option paths still work" -- turbo, sharding, the split audio
 pipeline, deinterlacing, cropping and time ranges. Each case only has to produce
 a structurally valid file; bit-exactness is the matrix's job.
 
-    python tests/e2e/option_smoke.py
-    CS_EXE=publish/aot/LiveArchiveEncoder.exe python tests/e2e/option_smoke.py
+    pytest tests/e2e/test_option_smoke.py
+    CS_EXE=publish/aot/LiveArchiveEncoder.exe pytest tests/e2e/test_option_smoke.py
 """
 
-import json
-import os
-import subprocess
-import sys
-import time
-from pathlib import Path
-# The apphost carries no extension on Unix; every path in this suite goes
-# through EXE_NAME so the same script runs on Windows and on Linux.
-EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
+from __future__ import annotations
 
+import pytest
 
-ROOT = Path(__file__).resolve().parent.parent.parent  # tests/e2e -> project root
-DEFAULT_EXE = ROOT / "publish" / "jit" / EXE_NAME
-EXE = Path(os.environ.get("CS_EXE", DEFAULT_EXE))
-SRC = ROOT / "tests" / "media" / "test_src.mp4"
-OUT = ROOT / "tests" / "out" / "options"
+import harness
+from harness import run
 
 # name, extra args, output extension. Every case names its encoder explicitly:
 # the default is rv20 (rm), and the extension has to match the muxer.
@@ -141,150 +130,85 @@ OPTION_CHECKS = [
     ("era_unknown",       ["--lang", "en", "--era", "nope"],        2, "must be one of"),
     ("rc_bad_args",       ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
                            "--recompress-args", "-i x.mp4",
-                           str(SRC), str(OUT / "rc_bad.avi")],      2, "not allowed here"),
+                           "SRC", "OUT/rc_bad.avi"],      2, "not allowed here"),
     ("rc_trailing_output", ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
                            "--recompress-args", "-c:v libx264 out.mp4",
-                           str(SRC), str(OUT / "rc_trail.avi")],    2, "output file name"),
+                           "SRC", "OUT/rc_trail.avi"],    2, "output file name"),
     ("wm_position_bad",   ["--lang", "en", "--no-cui", "--watermark", "x",
                            "--watermark-position", "middle",
-                           str(SRC), str(OUT / "wm_bad.mp4")],      2, "watermark-position"),
+                           "SRC", "OUT/wm_bad.mp4"],      2, "watermark-position"),
     ("era_help_lists",    ["--completion", "bash"],                 0, "--era"),
     # v7.7 #5: a motion level may never be faster than the base rate. The ladder
     # only throttles downwards, so 25 with --fps 15 is a typo, not a setting.
     ("level_too_fast",    ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
                            "--fps", "15", "--fps-levels", "25,10",
-                           str(SRC), str(OUT / "lv_fast.avi")], 2, "faster than the base FPS"),
+                           "SRC", "OUT/lv_fast.avi"], 2, "faster than the base FPS"),
     # A bad threshold is a parse error, caught before any encode starts.
     ("level_bad_spec",    ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
                            "--fps-levels", "12:128:130",
-                           str(SRC), str(OUT / "lv_bad.avi")],  2, "must be below"),
+                           "SRC", "OUT/lv_bad.avi"],  2, "must be below"),
     # ---- v7.8 #3: an explicit sample rate the codec cannot honour is refused
     # before FFmpeg starts. ac3 takes 32/44.1/48 kHz and nothing else.
     ("audio_rate_bad",    ["--lang", "en", "--no-cui", "--encoder", "rv20",
                            "--audio-encoder", "ac3", "--audio-rate", "16000",
-                           str(SRC), str(OUT / "ar_bad.rm")],   2, "does not support 16000 Hz"),
+                           "SRC", "OUT/ar_bad.rm"],   2, "does not support 16000 Hz"),
     # ...and a codec the container cannot hold is refused the same way.
     ("audio_nomux",       ["--lang", "en", "--no-cui", "--encoder", "rv20",
                            "--audio-encoder", "libvorbis",
-                           str(SRC), str(OUT / "am_bad.rm")],   2, "cannot be muxed"),
+                           "SRC", "OUT/am_bad.rm"],   2, "cannot be muxed"),
     # ---- v7.8 #4: only containers the encoder can write are accepted; a wrong
     # one is an error rather than a silent fallback to another extension.
     ("container_bad",     ["--lang", "en", "--no-cui", "--encoder", "rv20",
                            "--container", "mkv",
-                           str(SRC), str(OUT / "ct_bad.mkv")],  2, "cannot write"),
+                           "SRC", "OUT/ct_bad.mkv"],  2, "cannot write"),
     # ---- v7.8 #5/#6: fit modes and anchors are validated at parse time.
     ("fit_bad",           ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
                            "--fit", "squash",
-                           str(SRC), str(OUT / "fit_bad.avi")], 2, "--fit must be one of"),
+                           "SRC", "OUT/fit_bad.avi"], 2, "--fit must be one of"),
     ("anchor_bad",        ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
                            "--crop-anchor", "sideways",
-                           str(SRC), str(OUT / "an_bad.avi")],  2, "--crop-anchor must be one of"),
+                           "SRC", "OUT/an_bad.avi"],  2, "--crop-anchor must be one of"),
     ("completion_new_opts", ["--completion", "bash"],             0, "--container"),
 ]
 
 
-def run(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=300)
+def _expand(args: list[str], out, src) -> list[str]:
+    """OPTION_CHECKS carries SRC/OUT placeholders; bind them per run."""
+    return [str(src) if a == "SRC" else str(out / a[len("OUT/"):]) if a.startswith("OUT/") else a
+            for a in args]
 
 
-def probe(path):
-    p = run(["ffprobe", "-v", "error", "-show_streams", "-show_format",
-             "-of", "json", str(path)])
-    if p.returncode != 0:
-        return None
-    try:
-        return json.loads(p.stdout)
-    except json.JSONDecodeError:
-        return None
+@pytest.mark.parametrize(("name", "extra", "ext"), CASES, ids=[c[0] for c in CASES])
+def test_option_case(exe, src, workdir, name, extra, ext):
+    out = workdir("options")
+    dst = out / f"{name}.{ext}"
+
+    proc = run([str(exe), str(src), str(dst), "--end", "00:00:04",
+                *extra, "--ffmpeg-source", "path"])
+
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+    assert dst.exists() and dst.stat().st_size > 0, "no output"
+
+    info = harness.video_summary(dst)
+    assert info is not None, "ffprobe cannot read the output"
+    assert not info.get("no_video"), "no video stream"
+    if name == "quiet":
+        assert not proc.stdout.strip(), "--quiet still printed output"
+
+    # The live product exists; now the stage products.
+    for rel, want_codec in POST_PRODUCTS.get(name, []):
+        staged = out / rel
+        assert staged.exists() and staged.stat().st_size > 0, f"missing stage product {rel}"
+        sinfo = harness.probe(staged) or {}
+        sv = [s for s in sinfo.get("streams", []) if s.get("codec_type") == "video"]
+        assert sv and sv[0].get("codec_name") == want_codec, f"{rel} is not {want_codec}"
 
 
-def main():
-    if not EXE.is_file():
-        sys.exit(f"missing binary: {EXE}")
-    OUT.mkdir(parents=True, exist_ok=True)
-
-    print(f"binary : {EXE}")
-    print(f"source : {SRC}")
-    print()
-    print(f"{'case':<18}{'result':<8}{'size':>9}  {'wall':>6}  detail")
-    print("-" * 92)
-
-    fails = 0
-    for name, extra, ext in CASES:
-        dst = OUT / f"{name}.{ext}"
-        t0 = time.time()
-        proc = run([str(EXE), str(SRC), str(dst), "--end", "00:00:04",
-                    *extra, "--ffmpeg-source", "path"])
-        wall = time.time() - t0
-
-        status, detail = "PASS", ""
-        if proc.returncode != 0:
-            status = "FAIL"
-            detail = f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:80]}"
-        elif not dst.exists() or dst.stat().st_size == 0:
-            status, detail = "FAIL", "no output"
-        else:
-            info = probe(dst)
-            if info is None:
-                status, detail = "FAIL", "ffprobe cannot read the output"
-            else:
-                streams = info.get("streams", [])
-                video = [s for s in streams if s.get("codec_type") == "video"]
-                audio = [s for s in streams if s.get("codec_type") == "audio"]
-                if not video:
-                    status, detail = "FAIL", "no video stream"
-                else:
-                    v = video[0]
-                    codec = v.get("codec_name", "?")
-                    dur = 0.0
-                    try:
-                        dur = float((info.get("format") or {}).get("duration") or 0.0)
-                    except ValueError:
-                        dur = 0.0
-                    detail = (f"{codec} {v.get('width')}x{v.get('height')} "
-                              f"v={len(video)} a={len(audio)} dur={dur:.2f}s")
-                    if name == "quiet" and proc.stdout.strip():
-                        status, detail = "FAIL", "--quiet still printed output"
-
-                # The live product exists; now the stage products.
-                for rel, want_codec in POST_PRODUCTS.get(name, []):
-                    staged = OUT / rel
-                    if not staged.exists() or staged.stat().st_size == 0:
-                        status, detail = "FAIL", f"missing stage product {rel}"
-                        break
-                    sinfo = probe(staged)
-                    sv = [s for s in (sinfo or {}).get("streams", [])
-                          if s.get("codec_type") == "video"]
-                    if not sv or sv[0].get("codec_name") != want_codec:
-                        status, detail = "FAIL", f"{rel} is not {want_codec}"
-                        break
-
-        size = dst.stat().st_size if dst.exists() else 0
-        if status == "FAIL":
-            fails += 1
-        print(f"{name:<18}{status:<8}{size:>9}  {wall:>5.2f}s  {detail}")
-
-    print()
-    print(f"{'option':<18}{'result':<8}detail")
-    print("-" * 92)
-    total = len(CASES)
-    for name, args, want_rc, want_text in OPTION_CHECKS:
-        proc = run([str(EXE), *args])
-        blob = proc.stdout + proc.stderr
-        ok = proc.returncode == want_rc and want_text in blob
-        if not ok:
-            fails += 1
-        why = "" if ok else (
-            f"rc={proc.returncode} want {want_rc}" if proc.returncode != want_rc
-            else f"missing {want_text!r}")
-        print(f"{name:<18}{'PASS' if ok else 'FAIL':<8}{why}")
-        total += 1
-
-    print("-" * 92)
-    print(f"total={total} pass={total - fails} fail={fails}")
-    return 1 if fails else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+@pytest.mark.parametrize(("name", "args", "want_rc", "want_text"), OPTION_CHECKS,
+                         ids=[c[0] for c in OPTION_CHECKS])
+def test_option_check(exe, src, workdir, name, args, want_rc, want_text):
+    proc = run([str(exe), *_expand(args, workdir("options"), src)])
+    blob = proc.stdout + proc.stderr
+    assert proc.returncode == want_rc, f"rc={proc.returncode} want {want_rc}"
+    assert want_text in blob, f"missing {want_text!r} in output"

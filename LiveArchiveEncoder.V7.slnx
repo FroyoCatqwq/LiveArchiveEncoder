@@ -93,12 +93,15 @@
     <File Path="tests/LiveArchiveEncoder.Tests/ToolchainTests.cs" />
   </Folder>
   <Folder Name="/tests/e2e/">
-    <File Path="tests/e2e/ab_duration.py" />
-    <File Path="tests/e2e/compare_matrix.py" />
-    <File Path="tests/e2e/cui_smoke.py" />
-    <File Path="tests/e2e/error_paths.py" />
-    <File Path="tests/e2e/feature_sweep.py" />
-    <File Path="tests/e2e/option_smoke.py" />
+    <File Path="tests/e2e/conftest.py" />
+    <File Path="tests/e2e/harness.py" />
+    <File Path="tests/e2e/requirements.txt" />
+    <File Path="tests/e2e/test_ab_duration.py" />
+    <File Path="tests/e2e/test_compare_matrix.py" />
+    <File Path="tests/e2e/test_cui_smoke.py" />
+    <File Path="tests/e2e/test_error_paths.py" />
+    <File Path="tests/e2e/test_feature_sweep.py" />
+    <File Path="tests/e2e/test_option_smoke.py" />
   </Folder>
   <Folder Name="/tools/">
     <File Path="tools/benchmark.ps1" />

@@ -1,0 +1,79 @@
+"""Fixtures for the LiveArchiveEncoder end-to-end suite.
+
+The suites are sequential on purpose: compare_matrix and ab_duration measure
+wall-clock pacing, so a busy machine (or a parallel worker) changes what they
+see. Do not add -n auto / pytest-xdist here.
+"""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+
+import pytest
+
+import harness
+
+
+@pytest.fixture(scope="session")
+def exe() -> Path:
+    """The binary under test (CS_EXE overrides the default publish/jit build)."""
+    path = harness.resolve_exe()
+    if not path.is_file():
+        raise pytest.UsageError(
+            f"missing binary: {path}\n"
+            "build it first (tools/build.ps1 or tools/build.sh), "
+            "or point CS_EXE at an existing build")
+    return path
+
+
+@pytest.fixture(scope="session")
+def src() -> Path:
+    if not harness.SRC.is_file():
+        raise pytest.UsageError(f"missing source clip: {harness.SRC}")
+    return harness.SRC
+
+
+@pytest.fixture(scope="session")
+def py_baseline() -> list[str]:
+    """The v6.3.3 reference implementation as an argv prefix."""
+    if not harness.PY_BASELINE.is_file():
+        raise pytest.UsageError(f"missing python baseline: {harness.PY_BASELINE}")
+    return harness.py_command()
+
+
+@pytest.fixture
+def workdir():
+    """Factory for a suite's scratch directory (kept between runs, like before)."""
+    made: list[Path] = []
+
+    def _make(name: str) -> Path:
+        path = harness.scratch(name)
+        made.append(path)
+        return path
+
+    return _make
+
+
+@pytest.fixture(scope="session")
+def cui_config():
+    """The real settings file, backed up for the duration of the CUI suite.
+
+    Using the real file is the point of the test (it is where the persistence
+    checks read from); it is restored no matter how the suite ends.
+    """
+    path = harness.config_path()
+    backup = path.with_suffix(".json.bak")
+    had_config = path.exists()
+    if had_config:
+        shutil.copyfile(path, backup)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        yield path
+    finally:
+        if had_config:
+            shutil.copyfile(backup, path)
+            backup.unlink()
+        elif path.exists():
+            path.unlink()

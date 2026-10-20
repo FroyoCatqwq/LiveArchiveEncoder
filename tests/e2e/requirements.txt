@@ -1,0 +1,4 @@
+# End-to-end suite dependencies (tests/e2e/).
+# Nothing else: the suite drives the product under test plus ffprobe/ffmpeg
+# from PATH.
+pytest==9.1.1

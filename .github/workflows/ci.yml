@@ -42,7 +42,7 @@ jobs:
       - name: Test
         run: dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build
 
-# The Python harnesses under tests/e2e/ are deliberately NOT run here: they
-# compare this build against the v6.3.3 baseline and need an FFmpeg with the
+# The pytest suite under tests/e2e/ is deliberately NOT run here: it
+# compares this build against the v6.3.3 baseline and needs an FFmpeg with the
 # legacy encoders on PATH, plus a quiet machine (the realtime controller picks
 # frames against the wall clock). Run them locally, see docs/usage.md.

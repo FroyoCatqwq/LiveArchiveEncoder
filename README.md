@@ -30,7 +30,7 @@ remains tied to media duration.
 Platform-specific bits a script has to know:
 
 * The executable is `LiveArchiveEncoder.exe` on Windows and extension-less
-  `LiveArchiveEncoder` elsewhere. The Python harnesses handle this via `EXE_NAME`.
+  `LiveArchiveEncoder` elsewhere. The pytest suite handles this via `EXE_NAME`.
 * Managed builds live under `%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg\<id>\bin`
   on Windows and `~/.local/share/LiveArchiveEncoder/ffmpeg/<id>/bin` elsewhere.
 * The FFmpeg catalogue is filtered per platform — `gyan.dev` ships no Linux
@@ -103,13 +103,14 @@ At runtime you need an FFmpeg/ffprobe pair on `PATH` (or pass `--ffmpeg` /
 ## Tests
 
 ```bash
-# NUnit 5 unit tests — identical command on both platforms
-dotnet test LiveArchiveEncoder.V7.slnx -c Release      # 280 on Windows, 278 on Linux
+# TUnit unit tests — identical command on both platforms (runs on MTP since v7.8.3)
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 298 on Windows
 # and the same suite against the other runtime:
-dotnet test LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 ```
 
-The NUnit project covers the pure-logic layers that do not need a real encode:
+The unit test project (TUnit since v7.8.3, NUnit before) covers the pure-logic
+layers that do not need a real encode:
 SMB argument construction, the FFmpeg distribution catalogue, toolchain layout,
 player argument parsing, CLI parsing, config persistence, hwaccel normalisation,
 and localisation parity (every key must exist in both `en` and `zh`). Since v7.6
@@ -119,38 +120,48 @@ version-1 settings file still loading with both new stages off. It also runs und
 NativeAOT-sensitive APIs, so a reflection-only code path shows up as a failure
 here rather than as a crash in a published binary.
 
-End-to-end equivalence against the Python reference lives in the Python
-harnesses, which invoke a built exe and need FFmpeg on `PATH` (the Python
+End-to-end equivalence against the Python reference lives in the pytest suite
+(`tests/e2e/test_*.py`, since v7.8.3; six standalone scripts before), which
+invoke a built exe and need FFmpeg on `PATH` (the Python
 baseline uses the system FFmpeg too, so on a box that only has a managed build,
 put that build's `bin` on `PATH` first):
 
 ```bash
-python3 tests/e2e/compare_matrix.py     # 12 encoder/param cases, ffprobe structure
-python3 tests/e2e/error_paths.py        # 11 failure paths, exit codes
-python3 tests/e2e/feature_sweep.py      # every legacy encoder, 2 s clip
-python3 tests/e2e/option_smoke.py       # option plumbing, incl. the v7.6 stages
-python3 tests/e2e/cui_smoke.py          # interactive menu assertions
-CS_EXE=publish/aot/LiveArchiveEncoder python3 tests/e2e/compare_matrix.py
+pip install -r tests/e2e/requirements.txt   # pytest==9.1.1
+pytest                                       # all 123 cases, from the repo root
+pytest tests/e2e/test_compare_matrix.py -k wmv2   # a single case
+CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 ```
 
-`option_smoke.py` is the one that exercises the post-processing chain: it encodes
+| module | cases | what it checks |
+| --- | --- | --- |
+| `test_compare_matrix.py` | 12 | encoder/param matrix, ffprobe structure vs v6.3.3 |
+| `test_error_paths.py` | 11 | failure paths, exit codes vs the baseline |
+| `test_feature_sweep.py` | 35 | every legacy encoder, 2 s clip (2 skipped: no demuxer) |
+| `test_option_smoke.py` | 55 | option plumbing, incl. the v7.6 post-processing stages |
+| `test_cui_smoke.py` | 8 | interactive menu assertions (34 checks, 35 on Linux) |
+| `test_ab_duration.py` | 2 | duration medians vs the baseline (mpeg1video / wmv2) |
+
+`test_option_smoke.py` is the one that exercises the post-processing chain: it encodes
 with a watermark, with both stages armed, and with an era preset, then probes the
 `_wm` and `_web` products as well as the live file. Two of its cases need a font
 in the `fonts/` directory.
 
-`compare_matrix.py` compares against v6.3.3 and is kept as a regression check, but
+`test_compare_matrix.py` compares against v6.3.3 and is kept as a regression check, but
 the port no longer has to match the Python output bit for bit -- v7.6 features are
 all opt-in, so with no flags the two still agree.
 
-Every harness resolves the executable through `EXE_NAME`, so the same file runs
+Every module resolves the executable through `EXE_NAME`, so the same files run
 unchanged on Windows (`.exe`) and Linux (no extension).
 
 All scratch products land in `tests/out/` (gitignored); `CM_OUT` / `FS_OUT`
 move them if you want to keep two builds side by side.
 
-`compare_matrix.py` depends on the realtime frame-selection logic, so run it
-alone — a parallel build or another encode will shift the wall clock and change
-which frames the adaptive controller picks.
+`test_compare_matrix.py` and `test_ab_duration.py` depend on the realtime
+frame-selection logic, so run the suite alone — a parallel build or another
+encode will shift the wall clock and change which frames the adaptive
+controller picks. For the same reason the suite must not run under
+`pytest -n` (xdist); it is strictly sequential by design.
 
 ## Continuous integration
 
@@ -173,7 +184,7 @@ unit and the mise SDK on `PATH`. See `tools/forgejo-runner.service` and
 `tools/forgejo-runner-config.yml` — the only machine-specific parts are the home
 directory in the env block and the `--uuid` / token file.
 
-The Python harnesses run on none of them on purpose — see the note in `## Tests`.
+The e2e pytest suite runs on none of them on purpose — see the note in `## Tests`.
 
 ## Usage
 
@@ -286,8 +297,8 @@ survive an upgrade and neither is inside the repo:
 ```
 
 tests/
-  LiveArchiveEncoder.Tests/   NUnit 5 unit tests (no real encode needed)
-  e2e/                        Python end-to-end equivalence harnesses
+  LiveArchiveEncoder.Tests/   TUnit unit tests (no real encode needed)
+  e2e/                        pytest end-to-end equivalence suite
   media/test_src.mp4          generated 20 s 320x240 h264+aac fixture
   out/                        scratch products, gitignored
 tools/
