@@ -1517,8 +1517,14 @@ pytest  123 项（Windows 实测 121 通过 + 2 跳过）：
   ab_duration     2（mpeg1video / wmv2 各 4 变体 × 4 runs 的中位数对比）
 ```
 
-Linux 少一条检查是因为 `PathMeansSystemFfmpeg` 需要 PATH 上的系统 FFmpeg；
-cui_smoke 多一条是因为非 Windows 上会额外断言 `gyan` 不出现在清单里。
+Linux 两个数字对不上 Windows：单测是 **296 通过 + 1 跳过**（`PathMeansSystemFfmpeg`
+需要 PATH 上的系统 FFmpeg），cui_smoke 则多一条（非 Windows 上额外断言 `gyan`
+不出现在清单里）。e2e 用例数三平台一致，都是 121 通过 + 2 跳过。
+
+MPEG-PS 那两条（mpeg1video）在 Linux 上时长差得比 Windows 大——实测 0.167 s，正好
+是 23.976 fps 下的 4 帧，而**帧数两边都是 120**。那是容器按字节到达时刻打戳的老
+问题（见 `harness.py` 里 `DURATION_TOL` 的注释），不是丢帧；Windows 上同一用例只
+差 ~0.08 s。容差按 Linux 的最坏值留了 6 帧余量。
 
 `cui_smoke` 会**备份并恢复真实配置文件**（`%LOCALAPPDATA%` / `~/.local/share`
 下的 `config.json`）——持久化检查读的就是它；跑之前不需要特殊准备，跑完之后
