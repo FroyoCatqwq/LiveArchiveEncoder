@@ -8,13 +8,15 @@ duration drifted historically (mpeg1video, wmv2) through four variants --
 python, and the C# build with inline / separate / auto audio -- four times each
 and checks the run-to-run medians against the baseline:
 
-    mpeg (mpg)  wall-clock stamped: |median(py) - median(cs)| <= 0.12 s
+    mpeg (mpg)  wall-clock stamped: |median(py) - median(cs)| <= 0.25 s
+                (Linux measures up to 0.167 s, four frames at 23.976 fps)
     others      medians must match exactly (wmv/asf stamps from frame count)
-    cs separate the opt-in split pipeline, which remuxes: <= 0.12 s
+    cs separate the opt-in split pipeline, which remuxes: <= 0.25 s
                 (measured on wmv2: 5.015 vs 5.046 on all four runs)
 
-The 0.12 s rule and the format list are shared with compare_matrix
-(harness.PACING_DURATION_FORMATS / harness.DURATION_TOL). fresh/repeat counters
+The tolerance and the format list are shared with compare_matrix
+(harness.PACING_DURATION_FORMATS / harness.DURATION_TOL -- the comment there
+explains where 0.25 s comes from). fresh/repeat counters
 and wall times are printed for diagnostics but never asserted: they react to
 how busy the machine was, which is also why this suite must not run under
 parallel load (see conftest.py -- no pytest-xdist).
