@@ -79,6 +79,7 @@
   <Folder Name="/tests/LiveArchiveEncoder.Tests/">
     <Project Path="tests/LiveArchiveEncoder.Tests/LiveArchiveEncoder.Tests.csproj" />
     <File Path="tests/LiveArchiveEncoder.Tests/AudioAndFrameFitTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/AudioLimitTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/CliParserTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/ConfigStoreTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/FfmpegCatalogTests.cs" />
@@ -102,5 +103,6 @@
     <File Path="tools/benchmark.ps1" />
     <File Path="tools/build.ps1" />
     <File Path="tools/build.sh" />
+    <File Path="tools/probe_audio_limits.py" />
   </Folder>
 </Solution>

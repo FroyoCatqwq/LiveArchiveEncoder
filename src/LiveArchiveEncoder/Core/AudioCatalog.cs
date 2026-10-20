@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
@@ -15,6 +16,17 @@ namespace LiveArchiveEncoder.Core;
 ///
 /// Rates are the rates FFmpeg's encoder lists or accepts without resampling;
 /// an empty list means "anything goes" (PCM, FLAC, ADPCM).
+///
+/// v7.8.2 added the bitrate dimension. Three encoders refuse values that look
+/// perfectly reasonable, and each refuses them differently:
+///   * <c>mp2</c> only takes the standard Layer II bitrates, and which ones
+///     depends on the sample rate -- 8-160 kbps at 16/22.05/24 kHz (MPEG-2),
+///     32-384 kbps at 32/44.1/48 kHz (MPEG-1), with nothing in between;
+///   * <c>wmav1</c>/<c>wmav2</c> bottom out at 24 kbps;
+///   * <c>libvorbis</c> scales both ends of its band with the sample rate
+///     (8-40 kbps at 8 kHz, 32-224 kbps at 44.1/48 kHz).
+/// Every number below was probed against the rolling FFmpeg master build the
+/// toolchain downloads, not taken from a spec sheet.
 /// </summary>
 public sealed class AudioCodecInfo
 {
@@ -30,6 +42,29 @@ public sealed class AudioCodecInfo
     /// unsupported sample rate is a hard failure.</summary>
     public int MinKbps { get; init; } = 8;
     public int MaxKbps { get; init; } = 640;
+
+    /// <summary>
+    /// Bitrate band per sample rate, ascending by rate. The band with the
+    /// largest rate not exceeding the actual one wins; the first entry applies
+    /// below all of them. Empty falls back to <see cref="MinKbps"/>/
+    /// <see cref="MaxKbps"/> at every rate.
+    /// <para>
+    /// <see cref="KbpsBand.Values"/> carries the discrete bitrates the encoder
+    /// accepts at that rate, for the codecs that have no free range (mp2:
+    /// 144 kbps is a valid MPEG-2 Layer II bitrate and an invalid MPEG-1 one,
+    /// so the set is per band, not per codec). Empty means every value inside
+    /// the band.
+    /// </para>
+    /// </summary>
+    public (int Rate, int MinKbps, int MaxKbps, int[] Values)[] KbpsBands { get; init; } = [];
+
+    /// <summary>
+    /// FFmpeg marks this encoder experimental: it only opens with
+    /// <c>-strict</c>, which this tool never passes, so selecting it would fail
+    /// the encode. Offered by the catalogue but refused by
+    /// <see cref="AudioCatalog.Validate"/>.
+    /// </summary>
+    public bool Experimental { get; init; }
 
     /// <summary>Short note shown in the picker, e.g. the rate restriction.</summary>
     public string Note { get; init; } = "";
@@ -79,46 +114,83 @@ public static class AudioCatalog
         new()
         {
             Name = "mp2",
-            SampleRates = [22050, 24000, 32000, 44100, 48000],
+            // 16 kHz and up: FFmpeg's mp2 encoder rejects 8/11.025/12 kHz with
+            // "Specified sample rate ... is not supported".
+            SampleRates = [16000, 22050, 24000, 32000, 44100, 48000],
             MaxChannels = 2,
-            Note = "22.05 kHz and up",
+            Note = "16 kHz and up; MPEG-1 rates need 32+ kbps",
+            // MPEG-2 Layer II (16/22.05/24 kHz) runs 8-160 kbps, MPEG-1
+            // (32/44.1/48 kHz) 32-384 kbps, and only the standard bitrates are
+            // accepted: 36 kbps fails at 44.1 kHz even though it is inside the
+            // band, 40 kbps fails at 32 kHz and works at 16 kHz, and 144 kbps
+            // is the mirror image (valid at 16 kHz, not at 44.1).
+            KbpsBands = [
+                (16000, 8, 160, [8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160]),
+                (32000, 32, 384, [32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384]),
+            ],
         },
         new()
         {
             Name = "mp2fixed",
-            SampleRates = [22050, 24000, 32000, 44100, 48000],
+            SampleRates = [16000, 22050, 24000, 32000, 44100, 48000],
             MaxChannels = 2,
+            Note = "16 kHz and up; MPEG-1 rates need 32+ kbps",
+            KbpsBands = [
+                (16000, 8, 160, [8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160]),
+                (32000, 32, 384, [32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384]),
+            ],
         },
         new()
         {
             Name = "wmav1",
-            SampleRates = [8000, 11025, 16000, 22050, 32000, 44100, 48000],
+            SampleRates = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000],
             MaxChannels = 2,
+            // WMA bottoms out at 24 kbps at every rate; 16 kbps opens FFmpeg
+            // with "Bitrate 16000 is not supported" style failures.
+            MinKbps = 24,
+            Note = "24 kbps and up",
         },
         new()
         {
             Name = "wmav2",
-            SampleRates = [8000, 11025, 16000, 22050, 32000, 44100, 48000],
+            SampleRates = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000],
             MaxChannels = 2,
+            MinKbps = 24,
+            Note = "24 kbps and up",
         },
         new()
         {
-            Name = "libvorbis", SampleRates = [8000, 11025, 16000, 22050, 32000, 44100, 48000],
+            Name = "libvorbis",
+            SampleRates = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000],
             MaxChannels = 8,
+            Note = "band scales with rate: 8-40 kbps at 8 kHz ... 32-224 at 48 kHz",
+            // Vorbis manages bitrate per rate: the nominal ceiling at 8 kHz is
+            // 40 kbps and 224 kbps at 44.1/48 kHz, so a 128 kbps request at
+            // 22050 Hz fails with "encoder setup failed" while the same request
+            // at 44100 Hz is fine.
+            KbpsBands = [
+                (8000, 8, 40, []), (11025, 12, 48, []), (12000, 12, 48, []), (16000, 16, 96, []),
+                (22050, 16, 80, []), (24000, 16, 80, []), (32000, 32, 160, []),
+                (44100, 32, 224, []), (48000, 32, 224, []),
+            ],
         },
         new()
         {
-            Name = "vorbis", SampleRates = [8000, 11025, 16000, 22050, 32000, 44100, 48000],
+            Name = "vorbis",
+            SampleRates = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000],
             MaxChannels = 8,
+            Experimental = true,
         },
         // Opus always runs at 48 kHz internally; FFmpeg resamples, but only
         // these input rates are accepted by the encoder's own rate list.
         new()
         {
-            Name = "libopus", SampleRates = [8000, 12000, 16000, 24000, 48000],
+            Name = "libopus",
+            SampleRates = [8000, 12000, 16000, 24000, 48000],
             MaxChannels = 8,
+            MaxKbps = 256,
         },
-        new() { Name = "opus", SampleRates = [8000, 12000, 16000, 24000, 48000], MaxChannels = 8 },
+        new() { Name = "opus", SampleRates = [8000, 12000, 16000, 24000, 48000], MaxChannels = 8, Experimental = true },
         new()
         {
             Name = "adpcm_ima_amv", SampleRates = [22050], MaxChannels = 1,
@@ -149,12 +221,12 @@ public static class AudioCatalog
     {
         ["avi"] = ["libmp3lame", "mp3_mf", "mp2", "aac", "ac3", "wmav1", "wmav2",
                    "adpcm_ima_wav", "pcm_s16le"],
-        ["mp4"] = ["aac", "libmp3lame", "ac3", "libopus", "opus", "flac"],
-        ["matroska"] = ["aac", "ac3", "libmp3lame", "mp2", "libvorbis", "vorbis",
-                        "libopus", "opus", "flac", "wmav2", "pcm_s16le"],
+        ["mp4"] = ["aac", "libopus", "libmp3lame"],
+        ["matroska"] = ["aac", "ac3", "libmp3lame", "mp2", "libvorbis",
+                        "libopus", "flac", "wmav2", "pcm_s16le"],
         ["mpeg"] = ["mp2", "mp3_mf", "libmp3lame", "ac3", "pcm_s16le"],
         ["asf"] = ["wmav2", "wmav1", "libmp3lame", "mp3_mf", "ac3", "pcm_s16le"],
-        ["ogg"] = ["libvorbis", "vorbis", "libopus", "opus", "flac"],
+        ["ogg"] = ["libvorbis", "libopus", "flac"],
         ["rm"] = ["ac3", "aac"],
         ["flv"] = ["aac", "libmp3lame", "mp3_mf"],
         ["mov"] = ["aac", "libmp3lame", "ac3", "pcm_s16le"],
@@ -164,6 +236,27 @@ public static class AudioCatalog
         ["h261"] = [],
         ["h263"] = [],
     };
+
+    /// <summary>
+    /// Sample rates the <i>muxer</i> accepts, when it is stricter than the
+    /// codec. Keyed "container|codec". Two real cases, both probed:
+    /// <list type="bullet">
+    /// <item>FLV writes a 2-bit SoundRate for MP3: 8/12/16/24/32 kHz abort with
+    /// "FLV does not support sample rate ..., choose from (44100, 22050,
+    /// 11025)". 48000 is accepted too and stored truthfully.</item>
+    /// <item>MP4 refuses MP3 below 16 kHz: "muxing mp3 at 8000hz is not
+    /// standard, to mux anyway set strict to -1" -- and this tool never passes
+    /// -strict. AVI, MKV, MOV and ASF all take the full codec range.</item>
+    /// </list>
+    /// </summary>
+    private static readonly FrozenDictionary<string, int[]> MuxerRates =
+        new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["flv|libmp3lame"] = [11025, 22050, 44100, 48000],
+            ["flv|mp3_mf"] = [11025, 22050, 44100, 48000],
+            ["mp4|libmp3lame"] = [16000, 22050, 24000, 32000, 44100, 48000],
+            ["mp4|mp3_mf"] = [16000, 22050, 24000, 32000, 44100, 48000],
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     public static AudioCodecInfo? Find(string? name)
     {
@@ -236,15 +329,37 @@ public static class AudioCatalog
         return string.Join(", ", rates.Select(x => x.ToString(CultureInfo.InvariantCulture)));
     }
 
-    /// <summary>Closest supported rate, or the requested one when unconstrained.</summary>
-    public static int? NearestRate(string? codec, int? rate)
+    /// <summary>
+    /// The rates this codec may use in this container: the codec's own list,
+    /// narrowed by the muxer when the muxer is the stricter of the two. Empty
+    /// means unconstrained.
+    /// </summary>
+    public static int[] RatesFor(string? codec, string? container = null)
     {
         AudioCodecInfo? info = Find(codec);
-        if (info is null || info.SampleRates.Length == 0 || rate is null) return rate;
-        if (info.SampleRates.Contains(rate.Value)) return rate.Value;
+        int[] codecRates = info is null || info.SampleRates.Length == 0
+            ? []
+            : info.SampleRates;
 
-        int best = info.SampleRates[0];
-        foreach (int candidate in info.SampleRates)
+        if (codec.HasText && container.HasText
+            && MuxerRates.TryGetValue($"{container}|{codec}", out int[]? muxer))
+        {
+            return codecRates.Length == 0
+                ? muxer
+                : codecRates.Where(muxer.Contains).ToArray();
+        }
+        return codecRates;
+    }
+
+    /// <summary>Closest supported rate, or the requested one when unconstrained.</summary>
+    public static int? NearestRate(string? codec, int? rate, string? container = null)
+    {
+        int[] allowed = RatesFor(codec, container);
+        if (allowed.Length == 0 || rate is null) return rate;
+        if (allowed.Contains(rate.Value)) return rate.Value;
+
+        int best = allowed[0];
+        foreach (int candidate in allowed)
         {
             if (Math.Abs(candidate - rate.Value) < Math.Abs(best - rate.Value)) best = candidate;
         }
@@ -259,19 +374,67 @@ public static class AudioCatalog
     }
 
     /// <summary>
-    /// The settings the encoder will really be started with. An unsupported rate
-    /// is snapped to the nearest supported one rather than allowed to abort
-    /// FFmpeg mid-run.
+    /// The bitrate band this codec accepts at this sample rate. Without a rate
+    /// (auto) the widest band is returned, which is the permissive reading: the
+    /// rate is only known once the source is probed.
     /// </summary>
-    public static (int? Rate, int Channels) Effective(string? codec, int? rate, int channels)
+    public static (int MinKbps, int MaxKbps, int[] Values) KbpsBand(string? codec, int? rate)
+    {
+        AudioCodecInfo? info = Find(codec);
+        if (info is null) return (8, 640, []);
+        if (info.KbpsBands.Length == 0) return (info.MinKbps, info.MaxKbps, []);
+
+        (int Rate, int MinKbps, int MaxKbps, int[] Values) chosen = info.KbpsBands[0];
+        foreach ((int Rate, int MinKbps, int MaxKbps, int[] Values) band in info.KbpsBands)
+        {
+            if (rate is null || band.Rate <= rate.Value) chosen = band;
+        }
+        return (chosen.MinKbps, chosen.MaxKbps, chosen.Values);
+    }
+
+    /// <summary>
+    /// The bitrate the encoder will really be started with: clamped into the
+    /// band for <paramref name="rate"/>, and snapped to the nearest standard
+    /// value for codecs that only take discrete ones (mp2). Used for era
+    /// presets and menu input, where a value is a suggestion; an explicit
+    /// command-line value goes through <see cref="Validate"/> instead.
+    /// </summary>
+    public static int NearestKbps(string? codec, int kbps, int? rate = null)
+    {
+        AudioCodecInfo? info = Find(codec);
+        if (info is null) return kbps;
+
+        (int min, int max, int[] values) = KbpsBand(codec, rate);
+        if (values.Length == 0) return Math.Clamp(kbps, min, max);
+
+        // Discrete band (mp2): only the standard bitrates survive, and which
+        // ones depends on the rate through the band.
+        int best = values[0];
+        foreach (int value in values)
+        {
+            if (Math.Abs(value - kbps) < Math.Abs(best - kbps)) best = value;
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// The settings the encoder will really be started with. An unsupported
+    /// rate is snapped to the nearest supported one rather than allowed to
+    /// abort FFmpeg mid-run; a bitrate outside the codec's band for that rate
+    /// is clamped the same way.
+    /// </summary>
+    public static (int? Rate, int Channels, int Kbps) Effective(
+        string? codec, int? rate, int channels, int kbps, string? container = null)
     {
         if (codec == "roq_dpcm")
         {
             // RoQ predates this table and is enforced separately (22050 Hz, mono
             // or stereo); keep that rule authoritative.
-            return (22050, Math.Clamp(channels, 1, 2));
+            return (22050, Math.Clamp(channels, 1, 2), kbps);
         }
-        return (NearestRate(codec, rate), ClampChannels(codec, channels));
+        int? snappedRate = NearestRate(codec, rate, container);
+        int snappedKbps = NearestKbps(codec, kbps, snappedRate);
+        return (snappedRate, ClampChannels(codec, channels), snappedKbps);
     }
 
     /// <summary>
@@ -294,6 +457,13 @@ public static class AudioCatalog
         AudioCodecInfo? info = Find(codec);
         if (info is null) return null;
 
+        if (info.Experimental)
+        {
+            return $"'{codec}' is an experimental FFmpeg encoder: it only opens with "
+                   + "-strict, which this tool never passes, so the encode would fail. "
+                   + "Use the lib-prefixed encoder instead (libvorbis, libopus).";
+        }
+
         if (!SupportsContainer(codec, containerFormat))
         {
             string allowed = ContainerCodecs.TryGetValue(containerFormat, out string[]? list)
@@ -302,18 +472,39 @@ public static class AudioCatalog
                    + $"that container accepts: {allowed}";
         }
 
-        if (rate is not null && info.SampleRates.Length > 0 && !info.SampleRates.Contains(rate.Value))
+        int[] rates = RatesFor(codec, containerFormat);
+        if (rate is not null && rates.Length > 0 && !rates.Contains(rate.Value))
         {
-            return $"'{codec}' does not support {rate.Value} Hz; supported sample rates: "
-                   + string.Join(", ", info.SampleRates.Select(x => x.ToString(CultureInfo.InvariantCulture)));
+            string wanted = string.Join(", ", rates.Select(x => x.ToString(CultureInfo.InvariantCulture)));
+            // Phrase the stricter side as the one at fault: for FLV and MP4 the
+            // muxer is what refuses, for ac3 it is the codec.
+            bool muxerIsStricter = codec.HasText
+                && MuxerRates.ContainsKey($"{containerFormat}|{codec}");
+            return muxerIsStricter
+                ? $"the '{containerFormat}' muxer only takes {wanted} Hz for '{codec}', not {rate.Value}"
+                : $"'{codec}' does not support {rate.Value} Hz; supported sample rates: {wanted}";
         }
         if (channels < info.MinChannels || channels > info.MaxChannels)
         {
             return $"'{codec}' supports {info.MinChannels}-{info.MaxChannels} channel(s), not {channels}";
         }
-        if (kbps < info.MinKbps || kbps > info.MaxKbps)
+
+        (int minKbps, int maxKbps, int[] values) = KbpsBand(codec, rate);
+        if (values.Length > 0)
         {
-            return $"'{codec}' bitrate must be between {info.MinKbps} and {info.MaxKbps} kbps, not {kbps}";
+            if (!values.Contains(kbps))
+            {
+                string wanted = string.Join(", ", values.Select(x => x.ToString(CultureInfo.InvariantCulture)));
+                return $"'{codec}'"
+                       + (rate is not null ? $" at {rate.Value} Hz" : "")
+                       + $" does not take {kbps} kbps; standard bitrates: {wanted}";
+            }
+        }
+        else if (kbps < minKbps || kbps > maxKbps)
+        {
+            return $"'{codec}'"
+                   + (rate is not null ? $" at {rate.Value} Hz" : "")
+                   + $" bitrate must be between {minKbps} and {maxKbps} kbps, not {kbps}";
         }
         return null;
     }

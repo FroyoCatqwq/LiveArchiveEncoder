@@ -57,8 +57,8 @@ public static class RealtimeEncoder
             ? EncoderMath.ValidateRoqDimensions(o.Width, o.Height)
             : null;
 
-        (int? audioRate, int audioChannels) = Validation.EffectiveAudioSettings(
-            o.Encoder, o.AudioEncoder, o.AudioRate, o.AudioChannels);
+        (int? audioRate, int audioChannels, int audioKbps) = Validation.EffectiveAudioSettings(
+            o.Encoder, o.AudioEncoder, o.AudioRate, o.AudioChannels, o.AudioKbps);
 
         var config = new Config
         {
@@ -76,7 +76,7 @@ public static class RealtimeEncoder
             Qv = o.Quality,
             Threads = o.Threads,
             BufferFrames = o.BufferFrames,
-            AudioKbps = o.AudioKbps,
+            AudioKbps = audioKbps,
             AudioChannels = audioChannels,
             AudioRate = audioRate,
             Width = o.Width,
@@ -305,8 +305,8 @@ public static class RealtimeEncoder
 
         if (!hasAudio || duration is null) return Run(o, cancellationToken);
 
-        (int? audioRate, int audioChannels) = Validation.EffectiveAudioSettings(
-            o.Encoder, o.AudioEncoder, o.AudioRate, o.AudioChannels);
+        (int? audioRate, int audioChannels, int audioKbps) = Validation.EffectiveAudioSettings(
+            o.Encoder, o.AudioEncoder, o.AudioRate, o.AudioChannels, o.AudioKbps);
 
         // Probe muxability with a 3-frame synthetic clip before spending the whole
         // realtime video pass on it. Legacy muxers can accept the encode and still
@@ -331,7 +331,7 @@ public static class RealtimeEncoder
             // Stage 1 + 2 run concurrently: the audio encoder is not bound by the
             // realtime pacing that governs the video slot loop.
             Task<CaptureResult> audioTask = Task.Run(
-                () => AudioTrack.Encode(o.FFmpeg, src.FullName, o.AudioEncoder!, o.AudioKbps,
+                () => AudioTrack.Encode(o.FFmpeg, src.FullName, o.AudioEncoder!, audioKbps,
                     audioChannels, audioRate, o.StartSeconds, span, audioOnly, audioTimeout),
                 CancellationToken.None);
 
@@ -351,7 +351,7 @@ public static class RealtimeEncoder
                 WindowSeconds = o.WindowSeconds,
                 BufferFrames = o.BufferFrames,
                 AudioEncoder = null,
-                AudioKbps = o.AudioKbps,
+                AudioKbps = audioKbps,
                 AudioChannels = audioChannels,
                 AudioRate = audioRate,
                 Hwaccel = o.Hwaccel,

@@ -45,8 +45,8 @@ dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
 # -> src\LiveArchiveEncoder\bin\Release\net10.0\LiveArchiveEncoder.exe
 
 tools\build.ps1 -Aot
-# -> publish\jit\LiveArchiveEncoder.exe       (162 KB + shared framework)
-# -> publish\aot\LiveArchiveEncoder.exe       (3.8 MB, single file, no deps)
+# -> publish\jit\LiveArchiveEncoder.exe       (~230 KB + shared framework)
+# -> publish\aot\LiveArchiveEncoder.exe       (8.5 MB, single file, no deps)
 ```
 
 **Two flavours, two runtimes.** Only JIT and AOT are built. The JIT build targets
@@ -237,6 +237,19 @@ it is **not** the default and it is **not** faster:
 pipeline when the muxer rejects the split. Measured numbers are in
 `docs/test-report-v7.md` §7.
 
+### Audio limits (v7.8.2)
+
+Every audio encoder has sample-rate and bitrate limits, some of them stricter
+than they look: `mp2` starts at 16 kHz and needs 32+ kbps at 44.1/48 kHz (and
+only takes standard Layer II bitrates), `wmav1/wmav2` bottom out at 24 kbps,
+`libvorbis` scales its whole band with the rate (8-40 kbps at 8 kHz, 32-224 at
+48 kHz), and the muxer can be the stricter side — FLV takes only
+11025/22050/44100/48000 for MP3, and MP4 refuses MP3 below 16 kHz. All of these
+numbers were probed against the FFmpeg master build the toolchain downloads and
+live in `Core/AudioCatalog.cs`. Explicit CLI values that break a limit are
+rejected with the legal list (exit 2); era-preset values are snapped to the
+nearest legal one and the correction is logged. Full table: `docs/usage.md` §5.
+
 ## Layout
 
 ```
@@ -244,8 +257,9 @@ src/LiveArchiveEncoder/
   Configuration/  Config, EncoderInfo, EncoderCaps, StreamInfo, constant tables
   Core/           timecode parsing, pixel-format maths, validation, high-res timer,
                   Ctrl+C interrupt, AudioCatalog (v7.8: per-codec sample-rate and
-                  channel limits, container compatibility), TextExtensions (v7.8.1:
-                  C# 14 extension members)
+                  channel limits; v7.8.2: bitrate bands per codec and rate,
+                  muxer-level rate limits, container compatibility), TextExtensions
+                  (v7.8.1: C# 14 extension members)
   FFmpeg/         discovery, toolchain (multi-distro install/update/delete),
                   capability probing, ffprobe, process + pipe I/O
   Frames/         bounded pre-allocated frame pool

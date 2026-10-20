@@ -139,7 +139,10 @@ public static class Constants
             ["asf"] = ["wmav2", "wmav1", "libmp3lame"],
             ["mpeg"] = ["mp2", "mp3_mf", "libmp3lame"],
             ["avi"] = ["libmp3lame", "mp3_mf", "mp2", "aac"],
-            ["ogg"] = ["libvorbis", "vorbis", "libopus", "opus"],
+            // v7.8.2: the native vorbis/opus encoders are experimental in
+            // FFmpeg and need -strict, which this tool never passes, so the
+            // lib-prefixed pair is what the preference list offers.
+            ["ogg"] = ["libvorbis", "libopus"],
             ["rm"] = ["ac3", "aac"],
             ["mp4"] = ["aac", "libopus", "libmp3lame"],
             ["flv"] = ["aac", "libmp3lame", "mp3_mf"],

@@ -48,12 +48,13 @@ public sealed class AudioCatalogTests
     [Test]
     public void EffectiveSettingsSnapInsteadOfFailing()
     {
-        (int? rate, int channels) = AudioCatalog.Effective("ac3", 16000, 1);
+        (int? rate, int channels, int kbps) = AudioCatalog.Effective("ac3", 16000, 1, 32);
         Assert.That(rate, Is.EqualTo(32000));
         Assert.That(channels, Is.EqualTo(1));
+        Assert.That(kbps, Is.EqualTo(32));
 
         // roq_dpcm keeps its own stricter rule.
-        (int? roqRate, int roqChannels) = AudioCatalog.Effective("roq_dpcm", 44100, 6);
+        (int? roqRate, int roqChannels, _) = AudioCatalog.Effective("roq_dpcm", 44100, 6, 64);
         Assert.That(roqRate, Is.EqualTo(22050));
         Assert.That(roqChannels, Is.EqualTo(2));
     }

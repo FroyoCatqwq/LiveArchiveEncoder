@@ -25,8 +25,8 @@ public static class Validation
             + $"'{encoder.FormatName}' for encoder '{encoder.Name}'. {hint}");
     }
 
-    public static (int? AudioRate, int AudioChannels) EffectiveAudioSettings(
-        EncoderInfo encoder, string? audioEncoder, int? audioRate, int audioChannels)
+    public static (int? AudioRate, int AudioChannels, int AudioKbps) EffectiveAudioSettings(
+        EncoderInfo encoder, string? audioEncoder, int? audioRate, int audioChannels, int audioKbps)
     {
         if (audioEncoder == "roq_dpcm")
         {
@@ -35,13 +35,18 @@ public static class Validation
             if (audioChannels is not (1 or 2))
                 throw new ArgumentException("roq_dpcm supports mono or stereo audio only; choose 1 or 2 channels");
             // FFmpeg's roq_dpcm encoder rejects every sample rate except 22050 Hz.
-            return (22050, audioChannels);
+            return (22050, audioChannels, audioKbps);
         }
 
         // Everything else is snapped instead of rejected: an unsupported rate is
         // a value the encoder cannot honour, not a decision to refuse the run.
-        // (dialup98 used to ask ac3 for 16 kHz and got a zero-byte file.)
-        return AudioCatalog.Effective(audioEncoder, audioRate, audioChannels);
+        // (dialup98 used to ask ac3 for 16 kHz and got a zero-byte file.) The
+        // bitrate is clamped the same way -- mp2 at 44.1 kHz starts at 32 kbps
+        // and wmav2 at 24 -- and the container is passed along because the
+        // muxer can be the stricter side (FLV takes 11025/22050/44100/48000 for
+        // MP3, MP4 refuses MP3 below 16 kHz).
+        return AudioCatalog.Effective(
+            audioEncoder, audioRate, audioChannels, audioKbps, encoder.FormatName);
     }
 
     /// <summary>

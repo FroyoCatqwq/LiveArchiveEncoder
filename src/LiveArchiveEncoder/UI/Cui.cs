@@ -382,8 +382,8 @@ public static class Cui
                 c.AudioEncoder = null;
             }
             c.AudioEncoder = EncoderMath.ChooseAudioEncoder(effective.FormatName, audioAvailable);
-            (c.AudioRate, c.AudioChannels) = AudioCatalog.Effective(
-                c.AudioEncoder, c.AudioRate, c.AudioChannels);
+            (c.AudioRate, c.AudioChannels, c.AudioKbps) = AudioCatalog.Effective(
+                c.AudioEncoder, c.AudioRate, c.AudioChannels, c.AudioKbps, effective.FormatName);
 
             if (effective.Name == "amv")
             {
@@ -512,10 +512,14 @@ public static class Cui
 
         int? rateBefore = c.AudioRate;
         int channelsBefore = c.AudioChannels;
+        int kbpsBefore = c.AudioKbps;
         c.AudioEncoder = pick;
-        (c.AudioRate, c.AudioChannels) = AudioCatalog.Effective(pick, c.AudioRate, c.AudioChannels);
+        (c.AudioRate, c.AudioChannels, c.AudioKbps) = AudioCatalog.Effective(
+            pick, c.AudioRate, c.AudioChannels, c.AudioKbps, c.Encoder?.FormatName);
         if (c.AudioChannels != channelsBefore)
             Console.WriteLine(L.T("audio.channelsadjusted", channelsBefore, c.AudioChannels));
+        if (c.AudioKbps != kbpsBefore)
+            Console.WriteLine(L.T("audio.kbpsadjusted", kbpsBefore, c.AudioKbps));
         if (c.AudioRate != rateBefore)
             Console.WriteLine(L.T("audio.rateadjusted",
                 rateBefore?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto"),
@@ -689,7 +693,17 @@ public static class Cui
                         break;
                     case "15": c.DeintMarkedOnly = !c.DeintMarkedOnly; break;
                     case "16":
+                        // Bitrates are clamped like rates and channels: mp2 at
+                        // 44.1 kHz starts at 32 kbps, wmav2 at 24, and libvorbis
+                        // tops out at 224 -- values FFmpeg would refuse mid-run.
                         c.AudioKbps = ReadInt(L.T("param.prompt.audiokbps", c.AudioKbps), c.AudioKbps);
+                        int kbpsAdjusted = AudioCatalog.NearestKbps(
+                            c.AudioEncoder, c.AudioKbps, c.AudioRate);
+                        if (kbpsAdjusted != c.AudioKbps)
+                        {
+                            Console.WriteLine(L.T("audio.kbpsadjusted", c.AudioKbps, kbpsAdjusted));
+                            c.AudioKbps = kbpsAdjusted;
+                        }
                         break;
                     // Audio numbers are validated against the codec, not just
                     // for being positive: ac3 aborts on anything but 32/44.1/48
@@ -708,7 +722,11 @@ public static class Cui
                             c.AudioRate?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto")));
                         int? requested = rateRaw.Length > 0
                             ? int.Parse(rateRaw, CultureInfo.InvariantCulture) : null;
-                        int? snapped = AudioCatalog.NearestRate(c.AudioEncoder, requested);
+                        // The container is the stricter side for some codecs
+                        // (FLV takes 11025/22050/44100/48000 for MP3), so it has
+                        // to be part of the snap.
+                        int? snapped = AudioCatalog.NearestRate(
+                            c.AudioEncoder, requested, c.Encoder?.FormatName);
                         if (snapped != requested)
                         {
                             Console.WriteLine(L.T("audio.rateadjusted",
@@ -741,9 +759,11 @@ public static class Cui
                             break;
                         }
                         c.AudioEncoder = audioRaw;
-                        // The new codec may not accept the old numbers.
-                        (c.AudioRate, c.AudioChannels) = AudioCatalog.Effective(
-                            audioRaw, c.AudioRate, c.AudioChannels);
+                        // The new codec may not accept the old numbers: the rate
+                        // snaps, and the bitrate is clamped into the band the
+                        // snapped rate allows.
+                        (c.AudioRate, c.AudioChannels, c.AudioKbps) = AudioCatalog.Effective(
+                            audioRaw, c.AudioRate, c.AudioChannels, c.AudioKbps, c.Encoder?.FormatName);
                         Console.WriteLine(L.T("audio.set", audioRaw, AudioCatalog.DescribeRates(audioRaw)));
                         break;
                     case "21" when enc == "libx264":
@@ -894,15 +914,18 @@ public static class Cui
         IReadOnlyList<(string Ext, string Format)> after = EncoderMath.AllowedContainers(resolved);
         c.Container = after[0].Format == resolved.FormatName ? null : resolved.FormatName;
 
-        // A different muxer means a different set of audio codecs.
+        // A different muxer means a different set of audio codecs, and a
+        // different set of sample rates for the ones that stay: FLV only takes
+        // 11025/22050/44100/48000 for MP3, so switching containers re-snaps
+        // the rate (and the bitrate, whose band depends on the rate).
         if (c.AudioEncoder is { Length: > 0 } current
             && !AudioCatalog.SupportsContainer(current, resolved.FormatName))
         {
             Console.WriteLine(L.T("audio.replaced", current, resolved.FormatName));
             c.AudioEncoder = null;
         }
-        (c.AudioRate, c.AudioChannels) = AudioCatalog.Effective(
-            c.AudioEncoder, c.AudioRate, c.AudioChannels);
+        (c.AudioRate, c.AudioChannels, c.AudioKbps) = AudioCatalog.Effective(
+            c.AudioEncoder, c.AudioRate, c.AudioChannels, c.AudioKbps, resolved.FormatName);
 
         if (c.OutputIsAuto && c.InputPath is not null)
             c.OutputPath = DefaultOutput(c.InputPath, resolved);

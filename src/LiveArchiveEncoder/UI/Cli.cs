@@ -154,10 +154,15 @@ public static class Cli
 
         // An explicit --audio-rate is validated; an era preset's rate is a
         // suggestion and gets snapped, because a preset is written for a period
-        // rather than for the codec the container happens to force.
+        // rather than for the codec the container happens to force. The same
+        // split applies to the bitrate: mp2 refuses 16 kbps at 44.1 kHz and
+        // wmav2 refuses anything under 24, so a preset value is clamped into
+        // the band its (already snapped) rate allows, while an explicit
+        // --audio-kbps is reported as the error it is.
         int? audioRate = args.AudioRate ?? era?.AudioRate;
         bool audioRateExplicit = args.AudioRate is not null;
         int audioChannels = era?.AudioChannels ?? args.AudioChannels;
+        int audioKbps = era?.AudioKbps ?? args.AudioKbps;
         if (encoder.Name == "amv")
         {
             if (audioAvailable.Contains("adpcm_ima_amv")) audioEncoder = "adpcm_ima_amv";
@@ -179,11 +184,11 @@ public static class Cli
             }
         }
 
-        if (!audioRateExplicit) audioRate = AudioCatalog.NearestRate(audioEncoder, audioRate);
+        if (!audioRateExplicit) audioRate = AudioCatalog.NearestRate(audioEncoder, audioRate, encoder.FormatName);
         audioChannels = AudioCatalog.ClampChannels(audioEncoder, audioChannels);
+        if (era is not null) audioKbps = AudioCatalog.NearestKbps(audioEncoder, audioKbps, audioRate);
         string? audioError = AudioCatalog.Validate(
-            audioEncoder, encoder.FormatName, audioRate, audioChannels,
-            era?.AudioKbps ?? args.AudioKbps);
+            audioEncoder, encoder.FormatName, audioRate, audioChannels, audioKbps);
         if (audioError is not null)
         {
             Console.Error.WriteLine($"ERROR: {audioError}");
@@ -221,7 +226,7 @@ public static class Cli
                 Qv = args.Qv ?? EncoderMath.DefaultQuality(encoder.Name),
                 Threads = args.Threads,
                 BufferFrames = args.BufferFrames,
-                AudioKbps = era?.AudioKbps ?? args.AudioKbps,
+                AudioKbps = audioKbps,
                 AudioChannels = audioChannels,
                 AudioRate = audioRate,
                 Container = args.Container,

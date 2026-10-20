@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.8.1 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.8.2 (.NET 10 / .NET 11)",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -117,6 +117,7 @@ public static class L
         ["audio.set"] = "Audio encoder: {0} (sample rates: {1}).",
         ["audio.rateadjusted"] = "Sample rate {0} is not supported; using {1}.",
         ["audio.channelsadjusted"] = "{0} channels is not supported; using {1}.",
+        ["audio.kbpsadjusted"] = "{0} kbps is outside what this encoder takes at this rate; using {1} kbps.",
         ["audio.replaced"] = "'{0}' does not fit the new container '{1}'; picking another.",
         ["encoder.rescanok"] = "Rescan complete: {0} legacy video encoders detected.",
 
@@ -437,7 +438,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.8.1 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.8.2 (.NET 10 / .NET 11)",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 
@@ -534,6 +535,7 @@ public static class L
         ["audio.set"] = "音频编码器：{0}（采样率：{1}）。",
         ["audio.rateadjusted"] = "采样率 {0} 不受支持，已改用 {1}。",
         ["audio.channelsadjusted"] = "{0} 声道不受支持，已改用 {1}。",
+        ["audio.kbpsadjusted"] = "{0} kbps 超出该编码器在当前采样率下的范围，已改用 {1} kbps。",
         ["audio.replaced"] = "“{0}”不适用于新容器“{1}”，已重新选择。",
         ["encoder.rescanok"] = "重新扫描完成：检测到 {0} 个复古视频编码器。",
 
