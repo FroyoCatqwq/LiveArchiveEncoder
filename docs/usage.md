@@ -1766,9 +1766,11 @@ pytest  155 项（Windows 实测 153 通过 + 2 跳过）：
   ab_duration        2（mpeg1video / wmv2 各 4 变体 × 4 runs 的中位数对比）
 ```
 
-Linux 两个数字对不上 Windows：单测是 **380 通过 + 1 跳过**（`PathMeansSystemFfmpeg`
-需要 PATH 上的系统 FFmpeg），cui_smoke 则多一条（非 Windows 上额外断言 `gyan`
-不出现在清单里）。e2e 用例数三平台一致，都是 153 通过 + 2 跳过。
+Linux 的数字和 Windows 差一点：单测总数 **380（379 通过 + 1 跳过）**——跳过的是
+`PathMeansSystemFfmpeg`（需要 PATH 上的系统 FFmpeg），而总数少的那一条是映射网络
+驱动器的用例（Windows-only）。ci1（Ubuntu 26.10）与 ci2（Fedora 44）都是这个数字，
+两个 TFM 也一样。e2e 用例数三平台一致，都是 153 通过 + 2 跳过；Linux 上 phase 2
+只有 2 个 worker（`os.process_cpu_count` 决定的，VM 核少）。
 
 MPEG-PS 那两条（mpeg1video）在 Linux 上时长差得比 Windows 大——实测 0.167 s，正好
 是 23.976 fps 下的 4 帧，而**帧数两边都是 120**。那是容器按字节到达时刻打戳的老
