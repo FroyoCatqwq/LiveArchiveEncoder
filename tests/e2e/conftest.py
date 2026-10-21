@@ -1,8 +1,14 @@
 """Fixtures for the LiveArchiveEncoder end-to-end suite.
 
-The suites are sequential on purpose: compare_matrix and ab_duration measure
-wall-clock pacing, so a busy machine (or a parallel worker) changes what they
-see. Do not add -n auto / pytest-xdist here.
+Two groups of modules must not share the machine (see pytest.ini for the full
+explanation): the ones marked ``timing`` measure wall-clock pacing, and the
+``shared_config`` one reads and writes the real settings file that every encode
+also writes. Everything else is free to run in parallel.
+
+``tools/e2e.py`` is the sanctioned way to get that split (exclusive phase first,
+then the rest under xdist). The guard below refuses a blanket ``pytest -n`` so
+an accidental full-suite xdist run fails loudly instead of producing flaky
+timing numbers.
 """
 
 from __future__ import annotations
@@ -13,6 +19,18 @@ from pathlib import Path
 import pytest
 
 import harness
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    workers = getattr(config.option, "numprocesses", None)
+    if not workers:
+        return
+    marks = (config.option.markexpr or "").replace(" ", "")
+    if "timing" in marks and "shared_config" in marks:
+        return
+    raise pytest.UsageError(
+        "timing / shared_config modules must run alone: use tools/e2e.py, or "
+        '-m "not (timing or shared_config)" when passing -n')
 
 
 @pytest.fixture(scope="session")

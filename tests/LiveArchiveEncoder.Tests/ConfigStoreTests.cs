@@ -160,4 +160,66 @@ public sealed class ConfigStoreTests
 
         await Assert.That(ConfigStore.Load(_file).SavedAt).IsNotNull();
     }
+
+    /// <summary>
+    /// v7.9.1: the subtitle request survives a round trip whole -- the file
+    /// list is a list (a copy, not a reference to the live one), and an
+    /// embedded pick stays an index.
+    /// </summary>
+    [Test]
+    public async Task SubtitleSettingsSurviveARoundTrip()
+    {
+        var c = new Config
+        {
+            Subtitles = new SubtitleConfig
+            {
+                Mode = "copy",
+                Files = ["a.srt", "b.ass"],
+                Stream = 2,
+                Codec = "ass",
+            },
+        };
+
+        await Assert.That(ConfigStore.Save(ConfigStore.Capture(c), _file)).IsTrue();
+
+        var restored = new Config();
+        ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
+
+        await Assert.That(restored.Subtitles.Mode).IsEqualTo("copy");
+        await Assert.That(restored.Subtitles.Files).IsEquivalentTo(["a.srt", "b.ass"]);
+        await Assert.That(restored.Subtitles.Stream).IsEqualTo(2);
+        await Assert.That(restored.Subtitles.Codec).IsEqualTo("ass");
+        await Assert.That(restored.Subtitles.Active).IsTrue();
+    }
+
+    /// <summary>An absent key keeps the v7.9.0 behaviour: burn, nothing picked.</summary>
+    [Test]
+    public async Task SubtitleSettingsDefaultToInactiveBurn()
+    {
+        File.WriteAllText(_file, """{"Version":4,"Language":"en"}""");
+
+        var restored = new Config();
+        ConfigStore.Apply(ConfigStore.Load(_file), restored, []);
+
+        await Assert.That(restored.Subtitles.Mode).IsEqualTo("burn");
+        await Assert.That(restored.Subtitles.Files).IsEmpty();
+        await Assert.That(restored.Subtitles.Stream).IsNull();
+        await Assert.That(restored.Subtitles.Active).IsFalse();
+    }
+
+    /// <summary>
+    /// The same rule the encoder enforces: a mode of "off" is inactive even
+    /// with a pick behind it, and a pick with no mode is inactive too.
+    /// </summary>
+    [Test]
+    [Arguments("burn", null, false)]
+    [Arguments("burn", 3, true)]
+    [Arguments("copy", 3, true)]
+    [Arguments("off", 3, false)]
+    public async Task SubtitleActiveFollowsModeAndPick(string mode, int? stream, bool expected)
+    {
+        var c = new Config { Subtitles = new SubtitleConfig { Mode = mode, Stream = stream } };
+
+        await Assert.That(c.Subtitles.Active).IsEqualTo(expected);
+    }
 }

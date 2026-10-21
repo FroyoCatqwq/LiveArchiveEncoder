@@ -44,6 +44,20 @@ public static class Program
             return 0;
         }
 
+        // v7.9.1: settings file -> command line. Reads one JSON file and prints
+        // the equivalent command line; no FFmpeg, no encode, so it works on a
+        // box that has none installed.
+        if (cli.EmitArgsFile is { Length: > 0 } emitFile)
+        {
+            if (!File.Exists(emitFile))
+            {
+                Console.Error.WriteLine($"ERROR: settings file not found: {emitFile}");
+                return 2;
+            }
+            Console.Out.WriteLine(CliArgs.Join(CliArgs.FromUserConfig(ConfigStore.Load(emitFile))));
+            return 0;
+        }
+
         // Toolchain management never needs a working FFmpeg, so it runs before
         // discovery -- otherwise a missing ffmpeg would make "install one"
         // impossible, which is exactly the situation it exists to fix.
@@ -176,6 +190,15 @@ public static class Program
                 Console.Error.WriteLine($"ERROR: {exc.Message}");
                 return 1;
             }
+        }
+
+        // v7.9.1: the conversion exits resolve a run first, which needs an
+        // input; falling into the interactive UI instead would silently do
+        // nothing useful, so they say what is missing.
+        if (string.IsNullOrEmpty(cli.Input) && (cli.SaveConfig is { Length: > 0 } || cli.EmitArgs))
+        {
+            Console.Error.WriteLine("ERROR: --save-config / --emit-args require an input and an output");
+            return 2;
         }
 
         if (string.IsNullOrEmpty(cli.Input) && !cli.NoCui)

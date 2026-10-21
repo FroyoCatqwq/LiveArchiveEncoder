@@ -2,3 +2,6 @@
 # Nothing else: the suite drives the product under test plus ffprobe/ffmpeg
 # from PATH.
 pytest==9.1.1
+# Only used by tools/e2e.py, and only for the non-exclusive phase: the modules
+# that measure wall-clock pacing are filtered out before -n is applied.
+pytest-xdist==3.8.0

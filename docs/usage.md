@@ -216,6 +216,8 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--quiet` | 关 | 不打印进度横幅和结果摘要 |
 | `--no-cui` | 关 | 无输入参数时不进菜单，直接报错退出（给脚本用） |
 | `--audio-mode` | `inline` | `inline` / `separate` / `auto`，见第 7 节 |
+| `--emit-args` / `--emit-args=FILE` | — | **v7.9.1**：把设置打印成等价命令行后退出；带 `=FILE` 时从一个配置文件读设置（见 §7.6） |
+| `--save-config` | — | **v7.9.1**：把这次运行的最终设置写成配置文件，不启动编码（见 §7.6） |
 | `--help` / `-h` | — | 打印用法后退出（退出码 0） |
 | `--cpu-info` | — | 打印运行时检测到的指令集（诊断用） |
 | `--parallel` | `1` | 把时间范围切成 N 段并行编码再拼接（见 7.5 节） |
@@ -259,12 +261,13 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
 12. FFmpeg toolchain  切换/下载/删除 FFmpeg 构建（见 §7.10）
 13. Playback after run 编码完成后用什么播放（见 §7.11）
 14. Era preset        时代预设（见 §7.12）
-15. Watermark         文字水印（见 §7.12）
-16. Recompress        二次压缩（见 §7.12）
+15. Recompress        二次压缩（见 §7.12）
+16. Streams           视频/音频流选择（见 §7.16）
+17. Subtitles         字幕：烧录 / 封装 / 关闭（见 §7.16）
  0. Exit
 ```
 
-6 – 16 改完立即写进配置文件，下一次打开就是这次的值。
+6 – 17 改完立即写进配置文件，下一次打开就是这次的值。
 
 **Turbo 已彻底移除**（v7.9）：菜单里没有，命令行 `--turbo` 直接报
 `unrecognized argument`（rc=2），配置文件里遗留的 `Turbo` 键被静默忽略
@@ -470,6 +473,10 @@ LiveArchiveEncoder src.mp4 out.avi --encoder mpeg4 --fps 15 \
 并行分片在交互式菜单里是主菜单第 11 项 `Parallel shards`，改完立即写进配置
 （**默认关闭**）。命令行用 `--parallel N`（分片上限 8）。
 
+> **v7.9.1：远程源强制单遍。** 输入在 UNC 共享、`smb://`、Linux CIFS 挂载或
+> Windows 映射网络驱动器上时，`--parallel N`（N>1）会被忽略并打印原因——多个分片
+> 各自 seek 同一个网络文件，会把共享吞吐打满、让每段都掉帧。判定与提示见 §7.8。
+
 ### 前提：默认慢是**故意的**，不是性能问题
 
 v7 按 1/fps 的墙钟节奏输出，用来模拟直播录档。实测 20 秒素材：
@@ -561,6 +568,37 @@ LiveArchiveEncoder.exe src.mp4 out.roq --encoder roqvideo --parallel 4
 菜单里就是上一次 CLI 的设置。语言是个例外：没给 `--lang` 时会保留配置里已存的语言，
 不会因为跑了一次 CLI 就把中文界面重置成英文。
 
+### 配置文件 ↔ 命令行互转（v7.9.1）
+
+菜单里调好的一套设置想变成脚本，或者反过来把别人给的命令行存成菜单可恢复的配置，
+用这两个旗标，都**只做转换、不编码**：
+
+```powershell
+# 菜单设置 -> 命令行：把这个文件的设置打印成一条等价命令行
+LiveArchiveEncoder.exe --emit-args=my.json
+
+# 这次运行的命令行 -> 配置文件（写完整形状，可被菜单恢复）
+LiveArchiveEncoder.exe src.mkv out.avi --encoder mpeg4 --fps 15 --save-config my.json
+```
+
+| 写法 | 含义 |
+| --- | --- |
+| `--emit-args` | 打印**本次运行解析出来的**设置（含配置默认值与 `--era` 展开结果），然后退出 |
+| `--emit-args=FILE` | 从 `FILE` 读设置并打印等价命令行；不需要输入/输出参数，也不需要 FFmpeg |
+| `--save-config FILE` | 把本次运行的最终设置写成配置，**不启动编码** |
+
+细节：
+
+- `--emit-args` 故意**不吃下一个位置参数**：`--emit-args in.rm out.avi` 里的路径
+  仍然是输入/输出。要指定设置文件只能写成 `--emit-args=FILE` 这种带等号的形式。
+- 打印出来的整行可以直接回喂：`--emit-args=my.json` 的输出里已经带上输入/输出
+  路径，`$(...)` / `& ( ... )` 的形式即可复现同一次运行。
+- 只发射**与默认值不同**的项。派生值不发射：`--recover` 默认是 150，跟它一样的值
+  不出现在输出里；帧率阶梯只发射**你真正带阈值敲进去的档位**，基础帧率由 `--fps`
+  承载——否则 `13,8,5,3` 会被误当成用户自定义阶梯来回震荡。
+- 退出码与普通运行一致：`--save-config` 写不进去是 `2`，`--emit-args` 的文件不存在
+  也是 `2`。
+
 ### 中英文
 
 ```powershell
@@ -572,8 +610,9 @@ CUI 主菜单第 10 项 `Language / 界面语言` 可直接切换，并写进配
 接受 `en` / `zh` / `zh-CN` / `中文` 等写法。优先级：**命令行 `--lang` > 配置里存的
 语言 > 默认英文**。
 
-已翻译的范围：主菜单、参数页 26 项、编码器选择页、`Show configuration`、编码结果
-摘要、进度横幅里的标签（PixFmt / Output size / Time range 之类）、SMB 提示。
+已翻译的范围：主菜单、参数页 31 项、编码器选择页、`Show configuration`、编码结果
+摘要、进度横幅里的标签（PixFmt / Output size / Time range 之类）、SMB 提示、
+字幕菜单（v7.9.1）。
 
 注意：**FFmpeg 自身的报错和 `ERROR:` 前缀不翻译**。那些信息是要拿去搜索的，也是
 和 Python 版对拍时用来比较的，翻译了就搜不到了、也不好比对了。
@@ -646,6 +685,42 @@ LiveArchiveEncoder /mnt/lae/record.mp4 /mnt/lae/out.rm --encoder rv20
 > `Option reconnect not found. Error opening input file`。结果是**源放在 SMB 共享
 > 上会解出 0 帧**（fresh=0、0 字节、码率显示 48 kbps），而报错还被缓冲吃掉了。
 > 现在读取、写入、ffprobe 三处统一只加 `-rw_timeout`。
+
+### 映射网络驱动器与并行分片（v7.9.1）
+
+Windows 上把共享映射成盘符（`net use Z: \\nas\share`、资源管理器"映射网络驱动器"，
+Tailscale / SMB 网关也常常这么挂在 `Z:` 或 `Y:`）时，路径看起来是普通的
+`Z:\record.mp4`，`Path.IsPathRooted` 也说是本地盘。v7.9.1 起会额外问一句
+`DriveInfo.DriveType`，`Network` 就按远程处理：
+
+```
+Input          : Z:\record.mp4
+SMB share      : Z:\ -- mapped network drive (remote path)
+```
+
+同时打印一条稳定性提示——这句不是客套话：
+
+> **网络连接应尽量稳定可靠、速率稳定。**
+
+原因在于这是个**实时采集**工具：它按墙钟节奏从源取帧、按当前码率反馈调档。线路一
+抖，取帧就落后于墙钟，自适应控制器会以为"码率太高"而连续降档；恢复之后又要花时间
+爬回来。结果是产物中间出现一段画质塌陷，而编码本身"成功"了。
+
+所以远程源（UNC / `smb://` / Linux CIFS 挂载 / 映射盘）下**并行分片强制为单遍**：
+
+| 位置 | 行为 |
+| --- | --- |
+| CLI | 打印提示；`--parallel N`（N>1）被忽略并打印 `parallel.networkoff`，实际用 1 |
+| CUI 启动恢复 | 远程输入的配置里 `Parallel` 直接按 1 恢复 |
+| CUI 菜单 11 | 远程输入下拒绝 >1，提示原因 |
+| `ParallelEncoder` | 硬性回退：`BlockReason` 里再挡一次，不只靠 UI 层拦 |
+
+分片本身没错，错的是**分段读同一个网络文件**：多路 seek + 多路解码会把共享的吞吐
+打满，而每段都以为自己是唯一的读者。本地盘没有这个问题（`--parallel` 在本地照常）。
+
+> 已知遗留：低带宽下仍有极少数场景会卡住（实测样本
+> `REZero-Season2-OP-SingleTest-Subs.flv`，v7.9.1 未能复现）。真遇到时先用
+> `--audio-mode inline`、关掉字幕烧录缩小范围，并保留当时的源与参数。
 
 ### HTTP/HTTPS 直链（v7.9，初步支持）
 
@@ -882,27 +957,31 @@ LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --play external --player "C
 
 ---
 
-## 7.12 后处理：水印与二次压缩（v7.6）
+## 7.12 后处理：二次压缩（v7.6；水印于 v7.9.1 移除）
 
-直播录制之后、上传网站之前，网站还会做两件事：**打上自己的 logo**，然后**转一遍
-码**。v7.6 把这两步做成独立的阶段，串在 live 编码之后：
+直播录制之后、上传网站之前，网站还会做一件事：**转一遍码**。v7.6 把这一步做成
+独立阶段，串在 live 编码之后：
 
 ```
-live 编码 → (14) 时代预设   ← 可选，一层把两层参数都填好
-         → (15) 水印        ← 独立阶段，可单独生效
-         → (16) 二次压缩    ← 独立阶段，默认关闭
+live 编码 → (14) 时代预设   ← 可选，把两层参数都填好
+         → (15) 二次压缩    ← 独立阶段，默认关闭
          → 成品
 ```
+
+> **v7.9.1 变更**：静态文字水印阶段已移除（`--watermark*` 六个旗标、菜单里的
+> 水印项、配置里的 `Watermark` 段全部没有了，命令行传旧旗标会直接报
+> `unrecognized argument`）。代码归档在 `archive/retired/RetiredWatermark.cs`，
+> 日后想作为独立项目捡回来见该文件头部说明。字幕烧录（§7.16）走的是同一条
+> drawtext 技术路线，需要"往画面上印字"的用它。
 
 产物命名（都在 live 产物旁边）：
 
 | 阶段 | 产物 | 说明 |
 | --- | --- | --- |
 | live | `clip_live.rm` | 第一次编码，永远保留 |
-| 水印 | `clip_live_wm.mp4` | drawtext 重编码；不开二次压缩时它就是最终产物 |
-| 二次压缩 | `clip_live_web.mp4` | 模拟网站转码；`_wm` 中间文件默认用完即删 |
+| 二次压缩 | `clip_live_web.mp4` | 模拟网站转码；即最终产物 |
 
-两个阶段**默认都关闭**。
+二次压缩**默认关闭**。
 
 ### 时代预设（菜单 14 / `--era ID`）
 
@@ -925,7 +1004,7 @@ LiveArchiveEncoder.exe src.mp4 out.flv --era flv07 --recompress
 
 `--era` 不碰你显式给的 `--encoder` / `--width` / `--limit`：预设是兜底，不是覆盖。
 
-### 二次压缩（菜单 16）
+### 二次压缩（菜单 15）
 
 你只写 FFmpeg 命令的**中间参数段**，`-i <live产物>` 和输出路径由程序生成：
 
@@ -950,32 +1029,12 @@ LiveArchiveEncoder.exe src.mp4 out.rm --recompress --recompress-args ^
 其余随意——`-filter_complex`、多 `-map`、`-ss` 都是你的事。
 
 相关选项：`--recompress`（启用）、`--recompress-args "…"`（设参数并启用）、
-`--recompress-container EXT`（默认 mp4）、`--recompress-keep`（保留 `_wm` 中间文件）、
-`--no-recompress`。
+`--recompress-container EXT`（默认 mp4）、`--no-recompress`。
 
-### 水印（菜单 15）
+### 字体目录（字幕烧录用）
 
-静态文字水印，在 live 之后、二次压缩之前叠加——**logo 必须和画面一起被转码**
-才像当年的样子，反过来就会得到一个"现代清晰的 logo 糊在废片上"的怪东西。
-
-```powershell
-# 文字 + 位置，字号颜色留空 = 按画面尺寸自适应
-LiveArchiveEncoder.exe src.mp4 out.rm --watermark "优酷网" --watermark-position top-right
-
-# 全套
-LiveArchiveEncoder.exe src.mp4 out.rm --watermark "土豆网" ^
-  --watermark-position bottom-left --watermark-size 16 --watermark-color yellow ^
-  --watermark-font "C:\Windows\Fonts\msyh.ttc" --recompress --recompress-keep
-```
-
-- 位置：`top-left` / `top-right`（默认）/ `bottom-left` / `bottom-right` / `center`。
-  0 几年网站会在两个上角之间来回切换，那是动画——留给 v8。
-- 字号 `0`（默认）= 画面高度的 1/15、下限 8px：160x120 的小画面上得到 8px 的
-  年代感水印，而不是盖住六分之一画面的现代大字。
-
-### 字体目录
-
-水印字体**不用系统字体**，而是程序自己的 `fonts` 目录——和受管理 FFmpeg 同级：
+字幕烧录**不用系统字体**，而是程序自己的 `fonts` 目录——和受管理 FFmpeg 同级，
+libass 通过 `fontsdir=` 在那里找 ASS 文件点名的字体：
 
 ```
 Windows : %LOCALAPPDATA%\LiveArchiveEncoder\fonts\
@@ -985,15 +1044,12 @@ Linux   : ~/.local/share/LiveArchiveEncoder/fonts/
 为什么不查系统字体：
 
 - 最小化安装的 Linux（实测 Ubuntu 26.10 云镜像）**根本没有 `/usr/share/fonts/`**，
-  `drawtext` 直接失败，报错看起来像编码器的 bug；
-- 更糟的是，随手挑到一个拉丁字体后**编码会成功、产物却是空的方框**——错了还不
-  报错，这是最难排查的一类问题（Fedora 上就把 Liberation Sans 挑中了）。
+  `subtitles` 过滤器直接失败，报错看起来像编码器的 bug；
+- 更糟的是，一个点名"微软雅黑"的 ASS 文件在只找到拉丁字体时**编码会成功、
+  字幕却是空的方框**——错了还不报错，这是最难排查的一类问题。
 
-挑选顺序：**先 CJK**（`msyh` / `simhei` / `Noto*CJK` / `wqy` / `arphic` …），
-再常见无衬线（dejavu / liberation / notosans …），最后任意。
-
-- **Windows**：目录为空时，首次使用会把系统的微软雅黑 / 黑体 / 宋体复制一份
-  进去，之后一直用这份拷贝。
+- **Windows**：目录为空时可以把系统的微软雅黑 / 黑体 / 宋体复制一份进去，
+  之后一直用这份拷贝。
 - **Linux**：需要你自己放一个（放进去即可，不用改任何设置）。最简单的是从
   Windows 拷 `msyh.ttc` 或 `simhei.ttf` 过来；也可以从发行版字体包取：
   ```bash
@@ -1006,17 +1062,15 @@ Linux   : ~/.local/share/LiveArchiveEncoder/fonts/
   cp /usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc \
      ~/.local/share/LiveArchiveEncoder/fonts/
   ```
-- 想用别的字体：`--watermark-font <路径>`（或菜单 15 的第 5 项）、环境变量
-  `LAE_WATERMARK_FONT`。指定的文件不存在时会明确报错，不会静默跳过。
-- 水印阶段必然重编码，输出统一为 MP4/H.264（crf 20）：中间产物要能被后续阶段
-  读取，没必要在这个阶段复刻 roq/amv 那些尺寸限制。
+- 目录位置可以用环境变量 `LAE_FONT_DIR` 改（CI 或无用户配置目录的环境用）。
+  v7.9.1 之前写作 `LAE_WATERMARK_FONT_DIR`，旧名字仍然有效。
 
 ### CLI 与配置的关系
 
-**CLI 不读取配置里的水印/二次压缩状态**——脚本必须可预期，`--watermark` 不给
-就没有水印，哪怕昨晚在菜单里开过。参数段和文字本身会随 `--era` 预设填好；
-交互菜单（14/15/16）里设置的会保存，菜单下次打开还在。
-`--era` 不会替你打开二次压缩，要配 `--recompress`。
+**CLI 不读取配置里的二次压缩状态**——脚本必须可预期，`--recompress` 不给
+就没有二次压缩，哪怕昨晚在菜单里开过。参数段会随 `--era` 预设填好；交互菜单
+（14/15）里设置的会保存，菜单下次打开还在。`--era` 不会替你打开二次压缩，
+要配 `--recompress`。
 
 ---
 
@@ -1167,7 +1221,7 @@ LiveArchiveEncoder.exe dvd.vob out.avi --encoder mpeg4 --video-stream 2 --audio-
   被拒绝，并附上完整的流清单——**不会**静默编错流。
 - 不给编号就是"各类型第一条"，与 v7.8 及之前完全一致。
 - 选中的视频流的像素格式会驱动传输格式选择（第一条流的元数据不会被误用）。
-- CUI 主菜单第 17 项同样能选：先打印清单再逐个询问，留空＝第一条。
+- CUI 主菜单第 16 项 `Streams` 同样能选：先打印清单再逐个询问，留空＝第一条。
 - 选择会写进配置文件，供下次交互会话沿用；CLI 不读取它作为默认。
 
 ### 字幕：`--subtitle` / `--subtitle-stream` + `--subtitle-mode`
@@ -1199,6 +1253,30 @@ LiveArchiveEncoder.exe src.mp4 out.mkv --encoder libx264 --container mkv ^
 - 分离音频通路（`--audio-mode separate`）合并时会丢字幕轨，所以 copy 模式自动
   改走单进程并打 NOTE；burn 不受影响。
 - 缺文件、两处来源同时给、编号越界等都在编码开始前报错（CLI 缺文件是 rc=2）。
+
+### CUI 里的字幕（v7.9.1，菜单 17）
+
+v7.9.0 的字幕只有命令行能用，菜单里看不见——v7.9.1 补上了。主菜单第 17 项
+`Subtitles` 进去是四行：
+
+```
+ 1. Mode          burn / copy / off（循环切换）
+ 2. Embedded     从源里列字幕轨让你选（先 ffprobe，再逐个问）
+ 3. Files        外挂文件，多个用 ; 分隔；输入 - 清空
+ 4. Codec        copy 模式用哪个字幕编码器（留空＝按容器自动）
+ 0. Back
+```
+
+行为约定：
+
+- **文件与内嵌轨互斥**：选了内嵌轨就清掉外挂列表，反之亦然。两个同时给在
+  CLI 里是错误，在菜单里不给你这个机会。
+- 模式是 `off` 时主菜单摘要明确写"关闭"——不会出现"看着像开了、其实没烧"。
+- 外挂文件当场校验：扩展名必须是 `.ass/.ssa/.srt/.vtt`，文件必须存在，
+  否则不保存并提示原因。
+- 内嵌流的选择走 ffprobe 的实际清单，编号不在清单里就不收。
+- 设置写进配置文件，下次打开菜单还在；CLI 仍然**不读**配置里的字幕状态
+  （和二次压缩一致的规则）。
 
 ---
 
@@ -1296,9 +1374,10 @@ Repeated slots     : 21
 | `ERROR: input not found` | 路径不对 | 注意路径含空格要加引号 |
 | 一堆 CUDA/cuvid 警告 | 机器没 NVIDIA 或驱动不匹配 | 默认已关闭硬件解码；若手动开了 `--hwaccel cuda`，改回 `--hwaccel off` |
 | 输出文件只有音轨 / 时长不对 | 老式 muxer 的坑（RoQ、RealMedia 都出现过） | 默认 `inline` 模式不会遇到；如果用 `--audio-mode separate`，工具内置了 3 帧预演 + 输出解码校验，会拦下并自动回退到单进程 |
-| watermark 报"找不到可用字体" | `fonts` 目录是空的 | 往 `%LOCALAPPDATA%\LiveArchiveEncoder\fonts\`（Linux `~/.local/share/LiveArchiveEncoder/fonts/`）放一个 .ttf/.ttc；Windows 首次使用会自动复制微软雅黑进去，Linux 需要自己放。见 §7.12 |
-| 水印能生成但**中文是方块** | 挑到的是没有中文字形的字体 | 放一个中文字体进 `fonts` 目录（msyh.ttc / simhei.ttf / Noto*CJK），或用 `--watermark-font` 直接指定 |
+| 字幕烧录后**中文是方块** | ASS 点名的字体不在 `fonts` 目录里，libass 挑了拉丁字体顶上 | 往 `%LOCALAPPDATA%\LiveArchiveEncoder\fonts\`（Linux `~/.local/share/LiveArchiveEncoder/fonts/`）放一个中文字体（msyh.ttc / simhei.ttf / Noto*CJK）；目录可用 `LAE_FONT_DIR` 改。见 §7.12 |
 | `recompress` 报 `'-i' is not allowed here` / `looks like an output file name` | 参数段里写了输入或输出 | 参数段只写中间部分，`-i` 和输出路径由程序生成；见 §7.12 |
+| `--parallel 4` 给了却"没生效" | 输入在网络驱动器上（UNC / `smb://` / 映射盘 / CIFS 挂载） | 这是故意回退成单遍：分片读同一个网络文件会让画质在中间塌一段。把源拷到本地再分片，或接受单遍；见 §7.8 |
+| 远程源录到一半**画质突然变糊** | 网络抖动，实时节拍落后 → 自适应控制器误判码率太高而连续降档 | 同上，这是实时工具对线路的诚实反应；换稳定链路或降到本地源 |
 
 ---
 
@@ -1362,23 +1441,23 @@ C# 版在 v7.3 之外多出来的东西：`--parallel`（分片提速，见 §7.
 从 v7.6 起，C# 版**不再承诺与 Python v6.3.3 的输出一致**——原有行为全部保留，
 新功能只在显式开启时生效，默认行为不变。
 
-1. **后处理管线**（§7.12）：live 编码之后接两个独立阶段——**文字水印**（drawtext，
-   可单独生效）和**二次压缩**（模拟 0 几年视频网站转码，你写 FFmpeg 参数段，程序
-   负责 `-i` 和输出）。两者默认关闭。产物命名：`clip_live.rm` →
-   `clip_live_wm.mp4` → `clip_live_web.mp4`。
+1. **后处理管线**（§7.12）：live 编码之后接一个独立阶段——**二次压缩**（模拟
+   0 几年视频网站转码，你写 FFmpeg 参数段，程序负责 `-i` 和输出）。默认关闭。
+   产物命名：`clip_live.rm` → `clip_live_web.mp4`。文字水印阶段在 v7.9.1 已移除
+   （见 §7.12 顶部说明）。
 2. **时代预设**（§7.12，`--era ID`）：五个年代一套一套的 live + 二次压缩参数，
    从 1997 年拨号时代的 RealVideo G2 到 2016 年的 720p H.264。数字有出处
    （RealSystem G2 官方手册、实测的土豆 FLV 文件、杂志里的网速报道），见
    [`docs/era-presets.md`](era-presets.md)。
 3. **安全设计**：二次压缩的参数段逐 token 校验，`-i`、`-o`、末尾裸路径直接拒绝
    ——这些写法会让 FFmpeg 覆盖你的源文件。校验发生在 live 编码**之前**。
-4. **CLI 语义不变**：`--watermark` / `--recompress` 不读取配置文件里的状态，
-   不给就没有；交互菜单里的设置会保存，菜单之间粘性保留。
-5. **字体目录**（§7.12）：水印字体放在程序自己的 `fonts` 目录（与受管理 FFmpeg
-   同级），Windows 和 Linux 都不查系统字体。Linux 实测发现：最小化安装没有
-   `/usr/share/fonts`，随手挑到的拉丁字体还会让中文水印变成方块而编码照报成功
-   ——两种都是"错了不报错"。Windows 首次使用会自动把微软雅黑/黑体/宋体复制进
-   目录；Linux 自己放一个即可。
+4. **CLI 语义不变**：`--recompress` 不读取配置文件里的状态，不给就没有；交互
+   菜单里的设置会保存，菜单之间粘性保留。
+5. **字体目录**（§7.12）：字幕烧录的字体放在程序自己的 `fonts` 目录（与受管理
+   FFmpeg 同级），Windows 和 Linux 都不查系统字体。Linux 实测发现：最小化安装
+   没有 `/usr/share/fonts`，点名微软雅黑的 ASS 在只找到拉丁字体时还会让中文
+   字幕变成方块而编码照报成功——两种都是"错了不报错"。目录位置可用
+   `LAE_FONT_DIR` 覆盖（旧名 `LAE_WATERMARK_FONT_DIR` 仍有效）。
 
 ### v7.7 新增
 
@@ -1478,7 +1557,8 @@ C# 版在 v7.3 之外多出来的东西：`--parallel`（分片提速，见 §7.
 
 1. **视频流 / 音频流选择（目标 1）**：`--video-stream N` / `--audio-stream N`
    直接用 ffprobe 打印的**绝对流编号**（`--list-streams` 先列出），编号不存在或
-   类型不符会在编码前被拒绝并列出全部流。CUI 主菜单新增第 17 项。VOB（DVD）
+   类型不符会在编码前被拒绝并列出全部流。CUI 主菜单新增一项（v7.9.0 里是第 17
+   项，v7.9.1 删掉水印后是第 16 项）。VOB（DVD）
    这类多音轨源终于可以点名要哪条音轨了。真实素材验证：179MB VOB 经 SMB 选
    `--video-stream 2 --audio-stream 3` 编 00:00–00:30 片段，PSNR/零交叉率双重
    证明选的确实是目标流。
@@ -1503,6 +1583,34 @@ C# 版在 v7.3 之外多出来的东西：`--parallel`（分片提速，见 §7.
 7. **顺手修的两个老 bug**：`ffmpeg -filters` 的 flags 列宽是 2 字符（旧正则要求
    3 → 所有未标记滤镜从未被检出）；ffprobe 源超时 30s 不够——179MB VOB 实测要
    2m15s，放宽到 300s 并把 `--list-streams` 的超时变成干净报错。
+
+### v7.9.1 变更
+
+1. **水印功能移除（目标 1）**：静态文字水印整段退役——`--watermark` /
+   `--watermark-position` / `--watermark-size` / `--watermark-color` /
+   `--watermark-font` / `--no-watermark` 六个旗标、CUI 的第 15 项、配置里的
+   `Watermark` 段、`_wm` 中间产物全部没有了。代码归档在
+   `archive/retired/RetiredWatermark.cs`（含恢复说明），drawtext 时代那套字体
+   挑选逻辑归档在 `RetiredFontPicking.cs`。**二次压缩保留**，`_web` 产物照旧。
+2. **CUI 补上字幕（目标 2）**：主菜单第 17 项 `Subtitles`，可以选模式
+   （burn / copy / off）、列内嵌字幕轨、指定外挂文件、换 copy 模式的编码器。
+   文件与内嵌流**互斥**（选一个就清掉另一个），模式 `off` 时明确提示"不会带字幕"。
+   以前只有 CLI 能用字幕，等于菜单用户没有这个功能。
+3. **网络驱动器（目标 3）**：映射盘（`DriveType == Network`）现在也算远程路径：
+   打印稳定性提示，并把并行分片强制成单遍（CLI / CUI 菜单 11 / 恢复配置三处
+   都拦，`ParallelEncoder.BlockReason` 再兜一次）。见 §7.8。
+4. **配置 ↔ 命令行互转（目标 4）**：`--emit-args[=FILE]` 把设置打印成一条等价
+   命令行，`--save-config FILE` 把这次运行的解析结果写成配置文件，两者都不编码。
+   见 §7.6。
+5. **彻底删掉 `publish/aot-avx2`（目标 5）**：产物目录、CI 步骤、文档里的
+   AVX2 产物说法一起清掉——指令集基线对 FFmpeg 子进程编码没有收益。
+6. **测试**：单测 381（水印 11 条转归档、增补 CliArgs / 映射盘 / 字幕配置项），
+   e2e 155（删 3 条水印用例，加 4 条配置转换，CUI 字幕菜单用例重写为三次独立
+   调用）。
+7. **e2e 提速（目标 7）**：新增 `tools/e2e.py`，把 155 条拆成"排他 25 条先独占
+   跑 + 其余 130 条交给 xdist"，Windows 32 核实测 **794 s → 492 s**。排他规则
+   用 marker 表达（`timing` / `shared_config`），`conftest.py` 会拒绝裸 `pytest -n`
+   以免时序断言变成偶发失败。见 §12。
 
 ---
 
@@ -1532,7 +1640,9 @@ DOTNET="$HOME/dot" dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release 
 不需要 FFmpeg、不需要网络、几秒跑完，覆盖：
 
 - `SmbTests` — 远程路径识别、**读写两侧都不得再吐出 `-stimeout` / `-reconnect*`**
-  （v7.3 / v7.5 的回归），写入侧只用 `-rw_timeout`、可写探测不留痕迹
+  （v7.3 / v7.5 的回归），写入侧只用 `-rw_timeout`、可写探测不留痕迹；
+  v7.9.1 起还覆盖**映射网络驱动器**（本地盘不得误判为远程、UNC/`smb://` 恒为远程）
+  与稳定性提示文案
 - `FfmpegCatalogTests` — 各来源的 id / 默认值 / 谁能自动下载 / 压缩包类型，
   **以及清单不会跨平台混列**（Linux 上不得出现 `gyan`）
 - `ToolchainTests` — 安装目录布局、**`path` 来源不许解析成受管理构建**、
@@ -1541,18 +1651,21 @@ DOTNET="$HOME/dot" dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release 
 - `PlayerTests` — 播放模式解析与描述，缺文件/缺播放器都是"报告"而不是"崩"
 - `CliParserTests` — `--ffmpeg-source` / `--ffmpeg-download`（裸用不吞下一个 flag）/
   `--ffmpeg-archive` / `--play` / `--proxy` 等新选项，以及老选项没被碰坏
+- `CliArgsTests` — **配置 → 命令行**发射器：只发射非默认项、派生值不进阶梯、
+  二次压缩参数按 shell 规则加引号、禁用的阶段不发射
 - `ConfigStoreTests` — JSON 往返、`"path"` 不被规范化掉、损坏文件回退、
-  分片数夹取
+  分片数夹取；v7.9.1 起还覆盖字幕设置（外挂文件 / 内嵌流 / 模式 / 编码器）
+  的往返与 `Active` 语义
 - `LocalizationTests` — **中英文词条必须一一对应**（见下）、CJK 显示宽度补齐
 - `PostArgsTests` — 二次压缩参数段的切分与校验：正常片段放行，`-i` / `-o` /
   末尾裸路径必须拒绝；引号内空格保留，**反斜杠不当转义符**
-- `WatermarkTests` — drawtext 表达式（字体路径转义、位置 `W-tw-10`）、字号按
-  画面自适应、五种位置各自的表达式
+- `FontResolverTests` — `fonts` 目录 / `LAE_FONT_DIR` 环境变量契约（水印移除后
+  只剩字幕烧录在用）
 - `RecompressTests` — 参数向量必须以输出收尾、坏片段不生成命令、失败只报错不抛
 - `EraPresetTests` — id 唯一、两层参数齐全、**预设自带的参数段能通过自家校验器**、
   时代在像素数与码率上单调递增
-- `PostProcessingConfigTests` — 水印/压缩设置往返持久化、**v1 配置文件仍能读出
-  且两个阶段默认关闭**
+- `PostProcessingConfigTests` — 二次压缩设置往返持久化、**v1 配置文件仍能读出
+  且阶段默认关闭**、水印段不复存在
 
 > 词条完整性这一条刚建好就抓到了真东西：`note.*` 和 `run.*` 共 13 个词条只有英文，
 > 中文界面下会漏回英文并把那一列的对齐顶歪。已补齐。
@@ -1571,12 +1684,49 @@ Microsoft.Testing.Platform` 段负责把 `dotnet test` 切到 MTP 模式。
 
 ```powershell
 # Windows
-pip install -r tests\e2e\requirements.txt          # pytest==9.1.1
-pytest                                               # 全部 123 个用例
+pip install -r tests\e2e\requirements.txt          # pytest==9.1.1 + pytest-xdist
+python tools\e2e.py                                 # 全部 155 个用例，分两阶段跑
+pytest                                               # 单进程串行，同上但慢一倍
 pytest tests\e2e\test_feature_sweep.py              # 只跑一个模块
 pytest tests\e2e\test_compare_matrix.py -k wmv2     # 只跑一条（替代旧 CM_ONLY）
 CS_EXE=publish\aot\LiveArchiveEncoder.exe pytest     # 切换被测 exe（验 AOT 产物）
 ```
+
+### 两阶段跑法（v7.9.1）
+
+整套 155 条里，绝大部分只是"这个选项能不能产出一个结构正确的文件"，彼此独立；
+但有 25 条不行，分两类，靠 marker 标出来：
+
+| marker | 谁 | 为什么不能并行 |
+| --- | --- | --- |
+| `timing` | `compare_matrix`（12）、`ab_duration`（2） | 断言的是自适应码率控制器**选了什么帧**。机器一忙，控制器选的帧就变——并行 worker 不是让它变慢，而是让它测不准 |
+| `shared_config` | `cui_smoke`（11） | 读写的是用户目录下真实的 `config.json`，而**每一次 CLI 运行都会在退出时写这个文件**，并行的 CLI 会插进它的两条断言中间 |
+
+`tools/e2e.py` 就按这个分组跑两阶段：先把排他模块单独跑完（这段时间机器上不跑
+别的），再把其余 130 条交给 xdist，一条用例一个 worker。
+
+```powershell
+python tools\e2e.py                 # 两阶段
+python tools\e2e.py --phase serial   # 只跑排他的 25 条
+python tools\e2e.py --workers 4      # 少用几个 worker
+python tools\e2e.py -k era_flv       # 其余参数原样转给 pytest
+python tools\e2e.py -- --maxfail 1   # `--` 之后也是 pytest 参数
+```
+
+实测（32 核，Windows，155 条）：
+
+| 跑法 | 墙钟 |
+| --- | --- |
+| `pytest`（单进程） | 794 s |
+| `python tools/e2e.py`（8 worker） | **492 s**（排他阶段 397 s + 并行阶段 95 s） |
+
+提升有限是**结构性的**：排他的那 25 条本身就要 396 s（`ab_duration` 213 s、
+`compare_matrix` 166 s、`cui_smoke` 11 s），而它们必须独占机器；其余 130 条
+串行要 425 s，摊到 8 个 worker 只剩 92 s。想再快只能削覆盖，那是另一回事。
+
+> `pytest -n auto` 直接跑整套会被 `conftest.py` 拒绝并给出一条明确的报错——宁可
+> 拒跑，也不要让时序断言变成"偶发失败"。确实要并行时写
+> `pytest -n 6 -m "not (timing or shared_config)"`。
 
 ```bash
 # Linux —— 同几条命令，套件本身平台无关（可执行文件名差异由 harness 处理）
@@ -1593,27 +1743,32 @@ PATH 里的 ffprobe，以及**Python 基线也要能用系统 FFmpeg**——Linu
 受管理构建，把它的 `bin` 目录临时加进 `PATH` 即可。
 
 需要注意：`compare_matrix` 和 `ab_duration` 依赖实时节流下的帧选择，跑的时候
-**别同时跑别的重活**，也不要加 `pytest -n`（xdist）——并行 worker 会扰动
-fresh/repeat 计数和时长中位数（这是自适应控制器对 CPU 争用的正常反应，不是 bug）。
-套件因此设计为严格顺序执行，`conftest.py` 里有注释守着这条。
+**别同时跑别的重活**——并行 worker 会扰动 fresh/repeat 计数和时长中位数（这是
+自适应控制器对 CPU 争用的正常反应，不是 bug）。所以这两条（外加读写真实配置的
+`cui_smoke`）被标成排他模块，`tools/e2e.py` 会先把它们单独跑完再并行跑其余
+用例；直接用 `pytest -n auto` 跑整套会被 `conftest.py` 拒掉。
 
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 298
-dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 298
-pytest  123 项（Windows 实测 121 通过 + 2 跳过）：
-  option_smoke   55（37 组参数 + 18 项参数检查）
-  error_paths    11
-  compare_matrix 12
-  feature_sweep  35（33 通过 + 2 跳过：a64multi / a64multi5 只有 muxer 没有 demuxer）
-  cui_smoke       8 个阶段（内含 34 项检查，Linux 35）
-  ab_duration     2（mpeg1video / wmv2 各 4 变体 × 4 runs 的中位数对比）
+dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 381
+dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 381
+pytest  155 项（Windows 实测 153 通过 + 2 跳过）：
+  option_smoke      57（39 组参数 + 18 项参数检查）
+  feature_sweep     35（33 通过 + 2 跳过：a64multi / a64multi5 只有 muxer 没有 demuxer）
+  compare_matrix    12
+  error_paths       11
+  cui_smoke         11 个阶段（内含 40+ 项检查，Linux 多一条）
+  stream_selection   9
+  subtitles          7
+  http_source        7
+  config_conversion  4（配置 ↔ 命令行往返）
+  ab_duration        2（mpeg1video / wmv2 各 4 变体 × 4 runs 的中位数对比）
 ```
 
-Linux 两个数字对不上 Windows：单测是 **296 通过 + 1 跳过**（`PathMeansSystemFfmpeg`
+Linux 两个数字对不上 Windows：单测是 **380 通过 + 1 跳过**（`PathMeansSystemFfmpeg`
 需要 PATH 上的系统 FFmpeg），cui_smoke 则多一条（非 Windows 上额外断言 `gyan`
-不出现在清单里）。e2e 用例数三平台一致，都是 121 通过 + 2 跳过。
+不出现在清单里）。e2e 用例数三平台一致，都是 153 通过 + 2 跳过。
 
 MPEG-PS 那两条（mpeg1video）在 Linux 上时长差得比 Windows 大——实测 0.167 s，正好
 是 23.976 fps 下的 4 帧，而**帧数两边都是 120**。那是容器按字节到达时刻打戳的老
@@ -1624,9 +1779,10 @@ MPEG-PS 那两条（mpeg1video）在 Linux 上时长差得比 Windows 大——�
 下的 `config.json`）——持久化检查读的就是它；跑之前不需要特殊准备，跑完之后
 配置原样归还。
 
-`option_smoke` 里的 `era_flv` / `watermark_only` / `post_full_chain` 三个用例需要
-`fonts` 目录里有字体（见 §7.12）。另外 `compare_matrix` 现在只是**回归检查**——
-v7.6 起不再要求与 Python 版输出一致，但不开新开关时两边仍然一致。
+`option_smoke` 里的 `era_flv` 需要 `fonts` 目录里有字体（见 §7.12）；
+`subtitles` 那 7 条也需要同样的字体目录（libass 没有中文字体会画成方块）。
+另外 `compare_matrix` 现在只是**回归检查**——v7.6 起不再要求与 Python 版输出
+一致，但不开新开关时两边仍然一致。
 
 > 跑回归之前建议把配置里的 `FfmpegSource` 设成 `"path"`（或删掉受管理构建），
 > 这样 C# 版和 Python 版用的是同一个系统 FFmpeg，对比才有意义。

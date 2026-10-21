@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.0 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.1 (.NET 10 / .NET 11)",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -30,6 +30,7 @@ public static class L
 
         ["value.yes"] = "yes",
         ["value.no"] = "no",
+        ["value.off"] = "off",
         ["value.none"] = "none",
         ["value.auto"] = "auto",
         ["value.custom"] = "custom",
@@ -56,6 +57,13 @@ public static class L
             + "(avi, mp4, flv, asf, mpeg) are actually sharded; the rest fall back to a single pass.",
         ["parallel.off"] = "Parallel sharding off.",
         ["parallel.clamped"] = "Clamped to 1..{0}.",
+        // v7.9.1: a network source is encoded in a single pass on purpose --
+        // every shard opens its own reader over the same link, which is what
+        // stalls a connection that comes and goes.
+        ["parallel.networkoff"] = "Parallel sharding is off while the input is on a network drive.",
+        ["parallel.networkrefused"] = "The input is on a network drive, so sharding stays off: "
+            + "each shard would open its own reader over the same link, which is what stalls "
+            + "a connection that comes and goes.",
         ["menu.exit"] = "Exit",
         ["menu.select"] = "Select: ",
         ["menu.invalid"] = "Invalid selection.",
@@ -75,9 +83,42 @@ public static class L
         ["stream.invalid"] = "No stream of that type with that index; see the list above.",
         ["stream.cleared"] = "Stream selection reset to the first stream of each type.",
 
+        // v7.9.1: the CUI half of the subtitle options. Files and an embedded
+        // stream are exclusive, so setting one clears the other.
+        ["sub.menu"] = "Subtitles",
+        ["sub.off"] = "off",
+        ["sub.mode.burn"] = "burn",
+        ["sub.mode.copy"] = "copy",
+        ["sub.menu.mode"] = "Mode (burn / copy / off)",
+        ["sub.menu.files"] = "External subtitle file",
+        ["sub.menu.stream"] = "Embedded subtitle stream",
+        ["sub.menu.codec"] = "Copy-mode subtitle codec",
+        ["sub.menu.back"] = "Back",
+        ["sub.mode.set"] = "Subtitle mode: {0}.",
+        ["sub.files.hint"] = "Recognised extensions: {0}",
+        ["sub.prompt.files"] = "Subtitle file (blank = keep, '-' = clear): ",
+        ["sub.files.set"] = "External subtitle file: {0}.",
+        ["sub.files.cleared"] = "External subtitle file cleared.",
+        ["sub.badext"] = "'{0}' is not a subtitle file; recognised extensions: {1}",
+        ["sub.notfound"] = "No such file: {0}",
+        ["sub.prompt.stream"] = "Subtitle stream index (blank = none) [{0}]: ",
+        ["sub.streamn"] = "stream {0}",
+        ["sub.stream.set"] = "Embedded subtitle stream: {0}.",
+        ["sub.stream.cleared"] = "No embedded subtitle stream.",
+        ["sub.stream.invalid"] = "No subtitle stream with that index; see the list above.",
+        ["sub.copy.nocontainer"] = "Note: the '{0}' container cannot carry a subtitle stream; "
+            + "copy mode will be refused at encode time -- burn is the mode that always works.",
+        ["sub.codec.copyonly"] = "The codec only applies to copy mode.",
+        ["sub.codec.container"] = "Codecs the '{0}' container can hold: {1}",
+        ["sub.prompt.codec"] = "Copy-mode codec (blank = keep, '-' = automatic) [{0}]: ",
+        ["sub.codec.set"] = "Copy-mode codec: {0}.",
+        ["sub.codec.auto"] = "Copy-mode codec: automatic (chosen per container).",
+        ["sub.hint.off"] = "Note: the mode is 'off', so this pick is ignored until the mode is burn or copy.",
+
         ["config.settingsfile"] = "Settings file",
         ["config.restored"] = "Restored settings",
         ["config.savefailed"] = "WARNING: could not write settings to {0}",
+        ["config.saved"] = "Settings written to {0} (no encode was run).",
 
         ["input.prompt"] = "\nInput file or directory: ",
         ["input.notfound"] = "Path not found.",
@@ -315,6 +356,9 @@ public static class L
         ["smb.smb1"] = "SMB1 in use - obsolete and insecure; enable SMB2/3 on the server",
         ["smb.unknown"] = "UNC input; read-resilience options applied (dialect {0})",
         ["smb.notconnected"] = "UNC input; read-resilience options applied (dialect unknown until the share is connected)",
+        ["smb.mapped"] = "mapped network drive; read-resilience options applied",
+        ["smb.stability"] = "Network drive in use: the connection should be as stable and reliable "
+            + "as possible, with a steady transfer rate -- a link that comes and goes stalls the encode.",
 
         ["banner.source"] = "FFmpeg source",
 
@@ -370,44 +414,16 @@ public static class L
         ["play.ask"] = "\nPlay the result now? [Y/n]: ",
         ["play.launchfail"] = "could not start playback: {0}",
 
-        // ---- v7.6: watermark + recompress stages ----
-        ["post.watermark"] = "Watermark     : {0}",
+        // ---- v7.6: recompress stage (watermark retired in v7.9.1) ----
         ["post.recompress"] = "Recompressed  : {0}",
-        ["post.intermediate"] = "(watermarked intermediate removed)",
         ["post.failed"] = "{0} failed: {1}",
         ["post.kept"] = "The live recording is untouched: {0}",
         ["post.args.bad"] = "recompress arguments: {0}",
-
-        ["wm.menu"] = "Watermark",
-        ["wm.menu.enable"] = "Watermark text (applied before the recompress pass)",
-        ["wm.menu.position"] = "Position",
-        ["wm.menu.size"] = "Font size (0 = scale to the frame)",
-        ["wm.menu.color"] = "Font colour",
-        ["wm.menu.font"] = "Font file (blank = pick one automatically)",
-        ["wm.menu.back"] = "Back",
-        ["wm.off"] = "off",
-        ["wm.prompt.text"] = "Watermark text (blank = disable, '-' = clear): ",
-        ["wm.prompt.position"] = "Position {0} [{1}]: ",
-        ["wm.prompt.size"] = "Font size (0 = automatic) [{0}]: ",
-        ["wm.prompt.color"] = "Font colour [{0}]: ",
-        ["wm.prompt.font"] = "Font file [{0}] ('-' = automatic): ",
-        ["wm.set"] = "Watermark set to \"{0}\".",
-        ["wm.off.set"] = "Watermark off.",
-        ["wm.pos.set"] = "Watermark position: {0}.",
-        ["wm.size.set"] = "Font size: {0}{1}.",
-        ["wm.size.auto"] = " (automatic)",
-        ["wm.color.set"] = "Font colour: {0}.",
-        ["wm.font.set"] = "Font file: {0}.",
-        ["wm.font.auto"] = "Font file: chosen automatically.",
-        ["wm.badsize"] = "Font size must be 0 or a positive number.",
-        ["wm.empty"] = "Watermark text cannot be only spaces.",
-        ["wm.nofont"] = "No usable font was found; set one in the watermark menu or ${0}.",
 
         ["rc.menu"] = "Recompress (video-site pass)",
         ["rc.menu.enable"] = "Enable the recompress pass",
         ["rc.menu.args"] = "FFmpeg arguments",
         ["rc.menu.container"] = "Output container",
-        ["rc.menu.keep"] = "Keep the watermarked intermediate",
         ["rc.menu.back"] = "Back",
         ["rc.prompt.args"] = "FFmpeg arguments (-i and the output path are supplied for you):\n> ",
         ["rc.prompt.container"] = "Output container [{0}]: ",
@@ -417,8 +433,6 @@ public static class L
         ["rc.args.empty"] = "Arguments cannot be empty; write at least one option.",
         ["rc.args.rejected"] = "Those arguments were rejected: {0}",
         ["rc.container.set"] = "Output container: {0}.",
-        ["rc.keep.on"] = "The watermarked intermediate will be kept.",
-        ["rc.keep.off"] = "The watermarked intermediate is deleted once consumed.",
         ["rc.hint"] = "Example: -vf \"scale=320:240,fps=15\" -c:v libx264 -crf 28 -ac 1 -b:a 32k",
 
         ["era.menu"] = "Era preset",
@@ -439,7 +453,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.0 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.1 (.NET 10 / .NET 11)",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 
@@ -453,6 +467,7 @@ public static class L
 
         ["value.yes"] = "是",
         ["value.no"] = "否",
+        ["value.off"] = "关闭",
         ["value.none"] = "无",
         ["value.auto"] = "自动",
         ["value.custom"] = "自定义",
@@ -479,6 +494,9 @@ public static class L
             + "会真正分片，其余容器自动回退为单次编码。",
         ["parallel.off"] = "并行分片已关闭。",
         ["parallel.clamped"] = "已限制到 1..{0} 范围内。",
+        ["parallel.networkoff"] = "输入位于网络驱动器，并行分片已关闭。",
+        ["parallel.networkrefused"] = "输入位于网络驱动器，并行分片保持关闭：每个分片都会独立读取同一条链路，"
+            + "这正是网络时连时断时卡住的原因。",
         ["menu.exit"] = "退出",
         ["menu.select"] = "请选择: ",
         ["menu.invalid"] = "无效的选择。",
@@ -498,9 +516,40 @@ public static class L
         ["stream.invalid"] = "该编号没有对应类型的流；请参照上面的列表。",
         ["stream.cleared"] = "已重置为各类型的第一条流。",
 
+        // v7.9.1：CUI 侧字幕选项。外挂文件与内嵌流互斥，设一个即清另一个。
+        ["sub.menu"] = "字幕",
+        ["sub.off"] = "关闭",
+        ["sub.mode.burn"] = "烧录",
+        ["sub.mode.copy"] = "封装",
+        ["sub.menu.mode"] = "模式（烧录 / 封装 / 关闭）",
+        ["sub.menu.files"] = "外挂字幕文件",
+        ["sub.menu.stream"] = "内嵌字幕流",
+        ["sub.menu.codec"] = "封装模式字幕编码器",
+        ["sub.menu.back"] = "返回",
+        ["sub.mode.set"] = "字幕模式：{0}。",
+        ["sub.files.hint"] = "可识别的扩展名：{0}",
+        ["sub.prompt.files"] = "字幕文件（留空=不变，'-'=清除）：",
+        ["sub.files.set"] = "外挂字幕文件：{0}。",
+        ["sub.files.cleared"] = "已清除外挂字幕文件。",
+        ["sub.badext"] = "“{0}”不是字幕文件；可识别的扩展名：{1}",
+        ["sub.notfound"] = "文件不存在：{0}",
+        ["sub.prompt.stream"] = "字幕流编号（留空=不使用）[{0}]：",
+        ["sub.streamn"] = "流 {0}",
+        ["sub.stream.set"] = "内嵌字幕流：{0}。",
+        ["sub.stream.cleared"] = "不使用内嵌字幕流。",
+        ["sub.stream.invalid"] = "该编号没有字幕流；请参照上面的列表。",
+        ["sub.copy.nocontainer"] = "注意：'{0}' 容器无法承载字幕流，封装模式会在编码时被拒绝——烧录模式永远可用。",
+        ["sub.codec.copyonly"] = "该编码器仅对封装模式生效。",
+        ["sub.codec.container"] = "'{0}' 容器可承载的字幕编码器：{1}",
+        ["sub.prompt.codec"] = "封装模式编码器（留空=不变，'-'=自动）[{0}]：",
+        ["sub.codec.set"] = "封装模式编码器：{0}。",
+        ["sub.codec.auto"] = "封装模式编码器：自动（按容器选择）。",
+        ["sub.hint.off"] = "注意：当前模式为“关闭”，该选择要等模式改为烧录或封装后才会生效。",
+
         ["config.settingsfile"] = "配置文件",
         ["config.restored"] = "已恢复上次配置",
         ["config.savefailed"] = "警告：无法写入配置到 {0}",
+        ["config.saved"] = "设置已写入 {0}（未执行编码）。",
 
         ["input.prompt"] = "\n输入文件或目录: ",
         ["input.notfound"] = "路径不存在。",
@@ -733,6 +782,8 @@ public static class L
         ["smb.smb1"] = "正在使用 SMB1 —— 已过时且不安全的协议，请在服务端启用 SMB2/3",
         ["smb.unknown"] = "UNC 输入；已启用读取重试参数（协议版本 {0}）",
         ["smb.notconnected"] = "UNC 输入；已启用读取重试参数（共享尚未连接，协议版本未知）",
+        ["smb.mapped"] = "映射的网络驱动器；已启用读取重试参数",
+        ["smb.stability"] = "正在使用网络驱动器：网络连接应尽量稳定可靠、速率稳定——时连时断会让编码卡住。",
 
         ["banner.source"] = "FFmpeg 来源",
 
@@ -788,44 +839,16 @@ public static class L
         ["play.ask"] = "\n现在播放结果？[Y/n]: ",
         ["play.launchfail"] = "无法启动播放：{0}",
 
-        // ---- v7.6: 水印 + 二次压缩 ----
-        ["post.watermark"] = "水印        ：{0}",
+        // ---- v7.6: 二次压缩（水印已于 v7.9.1 移除） ----
         ["post.recompress"] = "二次压缩    ：{0}",
-        ["post.intermediate"] = "（已删除带水印的中间文件）",
         ["post.failed"] = "{0} 失败：{1}",
         ["post.kept"] = "直播产物未受影响：{0}",
         ["post.args.bad"] = "二次压缩参数：{0}",
-
-        ["wm.menu"] = "水印",
-        ["wm.menu.enable"] = "水印文字（在二次压缩之前叠加）",
-        ["wm.menu.position"] = "位置",
-        ["wm.menu.size"] = "字号（0 = 按画面自适应）",
-        ["wm.menu.color"] = "字体颜色",
-        ["wm.menu.font"] = "字体文件（留空 = 自动挑选）",
-        ["wm.menu.back"] = "返回",
-        ["wm.off"] = "关闭",
-        ["wm.prompt.text"] = "水印文字（留空=关闭，输入 - 清除）：",
-        ["wm.prompt.position"] = "位置 {0} [{1}]：",
-        ["wm.prompt.size"] = "字号（0 = 自适应）[{0}]：",
-        ["wm.prompt.color"] = "字体颜色 [{0}]：",
-        ["wm.prompt.font"] = "字体文件 [{0}]（输入 - 表示自动）：",
-        ["wm.set"] = "水印已设为“{0}”。",
-        ["wm.off.set"] = "水印已关闭。",
-        ["wm.pos.set"] = "水印位置：{0}。",
-        ["wm.size.set"] = "字号：{0}{1}。",
-        ["wm.size.auto"] = "（自适应）",
-        ["wm.color.set"] = "字体颜色：{0}。",
-        ["wm.font.set"] = "字体文件：{0}。",
-        ["wm.font.auto"] = "字体文件：自动挑选。",
-        ["wm.badsize"] = "字号必须是 0 或正整数。",
-        ["wm.empty"] = "水印文字不能只有空格。",
-        ["wm.nofont"] = "找不到可用字体，请在水印菜单里指定，或设置环境变量 ${0}。",
 
         ["rc.menu"] = "二次压缩（视频网站转码）",
         ["rc.menu.enable"] = "启用二次压缩",
         ["rc.menu.args"] = "FFmpeg 参数",
         ["rc.menu.container"] = "输出容器",
-        ["rc.menu.keep"] = "保留带水印的中间文件",
         ["rc.menu.back"] = "返回",
         ["rc.prompt.args"] = "FFmpeg 参数（-i 和输出路径由程序生成）：\n> ",
         ["rc.prompt.container"] = "输出容器 [{0}]：",
@@ -835,8 +858,6 @@ public static class L
         ["rc.args.empty"] = "参数不能为空，至少写一个选项。",
         ["rc.args.rejected"] = "这些参数被拒绝：{0}",
         ["rc.container.set"] = "输出容器：{0}。",
-        ["rc.keep.on"] = "将保留带水印的中间文件。",
-        ["rc.keep.off"] = "中间文件被使用后即删除。",
         ["rc.hint"] = "示例：-vf \"scale=320:240,fps=15\" -c:v libx264 -crf 28 -ac 1 -b:a 32k",
 
         ["era.menu"] = "时代预设",

@@ -55,7 +55,9 @@ def pytest_generate_tests(metafunc):
 
 def test_encoder_produces_a_valid_file(exe, src, workdir, encoder):
     out = workdir("sweep")
-    work = out / "src.mp4"
+    # One scratch copy per encoder: the cases run in parallel workers, and a
+    # shared src.mp4 would let one worker truncate the file another is reading.
+    work = out / f"src-{encoder}.mp4"
     shutil.copyfile(src, work)
 
     # --ffmpeg-source path: always the system FFmpeg, so the sweep is not
@@ -69,8 +71,9 @@ def test_encoder_produces_a_valid_file(exe, src, workdir, encoder):
 
     # Stale products from earlier runs are not deleted (the sweep directory is
     # kept on purpose); the newest file written after this run started is the
-    # one this encoder just produced.
-    produced = [p for p in glob.glob(str(out / "src_live.*"))
+    # one this encoder just produced. The product is named after its own
+    # scratch copy, so parallel workers cannot pick up each other's output.
+    produced = [p for p in glob.glob(str(out / f"{work.stem}_live.*"))
                 if os.path.getmtime(p) >= started - 1.0]
     produced.sort(key=os.path.getmtime)
     assert produced, "no output file"

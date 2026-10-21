@@ -49,19 +49,56 @@ public static class Smb
     /// <summary>
     /// True when the path needs the network-resilience treatment.
     ///
-    /// Windows: UNC. Unix: a <c>smb://</c> URL or an ordinary path that happens
-    /// to live under a CIFS mount -- on Linux a share is mounted into the tree
-    /// (by <c>mount -t cifs</c> or a desktop shell), so from the application's
-    /// point of view it is a perfectly normal directory that just happens to be
-    /// slow and prone to stalling. Detecting the mount is what makes the
-    /// timeouts apply there too.
+    /// Windows: UNC or a mapped network drive. Unix: a <c>smb://</c> URL or an
+    /// ordinary path that happens to live under a CIFS mount -- on Linux a share
+    /// is mounted into the tree (by <c>mount -t cifs</c> or a desktop shell), so
+    /// from the application's point of view it is a perfectly normal directory
+    /// that just happens to be slow and prone to stalling. Detecting the mount
+    /// is what makes the timeouts apply there too.
     /// </summary>
     public static bool IsRemotePath(string? path)
     {
         if (!path.HasText) return false;
         if (IsUncPath(path)) return true;
-        return !OperatingSystem.IsWindows() && MountFor(path) is not null;
+        if (OperatingSystem.IsWindows()) return IsMappedNetworkDrive(path);
+        return MountFor(path) is not null;
     }
+
+    /// <summary>
+    /// True when the path lives on a mapped network drive -- the drive-letter
+    /// spelling of a share (<c>Z:\clips\x.flv</c> after
+    /// <c>net use Z: \\server\share</c>, which is what a tailscale-mapped
+    /// folder looks like). UNC covers the \\server\share spelling; this covers
+    /// the letter, and a mapped drive stalls exactly like a UNC path does when
+    /// the link comes and goes.
+    /// </summary>
+    public static bool IsMappedNetworkDrive(string? path)
+    {
+        if (!OperatingSystem.IsWindows() || !path.HasText) return false;
+        try
+        {
+            string? root = Path.GetPathRoot(path);
+            // "C:\" -- a letter, a colon and a separator. Anything else (a
+            // relative path, a UNC root) is not a mapped drive.
+            if (root is not { Length: >= 2 } || root[1] != ':') return false;
+            return new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch (Exception exc) when (exc is ArgumentException or IOException)
+        {
+            // A drive that cannot be asked about is treated as local: the
+            // timeout options only ever add overhead, and the open itself will
+            // fail with a clearer message anyway.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The stability warning a network source earns, or null for a local one.
+    /// Printed where the user picks the input, not at encode time -- by then a
+    /// stalled link has already cost a run.
+    /// </summary>
+    public static string? StabilityHint(string? path) =>
+        IsRemotePath(path) ? L.T("smb.stability") : null;
 
     /// <summary>UNC paths always use backslashes; accept what users paste from Explorer or bash.</summary>
     public static string Normalize(string path)
@@ -354,6 +391,16 @@ public static class Smb
         bool url = IsSmbUrl(path);
         bool unc = !url && IsUncPath(path);
         CifsMount? mount = OperatingSystem.IsWindows() ? null : MountFor(path);
+
+        // v7.9.1: a mapped network drive is a network source too. The dialect
+        // behind the letter is not worth a WMI round-trip here -- what the
+        // banner owes the user is that the resilience options are in play.
+        if (OperatingSystem.IsWindows() && IsMappedNetworkDrive(path))
+        {
+            string driveRoot = Path.GetPathRoot(path) ?? path;
+            return $"{label,-17}: {driveRoot} -- {L.T("smb.mapped")}";
+        }
+
         if (!url && !unc && mount is null) return null;
 
         // On Linux the "share root" is the mount: what the user needs to see is

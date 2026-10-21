@@ -78,17 +78,14 @@ public static class Recompress
     }
 
     /// <summary>
-    /// <c>clip_live.rm</c> and <c>clip_live_wm.mp4</c> both become
-    /// <c>clip_live_web.&lt;container&gt;</c>: "_wm" marks an intermediate, "_web"
-    /// marks the file a site would have served, and the two never stack up into
-    /// something unreadable.
+    /// <c>clip_live.rm</c> becomes <c>clip_live_web.&lt;container&gt;</c>: "_web"
+    /// marks the file a site would have served, and it never stacks onto the
+    /// live product's name.
     /// </summary>
     public static string DeriveOutputPath(string inputPath, string container)
     {
         string dir = Path.GetDirectoryName(inputPath) ?? ".";
         string stem = Path.GetFileNameWithoutExtension(inputPath);
-        if (stem.EndsWith("_wm", StringComparison.Ordinal))
-            stem = stem[..^"_wm".Length];
 
         string ext = container.Or("mp4").TrimStart('.').ToLowerInvariant();
         return Path.Combine(dir, stem + "_web." + ext);

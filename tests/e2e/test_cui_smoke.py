@@ -23,6 +23,12 @@ import pytest
 
 import harness
 
+# Every run of the product writes the real settings file on its way out, and
+# these assertions read that same file. Running beside other encodes would let
+# someone else's write land between two of ours, so this module is exclusive
+# too (tools/e2e.py phase 1) -- it is only 11 s, so the serialisation is free.
+pytestmark = pytest.mark.shared_config
+
 
 class Checks:
     """Collects check results so one failure does not hide the rest of a run."""
@@ -175,13 +181,14 @@ def test_run9_stream_pick(exe, cui_config, multi_src):
     print them rather than expect the user to know. A blank answer clears the
     pick again -- "first of each type" is the v7.8 behaviour and stays reachable.
     """
-    # 1 = input, then the path; 17 = streams; 2 = the second video track,
-    # 3 = the second audio track; 0 = exit.
-    p9 = harness.cui(exe, [], f"1\n{multi_src}\n17\n2\n3\n0\n")
+    # 1 = input, then the path; 16 = streams; 2 = the second video track,
+    # 3 = the second audio track; 0 = exit. (v7.9.1 removed the watermark
+    # entry, which shifted the menu down by one.)
+    p9 = harness.cui(exe, [], f"1\n{multi_src}\n16\n2\n3\n0\n")
 
     c = Checks()
     c.check("exit code 0", p9.returncode == 0, f"rc={p9.returncode}")
-    c.check("streams menu offered", "17." in p9.stdout and "Video/audio stream" in p9.stdout)
+    c.check("streams menu offered", "16." in p9.stdout and "Video/audio stream" in p9.stdout)
     c.check("lists the streams before asking", "streams in this source:" in p9.stdout.lower())
     c.check("asks for a video index", "Video stream index" in p9.stdout)
     c.check("asks for an audio index", "Audio stream index" in p9.stdout)
@@ -196,7 +203,7 @@ def test_run9_stream_pick(exe, cui_config, multi_src):
 
 def test_run10_stream_pick_clears(exe, cui_config, multi_src):
     """Blank answers must return to "first of each type"."""
-    p10 = harness.cui(exe, [], f"1\n{multi_src}\n17\n\n\n0\n")
+    p10 = harness.cui(exe, [], f"1\n{multi_src}\n16\n\n\n0\n")
 
     c = Checks()
     c.check("exit code 0", p10.returncode == 0, f"rc={p10.returncode}")
@@ -206,4 +213,53 @@ def test_run10_stream_pick_clears(exe, cui_config, multi_src):
             str(c10.get("VideoStream") if c10 else None))
     c.check("audio pick cleared", c10 and c10.get("AudioStream") is None,
             str(c10.get("AudioStream") if c10 else None))
+    c.finish()
+
+
+def test_run11_subtitle_menu(exe, cui_config):
+    """v7.9.1: the CUI exposes the subtitle options the CLI already had.
+
+    The fixture MKV carries its SubRip track as stream 2, so the menu lists it
+    the way ffprobe numbers it. Picking a sidecar clears an embedded pick --
+    the encoder refuses both at once -- and a cleared pick leaves the mode
+    alone but disables the stage.
+    """
+    mkv = harness.TESTS / "media" / "test_subs.mkv"
+    srt = harness.TESTS / "media" / "test_src.srt"
+    if not mkv.is_file() or not srt.is_file():
+        pytest.skip("subtitle fixtures missing (see test_subtitles.py)")
+
+    # A: input the MKV, open subtitles, pick the embedded track, come back.
+    # 17 = subtitles (v7.9.1 removed the watermark entry, which shifted the
+    # menu down by one); 3 = embedded stream; 2 = the SubRip track's index.
+    pa = harness.cui(exe, [], f"1\n{mkv}\n17\n3\n2\n0\n0\n")
+    # B: switch the mode to copy, then name a sidecar (clears the stream pick).
+    pb = harness.cui(exe, [], f"17\n1\n2\n{srt}\n0\n0\n")
+    # C: clear the sidecar; the mode stays copy but nothing is picked.
+    pc = harness.cui(exe, [], f"17\n2\n-\n0\n0\n")
+
+    c = Checks()
+    for name, p in (("A", pa), ("B", pb), ("C", pc)):
+        c.check(f"run {name} exit code 0", p.returncode == 0, f"rc={p.returncode}")
+    c.check("subtitle menu offered", "17." in pa.stdout and "Subtitles" in pa.stdout)
+    c.check("lists the streams before asking",
+            "streams in this source:" in pa.stdout.lower())
+    c.check("asks for a subtitle index", "Subtitle stream index" in pa.stdout)
+    c.check("main menu shows the burn pick", "burn: stream 2" in pa.stdout)
+    c.check("mode cycles to copy", "Mode (burn / copy / off)" in pb.stdout
+            and "= copy" in pb.stdout)
+    c.check("sidecar replaces the stream pick",
+            "External subtitle file" in pb.stdout and "test_src.srt" in pb.stdout)
+    c.check("main menu shows the copy pick", "copy: test_src.srt" in pb.stdout)
+    c.check("sidecar cleared", "External subtitle file cleared." in pc.stdout)
+    c.check("nothing picked reads as off", "Subtitles" in pc.stdout and "= off" in pc.stdout)
+    cfg = harness.read_config()
+    c.check("subtitles persisted", cfg is not None and "Subtitles" in cfg,
+            str(sorted(cfg) if cfg else None))
+    if cfg:
+        subs = cfg.get("Subtitles") or {}
+        c.check("mode persisted as copy", subs.get("Mode") == "copy", str(subs.get("Mode")))
+        c.check("files cleared in the file too", subs.get("Files") == [], str(subs.get("Files")))
+        c.check("stream pick cleared in the file too", subs.get("Stream") is None,
+                str(subs.get("Stream")))
     c.finish()

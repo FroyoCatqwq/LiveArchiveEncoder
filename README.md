@@ -4,9 +4,13 @@ CUI/CLI frontend for classic/legacy FFmpeg video encoders. Started as a
 behaviour-preserving port of `live_archive_encoder.py` v6.3.3 (kept verbatim
 under `reference/`) to C#, with the internals rewritten for lower
 allocation and better pipe scheduling. **As of v7.6 it grows past the port**:
-post-processing stages (text watermark, a "video site" recompress pass) and
-per-era presets sit on top of the realtime encoder, all of them off by default —
-with no flags given, the output is still exactly what v6.3.3 would have produced.
+a "video site" recompress pass and per-era presets sit on top of the realtime
+encoder, all of them off by default — with no flags given, the output is still
+exactly what v6.3.3 would have produced.
+
+> **v7.9.1:** the static text watermark stage was retired (code archived under
+> `archive/retired/`, so it can come back as a separate project). Subtitle
+> burning/copying, added in v7.9, covers the "put text on the picture" job.
 
 Full user guide: [`docs/usage.md`](docs/usage.md); where the era-preset numbers
 come from: [`docs/era-presets.md`](docs/era-presets.md).
@@ -115,8 +119,8 @@ SMB argument construction, the FFmpeg distribution catalogue, toolchain layout,
 player argument parsing, CLI parsing, config persistence, hwaccel normalisation,
 and localisation parity (every key must exist in both `en` and `zh`). Since v7.6
 it also covers the post-processing layer: the recompress fragment tokenizer and
-its rejections, the `drawtext` filter expression, era-preset consistency, and a
-version-1 settings file still loading with both new stages off. It also runs under
+its rejections, era-preset consistency, the settings↔command-line converter, and
+a version-1 settings file still loading with the stage off. It also runs under
 NativeAOT-sensitive APIs, so a reflection-only code path shows up as a failure
 here rather than as a crash in a published binary.
 
@@ -127,8 +131,9 @@ baseline uses the system FFmpeg too, so on a box that only has a managed build,
 put that build's `bin` on `PATH` first):
 
 ```bash
-pip install -r tests/e2e/requirements.txt   # pytest==9.1.1
-pytest                                       # all 123 cases, from the repo root
+pip install -r tests/e2e/requirements.txt   # pytest==9.1.1 + pytest-xdist
+python tools/e2e.py                          # two-phase run (see below)
+pytest                                       # same 155 cases, one at a time
 pytest tests/e2e/test_compare_matrix.py -k wmv2   # a single case
 CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 ```
@@ -138,14 +143,18 @@ CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 | `test_compare_matrix.py` | 12 | encoder/param matrix, ffprobe structure vs v6.3.3 |
 | `test_error_paths.py` | 11 | failure paths, exit codes vs the baseline |
 | `test_feature_sweep.py` | 35 | every legacy encoder, 2 s clip (2 skipped: no demuxer) |
-| `test_option_smoke.py` | 55 | option plumbing, incl. the v7.6 post-processing stages |
-| `test_cui_smoke.py` | 8 | interactive menu assertions (34 checks, 35 on Linux) |
+| `test_option_smoke.py` | 57 | option plumbing, incl. the recompress stage and era presets |
+| `test_cui_smoke.py` | 11 | interactive menu assertions (40+ checks, one extra on Linux) |
+| `test_stream_selection.py` | 9 | stream picks by absolute index, plus time-range clipping |
+| `test_subtitles.py` | 7 | burn / copy / off, sidecar and embedded, bad requests |
+| `test_http_source.py` | 7 | `http(s)://` inputs, timeout and failure behaviour |
+| `test_config_conversion.py` | 4 | settings file ↔ command line round trip |
 | `test_ab_duration.py` | 2 | duration medians vs the baseline (mpeg1video / wmv2) |
 
-`test_option_smoke.py` is the one that exercises the post-processing chain: it encodes
-with a watermark, with both stages armed, and with an era preset, then probes the
-`_wm` and `_web` products as well as the live file. Two of its cases need a font
-in the `fonts/` directory.
+`test_option_smoke.py` is the one that exercises the post-processing chain: it
+encodes with an era preset and with the recompress stage armed, then probes the
+`_web` product as well as the live file. The `era_flv` case, like the subtitle
+module, needs a font in the `fonts/` directory.
 
 `test_compare_matrix.py` compares against v6.3.3 and is kept as a regression check, but
 the port no longer has to match the Python output bit for bit -- v7.6 features are
@@ -158,10 +167,22 @@ All scratch products land in `tests/out/` (gitignored); `CM_OUT` / `FS_OUT`
 move them if you want to keep two builds side by side.
 
 `test_compare_matrix.py` and `test_ab_duration.py` depend on the realtime
-frame-selection logic, so run the suite alone — a parallel build or another
-encode will shift the wall clock and change which frames the adaptive
-controller picks. For the same reason the suite must not run under
-`pytest -n` (xdist); it is strictly sequential by design.
+frame-selection logic, so they measure a quiet machine — a parallel build or
+another encode shifts the wall clock and changes which frames the adaptive
+controller picks. `test_cui_smoke.py` is exclusive for a different reason: every
+run writes the real settings file it asserts on.
+
+Those two groups are marked (`timing`, `shared_config`) and `tools/e2e.py` runs
+them alone first, then everything else under xdist:
+
+```
+python tools/e2e.py                  # 794 s serial -> 492 s on a 32-core box
+python tools/e2e.py --phase serial   # only the 25 exclusive cases
+python tools/e2e.py -k era_flv       # extra args go to pytest
+```
+
+A blanket `pytest -n` is refused by a guard in `conftest.py` rather than
+silently turning the timing assertions flaky.
 
 ## Continuous integration
 
@@ -224,12 +245,13 @@ Two flags are additions rather than ports:
 | `--cpu-info` | prints the instruction sets and `Vector<byte>.Count` the runtime reports |
 | `--audio-mode inline\|separate\|auto` | audio routing; `inline` (default) is v6.3.3 behaviour, see below |
 | `--hwaccel NAME` | hardware decode; `off` (default), `auto`, or any method from `ffmpeg -hwaccels`. The method is probed by actually decoding one frame and falls back to software when it fails |
-| `--watermark TEXT` | burn a text watermark into the live recording, before the recompress pass. Position/size/colour/font are separate flags; off by default |
 | `--recompress`, `--recompress-args ARGS` | re-encode the result the way a video site would. You write the middle of the FFmpeg command (`-vf scale=320:240,fps=15 -c:v libx264 -crf 28 …`); the program owns `-i` and the output path, and the fragment is tokenised and vetted so a stray path cannot overwrite your source. Off by default |
 | `--era ID` | apply an era preset: one set of live + recompress settings per era of online video, 1997→2016 — dial-up RealVideo G2, early-ADSL RealMedia, the FLV/Youku/Tudou years, early H.264, 720p. Sources in `docs/era-presets.md` |
 | `--video-stream N`, `--audio-stream N` | v7.9: pick which track of a multi-stream source (a VOB's second audio language, an MKV's duplicate encode) to encode, by the absolute index ffprobe prints; `--list-streams` lists them. Wrong index or type is refused before the encode, with the inventory |
 | `--subtitle FILE`, `--subtitle-stream N` | v7.9: subtitles from a sidecar file (`.ass/.ssa/.srt/.vtt`, repeatable) or an embedded track. `--subtitle-mode burn` (default) renders them into the picture with libass and the tool's own font directory; `--subtitle-mode copy` muxes them as a real subtitle stream where the container has one, with the codec picked from what `ffmpeg -encoders` actually lists. Bitmap subtitles (dvdsub/dvbsub) can be carried but not burned |
 | HTTP/HTTPS input | v7.9, initial support: the input may be a progressive `http(s)://` direct link (archive.org `/download/…` style). Carries the `-reconnect` family and a 30 s socket timeout; seeking needs a Range-capable server. No auth/cookies/HLS |
+| `--emit-args`, `--emit-args=FILE` | v7.9.1: print the settings as one equivalent command line and exit. The bare form uses this run's resolved settings; `=FILE` reads settings without needing input/output or FFmpeg |
+| `--save-config FILE` | v7.9.1: write this run's resolved settings to a settings file and exit **without encoding** — the way to turn a working command line into something the menu restores |
 
 ### Audio routing
 
@@ -260,6 +282,26 @@ resolve against the tool's `fonts/` directory, and a monochrome-first `.ttc`
 falls back to a usable CJK font), and **Turbo removed outright** — `--turbo` is
 now an unrecognized argument and the code lives in `archive/retired/`. Details
 in `docs/usage.md` §7.16 and the v7.9 notes there.
+
+### v7.9.1
+
+* **Watermark stage retired.** The six `--watermark*` flags, the CUI item, the
+  `Watermark` settings block and the `_wm` intermediate product are gone; passing
+  an old flag is an `unrecognized argument`. The code is archived (with revival
+  notes) in `archive/retired/RetiredWatermark.cs` and `RetiredFontPicking.cs`.
+  The recompress pass stays — `_web` products are unchanged.
+* **Subtitles in the interactive menu.** A new item edits mode (burn/copy/off),
+  picks an embedded track by probing the source, names sidecar files, and
+  chooses the copy-mode codec. Files and an embedded track are mutually
+  exclusive. Previously subtitles were CLI-only.
+* **Mapped network drives.** A drive letter pointing at a share
+  (`DriveInfo.DriveType == Network`, which is how Tailscale and "map network
+  drive" appear) now counts as remote: it prints a stability warning and forces
+  `--parallel 1`, because sharding a realtime capture across several readers of
+  one network file is how you get a bitrate collapse in the middle of a recording.
+* **Settings file ↔ command line.** `--emit-args[=FILE]` and `--save-config FILE`
+  convert between the two, both without encoding; see §7.6 of the guide.
+* `publish/aot-avx2` is gone for good, and the app title now says v7.9.1.
 
 ### Audio limits (v7.8.2)
 
@@ -297,8 +339,8 @@ src/LiveArchiveEncoder/
   UI/             CLI parser + help, CUI menus, shared reporting, --cpu-info,
                   post-encode playback
   PostProcess/    v7.6: the stages that follow the live encode -- era presets,
-                  the recompress argument validator, the drawtext watermark,
-                  font resolution, and the chain that orders them
+                  the recompress argument validator, font resolution, and the
+                  chain that orders them (the watermark stage retired in v7.9.1)
 ```
 
 Two data directories live next to each other under the user's profile, so both
@@ -307,7 +349,7 @@ survive an upgrade and neither is inside the repo:
 ```
 %LOCALAPPDATA%\LiveArchiveEncoder\        ~/.local/share/LiveArchiveEncoder/
   ffmpeg/<id>/bin/                          managed FFmpeg distributions
-  fonts/                                    watermark fonts (user-supplied)
+  fonts/                                    fonts for subtitle burning (user-supplied)
   config.json                               persisted settings
 ```
 

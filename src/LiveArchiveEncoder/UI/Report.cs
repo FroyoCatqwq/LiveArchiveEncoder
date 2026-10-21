@@ -73,6 +73,17 @@ public static class Report
             c.AudioRate?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto")));
         if (c.AudioEncoder is { Length: > 0 } codec)
             Line(L.T("report.audiorates"), AudioCatalog.DescribeRates(codec));
+        // Subtitles change what the run produces as much as the shard count
+        // does, so they belong in the dump -- shown only when active, since
+        // "off" is the default and would just repeat the menu.
+        if (c.Subtitles.Active)
+        {
+            string what = c.Subtitles.Files.Count > 0
+                ? string.Join(", ", c.Subtitles.Files.Select(f => Path.GetFileName(f)))
+                : L.T("sub.streamn", c.Subtitles.Stream!.Value);
+            Line(L.T("sub.menu"), $"{c.Subtitles.Mode}: {what}"
+                + (c.Subtitles.Codec is { Length: > 0 } sc ? $" ({sc})" : ""));
+        }
         if (c.Encoder is not null && c.Encoder.Name == "roqvideo")
         {
             string? warning = EncoderMath.ValidateRoqDimensions(c.Width, c.Height);

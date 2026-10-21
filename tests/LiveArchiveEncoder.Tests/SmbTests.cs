@@ -148,4 +148,56 @@ public sealed class SmbTests
         await Assert.That(Smb.CanWriteDirectory(dir)).IsTrue();
         await Assert.That(Directory.Exists(dir)).IsFalse().Because("a local destination must not be created by a probe");
     }
+
+    /// <summary>
+    /// v7.9.1: the drive-letter spelling of a share -- what a tailscale-mapped
+    /// folder looks like. UNC is not the only network source, and a mapped
+    /// drive stalls exactly like a UNC path when the link comes and goes.
+    ///
+    /// Only the false cases are asserted everywhere: whether this machine
+    /// happens to have a network drive mapped is not something a test can
+    /// rely on. What is asserted is that a local path (the common case) is
+    /// never mistaken for a network one.
+    /// </summary>
+    [Test]
+    [Arguments(@"C:\video\clip.mp4")]
+    [Arguments("clip.mp4")]
+    [Arguments("")]
+    [Arguments(null)]
+    public async Task IsMappedNetworkDrive_LocalPathsAreNotNetwork(string? path) =>
+        await Assert.That(Smb.IsMappedNetworkDrive(path)).IsFalse();
+
+    [Test]
+    public async Task IsMappedNetworkDrive_IsWindowsOnly()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        await Assert.That(Smb.IsMappedNetworkDrive(@"/mnt/share/a.mp4")).IsFalse();
+    }
+
+    /// <summary>A UNC path is remote with or without the mapped-drive probe.</summary>
+    [Test]
+    [Arguments(@"\\nas\share\clip.mp4")]
+    [Arguments("smb://nas/share/clip.mp4")]
+    public async Task IsRemotePath_UncAndUrlAreAlwaysRemote(string path) =>
+        await Assert.That(Smb.IsRemotePath(path)).IsTrue();
+
+    [Test]
+    public async Task IsRemotePath_LocalFileIsNot()
+    {
+        string local = Path.Combine(Path.GetTempPath(), "a.mp4");
+
+        await Assert.That(Smb.IsRemotePath(local)).IsFalse();
+    }
+
+    /// <summary>
+    /// The hint is the user-facing half of the network-drive policy: it exists
+    /// for a remote source and says nothing for a local one.
+    /// </summary>
+    [Test]
+    public async Task StabilityHint_ExistsForRemoteAndNothingForLocal()
+    {
+        await Assert.That(Smb.StabilityHint(@"\\nas\share\a.mp4")).IsNotNull();
+        await Assert.That(Smb.StabilityHint(@"C:\video\a.mp4")).IsNull();
+    }
 }

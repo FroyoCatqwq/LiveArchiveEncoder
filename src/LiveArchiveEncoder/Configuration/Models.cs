@@ -210,10 +210,12 @@ public sealed class Config
     public string? PlayerPath { get; set; }
 
     /// <summary>
-    /// Text watermark burned in after the live pass and before the recompress
-    /// pass. Off by default.
+    /// v7.9.1: subtitles, as the interactive shell keeps them. The CLI spells
+    /// the same request with --subtitle / --subtitle-stream / --subtitle-mode
+    /// / --subtitle-codec; a CLI run never reads these as defaults, it only
+    /// writes its own request back.
     /// </summary>
-    public WatermarkSettings Watermark { get; set; } = new();
+    public SubtitleConfig Subtitles { get; set; } = new();
 
     /// <summary>
     /// The "upload to a video site" pass. Off by default.
@@ -229,57 +231,30 @@ public sealed class Config
 }
 
 /// <summary>
-/// A static text watermark.
+/// v7.9.1: subtitles, as the interactive shell keeps them.
 ///
-/// Deliberately narrow in v7.6: text, placement, size and colour. Movement,
-/// outlines, background boxes and timed appearance are v8's job and were left
-/// out rather than added as switches that do nothing -- the stage itself is
-/// separate from the recompress stage precisely so those can be added without
-/// touching anything else.
+/// Mirrors <see cref="Encoding.SubtitleSettings"/> but persists cleanly:
+/// the mode is the same string the CLI spells, the file list is editable
+/// in place, and an embedded track is a single index. Files and an embedded
+/// stream are mutually exclusive -- the encoder refuses both at once -- so
+/// the menu clears the other side when one is set.
 /// </summary>
-public sealed class WatermarkSettings
+public sealed class SubtitleConfig
 {
-    public bool Enabled { get; set; }
+    /// <summary>"burn" (default), "copy", or "off".</summary>
+    public string Mode { get; set; } = "burn";
 
-    /// <summary>The drawn text. Empty is rejected before FFmpeg is started.</summary>
-    public string Text { get; set; } = "";
+    /// <summary>External sidecar files (.ass/.ssa/.srt/.vtt), in order.</summary>
+    public List<string> Files { get; set; } = [];
 
-    /// <summary>
-    /// top-left, top-right, bottom-left, bottom-right or center.
-    /// A video site of the era alternated corners between clips; that animation
-    /// is not implemented yet, so this is a fixed corner.
-    /// </summary>
-    public string Position { get; set; } = "top-right";
+    /// <summary>Absolute index of an embedded subtitle track; null = none picked.</summary>
+    public int? Stream { get; set; }
 
-    /// <summary>
-    /// Point size. 0 means "scale it to the frame": height/15, floored at 8, so
-    /// a 160x120 clip gets a period-appropriate 8 px mark instead of a 16 px one
-    /// that would cover a sixth of the picture.
-    /// </summary>
-    public int FontSize { get; set; }
+    /// <summary>Explicit codec for copy mode; null picks one per container.</summary>
+    public string? Codec { get; set; }
 
-    /// <summary>Edge inset in pixels. 0 means height/40, floored at 4.</summary>
-    public int Margin { get; set; }
-
-    /// <summary>Any FFmpeg colour name or 0xRRGGBB value.</summary>
-    public string FontColor { get; set; } = "white";
-
-    /// <summary>
-    /// Explicit font file. Null makes the program pick a system font that can
-    /// actually render the text; on a Chinese Windows box that is Microsoft
-    /// YaHei, because Arial cannot draw CJK and drawtext fails without a font
-    /// that can.
-    /// </summary>
-    public string? FontFile { get; set; }
-
-    public static IReadOnlyList<string> Positions =>
-        ["top-left", "top-right", "bottom-left", "bottom-right", "center"];
-
-    public static string CanonicalPosition(string? value)
-    {
-        string v = (value ?? "").Trim().ToLowerInvariant().Replace('_', '-');
-        return Positions.Contains(v) ? v : "top-right";
-    }
+    /// <summary>Same rule as <see cref="Encoding.SubtitleSettings.Active"/>.</summary>
+    public bool Active => Mode != "off" && (Files.Count > 0 || Stream is not null);
 }
 
 /// <summary>
@@ -300,10 +275,4 @@ public sealed class RecompressSettings
 
     /// <summary>Container extension without the dot.</summary>
     public string Container { get; set; } = "mp4";
-
-    /// <summary>
-    /// Keep the watermarked intermediate file instead of deleting it when the
-    /// recompress pass consumes it.
-    /// </summary>
-    public bool KeepIntermediate { get; set; }
 }

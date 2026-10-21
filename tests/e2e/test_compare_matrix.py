@@ -21,6 +21,10 @@ import pytest
 import harness
 from harness import run
 
+# Wall-clock sensitive: the adaptive controller reacts to whatever else is
+# running, so this module runs alone (tools/e2e.py phase 1).
+pytestmark = pytest.mark.timing
+
 # name, extension, extra CLI args (input/output are appended by the harness)
 CASES = [
     ("rv20_default",         "rm",   ["--encoder", "rv20"]),

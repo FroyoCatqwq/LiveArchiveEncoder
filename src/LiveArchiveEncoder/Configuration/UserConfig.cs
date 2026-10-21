@@ -119,14 +119,18 @@ public sealed class UserConfig
     /// <summary>External player executable; empty means the shell association.</summary>
     public string? PlayerPath { get; set; }
 
-    // ---- v7.6: post-processing stages ----
+    // ---- v7.6: the post-processing stage ----
     // Absent from v1 files, which is fine: System.Text.Json leaves a property
     // alone when the JSON does not mention it, so an old config keeps the
-    // defaults (both stages off) instead of nulling anything out.
-
-    public WatermarkSettings Watermark { get; set; } = new();
+    // default (the stage off) instead of nulling anything out.
 
     public RecompressSettings Recompress { get; set; } = new();
+
+    /// <summary>
+    /// v7.9.1: subtitle request. Absent from older files, which is fine -- the
+    /// defaults mean "burn, nothing picked", i.e. the v7.9.0 behaviour.
+    /// </summary>
+    public SubtitleConfig Subtitles { get; set; } = new();
 
     /// <summary>Last applied era preset id, or null for "custom settings".</summary>
     public string? EraPreset { get; set; }
@@ -242,20 +246,17 @@ public static class ConfigStore
         FfmpegProxy = c.FfmpegProxy,
         PlayMode = UI.Player.ModeName(c.Play),
         PlayerPath = c.PlayerPath,
-        Watermark = CloneWatermark(c.Watermark),
         Recompress = CloneRecompress(c.Recompress),
+        Subtitles = CloneSubtitles(c.Subtitles),
         EraPreset = c.EraPreset,
     };
 
-    private static WatermarkSettings CloneWatermark(WatermarkSettings s) => new()
+    private static SubtitleConfig CloneSubtitles(SubtitleConfig s) => new()
     {
-        Enabled = s.Enabled,
-        Text = s.Text,
-        Position = s.Position,
-        FontSize = s.FontSize,
-        Margin = s.Margin,
-        FontColor = s.FontColor,
-        FontFile = s.FontFile,
+        Mode = s.Mode,
+        Files = [.. s.Files],
+        Stream = s.Stream,
+        Codec = s.Codec,
     };
 
     private static FpsRungSetting CloneRung(FpsRungSetting s) => new()
@@ -270,7 +271,6 @@ public static class ConfigStore
         Enabled = s.Enabled,
         Args = s.Args,
         Container = s.Container,
-        KeepIntermediate = s.KeepIntermediate,
     };
 
     /// <summary>
@@ -356,11 +356,11 @@ public static class ConfigStore
         c.Play = UI.Player.ParseMode(stored.PlayMode);
         c.PlayerPath = stored.PlayerPath;
 
-        // Restored whole rather than field by field: both stages are plain data
+        // Restored whole rather than field by field: the stage is plain data
         // with no dependency on the FFmpeg build, so there is nothing here that
         // could be unavailable the way an encoder can be.
-        c.Watermark = CloneWatermark(stored.Watermark);
         c.Recompress = CloneRecompress(stored.Recompress);
+        c.Subtitles = CloneSubtitles(stored.Subtitles);
         c.EraPreset = stored.EraPreset;
     }
 

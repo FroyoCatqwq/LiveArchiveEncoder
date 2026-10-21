@@ -37,6 +37,10 @@ import pytest
 import harness
 from harness import parse_summary, probe, run
 
+# Wall-clock sensitive: compares run-to-run duration medians, so it must not
+# share the machine (tools/e2e.py phase 1).
+pytestmark = pytest.mark.timing
+
 CASES = [("mpeg1video", "mpg"), ("wmv2", "wmv")]
 RUNS = 4
 END = "00:00:05"

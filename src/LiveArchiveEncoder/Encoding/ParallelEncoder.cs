@@ -307,6 +307,12 @@ public static class ParallelEncoder
     private static string? BlockReason(RealtimeOptions o, double? duration)
     {
         if (o.Parallel <= 1) return null;
+        // v7.9.1: a network source is a single pass on purpose. Every shard
+        // opens its own decoder over the same link, and N concurrent readers
+        // on a connection that comes and goes is exactly the stall this
+        // avoids -- the shards then wait on each other instead of on work.
+        if (Remote.Smb.IsRemotePath(o.SourcePath))
+            return L.T("parallel.networkrefused");
         if (duration is null) return "source duration is unknown";
         if (!Constants.ConcatSafeFormats.Contains(o.Encoder.FormatName))
         {

@@ -130,105 +130,6 @@ public sealed class PostArgsTests
     }
 }
 
-/// <summary>
-/// The watermark filter has to survive real FFmpeg parsing: a font path with a
-/// drive colon, CJK text, and x/y expressions that depend on the text size.
-/// Built once here and exercised against FFmpeg by the e2e harness.
-/// </summary>
-public sealed class WatermarkTests
-{
-    [Test]
-    public async Task FilterCarriesTextPositionAndSize()
-    {
-        var settings = new WatermarkSettings
-        {
-            Enabled = true,
-            Text = "优酷",
-            Position = "top-right",
-            FontSize = 16,
-            Margin = 10,
-            FontColor = "white",
-        };
-
-        string filter = Watermark.BuildFilter(settings, 240, "C:/Fonts/msyh.ttc");
-
-        await Assert.That(filter).StartsWith("drawtext=");
-        await Assert.That(filter).Contains("fontfile='C\\:/Fonts/msyh.ttc'");
-        await Assert.That(filter).Contains("text='优酷'");
-        await Assert.That(filter).Contains("fontsize=16");
-        await Assert.That(filter).Contains("fontcolor=white");
-        // top-right pins the right edge of the text to the frame width.
-        await Assert.That(filter).Contains("x=W-tw-10");
-        await Assert.That(filter).Contains("y=10");
-    }
-
-    [Test]
-    public async Task FontSizeScalesDownForSmallFrames()
-    {
-        var settings = new WatermarkSettings { Enabled = true, Text = "x" };
-
-        string small = Watermark.BuildFilter(settings, 120, null);
-        string large = Watermark.BuildFilter(settings, 720, null);
-
-        await Assert.That(small).Contains("fontsize=8").Because("120 / 15 floors at 8");
-        await Assert.That(large).Contains("fontsize=48").Because("720 / 15");
-    }
-
-    [Test]
-    public async Task ExplicitFontSizeWinsOverTheAutomaticOne()
-    {
-        var settings = new WatermarkSettings { Enabled = true, Text = "x", FontSize = 24 };
-
-        await Assert.That(Watermark.BuildFilter(settings, 120, null)).Contains("fontsize=24");
-    }
-
-    [Test]
-    [Arguments("top-left", "x=6", "y=6")]
-    [Arguments("top-right", "x=W-tw-6", "y=6")]
-    [Arguments("bottom-left", "x=6", "y=H-th-6")]
-    [Arguments("bottom-right", "x=W-tw-6", "y=H-th-6")]
-    [Arguments("center", "x=(W-tw)/2", "y=(H-th)/2")]
-    public async Task EveryPositionProducesExpressions(string position, string x, string y)
-    {
-        var settings = new WatermarkSettings { Enabled = true, Text = "x", Position = position };
-
-        string filter = Watermark.BuildFilter(settings, 240, null);
-
-        await Assert.That(filter).Contains($"{x}:");
-        await Assert.That(filter).Contains($"{y}:");
-    }
-
-    [Test]
-    public async Task UnknownPositionFallsBackToTopRight()
-    {
-        var settings = new WatermarkSettings { Enabled = true, Text = "x", Position = "somewhere" };
-
-        await Assert.That(Watermark.BuildFilter(settings, 240, null)).Contains("x=W-tw-");
-    }
-
-    [Test]
-    public async Task OutputPathInsertsWmBeforeTheExtension()
-    {
-        await Assert.That(Watermark.DeriveOutputPath(Path.Combine("d", "clip_live.rm"))).IsEqualTo(Path.Combine("d", "clip_live_wm.mp4"));
-    }
-
-    [Test]
-    public async Task EmptyTextIsReportedAsAnErrorNotRun()
-    {
-        // The stage must fail before FFmpeg is started, or a misconfigured run
-        // wastes a whole live encode.
-        var settings = new WatermarkSettings { Enabled = true, Text = "   " };
-
-        (bool ok, string? error) = Watermark.Apply(
-            "ffmpeg-does-not-exist", "in.mp4", "out.mp4", settings, 320, 240);
-
-        await Assert.That(ok).IsFalse();
-        // TUnit has no case-insensitive Contains overload; a plain substring
-        // check on the message is the same statement.
-        await Assert.That(error!.Contains("empty", StringComparison.OrdinalIgnoreCase)).IsTrue();
-    }
-}
-
 public sealed class RecompressTests
 {
     private static RecompressSettings Settings(string args, string container = "mp4") => new()
@@ -287,11 +188,10 @@ public sealed class RecompressTests
     }
 
     [Test]
-    public async Task WebOutputReplacesTheWmMark()
+    public async Task WebOutputReplacesTheLiveExtension()
     {
         string dir = Path.Combine("d", "sub");
 
-        await Assert.That(Recompress.DeriveOutputPath(Path.Combine(dir, "clip_live_wm.mp4"), "mp4")).IsEqualTo(Path.Combine(dir, "clip_live_web.mp4"));
         await Assert.That(Recompress.DeriveOutputPath(Path.Combine(dir, "clip_live.rm"), "mp4")).IsEqualTo(Path.Combine(dir, "clip_live_web.mp4"));
         await Assert.That(Recompress.DeriveOutputPath(Path.Combine(dir, "clip_live.rm"), ".mkv")).IsEqualTo(Path.Combine(dir, "clip_live_web.mkv"));
     }
@@ -383,30 +283,23 @@ public sealed class EraPresetTests
 public sealed class PostProcessingConfigTests
 {
     [Test]
-    public async Task BothStagesAreOffByDefault()
+    public async Task RecompressIsOffByDefault()
     {
         var config = new Config();
 
-        await Assert.That(config.Watermark.Enabled).IsFalse().Because("watermark defaults to off");
         await Assert.That(config.Recompress.Enabled).IsFalse().Because("recompress defaults to off");
     }
 
     [Test]
-    public async Task WatermarkAndRecompressRoundTripThroughUserConfig()
+    public async Task RecompressRoundTripThroughUserConfig()
     {
         var source = new Config
         {
-            Watermark = new WatermarkSettings
-            {
-                Enabled = true, Text = "新浪播客", Position = "bottom-left",
-                FontSize = 20, Margin = 8, FontColor = "yellow", FontFile = "C:/f.ttf",
-            },
             Recompress = new RecompressSettings
             {
                 Enabled = true,
                 Args = "-vf scale=320:240,fps=15 -c:v libx264 -crf 28",
                 Container = "mkv",
-                KeepIntermediate = true,
             },
             EraPreset = "flv07",
         };
@@ -417,23 +310,17 @@ public sealed class PostProcessingConfigTests
         var restored = new Config();
         ConfigStore.Apply(roundTripped, restored, []);
 
-        await Assert.That(restored.Watermark.Enabled).IsTrue();
-        await Assert.That(restored.Watermark.Text).IsEqualTo("新浪播客");
-        await Assert.That(restored.Watermark.Position).IsEqualTo("bottom-left");
-        await Assert.That(restored.Watermark.FontSize).IsEqualTo(20);
-        await Assert.That(restored.Watermark.FontColor).IsEqualTo("yellow");
         await Assert.That(restored.Recompress.Enabled).IsTrue();
         await Assert.That(restored.Recompress.Args).Contains("crf 28");
         await Assert.That(restored.Recompress.Container).IsEqualTo("mkv");
-        await Assert.That(restored.Recompress.KeepIntermediate).IsTrue();
         await Assert.That(restored.EraPreset).IsEqualTo("flv07");
     }
 
     [Test]
-    public async Task AVersion1ConfigFileStillLoadsWithBothStagesOff()
+    public async Task AVersion1ConfigFileStillLoadsWithRecompressOff()
     {
-        // The v7.5 shape, before the stages existed. It must read back as a
-        // normal config with the new stages at their defaults, not as nulls.
+        // The v7.5 shape, before the stage existed. It must read back as a
+        // normal config with the stage at its defaults, not as nulls.
         string legacyJson = """
             {
               "Version": 1,
@@ -453,8 +340,6 @@ public sealed class PostProcessingConfigTests
             UserConfig loaded = ConfigStore.Load(path);
 
             await Assert.That(loaded.Encoder).IsEqualTo("rv20");
-            await Assert.That(loaded.Watermark).IsNotNull();
-            await Assert.That(loaded.Watermark.Enabled).IsFalse();
             await Assert.That(loaded.Recompress).IsNotNull();
             await Assert.That(loaded.Recompress.Enabled).IsFalse();
         }
@@ -462,15 +347,6 @@ public sealed class PostProcessingConfigTests
         {
             File.Delete(path);
         }
-    }
-
-    [Test]
-    public async Task PositionIsNormalisedAndUnknownValuesFallBack()
-    {
-        await Assert.That(WatermarkSettings.CanonicalPosition("TOP_RIGHT")).IsEqualTo("top-right");
-        await Assert.That(WatermarkSettings.CanonicalPosition("center")).IsEqualTo("center");
-        await Assert.That(WatermarkSettings.CanonicalPosition(null)).IsEqualTo("top-right");
-        await Assert.That(WatermarkSettings.CanonicalPosition("nonsense")).IsEqualTo("top-right");
     }
 
     private static async Task<UserConfig> RoundTrip(UserConfig cfg)
@@ -489,11 +365,15 @@ public sealed class PostProcessingConfigTests
 }
 
 /// <summary>
-/// v7.9 #4: a font named by the user. The bug this covers: a bare file name
-/// (<c>--watermark-font simsun.ttc</c>) was handed to FFmpeg verbatim, and
-/// FFmpeg resolves relative paths against its own working directory -- so the
-/// font sitting in the bundled directory was never found and the only thing
-/// that worked was an absolute path.
+/// Where the subtitle burn path looks for fonts. The live surface is the
+/// directory contract: <see cref="FontResolver.FontDirectory"/> answers from
+/// LAE_FONT_DIR, falls back to the pre-retirement LAE_WATERMARK_FONT_DIR so a
+/// setup written for the watermark era keeps working, and otherwise points at
+/// the profile directory's fonts folder.
+///
+/// The font-picking members that used to live here (Resolve, Find, PickFrom,
+/// the CJK marker tables) were archived with the watermark in v7.9.1 -- see
+/// archive/retired/RetiredFontPicking.cs.
 ///
 /// Not in parallel: the directory override is a process-wide environment
 /// variable, and TUnit's default parallelism would let one test's finally
@@ -503,67 +383,80 @@ public sealed class PostProcessingConfigTests
 public sealed class FontResolverTests
 {
     [Test]
-    public async Task EmptyOrNullIsEmpty()
-    {
-        await Assert.That(FontResolver.Resolve(null)).IsEqualTo("");
-        await Assert.That(FontResolver.Resolve("")).IsEqualTo("");
-    }
-
-    [Test]
-    public async Task AnExistingPathIsUsedAsTyped()
-    {
-        string path = Path.Combine(Path.GetTempPath(), $"lae-font-{Guid.NewGuid():N}.ttf");
-        try
-        {
-            File.WriteAllText(path, "not a real font; existence is all Resolve checks");
-            await Assert.That(FontResolver.Resolve(path)).IsEqualTo(Path.GetFullPath(path));
-        }
-        finally
-        {
-            File.Delete(path);
-        }
-    }
-
-    [Test]
-    public async Task ABareNameIsLookedUpInTheFontsDirectory()
+    public async Task DirectoryEnvOverrideWins()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"lae-fonts-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        string font = Path.Combine(dir, "simsun.ttc");
-        File.WriteAllText(font, "stub");
         string? previous = Environment.GetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable);
         Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, dir);
         try
         {
-            // The regression: this used to come back as "simsun.ttc" and the
-            // encode then failed with "no such file or directory".
-            await Assert.That(FontResolver.Resolve("simsun.ttc")).IsEqualTo(font);
+            await Assert.That(FontResolver.FontDirectory).IsEqualTo(dir);
         }
         finally
         {
             Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, previous);
-            Directory.Delete(dir, recursive: true);
         }
     }
 
     [Test]
-    public async Task AnUnknownBareNameComesBackUnchangedForTheErrorMessage()
+    public async Task LegacyDirectoryEnvOverrideStillHonoured()
     {
-        string dir = Path.Combine(Path.GetTempPath(), $"lae-fonts-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
+        // v7.9.1: LAE_WATERMARK_FONT_DIR predates the watermark removal; a
+        // machine that exported it must not silently lose its font directory.
+        string dir = Path.Combine(Path.GetTempPath(), $"lae-fonts-legacy-{Guid.NewGuid():N}");
         string? previous = Environment.GetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable);
-        Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, dir);
+        string? legacy = Environment.GetEnvironmentVariable(FontResolver.LegacyDirectoryEnvironmentVariable);
+        Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, null);
+        Environment.SetEnvironmentVariable(FontResolver.LegacyDirectoryEnvironmentVariable, dir);
         try
         {
-            await Assert.That(FontResolver.Resolve("nope.ttf")).IsEqualTo("nope.ttf");
-            // A rooted path is never rewritten, existing or not.
-            await Assert.That(FontResolver.Resolve(@"C:\Windows\Fonts\simsun.ttc"))
-                .IsEqualTo(@"C:\Windows\Fonts\simsun.ttc");
+            await Assert.That(FontResolver.FontDirectory).IsEqualTo(dir);
         }
         finally
         {
             Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, previous);
-            Directory.Delete(dir, recursive: true);
+            Environment.SetEnvironmentVariable(FontResolver.LegacyDirectoryEnvironmentVariable, legacy);
+        }
+    }
+
+    [Test]
+    public async Task NewNameBeatsTheLegacyOne()
+    {
+        string current = Path.Combine(Path.GetTempPath(), $"lae-fonts-new-{Guid.NewGuid():N}");
+        string legacy = Path.Combine(Path.GetTempPath(), $"lae-fonts-old-{Guid.NewGuid():N}");
+        string? previous = Environment.GetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable);
+        string? legacyPrevious = Environment.GetEnvironmentVariable(FontResolver.LegacyDirectoryEnvironmentVariable);
+        Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, current);
+        Environment.SetEnvironmentVariable(FontResolver.LegacyDirectoryEnvironmentVariable, legacy);
+        try
+        {
+            await Assert.That(FontResolver.FontDirectory).IsEqualTo(current);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, previous);
+            Environment.SetEnvironmentVariable(FontResolver.LegacyDirectoryEnvironmentVariable, legacyPrevious);
+        }
+    }
+
+    [Test]
+    public async Task DefaultIsTheFontsFolderUnderTheProfile()
+    {
+        string? previous = Environment.GetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable);
+        string? legacy = Environment.GetEnvironmentVariable(FontResolver.LegacyDirectoryEnvironmentVariable);
+        Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, null);
+        Environment.SetEnvironmentVariable(FontResolver.LegacyDirectoryEnvironmentVariable, null);
+        try
+        {
+            await Assert.That(FontResolver.FontDirectory)
+                .IsEqualTo(Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "LiveArchiveEncoder", "fonts"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, previous);
+            Environment.SetEnvironmentVariable(FontResolver.LegacyDirectoryEnvironmentVariable, legacy);
         }
     }
 }

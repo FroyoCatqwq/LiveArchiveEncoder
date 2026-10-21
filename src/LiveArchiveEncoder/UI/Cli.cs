@@ -84,6 +84,19 @@ public static class Cli
             return 2;
         }
 
+        // v7.9.1: a network drive is a single-pass encode on purpose. The hint
+        // prints for every network source (stability is the user's to manage);
+        // an explicit --parallel N is overridden rather than honoured, because
+        // N concurrent readers on one flaky link is the stall itself.
+        string sourceForPolicy = urlInput ? args.Input! : src!.FullName;
+        bool networkSource = Remote.Smb.IsRemotePath(sourceForPolicy);
+        if (networkSource)
+        {
+            Console.WriteLine(Remote.Smb.StabilityHint(sourceForPolicy));
+            if (args.Parallel > 1) Console.WriteLine(L.T("parallel.networkoff"));
+        }
+        int parallel = networkSource ? 1 : args.Parallel;
+
         FileInfo dst = !string.IsNullOrEmpty(args.Output)
             ? new FileInfo(args.Output)
             : DefaultOutput(src, encoder, urlInput ? args.Input! : null);
@@ -257,7 +270,10 @@ public static class Cli
                 X264Tune = args.X264Tune,
                 X264Profile = args.X264Profile,
                 X264Level = args.X264Level,
-                Parallel = args.Parallel,
+                // The effective count, not the flag: a network source forces a
+                // single pass, and the settings file must not remember a shard
+                // count the next run would have to undo again.
+                Parallel = parallel,
                 // --lang wins; without it the stored preference is preserved so a
                 // CLI run never silently resets the language chosen in the UI.
                 Language = args.Language ?? stored.Language,
@@ -265,7 +281,6 @@ public static class Cli
                 FfmpegProxy = args.FfmpegProxy,
                 Play = args.Play,
                 PlayerPath = args.PlayerPath,
-                Watermark = ResolveWatermark(args),
                 Recompress = ResolveRecompress(args, era),
                 EraPreset = era?.Id ?? (args.Era is null ? stored.EraPreset : null),
             };
@@ -293,6 +308,30 @@ public static class Cli
         {
             Console.Error.WriteLine($"ERROR: {exc.Message}");
             return 2;
+        }
+
+        // ---- v7.9.1: settings-file conversion ----
+        // Both exits sit after validation (a bad setting must still be the
+        // error it is) and before anything expensive: capturing a command line
+        // as a settings file must not cost a twenty-minute encode, and printing
+        // the equivalent command line must not either.
+        if (args.SaveConfig is { Length: > 0 } || args.EmitArgs)
+        {
+            UserConfig captured = ConfigStore.Capture(config);
+            if (args.SaveConfig is { Length: > 0 } savePath)
+            {
+                if (!ConfigStore.Save(captured, savePath))
+                {
+                    Console.Error.WriteLine($"ERROR: could not write the settings file: {savePath}");
+                    return 2;
+                }
+                if (!args.Quiet) Console.WriteLine(L.T("config.saved", savePath));
+            }
+            if (args.EmitArgs)
+                Console.WriteLine(CliArgs.Join(CliArgs.FromUserConfig(captured)));
+            // The default-path save below is deliberately skipped: a conversion
+            // must not disturb the settings the interactive shell left behind.
+            return 0;
         }
 
         dst.Directory?.Create();
@@ -351,15 +390,15 @@ public static class Cli
             EndSeconds = config.EndTimeSeconds,
             AvailableFilters = availableFilters,
             AvailableScaleAlgorithms = availableScaleAlgorithms,
-            Verbose = !args.Quiet,
-            AudioMode = args.AudioMode,
-            Parallel = args.Parallel,
-        };
+                Verbose = !args.Quiet,
+                AudioMode = args.AudioMode,
+                Parallel = parallel,
+            };
 
         Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
         if (!args.Quiet) Report.PrintResult(dst.FullName, result);
 
-        // ---- v7.6: watermark, then the video-site recompress pass ----
+        // ---- v7.6: the video-site recompress pass ----
         string finalPath = dst.FullName;
         if (PostProcess.PostPipeline.Needed(config))
         {
@@ -369,21 +408,17 @@ public static class Cli
 
             if (!args.Quiet)
             {
-                if (post.WatermarkRan && post.WatermarkPath is { Length: > 0 } wm)
-                    Console.WriteLine(L.T("post.watermark", wm));
                 if (post.RecompressRan && post.RecompressPath is { Length: > 0 } rc)
                     Console.WriteLine(L.T("post.recompress", rc));
-                if (post.IntermediateRemoved)
-                    Console.WriteLine(L.T("post.intermediate"));
             }
 
             if (post.Failed)
             {
                 string stage = post.FailedStage!;
-                string detail = (stage == "watermark" ? post.WatermarkError : post.RecompressError) ?? "";
+                string detail = post.RecompressError ?? "";
                 Console.Error.WriteLine($"ERROR: {L.T("post.failed", stage, detail)}");
                 // Say the live file survived: losing a long encode and then
-                // discovering the watermark typo is bad enough without also
+                // discovering the recompress typo is bad enough without also
                 // wondering whether the recording is gone.
                 Console.Error.WriteLine(L.T("post.kept", dst.FullName));
                 return 1;
@@ -407,44 +442,11 @@ public static class Cli
     ///
     /// Deliberately <em>not</em> seeded from the settings file. The CLI has never
     /// read the stored config for defaults -- scripted runs must be predictable
-    /// -- and these two stages are the worst possible place to break that rule:
+    /// -- and this stage is the worst possible place to break that rule:
     /// a recompress pass silently re-encodes an already lossy file, so a setting
     /// that stuck from yesterday's interactive session would keep degrading
     /// today's output. The interactive shell keeps its own state; a CLI run
     /// writes exactly what it was given.
-    /// </summary>
-    private static WatermarkSettings ResolveWatermark(CliOptions args)
-    {
-        var wm = new WatermarkSettings
-        {
-            Enabled = false,
-            Text = "",
-            Position = "top-right",
-            FontSize = 0,
-            Margin = 0,
-            FontColor = "white",
-        };
-
-        if (args.Watermark is { Length: > 0 } text)
-        {
-            wm.Text = text;
-            wm.Enabled = true;
-        }
-        if (args.WatermarkPosition is { Length: > 0 } pos) wm.Position = pos;
-        if (args.WatermarkSize is { } size) wm.FontSize = size;
-        if (args.WatermarkColor is { Length: > 0 } colour) wm.FontColor = colour;
-        if (args.WatermarkFont is { Length: > 0 } font) wm.FontFile = font;
-
-        if (args.NoWatermark) wm.Enabled = false;
-        return wm;
-    }
-
-    /// <summary>
-    /// Same rule as <see cref="ResolveWatermark"/>: what the command line says,
-    /// nothing else. <c>--recompress-args</c> arms the stage on its own -- nobody
-    /// writes out a full argument list and then expects it not to run -- while
-    /// <c>--recompress</c> alone reuses the arguments of the era preset when one
-    /// was given.
     /// </summary>
     private static RecompressSettings ResolveRecompress(CliOptions args, PostProcess.EraPreset? era)
     {
@@ -453,12 +455,10 @@ public static class Cli
             Enabled = false,
             Args = era?.RecompressArgs ?? "",
             Container = era?.RecompressContainer ?? "mp4",
-            KeepIntermediate = false,
         };
 
         if (args.RecompressArgs is { Length: > 0 } a) rc.Args = a;
         if (args.RecompressContainer is { Length: > 0 } c) rc.Container = c;
-        if (args.RecompressKeep) rc.KeepIntermediate = true;
 
         if (args.Recompress) rc.Enabled = true;
         if (args.NoRecompress) rc.Enabled = false;
@@ -480,9 +480,6 @@ public static class Cli
             if (!config.Recompress.Container.HasText)
                 throw new ArgumentException(L.T("rc.args.empty"));
         }
-
-        if (config.Watermark.Enabled && !config.Watermark.Text.HasText)
-            throw new ArgumentException(L.T("wm.empty"));
     }
 
     private static FileInfo DefaultOutput(FileInfo? src, EncoderInfo encoder, string? url = null)

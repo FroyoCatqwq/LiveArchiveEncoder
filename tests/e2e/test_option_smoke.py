@@ -62,12 +62,9 @@ CASES = [
     # An era preset rewrites the encoder, frame size and bitrate ceiling, so the
     # output container follows the preset's encoder, not the old default.
     ("era_flv",         ["--era", "flv07"],                              "flv"),
-    # The watermark stage writes <stem>_wm.mp4 next to the main product.
-    ("watermark_only",  ["--encoder", "mpeg4", "--watermark", "测试"], "avi"),
-    # Both stages: watermark -> recompress, and --recompress-keep keeps the
-    # intermediate so both can be probed below.
-    ("post_full_chain", ["--encoder", "mpeg4", "--watermark", "测试",
-                         "--recompress", "--recompress-keep",
+    # v7.9.1 removed the watermark stage; recompress is the one that is left.
+    # The stage writes <stem>_web.mp4 next to the main product.
+    ("post_web",        ["--encoder", "mpeg4", "--recompress",
                          "--recompress-args", "-vf scale=320:240,fps=15 "
                                               "-c:v libx264 -crf 28 -ac 1 -b:a 32k"], "avi"),
 
@@ -107,9 +104,7 @@ CASES = [
 # v7.6: files the post-processing stages leave next to the main product.
 # case name -> [(file that must exist, expected codec)].
 POST_PRODUCTS = {
-    "watermark_only":   [("watermark_only_wm.mp4", "h264")],
-    "post_full_chain":  [("post_full_chain_wm.mp4", "h264"),
-                         ("post_full_chain_web.mp4", "h264")],
+    "post_web":         [("post_web_web.mp4", "h264")],
 }
 
 # Non-encoding option paths: (name, args, expected rc, substring that must appear).
@@ -132,9 +127,6 @@ OPTION_CHECKS = [
     ("rc_trailing_output", ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
                            "--recompress-args", "-c:v libx264 out.mp4",
                            "SRC", "OUT/rc_trail.avi"],    2, "output file name"),
-    ("wm_position_bad",   ["--lang", "en", "--no-cui", "--watermark", "x",
-                           "--watermark-position", "middle",
-                           "SRC", "OUT/wm_bad.mp4"],      2, "watermark-position"),
     ("era_help_lists",    ["--completion", "bash"],                 0, "--era"),
     # v7.7 #5: a motion level may never be faster than the base rate. The ladder
     # only throttles downwards, so 25 with --fps 15 is a typo, not a setting.
@@ -167,6 +159,9 @@ OPTION_CHECKS = [
                            "--crop-anchor", "sideways",
                            "SRC", "OUT/an_bad.avi"],  2, "--crop-anchor must be one of"),
     ("completion_new_opts", ["--completion", "bash"],             0, "--container"),
+    # v7.9.1: subtitles complete like every other option; the retired
+    # watermark flags must not come back with them.
+    ("completion_subtitle", ["--completion", "bash"],             0, "--subtitle-mode"),
     # ---- v7.9: Turbo is gone, not deprecated. An old script still passing it
     # must fail loudly rather than silently lose the pacing change it asked for.
     ("turbo_gone",        ["--lang", "en", "--no-cui", "--turbo"], 2, "unrecognized argument"),
@@ -220,3 +215,12 @@ def test_option_check(exe, src, workdir, name, args, want_rc, want_text):
     blob = proc.stdout + proc.stderr
     assert proc.returncode == want_rc, f"rc={proc.returncode} want {want_rc}"
     assert want_text in blob, f"missing {want_text!r} in output"
+
+
+def test_completion_drops_retired_flags(exe):
+    """v7.9.1 removed the watermark stage; a stale completion script would
+    still offer --watermark* and --recompress-keep to tab-completion."""
+    proc = run([str(exe), "--completion", "bash"])
+    assert proc.returncode == 0
+    for gone in ("watermark", "recompress-keep"):
+        assert gone not in proc.stdout, f"retired {gone!r} still completes"

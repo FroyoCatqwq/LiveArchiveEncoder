@@ -1,3 +1,21 @@
+// Retired code, kept for reference. NOT COMPILED: this file lives outside
+// every project on purpose (see archive/README.md).
+//
+// Retired in v7.9.1, at the user's request: the watermark is removed from the
+// tool and may come back as its own project (or a later feature) rather than
+// as a stage wedged between the live pass and the recompress pass.
+//
+// What replaced it: nothing. The recompress stage
+// (src/LiveArchiveEncoder/PostProcess/Recompress.cs) still exists and is the
+// only post-processing stage left; the pipeline no longer runs anything before
+// it.
+//
+// Restoring it means: this file back to src/LiveArchiveEncoder/PostProcess/,
+// WatermarkSettings back into Configuration/Models.cs (it was deleted with the
+// stage), and the CLI/CUI plumbing that consumed it (--watermark,
+// --watermark-position, --watermark-size, --watermark-color, --watermark-font,
+// --no-watermark, CUI menu row 15, the wm.* localisation keys).
+
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
@@ -19,7 +37,7 @@ namespace LiveArchiveEncoder.PostProcess;
 /// exact stream count) would make this stage fail on precisely the formats the
 /// tool exists to produce.
 /// </summary>
-public static class Watermark
+public static class RetiredWatermark
 {
     /// <summary>Generous: a re-encode is offline work, not the paced live pass.</summary>
     private const int TimeoutSeconds = 3600;

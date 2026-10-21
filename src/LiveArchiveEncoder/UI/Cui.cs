@@ -53,6 +53,14 @@ public static class Cui
             Console.WriteLine($"{L.Pad(L.T("config.restored"), 17)}: {ConfigStore.DefaultPath}"
                 + (stored.SavedAt is null ? "" : $" (saved {stored.SavedAt.Value.LocalDateTime:G})"));
         }
+        // v7.9.1: a remembered shard count belongs to whatever input it was
+        // chosen for. If that input is on a network drive, sharding is off for
+        // the run -- said here, at restore, rather than at encode time.
+        if (c.Parallel > 1 && Remote.Smb.IsRemotePath(c.InputPath?.FullName))
+        {
+            c.Parallel = 1;
+            Console.WriteLine(L.T("parallel.networkoff"));
+        }
         Console.WriteLine($"{L.Pad(L.T("config.settingsfile"), 17)}: {ConfigStore.DefaultPath}");
         while (true)
         {
@@ -74,9 +82,9 @@ public static class Cui
             Console.WriteLine($"12. {L.Pad(L.T("menu.toolchain"), 22)} = {c.FfmpegSource}");
             Console.WriteLine($"13. {L.Pad(L.T("menu.play"), 22)} = {Player.Describe(c.Play, c.PlayerPath, FFmpegDiscovery.FindFFplay(ffmpeg))}");
             Console.WriteLine($"14. {L.Pad(L.T("era.menu"), 22)} = {DescribeEra(c)}");
-            Console.WriteLine($"15. {L.Pad(L.T("wm.menu"), 22)} = {DescribeWatermark(c)}");
-            Console.WriteLine($"16. {L.Pad(L.T("rc.menu"), 22)} = {DescribeRecompress(c)}");
-            Console.WriteLine($"17. {L.Pad(L.T("menu.streams"), 22)} = {DescribeStreams(c)}");
+            Console.WriteLine($"15. {L.Pad(L.T("rc.menu"), 22)} = {DescribeRecompress(c)}");
+            Console.WriteLine($"16. {L.Pad(L.T("menu.streams"), 22)} = {DescribeStreams(c)}");
+            Console.WriteLine($"17. {L.Pad(L.T("sub.menu"), 22)} = {DescribeSubtitles(c)}");
             Console.WriteLine($" 0. {L.T("menu.exit")}");
             Console.Write(L.T("menu.select"));
 
@@ -95,6 +103,18 @@ public static class Cui
                         c.InputPath = selected;
                         if (c.Encoder is not null && c.OutputIsAuto)
                             c.OutputPath = DefaultOutput(selected, c.Encoder);
+                        // v7.9.1: a network input is a single-pass encode by
+                        // default, and the user hears why here rather than
+                        // twenty minutes into a stalled run.
+                        if (Remote.Smb.IsRemotePath(selected.FullName))
+                        {
+                            Console.WriteLine(Remote.Smb.StabilityHint(selected.FullName));
+                            if (c.Parallel > 1)
+                            {
+                                c.Parallel = 1;
+                                Console.WriteLine(L.T("parallel.networkoff"));
+                            }
+                        }
                     }
                     break;
                 case "2":
@@ -152,6 +172,13 @@ public static class Cui
                         c.Parallel = Math.Clamp(c.Parallel, 1, Constants.MaxParallelShards);
                         Console.WriteLine(L.T("parallel.clamped", Constants.MaxParallelShards));
                     }
+                    // v7.9.1: the encoder refuses to shard a network source, so
+                    // the menu does not store a number the run would ignore.
+                    if (c.Parallel > 1 && Remote.Smb.IsRemotePath(c.InputPath?.FullName))
+                    {
+                        c.Parallel = 1;
+                        Console.WriteLine(L.T("parallel.networkrefused"));
+                    }
                     Console.WriteLine(c.Parallel > 1 ? L.T("parallel.set", c.Parallel) : L.T("parallel.off"));
                     Persist(c);
                     break;
@@ -179,15 +206,15 @@ public static class Cui
                     Persist(c);
                     break;
                 case "15":
-                    EditWatermark(c);
-                    Persist(c);
-                    break;
-                case "16":
                     EditRecompress(c);
                     Persist(c);
                     break;
-                case "17":
+                case "16":
                     EditStreams(c, ffprobe);
+                    Persist(c);
+                    break;
+                case "17":
+                    EditSubtitles(c, ffprobe);
                     Persist(c);
                     break;
                 default:
@@ -272,6 +299,161 @@ public static class Cui
                 continue;
             }
             return value;
+        }
+    }
+
+    /// <summary>
+    /// v7.9.1: one-line summary for the main menu. "off" covers both an
+    /// explicit off and a request with nothing picked, because that is what
+    /// the encoder will do with it.
+    /// </summary>
+    private static string DescribeSubtitles(Config c)
+    {
+        SubtitleConfig s = c.Subtitles;
+        if (!s.Active) return L.T("sub.off");
+
+        string what = s.Files.Count > 0
+            ? string.Join(", ", s.Files.Select(f => Path.GetFileName(f)))
+            : L.T("sub.streamn", s.Stream!.Value);
+        string mode = s.Mode == "copy" ? L.T("sub.mode.copy") : L.T("sub.mode.burn");
+        string codec = s is { Mode: "copy", Codec: { Length: > 0 } code } ? $" ({code})" : "";
+        return $"{mode}: {what}{codec}";
+    }
+
+    /// <summary>
+    /// v7.9.1: the subtitle menu -- the CUI half of what
+    /// --subtitle / --subtitle-stream / --subtitle-mode / --subtitle-codec
+    /// spell on the command line.
+    ///
+    /// Files and an embedded stream stay mutually exclusive the way the
+    /// encoder wants them: setting one clears the other instead of letting
+    /// the run fail on a request that can never be honoured.
+    /// </summary>
+    private static void EditSubtitles(Config c, string ffprobe)
+    {
+        while (true)
+        {
+            SubtitleConfig s = c.Subtitles;
+            Console.WriteLine($"\n== {L.T("sub.menu")} ==");
+            Console.WriteLine($" 1. {L.Pad(L.T("sub.menu.mode"), 30)} = {s.Mode}");
+            Console.WriteLine($" 2. {L.Pad(L.T("sub.menu.files"), 30)} = {(s.Files.Count == 0 ? L.T("value.notselected") : string.Join(", ", s.Files.Select(f => Path.GetFileName(f))))}");
+            Console.WriteLine($" 3. {L.Pad(L.T("sub.menu.stream"), 30)} = {(s.Stream is int idx ? idx.ToString(CultureInfo.InvariantCulture) : L.T("value.notselected"))}");
+            Console.WriteLine($" 4. {L.Pad(L.T("sub.menu.codec"), 30)} = {(s.Codec is { Length: > 0 } code ? code : L.T("value.auto"))}");
+            Console.WriteLine($" 0. {L.T("sub.menu.back")}");
+            Console.Write(L.T("menu.select"));
+
+            switch ((Console.ReadLine() ?? "").Trim())
+            {
+                case "0": return;
+                case "1":
+                    // Cycle burn -> copy -> off -> burn. The picks survive an
+                    // "off" so flipping back does not lose the selection.
+                    s.Mode = s.Mode switch
+                    {
+                        "burn" => "copy",
+                        "copy" => "off",
+                        _ => "burn",
+                    };
+                    Console.WriteLine(L.T("sub.mode.set", s.Mode));
+                    if (s.Mode == "copy" && c.Encoder is not null
+                        && !Constants.SubtitleCodecsByContainer.ContainsKey(c.Encoder.FormatName))
+                    {
+                        Console.WriteLine(L.T("sub.copy.nocontainer", c.Encoder.FormatName));
+                    }
+                    break;
+                case "2":
+                    Console.WriteLine(L.T("sub.files.hint", string.Join(" ", Constants.SubtitleFileExtensions)));
+                    Console.Write(L.T("sub.prompt.files"));
+                    string file = (Console.ReadLine() ?? "").Trim().Trim('"');
+                    if (file == "-")
+                    {
+                        s.Files = [];
+                        Console.WriteLine(L.T("sub.files.cleared"));
+                        break;
+                    }
+                    if (file.Length == 0) break;
+                    if (!Constants.SubtitleFileExtensions.Contains(
+                            Path.GetExtension(file).ToLowerInvariant()))
+                    {
+                        Console.WriteLine($"{L.T("error.prefix")}{L.T("sub.badext",
+                            Path.GetFileName(file), string.Join(" ", Constants.SubtitleFileExtensions))}");
+                        break;
+                    }
+                    if (!File.Exists(file))
+                    {
+                        Console.WriteLine($"{L.T("error.prefix")}{L.T("sub.notfound", file)}");
+                        break;
+                    }
+                    s.Files = [file];
+                    s.Stream = null;   // the two picks are exclusive
+                    Console.WriteLine(L.T("sub.files.set", Path.GetFileName(file)));
+                    if (s.Mode == "off") Console.WriteLine(L.T("sub.hint.off"));
+                    break;
+                case "3":
+                    if (c.InputPath is null || !c.InputPath.Exists)
+                    {
+                        Console.WriteLine(L.T("stream.selectfirst"));
+                        break;
+                    }
+                    FFmpeg.SourceInfo source;
+                    try
+                    {
+                        source = FFmpeg.Probe.Source(ffprobe, c.InputPath.FullName);
+                    }
+                    catch (InvalidOperationException exc)
+                    {
+                        Console.WriteLine(L.T("stream.probefailed", exc.Message));
+                        break;
+                    }
+                    Console.WriteLine(L.T("stream.heading", c.InputPath.Name));
+                    Console.WriteLine(LiveArchiveEncoder.Encoding.StreamSelection.Describe(source));
+                    Console.Write(L.T("sub.prompt.stream",
+                        s.Stream?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.none")));
+                    string rawIdx = (Console.ReadLine() ?? "").Trim();
+                    if (rawIdx.Length == 0)
+                    {
+                        s.Stream = null;
+                        Console.WriteLine(L.T("sub.stream.cleared"));
+                        break;
+                    }
+                    if (!int.TryParse(rawIdx, NumberStyles.Integer, CultureInfo.InvariantCulture, out int pick)
+                        || !source.Streams.Any(st => st.Index == pick && st.Type == "subtitle"))
+                    {
+                        Console.WriteLine(L.T("sub.stream.invalid"));
+                        break;
+                    }
+                    s.Stream = pick;
+                    s.Files = [];   // the two picks are exclusive
+                    Console.WriteLine(L.T("sub.stream.set", pick));
+                    if (s.Mode == "off") Console.WriteLine(L.T("sub.hint.off"));
+                    break;
+                case "4":
+                    if (s.Mode != "copy")
+                    {
+                        Console.WriteLine(L.T("sub.codec.copyonly"));
+                        break;
+                    }
+                    string? preferred = c.Encoder is not null
+                        && Constants.SubtitleCodecsByContainer.TryGetValue(
+                            c.Encoder.FormatName, out string[]? list)
+                        ? string.Join(", ", list)
+                        : null;
+                    if (preferred is not null)
+                        Console.WriteLine(L.T("sub.codec.container", c.Encoder!.FormatName, preferred));
+                    Console.Write(L.T("sub.prompt.codec", s.Codec ?? L.T("value.auto")));
+                    string codecRaw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+                    if (codecRaw == "-")
+                    {
+                        s.Codec = null;
+                        Console.WriteLine(L.T("sub.codec.auto"));
+                    }
+                    else if (codecRaw.Length > 0)
+                    {
+                        s.Codec = codecRaw;
+                        Console.WriteLine(L.T("sub.codec.set", codecRaw));
+                    }
+                    break;
+            }
         }
     }
 
@@ -1228,6 +1410,16 @@ public static class Cui
                 AudioKbps = c.AudioKbps,
                 AudioChannels = c.AudioChannels,
                 AudioRate = c.AudioRate,
+                // v7.9.1: the subtitle request the menu built, in the same
+                // shape the CLI half hands the encoder.
+                Subtitles = new Encoding.SubtitleSettings(
+                    [.. c.Subtitles.Files], c.Subtitles.Stream,
+                    Encoding.SubtitleTrack.ParseMode(c.Subtitles.Mode), c.Subtitles.Codec),
+                // Detected once here (and inherited by shards) instead of once
+                // per shard: the copy path needs the build's own encoder list.
+                AvailableSubtitleEncoders = c.Subtitles.Active
+                    ? FFmpeg.FFmpegCapabilities.DetectSubtitleEncoders(ffmpeg)
+                    : null,
                 Hwaccel = c.Hwaccel,
                 Width = c.Width,
                 Height = c.Height,
@@ -1258,8 +1450,9 @@ public static class Cui
             Console.WriteLine();
             Report.PrintResult(c.OutputPath.FullName, result);
 
-            // v7.6: watermark first, then the video-site recompress pass, in that
-            // order -- the mark has to suffer the same transcode the picture does.
+            // v7.6: the video-site recompress pass, after the live recording --
+            // the site transcoded whatever it was given, so this is the only
+            // stage left.
             string finalPath = c.OutputPath.FullName;
             if (PostProcess.PostPipeline.Needed(c))
             {
@@ -1267,17 +1460,13 @@ public static class Cui
                     PostProcess.PostPipeline.Run(ffmpeg, c.OutputPath.FullName, c);
                 finalPath = post.FinalPath;
 
-                if (post.WatermarkRan && post.WatermarkPath is { Length: > 0 } wm)
-                    Console.WriteLine(L.T("post.watermark", wm));
                 if (post.RecompressRan && post.RecompressPath is { Length: > 0 } rc)
                     Console.WriteLine(L.T("post.recompress", rc));
-                if (post.IntermediateRemoved)
-                    Console.WriteLine(L.T("post.intermediate"));
 
                 if (post.Failed)
                 {
                     string stage = post.FailedStage!;
-                    string detail = (stage == "watermark" ? post.WatermarkError : post.RecompressError) ?? "";
+                    string detail = post.RecompressError ?? "";
                     Console.WriteLine($"{L.T("error.prefix")}{L.T("post.failed", stage, detail)}");
                     Console.WriteLine(L.T("post.kept", c.OutputPath.FullName));
                     finalPath = c.OutputPath.FullName;   // play what did survive
@@ -1318,20 +1507,15 @@ public static class Cui
         return choices[(index + 1) % choices.Count];
     }
 
-    // ---- v7.6: era preset / watermark / recompress menus ----
+    // ---- v7.6: era preset / recompress menus ----
 
     private static string DescribeEra(Config c) =>
         c.EraPreset is { Length: > 0 } id && PostProcess.EraPresets.Find(id) is not null
             ? id
             : L.T("era.none");
 
-    private static string DescribeWatermark(Config c) =>
-        c.Watermark.Enabled
-            ? $"\"{c.Watermark.Text}\""
-            : L.T("wm.off");
-
     private static string DescribeRecompress(Config c) =>
-        (c.Recompress.Enabled ? "on" : L.T("wm.off"))
+        (c.Recompress.Enabled ? "on" : L.T("value.off"))
         + (c.Recompress.Args.Length > 0 ? $" | {c.Recompress.Args}" : "");
 
     private static void PickEraPreset(Config c)
@@ -1364,87 +1548,14 @@ public static class Cui
         Console.WriteLine(L.T("rc.hint"));
     }
 
-    private static void EditWatermark(Config c)
-    {
-        while (true)
-        {
-            Console.WriteLine($"\n== {L.T("wm.menu")} ==");
-            Console.WriteLine($" 1. {L.Pad(L.T("wm.menu.enable"), 30)} = {DescribeWatermark(c)}");
-            Console.WriteLine($" 2. {L.Pad(L.T("wm.menu.position"), 30)} = {c.Watermark.Position}");
-            Console.WriteLine($" 3. {L.Pad(L.T("wm.menu.size"), 30)} = {(c.Watermark.FontSize > 0 ? c.Watermark.FontSize.ToString(CultureInfo.InvariantCulture) : "0" + L.T("wm.size.auto"))}");
-            Console.WriteLine($" 4. {L.Pad(L.T("wm.menu.color"), 30)} = {c.Watermark.FontColor}");
-            Console.WriteLine($" 5. {L.Pad(L.T("wm.menu.font"), 30)} = {c.Watermark.FontFile ?? L.T("value.auto")}");
-            Console.WriteLine($" 0. {L.T("wm.menu.back")}");
-            Console.Write(L.T("menu.select"));
-
-            switch ((Console.ReadLine() ?? "").Trim())
-            {
-                case "0": return;
-                case "1":
-                    Console.Write(L.T("wm.prompt.text"));
-                    string text = (Console.ReadLine() ?? "").Trim();
-                    if (text.Length == 0 || text == "-")
-                    {
-                        c.Watermark.Enabled = false;
-                        c.Watermark.Text = "";
-                        Console.WriteLine(L.T("wm.off.set"));
-                        break;
-                    }
-                    c.Watermark.Text = text;
-                    c.Watermark.Enabled = true;
-                    Console.WriteLine(L.T("wm.set", text));
-                    break;
-                case "2":
-                    int p = WatermarkSettings.Positions
-                        .ToList().IndexOf(WatermarkSettings.CanonicalPosition(c.Watermark.Position));
-                    c.Watermark.Position = WatermarkSettings.Positions[(p + 1) % 5];
-                    Console.WriteLine(L.T("wm.pos.set", c.Watermark.Position));
-                    break;
-                case "3":
-                    Console.Write(L.T("wm.prompt.size", c.Watermark.FontSize));
-                    if (int.TryParse((Console.ReadLine() ?? "").Trim(), out int size) && size >= 0)
-                    {
-                        c.Watermark.FontSize = size;
-                        Console.WriteLine(L.T("wm.size.set", size, size == 0 ? L.T("wm.size.auto") : ""));
-                    }
-                    else Console.WriteLine($"{L.T("error.prefix")}{L.T("wm.badsize")}");
-                    break;
-                case "4":
-                    Console.Write(L.T("wm.prompt.color", c.Watermark.FontColor));
-                    string colour = (Console.ReadLine() ?? "").Trim();
-                    if (colour.Length > 0)
-                    {
-                        c.Watermark.FontColor = colour;
-                        Console.WriteLine(L.T("wm.color.set", colour));
-                    }
-                    break;
-                case "5":
-                    Console.Write(L.T("wm.prompt.font", c.Watermark.FontFile ?? L.T("value.auto")));
-                    string font = (Console.ReadLine() ?? "").Trim().Trim('"');
-                    if (font == "-")
-                    {
-                        c.Watermark.FontFile = null;
-                        Console.WriteLine(L.T("wm.font.auto"));
-                    }
-                    else if (font.Length > 0)
-                    {
-                        c.Watermark.FontFile = font;
-                        Console.WriteLine(L.T("wm.font.set", font));
-                    }
-                    break;
-            }
-        }
-    }
-
     private static void EditRecompress(Config c)
     {
         while (true)
         {
             Console.WriteLine($"\n== {L.T("rc.menu")} ==");
-            Console.WriteLine($" 1. {L.Pad(L.T("rc.menu.enable"), 30)} = {(c.Recompress.Enabled ? "on" : L.T("wm.off"))}");
+            Console.WriteLine($" 1. {L.Pad(L.T("rc.menu.enable"), 30)} = {(c.Recompress.Enabled ? "on" : L.T("value.off"))}");
             Console.WriteLine($" 2. {L.Pad(L.T("rc.menu.args"), 30)} = {(c.Recompress.Args.Length == 0 ? L.T("value.notselected") : c.Recompress.Args)}");
             Console.WriteLine($" 3. {L.Pad(L.T("rc.menu.container"), 30)} = {c.Recompress.Container}");
-            Console.WriteLine($" 4. {L.Pad(L.T("rc.menu.keep"), 30)} = {L.YesNo(c.Recompress.KeepIntermediate)}");
             Console.WriteLine($" 0. {L.T("rc.menu.back")}");
             Console.Write(L.T("menu.select"));
 
@@ -1480,10 +1591,6 @@ public static class Cui
                         c.Recompress.Container = container;
                         Console.WriteLine(L.T("rc.container.set", container));
                     }
-                    break;
-                case "4":
-                    c.Recompress.KeepIntermediate = !c.Recompress.KeepIntermediate;
-                    Console.WriteLine(c.Recompress.KeepIntermediate ? L.T("rc.keep.on") : L.T("rc.keep.off"));
                     break;
             }
         }
