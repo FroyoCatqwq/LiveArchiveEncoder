@@ -18,10 +18,25 @@
 | --- | --- | --- |
 | 状态 | 主要开发平台 | v7.5 起完整支持 |
 | 构建 | `tools\build.ps1`（JIT / AOT） | `tools/build.sh`（JIT，可加 `--aot`） |
-| NativeAOT | ✅ 需要 MSVC + Windows SDK | ⚠️ 实验性，需要 `clang` + `zlib` 开发包 |
+| NativeAOT | ✅ 需要 MSVC + Windows SDK | ✅ v7.9.1 起出包，构建需要 `clang` + `zlib1g-dev` |
 | SMB | UNC 路径（`\\host\share`） | CIFS 挂载点（`/mnt/…`），需要 `cifs-utils` |
 | 播放器 | `ffplay` 或 `start` 关联程序 | `ffplay` 或 `xdg-open` |
 | 受管理 FFmpeg | ✅ | ✅ |
+
+### 从 Release 下载
+
+每个版本都在 GitHub 与 Codeberg 双端发布四个产物：
+
+| 文件 | 平台 | 说明 |
+| --- | --- | --- |
+| `…-win-x64.zip` | Windows | JIT，需要 .NET 10 **或** .NET 11 运行时（`RollForward=Major`） |
+| `…-win-x64-aot.zip` | Windows | NativeAOT 单 exe，不需要运行时 |
+| `…-linux-x64.tar.gz` | Linux | JIT，需要 .NET 10 **或** .NET 11 运行时 |
+| `…-linux-x64-aot.tar.gz` | Linux | NativeAOT 单文件，不需要运行时 |
+
+Linux 两个包解压即用（`tar xzf … && ./LiveArchiveEncoder`，可执行位已带上）。
+AOT 版在 Ubuntu 26.10 上链接，**要求目标机的 glibc 不低于构建机**；老发行版用 JIT 版
+更稳。两个版本都还需要 `PATH` 上有 FFmpeg/ffprobe，或让工具自己下一套（§7.10）。
 
 跨平台规则（写脚本时按这个来）：
 
