@@ -104,11 +104,26 @@ tools\build.ps1 -Aot -WindowsSdkLibVersion 10.0.26100.0
 At runtime you need an FFmpeg/ffprobe pair on `PATH` (or pass `--ffmpeg` /
 `--ffprobe`), or let the tool download and manage one itself (`--ffmpeg-download`).
 
+## Prebuilt binaries
+
+Every release carries four builds, on both hosts:
+
+| file | platform | runtime needed |
+| --- | --- | --- |
+| `…-win-x64.zip` | Windows | .NET 10 or .NET 11 (`RollForward=Major`) |
+| `…-win-x64-aot.zip` | Windows | none (NativeAOT, single exe) |
+| `…-linux-x64.tar.gz` | Linux | .NET 10 or .NET 11 |
+| `…-linux-x64-aot.tar.gz` | Linux | none (NativeAOT, single file) |
+
+The Linux archives keep the executable bit, so `tar xzf … && ./LiveArchiveEncoder`
+works as-is. The AOT binaries link against the build host's glibc — older
+distributions should take the JIT build. FFmpeg is still needed either way.
+
 ## Tests
 
 ```bash
 # TUnit unit tests — identical command on both platforms (runs on MTP since v7.8.3)
-dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 298 on Windows
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 381 on Windows
 # and the same suite against the other runtime:
 dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 ```
