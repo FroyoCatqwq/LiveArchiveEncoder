@@ -71,29 +71,27 @@ public static class Watermark
         if (!settings.Text.HasText)
             return (false, "watermark is enabled but the text is empty");
 
-        string? font = !settings.FontFile.HasText ? FontResolver.Find() : settings.FontFile;
+        // v7.9: a bare font name is resolved against the bundled fonts
+        // directory; without that, "--watermark-font simsun.ttc" failed even
+        // with the font installed, because FFmpeg resolves relative paths
+        // against its own working directory.
+        string? font = settings.FontFile.HasText
+            ? FontResolver.Resolve(settings.FontFile)
+            : FontResolver.Find();
         if (font is null || !File.Exists(font))
             // Localised sentence first, then the untranslated install command --
             // a shell command should not be rendered in the user's language.
             return (false, $"{L.T("wm.nofont", FontResolver.EnvironmentVariable)} {FontResolver.InstallHint}");
 
-        string filter = BuildFilter(settings, height, font);
-
         string? dir = Path.GetDirectoryName(output);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+        string filter = BuildFilter(settings, height, font);
 
         CaptureResult result;
         try
         {
-            result = ProcessRunner.Run(
-                [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-                 "-i", input,
-                 "-vf", filter,
-                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                 "-c:a", "aac", "-b:a", "64k",
-                 "-movflags", "+faststart",
-                 output],
-                TimeoutSeconds);
+            result = RunDrawtext(ffmpeg, input, output, filter);
         }
         // Same reasoning as the recompress stage: a bad executable or a missing
         // input arrives as an OS exception and must become a message, not an
@@ -106,6 +104,42 @@ public static class Watermark
             return (false, exc.Message);
         }
 
+        if (result.ExitCode != 0 && IsMonochromeFontFailure(result.Stderr))
+        {
+            // drawtext refuses monochrome (1bpp) faces outright, and the first
+            // face of simsun.ttc is one -- so the font the user named is
+            // unusable even though it exists and resolves. Before failing,
+            // retry with the CJK font the resolver would have picked; that one
+            // is known to render. Say so, because silently swapping a font the
+            // user asked for is worse than the noise.
+            string? fallback = FontResolver.Find();
+            if (fallback is not null && File.Exists(fallback)
+                && !string.Equals(Path.GetFullPath(fallback), Path.GetFullPath(font), StringComparison.OrdinalIgnoreCase))
+            {
+                CaptureResult retry;
+                try
+                {
+                    retry = RunDrawtext(ffmpeg, input, output, BuildFilter(settings, height, fallback));
+                }
+                catch (Exception exc) when (exc is InvalidOperationException
+                                               or System.ComponentModel.Win32Exception
+                                               or TimeoutException
+                                               or IOException)
+                {
+                    return (false, exc.Message);
+                }
+
+                if (retry.ExitCode == 0 && File.Exists(output) && new FileInfo(output).Length > 0)
+                {
+                    Console.Error.WriteLine(
+                        $"WARNING: '{Path.GetFileName(font)}' is a monochrome (1bpp) font and "
+                        + $"drawtext cannot use it; the watermark was drawn with "
+                        + $"'{Path.GetFileName(fallback)}' instead.");
+                    return (true, null);
+                }
+            }
+        }
+
         if (result.ExitCode != 0)
             return (false, $"ffmpeg drawtext failed (exit {result.ExitCode}): {Tail(result.Stderr)}");
 
@@ -114,6 +148,28 @@ public static class Watermark
 
         return (true, null);
     }
+
+    /// <summary>
+    /// drawtext's refusal when the font's first face is a 1bpp bitmap face.
+    /// The message is stable across FFmpeg builds; the failure mode behind it
+    /// is not (a .ttc collection simply picks face 0, and which face that is
+    /// differs per font), so this is matched rather than predicted.
+    /// </summary>
+    private static bool IsMonochromeFontFailure(string stderr) =>
+        stderr.Contains("Monocromatic", StringComparison.OrdinalIgnoreCase)
+        || stderr.Contains("Monochrome", StringComparison.OrdinalIgnoreCase);
+
+    private static CaptureResult RunDrawtext(
+        string ffmpeg, string input, string output, string filter) =>
+        ProcessRunner.Run(
+            [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+             "-i", input,
+             "-vf", filter,
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+             "-c:a", "aac", "-b:a", "64k",
+             "-movflags", "+faststart",
+             output],
+            TimeoutSeconds);
 
     /// <summary>
     /// Insert "_wm" before the extension and switch the container to mp4.

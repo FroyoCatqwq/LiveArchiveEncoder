@@ -227,6 +227,9 @@ Two flags are additions rather than ports:
 | `--watermark TEXT` | burn a text watermark into the live recording, before the recompress pass. Position/size/colour/font are separate flags; off by default |
 | `--recompress`, `--recompress-args ARGS` | re-encode the result the way a video site would. You write the middle of the FFmpeg command (`-vf scale=320:240,fps=15 -c:v libx264 -crf 28 …`); the program owns `-i` and the output path, and the fragment is tokenised and vetted so a stray path cannot overwrite your source. Off by default |
 | `--era ID` | apply an era preset: one set of live + recompress settings per era of online video, 1997→2016 — dial-up RealVideo G2, early-ADSL RealMedia, the FLV/Youku/Tudou years, early H.264, 720p. Sources in `docs/era-presets.md` |
+| `--video-stream N`, `--audio-stream N` | v7.9: pick which track of a multi-stream source (a VOB's second audio language, an MKV's duplicate encode) to encode, by the absolute index ffprobe prints; `--list-streams` lists them. Wrong index or type is refused before the encode, with the inventory |
+| `--subtitle FILE`, `--subtitle-stream N` | v7.9: subtitles from a sidecar file (`.ass/.ssa/.srt/.vtt`, repeatable) or an embedded track. `--subtitle-mode burn` (default) renders them into the picture with libass and the tool's own font directory; `--subtitle-mode copy` muxes them as a real subtitle stream where the container has one, with the codec picked from what `ffmpeg -encoders` actually lists. Bitmap subtitles (dvdsub/dvbsub) can be carried but not burned |
+| HTTP/HTTPS input | v7.9, initial support: the input may be a progressive `http(s)://` direct link (archive.org `/download/…` style). Carries the `-reconnect` family and a 30 s socket timeout; seeking needs a Range-capable server. No auth/cookies/HLS |
 
 ### Audio routing
 
@@ -247,6 +250,16 @@ it is **not** the default and it is **not** faster:
 `--audio-mode auto` behaves like `separate` but falls back to the single-process
 pipeline when the muxer rejects the split. Measured numbers are in
 `docs/test-report-v7.md` §7.
+
+### v7.9
+
+Stream selection (`--video-stream`/`--audio-stream`/`--list-streams`), subtitles
+(read + burn with libass, or carry as a stream where the container has one),
+HTTP/HTTPS input, AVI for h261/h263/h263p, a font-path fix (bare file names now
+resolve against the tool's `fonts/` directory, and a monochrome-first `.ttc`
+falls back to a usable CJK font), and **Turbo removed outright** — `--turbo` is
+now an unrecognized argument and the code lives in `archive/retired/`. Details
+in `docs/usage.md` §7.16 and the v7.9 notes there.
 
 ### Audio limits (v7.8.2)
 
@@ -276,8 +289,10 @@ src/LiveArchiveEncoder/
   Frames/         bounded pre-allocated frame pool
   RateControl/    rolling bitrate monitor fed by `ffmpeg -progress`
   Encoding/       argument builders, preflight, the realtime encode loop, audio
-                  routing, optional parallel sharding, ShardPlanner (v7.7)
-  Remote/         SMB/UNC argument construction for read and write
+                  routing, optional parallel sharding, ShardPlanner (v7.7),
+                  stream selection and subtitles (v7.9)
+  Remote/         SMB/UNC argument construction for read and write,
+                  HttpSource (v7.9: http/https input)
   Localization/   en/zh string tables (every key must exist in both)
   UI/             CLI parser + help, CUI menus, shared reporting, --cpu-info,
                   post-encode playback

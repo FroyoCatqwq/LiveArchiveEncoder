@@ -11,7 +11,9 @@ namespace LiveArchiveEncoder.Tests;
 /// </summary>
 public sealed class HwaccelTests
 {
-    private static readonly FileInfo NoSource = new("no-such-media.mp4");
+    // v7.9: the source is a plain string now -- an http:// URL is a legal
+    // source too, and a hardware probe has to be able to ask about one.
+    private const string NoSource = "no-such-media.mp4";
 
     [Test]
     [Arguments("off")]

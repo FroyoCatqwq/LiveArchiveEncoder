@@ -487,3 +487,83 @@ public sealed class PostProcessingConfigTests
         }
     }
 }
+
+/// <summary>
+/// v7.9 #4: a font named by the user. The bug this covers: a bare file name
+/// (<c>--watermark-font simsun.ttc</c>) was handed to FFmpeg verbatim, and
+/// FFmpeg resolves relative paths against its own working directory -- so the
+/// font sitting in the bundled directory was never found and the only thing
+/// that worked was an absolute path.
+///
+/// Not in parallel: the directory override is a process-wide environment
+/// variable, and TUnit's default parallelism would let one test's finally
+/// block restore it under another test's feet.
+/// </summary>
+[NotInParallel]
+public sealed class FontResolverTests
+{
+    [Test]
+    public async Task EmptyOrNullIsEmpty()
+    {
+        await Assert.That(FontResolver.Resolve(null)).IsEqualTo("");
+        await Assert.That(FontResolver.Resolve("")).IsEqualTo("");
+    }
+
+    [Test]
+    public async Task AnExistingPathIsUsedAsTyped()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"lae-font-{Guid.NewGuid():N}.ttf");
+        try
+        {
+            File.WriteAllText(path, "not a real font; existence is all Resolve checks");
+            await Assert.That(FontResolver.Resolve(path)).IsEqualTo(Path.GetFullPath(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Test]
+    public async Task ABareNameIsLookedUpInTheFontsDirectory()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"lae-fonts-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string font = Path.Combine(dir, "simsun.ttc");
+        File.WriteAllText(font, "stub");
+        string? previous = Environment.GetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable);
+        Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, dir);
+        try
+        {
+            // The regression: this used to come back as "simsun.ttc" and the
+            // encode then failed with "no such file or directory".
+            await Assert.That(FontResolver.Resolve("simsun.ttc")).IsEqualTo(font);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, previous);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task AnUnknownBareNameComesBackUnchangedForTheErrorMessage()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"lae-fonts-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string? previous = Environment.GetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable);
+        Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, dir);
+        try
+        {
+            await Assert.That(FontResolver.Resolve("nope.ttf")).IsEqualTo("nope.ttf");
+            // A rooted path is never rewritten, existing or not.
+            await Assert.That(FontResolver.Resolve(@"C:\Windows\Fonts\simsun.ttc"))
+                .IsEqualTo(@"C:\Windows\Fonts\simsun.ttc");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(FontResolver.DirectoryEnvironmentVariable, previous);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+}

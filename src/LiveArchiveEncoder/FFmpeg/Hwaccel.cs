@@ -67,16 +67,19 @@ public static class Hwaccel
     /// <summary>
     /// The only test that means anything: decode one frame through the method.
     /// Returns null when it works, otherwise the reason.
+    ///
+    /// The source is a string because it may be an HTTP(S) URL (v7.9).
     /// </summary>
-    public static string? Probe(string ffmpeg, string method, FileInfo src)
+    public static string? Probe(string ffmpeg, string method, string sourcePath)
     {
         try
         {
             CaptureResult p = ProcessRunner.Run(
             [
                 ffmpeg, "-hide_banner", "-loglevel", "error",
+                .. Remote.HttpSource.ReadArgs(sourcePath),
                 "-hwaccel", method,
-                "-i", src.FullName,
+                "-i", sourcePath,
                 "-frames:v", "1",
                 "-f", "null", "-",
             ], 120);
@@ -96,7 +99,7 @@ public static class Hwaccel
     /// Turn a request ("off" / "auto" / a method name) into a method that is
     /// known to work here, or <see cref="Off"/>.
     /// </summary>
-    public static string Resolve(string? requested, string ffmpeg, FileInfo src, Action<string>? log)
+    public static string Resolve(string? requested, string ffmpeg, string sourcePath, Action<string>? log)
     {
         string ask = (requested ?? Off).Trim();
         if (ask.Length == 0 || ask.Equals(Off, StringComparison.OrdinalIgnoreCase)) return Off;
@@ -107,7 +110,7 @@ public static class Hwaccel
         {
             foreach (string method in PreferenceOrder.Where(compiled.Contains))
             {
-                if (Probe(ffmpeg, method, src) is null)
+                if (Probe(ffmpeg, method, sourcePath) is null)
                 {
                     log?.Invoke($"Hardware decode: {method}");
                     return method;
@@ -125,7 +128,7 @@ public static class Hwaccel
             return Off;
         }
 
-        if (Probe(ffmpeg, ask, src) is { Length: > 0 } why)
+        if (Probe(ffmpeg, ask, sourcePath) is { Length: > 0 } why)
         {
             log?.Invoke($"Hardware decode: '{ask}' is compiled in but cannot decode here "
                 + $"({why}); using software decode");

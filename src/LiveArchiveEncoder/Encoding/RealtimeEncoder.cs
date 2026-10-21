@@ -36,20 +36,29 @@ public static class RealtimeEncoder
     /// <summary>Single-pass encode: one decoder process, one encoder process.</summary>
     public static EncodeResult RunSingle(RealtimeOptions o, CancellationToken cancellationToken = default)
     {
-        var src = new FileInfo(Path.GetFullPath(o.SourcePath));
         var dst = new FileInfo(Path.GetFullPath(o.DestinationPath));
+
+        // v7.9: an HTTP(S) source has no FileInfo and no existence check -- it is
+        // the probe below that decides whether the URL is any good.
+        bool urlSource = Remote.HttpSource.IsUrl(o.SourcePath);
+        var src = urlSource ? null : new FileInfo(Path.GetFullPath(o.SourcePath));
 
         // "Input not found" is the wrong message for an SMB source that simply
         // is not reachable as a path yet -- tell the user how to make it one.
-        if (!src.Exists)
+        if (src is not null && !src.Exists)
         {
             string? hint = Remote.Smb.UnreachableHint(o.SourcePath);
             throw new FileNotFoundException(hint is null
                 ? $"Input not found: {src.FullName}"
                 : $"Input not found: {src.FullName}\n{hint}");
         }
-        if (string.Equals(src.FullName, dst.FullName, StringComparison.OrdinalIgnoreCase))
+        if (!urlSource && string.Equals(src!.FullName, dst.FullName, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Output must differ from input");
+
+        // One string for "where the frames come from": the resolved local path,
+        // or the URL itself. Every consumer below (probe, decoder, audio track)
+        // used to read src.FullName.
+        string sourcePath = src?.FullName ?? o.SourcePath;
 
         Validation.ValidateOutputExtension(dst, o.Encoder);
 
@@ -62,7 +71,8 @@ public static class RealtimeEncoder
 
         var config = new Config
         {
-            InputPath = src,
+            // A URL source has no local path to remember in the config.
+            InputPath = urlSource ? null : src,
             OutputPath = dst,
             StartTimeSeconds = o.StartSeconds,
             EndTimeSeconds = o.EndSeconds,
@@ -98,7 +108,10 @@ public static class RealtimeEncoder
         Validation.ValidateCommonConfig(config);
 
         // One ffprobe run instead of three (stream / duration / audio presence).
-        SourceInfo source = Probe.Source(o.FFprobe, src);
+        // v7.9: the stream picks are validated here, against this same probe,
+        // and Video metadata is re-pointed at the selected video stream.
+        SourceInfo source = StreamSelection.Resolve(
+            Probe.Source(o.FFprobe, sourcePath), o.VideoStream, o.AudioStream);
         StreamInfo stream = source.Video;
         (double? resolvedEnd, double? duration) =
             Timecode.ResolveRange(o.StartSeconds, o.EndSeconds, source.Duration);
@@ -155,6 +168,17 @@ public static class RealtimeEncoder
         string vf = ArgsBuilder.BuildFilters(
             width, height, o.Fps, o.FitMode, o.CropAnchor, o.PadColor, scaleAlgo,
             transportFmt, o.Deinterlace, o.DeintMode, o.DeintParity, o.DeintMarkedOnly);
+
+        // v7.9 #2: subtitles are validated here, before anything expensive, and
+        // rendered last so the text is neither scaled nor cropped with the
+        // picture. The plan owns a staging directory when it extracts a track.
+        SubtitlePlan? subs = o.Subtitles?.Active == true
+            ? SubtitleTrack.Plan(
+                source, o.Subtitles!, o.Encoder.FormatName, availableFilters,
+                o.AvailableSubtitleEncoders ?? FFmpegCapabilities.DetectSubtitleEncoders(o.FFmpeg),
+                o.FFmpeg, sourcePath)
+            : null;
+        if (subs is { Mode: SubtitleMode.Burn }) vf = SubtitleTrack.AppendBurn(vf, subs.BurnFiles);
         int frameSize = PixelFormatUtil.RawFrameSize(width, height, transportFmt);
         int? targetSlots = duration is null ? null : (int)Math.Ceiling(duration.Value * o.Fps - 1e-9);
         string muxer = o.Encoder.FormatName;
@@ -175,9 +199,10 @@ public static class RealtimeEncoder
         void RunVideoPreflight(string hwaccel)
         {
             Preflight.Video(
-                ffmpeg: o.FFmpeg, src: src, encoder: o.Encoder, fps: o.Fps, quality: o.Quality,
+                ffmpeg: o.FFmpeg, sourcePath: sourcePath, encoder: o.Encoder, fps: o.Fps, quality: o.Quality,
                 threads: o.Threads, vf: vf, muxer: muxer,
                 stream: stream,
+                videoStream: o.VideoStream,
                 x264Preset: o.Encoder.Name == "libx264" ? o.X264Preset : null,
                 x264Tune: o.Encoder.Name == "libx264" ? o.X264Tune : null,
                 x264Profile: o.Encoder.Name == "libx264" ? o.X264Profile : null,
@@ -196,7 +221,7 @@ public static class RealtimeEncoder
         // of the actual run, so the preflight still gets a software retry: the
         // retry only ever happens in the case that would otherwise have thrown.
         Action<string>? say = o.Verbose ? Console.WriteLine : null;
-        string hwaccel = FFmpeg.Hwaccel.Resolve(o.Hwaccel, o.FFmpeg, src, say);
+        string hwaccel = FFmpeg.Hwaccel.Resolve(o.Hwaccel, o.FFmpeg, sourcePath, say);
         o.Hwaccel = hwaccel;
 
         Task videoPreflight = Task.Run(() =>
@@ -219,16 +244,17 @@ public static class RealtimeEncoder
 
         Task? audioPreflight = hasAudio && o.AudioEncoder is not null
             ? Task.Run(() => Preflight.Audio(
-                ffmpeg: o.FFmpeg, src: src, audioEncoder: o.AudioEncoder!,
+                ffmpeg: o.FFmpeg, sourcePath: sourcePath, audioEncoder: o.AudioEncoder!,
                 audioKbps: o.AudioKbps, audioChannels: audioChannels,
-                audioRate: audioRate, startSeconds: o.StartSeconds))
+                audioRate: audioRate, startSeconds: o.StartSeconds,
+                audioStream: o.AudioStream))
             : null;
 
         Task.WaitAll(audioPreflight is null ? [videoPreflight] : [videoPreflight, audioPreflight]);
 
-        List<string> decCmd = BuildDecoderCommand(o, src, vf, transportFmt, duration);
+        List<string> decCmd = BuildDecoderCommand(o, sourcePath, vf, transportFmt, duration);
         List<string> encCmd = BuildEncoderCommand(
-            o, dst, transportFmt, width, height, hasAudio, audioRate, audioChannels, duration, stream, muxer);
+            o, dst, transportFmt, width, height, hasAudio, audioRate, audioChannels, duration, stream, muxer, subs);
 
         if (o.Verbose)
         {
@@ -241,15 +267,31 @@ public static class RealtimeEncoder
                 + (duration is not null ? $" ({duration.Value:F3}s)" : ""));
             Console.WriteLine($"{L.T("run.filters"),-17}: {vf}");
 
-            string? smb = Remote.Smb.Describe(src.FullName);
+            string? smb = Remote.Smb.Describe(sourcePath);
             if (smb is not null) Console.WriteLine(smb);
             string? smbOut = Remote.Smb.DescribeOutput(dst.FullName);
             if (smbOut is not null) Console.WriteLine(smbOut);
         }
 
-        return Execute(
-            o, dst, decCmd, encCmd, frameSize, targetSlots, duration, hasAudio,
-            stream.PixFmt, transportFmt, width, height, scaleAlgo, resolvedEnd, cancellationToken);
+        if (subs is null)
+        {
+            return Execute(
+                o, dst, decCmd, encCmd, frameSize, targetSlots, duration, hasAudio,
+                stream.PixFmt, transportFmt, width, height, scaleAlgo, resolvedEnd, cancellationToken);
+        }
+
+        // An embedded track was staged to a temp directory for the filter; it
+        // goes away whether the encode worked or not.
+        try
+        {
+            return Execute(
+                o, dst, decCmd, encCmd, frameSize, targetSlots, duration, hasAudio,
+                stream.PixFmt, transportFmt, width, height, scaleAlgo, resolvedEnd, cancellationToken);
+        }
+        finally
+        {
+            subs.Dispose();
+        }
     }
 
     /// <summary>
@@ -283,11 +325,17 @@ public static class RealtimeEncoder
 
     private static EncodeResult RunSplitCore(RealtimeOptions o, CancellationToken cancellationToken)
     {
-        var src = new FileInfo(Path.GetFullPath(o.SourcePath));
         var dst = new FileInfo(Path.GetFullPath(o.DestinationPath));
+
+        // v7.9: an HTTP(S) source has no FileInfo and no existence check -- it is
+        // the probe below that decides whether the URL is any good.
+        bool urlSource = Remote.HttpSource.IsUrl(o.SourcePath);
+        var src = urlSource ? null : new FileInfo(Path.GetFullPath(o.SourcePath));
+        string sourcePath = src?.FullName ?? o.SourcePath;
+
         // "Input not found" is the wrong message for an SMB source that simply
         // is not reachable as a path yet -- tell the user how to make it one.
-        if (!src.Exists)
+        if (src is not null && !src.Exists)
         {
             string? hint = Remote.Smb.UnreachableHint(o.SourcePath);
             throw new FileNotFoundException(hint is null
@@ -297,13 +345,25 @@ public static class RealtimeEncoder
 
         // Reuse the inline preparation to resolve every derived parameter
         // (transport format, size, filters, duration, audio settings) identically.
-        SourceInfo source = Probe.Source(o.FFprobe, src);
+        // v7.9: stream picks are validated against this probe too.
+        SourceInfo source = StreamSelection.Resolve(
+            Probe.Source(o.FFprobe, sourcePath), o.VideoStream, o.AudioStream);
         (_, double? duration) = Timecode.ResolveRange(o.StartSeconds, o.EndSeconds, source.Duration);
         bool hasAudio = source.HasAudio
             && o.AudioEncoder is not null
             && !Constants.NoAudioFormats.Contains(o.Encoder.FormatName);
 
         if (!hasAudio || duration is null) return Run(o, cancellationToken);
+
+        // v7.9 #2: the split pipeline rejoins video and audio with -c copy and
+        // would drop a carried subtitle track, so that combination runs inline.
+        // Burned subtitles are already in the picture and survive the split.
+        if (o.Subtitles is { Active: true, Mode: SubtitleMode.Copy })
+        {
+            if (o.Verbose)
+                Console.WriteLine(L.T("note.subtitleinline"));
+            return Run(o, cancellationToken);
+        }
 
         (int? audioRate, int audioChannels, int audioKbps) = Validation.EffectiveAudioSettings(
             o.Encoder, o.AudioEncoder, o.AudioRate, o.AudioChannels, o.AudioKbps);
@@ -331,8 +391,9 @@ public static class RealtimeEncoder
             // Stage 1 + 2 run concurrently: the audio encoder is not bound by the
             // realtime pacing that governs the video slot loop.
             Task<CaptureResult> audioTask = Task.Run(
-                () => AudioTrack.Encode(o.FFmpeg, src.FullName, o.AudioEncoder!, audioKbps,
-                    audioChannels, audioRate, o.StartSeconds, span, audioOnly, audioTimeout),
+                () => AudioTrack.Encode(o.FFmpeg, sourcePath, o.AudioEncoder!, audioKbps,
+                    audioChannels, audioRate, o.StartSeconds, span, audioOnly, audioTimeout,
+                    o.AudioStream),
                 CancellationToken.None);
 
             var videoOptions = new RealtimeOptions
@@ -354,6 +415,12 @@ public static class RealtimeEncoder
                 AudioKbps = audioKbps,
                 AudioChannels = audioChannels,
                 AudioRate = audioRate,
+                // The video stage re-enters Run(), which probes the source
+                // again: it has to make the same stream pick.
+                VideoStream = o.VideoStream,
+                AudioStream = o.AudioStream,
+                Subtitles = o.Subtitles,
+                AvailableSubtitleEncoders = o.AvailableSubtitleEncoders,
                 Hwaccel = o.Hwaccel,
                 Width = o.Width,
                 Height = o.Height,
@@ -441,18 +508,24 @@ public static class RealtimeEncoder
     }
 
     private static List<string> BuildDecoderCommand(
-        RealtimeOptions o, FileInfo src, string vf, string transportFmt, double? duration)
+        RealtimeOptions o, string sourcePath, string vf, string transportFmt, double? duration)
     {
         var cmd = new List<string> { o.FFmpeg, "-hide_banner", "-loglevel", "error" };
-        // Network resilience only for UNC sources; on a local file these are noise.
-        cmd.AddRange(Remote.Smb.RemoteReadArgs(src.FullName));
+        // Network resilience, per source: the reconnect family for a URL, the
+        // rw_timeout for a share. On a local file these are noise, so both
+        // helpers return nothing.
+        cmd.AddRange(Remote.HttpSource.ReadArgs(sourcePath));
+        cmd.AddRange(Remote.Smb.RemoteReadArgs(sourcePath));
         if (!string.Equals(o.Hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
             cmd.AddRange(["-hwaccel", o.Hwaccel]);
+        // Input seeking works over HTTP on any Range-capable server, which is
+        // what archive.org and every CDN are; a server without it will fail
+        // here rather than silently produce the wrong segment.
         if (o.StartSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(o.StartSeconds)]);
-        cmd.AddRange(["-i", src.FullName]);
+        cmd.AddRange(["-i", sourcePath]);
         if (duration is not null) cmd.AddRange(["-t", ArgsBuilder.FloatArg(duration.Value)]);
         cmd.AddRange([
-            "-map", "0:v:0", "-an", "-vf", vf, "-pix_fmt", transportFmt, "-f", "rawvideo", "pipe:1",
+            "-map", StreamSelection.VideoMap(o.VideoStream), "-an", "-vf", vf, "-pix_fmt", transportFmt, "-f", "rawvideo", "pipe:1",
         ]);
         return cmd;
     }
@@ -460,7 +533,7 @@ public static class RealtimeEncoder
     private static List<string> BuildEncoderCommand(
         RealtimeOptions o, FileInfo dst, string transportFmt, int width, int height,
         bool hasAudio, int? audioRate, int audioChannels, double? duration,
-        StreamInfo stream, string muxer)
+        StreamInfo stream, string muxer, SubtitlePlan? subs)
     {
         var cmd = new List<string>
         {
@@ -472,15 +545,39 @@ public static class RealtimeEncoder
             "-framerate", ArgsBuilder.FpsArg(o.Fps),
             "-i", "pipe:0",
         };
+        // Input 0 is the pipe; every further input is numbered from here.
+        int nextInput = 1;
 
         if (hasAudio)
         {
+            // The audio track is read from the source a second time -- a second
+            // network read when the source is a URL, so it gets the same
+            // resilience options as the decoder's read.
+            cmd.AddRange(Remote.HttpSource.ReadArgs(o.SourcePath));
+            cmd.AddRange(Remote.Smb.RemoteReadArgs(o.SourcePath));
             if (o.StartSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(o.StartSeconds)]);
             cmd.AddRange(["-i", o.SourcePath]);
+            nextInput++;
         }
 
+        // v7.9 #2: a carried subtitle track is its own input. A sidecar file is
+        // read directly; an embedded track means reading the source once more.
+        int subtitleInput = -1;
+        if (subs is { Mode: SubtitleMode.Copy })
+        {
+            cmd.AddRange(SubtitleTrack.CopyInputArgs(subs, o.SourcePath, o.StartSeconds, duration));
+            subtitleInput = nextInput++;
+        }
+
+        // Input 0 is the raw video pipe coming from the decoder, which already
+        // carries the *selected* video stream -- the pick is applied there
+        // (BuildDecoderCommand), not here. Selecting it a second time would
+        // index the pipe's single stream and match nothing.
         cmd.AddRange(["-map", "0:v:0"]);
-        if (hasAudio) cmd.AddRange(["-map", "1:a:0"]);
+        // Input 1 is the source again, read once more for the audio track.
+        if (hasAudio) cmd.AddRange(["-map", StreamSelection.AudioMap(1, o.AudioStream)]);
+        // Burned subtitles are already in the picture and need no map here.
+        if (subtitleInput >= 0) cmd.AddRange(["-map", SubtitleTrack.CopyMap(subtitleInput, subs!)]);
 
         cmd.AddRange(["-c:v", o.Encoder.Name]);
         cmd.AddRange(ArgsBuilder.VideoQualityArgs(o.Encoder.Name, o.Quality));
@@ -512,6 +609,10 @@ public static class RealtimeEncoder
             if (audioRate is not null && audioRate.Value != 0)
                 cmd.AddRange(["-ar", audioRate.Value.ToString()]);
         }
+
+        // v7.9 #2: the carried track is transcoded into whatever the container
+        // can hold (ass in Matroska, mov_text in MP4, xsub in AVI, ...).
+        if (subs is { Mode: SubtitleMode.Copy }) cmd.AddRange(SubtitleTrack.CopyCodecArgs(subs));
 
         // The segment duration bounds both streams. There is no -shortest because
         // the raw-video producer must not race the audio input into a premature
@@ -632,18 +733,12 @@ public static class RealtimeEncoder
                     capturedSequence++;
                     pool.Publish(index, capturedSequence);
 
-                    if (!o.Turbo)
-                    {
-                        // Python resets the deadline when the slot is already overdue
-                        // instead of trying to catch up; keep that behaviour.
-                        nextDeadline += (long)(interval * frequency);
-                        long nowTicks = Stopwatch.GetTimestamp();
-                        if (nextDeadline > nowTicks) HighResolutionTimer.WaitUntil(nextDeadline);
-                        else nextDeadline = nowTicks;
-                    }
-                    // Turbo: no wall-clock pacing. The decoder pipe and the bounded
-                    // pool are the only back-pressure, so the capture side runs at
-                    // decode speed.
+                    // Python resets the deadline when the slot is already overdue
+                    // instead of trying to catch up; keep that behaviour.
+                    nextDeadline += (long)(interval * frequency);
+                    long nowTicks = Stopwatch.GetTimestamp();
+                    if (nextDeadline > nowTicks) HighResolutionTimer.WaitUntil(nextDeadline);
+                    else nextDeadline = nowTicks;
                 }
             }
             catch (Exception ex)
@@ -653,7 +748,6 @@ public static class RealtimeEncoder
             finally
             {
                 captureState.Done = true;
-                pool.Close();
             }
         }
 
@@ -715,18 +809,9 @@ public static class RealtimeEncoder
                 }
 
                 long nowSlotTicks = Stopwatch.GetTimestamp();
-                if (o.Turbo)
-                {
-                    // No wall-clock deadline: the slot clock is advanced by the
-                    // media-time counter below instead of by a timer.
-                    nextSlot = nowSlotTicks;
-                }
-                else
-                {
-                    nextSlot += slotIntervalTicks;
-                    if (nextSlot > nowSlotTicks) HighResolutionTimer.WaitUntil(nextSlot);
-                    else nextSlot = nowSlotTicks;
-                }
+                nextSlot += slotIntervalTicks;
+                if (nextSlot > nowSlotTicks) HighResolutionTimer.WaitUntil(nextSlot);
+                else nextSlot = nowSlotTicks;
 
                 encoderProc.Refresh();
                 if (encoderProc.HasExited)
@@ -737,12 +822,11 @@ public static class RealtimeEncoder
                 }
 
                 slots++;
-                // Wall clock in realtime mode; media time in turbo mode. The
-                // 0.18/0.30/0.75/0.80s hysteresis constants are expressed in
-                // seconds of *programme*, so at 58x speed a wall clock would let
-                // tens of times more frames slip through each window and the
-                // ladder would never settle the way it does in realtime.
-                double now = o.Turbo ? slots / o.Fps : HighResolutionTimer.MonotonicSeconds();
+                // The hysteresis constants are expressed in seconds of
+                // *programme*, which on the wall clock is exactly what the
+                // realtime pacing produces -- so they are compared against
+                // monotonic time directly.
+                double now = HighResolutionTimer.MonotonicSeconds();
                 double totalRate = monitor.RateKbps();
                 double videoRate = Math.Max(0.0, totalRate - (hasAudio ? o.AudioKbps : 0.0));
 
@@ -786,15 +870,6 @@ public static class RealtimeEncoder
 
                 cadence += effectiveFps / o.Fps;
                 bool emitFresh = previousIndex < 0 || cadence >= 1.0;
-
-                // Turbo pacing: instead of sleeping to a wall-clock deadline, wait
-                // for the capture thread to actually hand over a frame. Without
-                // this the consumer would outrun the decoder and every slot would
-                // resolve to "reuse previous", collapsing the video to a still.
-                if (o.Turbo && emitFresh && pool.ReadyCount == 0 && !captureState.Done)
-                {
-                    pool.WaitForFrame(2000);
-                }
 
                 byte[] payload;
                 if (emitFresh)

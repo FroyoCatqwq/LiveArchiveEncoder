@@ -30,10 +30,6 @@ public static class Program
         // the CUI banner follow it.
         L.SetLanguage(cli.Language);
 
-        // v7.7: Turbo still behaves exactly as before, but it is on its way out
-        // and anyone still scripting it deserves to know that up front.
-        if (cli.Turbo) Console.Error.WriteLine($"WARNING: {L.T("turbo.deprecated")}");
-
         // argparse prints help without touching FFmpeg first, and so do we.
         if (cli.Help)
         {
@@ -154,6 +150,32 @@ public static class Program
         {
             Report.PrintFilterList(ffmpeg, availableFilters, availableScaleAlgorithms);
             return 0;
+        }
+
+        // v7.9: the indexes --video-stream/--audio-stream take are exactly the
+        // numbers this prints, so the two halves cannot disagree.
+        if (cli.ListStreams)
+        {
+            if (string.IsNullOrEmpty(cli.Input))
+            {
+                Console.Error.WriteLine("ERROR: --list-streams requires an input");
+                return 2;
+            }
+            try
+            {
+                Console.Out.WriteLine(
+                    LiveArchiveEncoder.Encoding.StreamSelection.Describe(
+                        FFmpeg.Probe.Source(ffprobe, cli.Input)));
+                return 0;
+            }
+            catch (Exception exc) when (exc is InvalidOperationException
+                                            or ArgumentException or TimeoutException)
+            {
+                // A big programme stream on a share can take minutes to probe,
+                // so a timeout here is a fact about the source, not a crash.
+                Console.Error.WriteLine($"ERROR: {exc.Message}");
+                return 1;
+            }
         }
 
         if (string.IsNullOrEmpty(cli.Input) && !cli.NoCui)

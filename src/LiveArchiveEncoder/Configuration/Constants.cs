@@ -85,6 +85,11 @@ public static class Constants
     ///
     /// Deliberately not "everything in every container": MPEG-PS in Matroska and
     /// RealVideo in AVI are the kind of pair that muxes and then fails to play.
+    ///
+    /// v7.9: h261 / h263 / h263p join, because the raw .h261/.h263 streams carry
+    /// no audio at all while the same codecs in AVI take an mp3 track fine
+    /// (verified 2026-10-21 against the BtbN build: all three mux and probe back
+    /// with a working audio stream).
     /// </summary>
     public static readonly FrozenDictionary<string, (string Ext, string Format)[]> ContainerChoicesByEncoder =
         new Dictionary<string, (string Ext, string Format)[]>
@@ -94,6 +99,9 @@ public static class Constants
             ["mpeg4"] = [("avi", "avi"), ("mp4", "mp4")],
             ["libxvid"] = [("avi", "avi"), ("mp4", "mp4")],
             ["libx264"] = [("mp4", "mp4"), ("avi", "avi"), ("mkv", "matroska")],
+            ["h261"] = [("h261", "h261"), ("avi", "avi")],
+            ["h263"] = [("h263", "h263"), ("avi", "avi")],
+            ["h263p"] = [("avi", "avi")],
         }.ToFrozenDictionary();
 
     /// <summary>
@@ -102,6 +110,43 @@ public static class Constants
     /// stretch = fill and distort.
     /// </summary>
     public static readonly string[] FitModes = ["crop", "fit", "stretch"];
+
+    // ---------------------------------------------------------------- v7.9 #2
+    // Subtitles. "以 ffmpeg -encoders 为准": every codec named below is one of
+    // the S-class encoders a current build actually prints, and the copy path
+    // re-checks the choice against the discovered set before using it.
+
+    /// <summary>
+    /// Subtitle codec each container carries, in preference order. Null (absent)
+    /// means the container has no subtitle stream concept at all -- the archive
+    /// formats (rm, flv, asf, roq, amv, ...) are in that group, which is exactly
+    /// why burning the text into the picture is the default.
+    /// </summary>
+    public static readonly FrozenDictionary<string, string[]> SubtitleCodecsByContainer =
+        new Dictionary<string, string[]>
+        {
+            ["matroska"] = ["ass", "ssa", "srt", "subrip", "webvtt", "text"],
+            ["mp4"] = ["mov_text"],
+            ["avi"] = ["xsub"],
+            ["mpeg"] = ["dvdsub"],
+            ["mpegts"] = ["dvbsub"],
+            ["webm"] = ["webvtt"],
+        }.ToFrozenDictionary();
+
+    /// <summary>
+    /// Bitmap subtitle formats. libass renders <em>text</em>; a DVD/DVB
+    /// subpicture is a picture, and turning it into text needs OCR, which FFmpeg
+    /// does not do. So these can be carried (copy) but not burned.
+    /// </summary>
+    public static readonly FrozenSet<string> BitmapSubtitleCodecs =
+        new[] { "dvdsub", "dvbsub", "dvb_subtitle", "dvd_subtitle", "xsub" }
+            .ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>Sidecar subtitle files this tool recognises, e.g. clip.sc.ass.</summary>
+    public static readonly string[] SubtitleFileExtensions = [".ass", ".ssa", ".srt", ".vtt"];
+
+    /// <summary>How a subtitle track reaches the output.</summary>
+    public static readonly string[] SubtitleModes = ["burn", "copy", "off"];
 
     /// <summary>Which part survives when <c>crop</c> has to discard an edge.</summary>
     public static readonly string[] CropAnchors = ["center", "top", "bottom", "left", "right"];

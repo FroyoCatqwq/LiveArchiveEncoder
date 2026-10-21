@@ -32,6 +32,15 @@ public static class FontResolver
     /// <summary>Environment override, for CI boxes and scripted runs.</summary>
     public const string EnvironmentVariable = "LAE_WATERMARK_FONT";
 
+    /// <summary>
+    /// Environment override for the directory itself, mirroring
+    /// <see cref="EnvironmentVariable"/> for the file. Useful where the fonts
+    /// live somewhere a service account cannot see, and it is what lets the
+    /// unit tests exercise the bare-name lookup without touching the real
+    /// profile directory.
+    /// </summary>
+    public const string DirectoryEnvironmentVariable = "LAE_WATERMARK_FONT_DIR";
+
     /// <summary>Directory name next to the managed <c>ffmpeg</c> directory.</summary>
     public const string DirectoryName = "fonts";
 
@@ -40,6 +49,9 @@ public static class FontResolver
     {
         get
         {
+            string? overrideDir = Environment.GetEnvironmentVariable(DirectoryEnvironmentVariable);
+            if (overrideDir.HasText) return overrideDir;
+
             // Same rule as Toolchain.Root: fall back to the executable's own
             // directory when there is no user profile (service accounts, CI).
             string? appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -69,6 +81,40 @@ public static class FontResolver
         if (SeedFromSystemFonts(dir)) return PickFrom(dir);
 
         return null;
+    }
+
+    /// <summary>
+    /// Resolve a font the user named to a path drawtext (or libass) can open.
+    ///
+    /// v7.9: this exists because of a real bug report. Typing a bare file name
+    /// -- <c>--watermark-font simsun.ttc</c> -- used to be handed to FFmpeg
+    /// verbatim, and FFmpeg resolves relative paths against <em>its</em> working
+    /// directory, not against the fonts directory this program documents. The
+    /// encode then failed with "no such file or directory" even though the font
+    /// was sitting right there in the bundled directory, and the only way to
+    /// make it work was the absolute path -- which nobody should have to type.
+    ///
+    /// Accepted forms, in order:
+    ///   1. a path that exists as typed (absolute, or relative to the working
+    ///      directory -- ordinary path semantics, so an explicit path always
+    ///      wins);
+    ///   2. a bare file name looked up in <see cref="FontDirectory"/>, which is
+    ///      what the menu and the docs tell people to populate;
+    ///   3. anything else comes back unchanged, so the caller's error message
+    ///      still shows exactly what was asked for.
+    /// </summary>
+    public static string Resolve(string? font)
+    {
+        if (!font.HasText) return "";
+        if (File.Exists(font)) return Path.GetFullPath(font);
+
+        if (!Path.IsPathRooted(font))
+        {
+            string candidate = Path.Combine(FontDirectory, font);
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return font;
     }
 
     /// <summary>File name fragments that mean "this font can draw CJK".</summary>

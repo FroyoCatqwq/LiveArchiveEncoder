@@ -51,9 +51,12 @@
                            needs inline arrays in [Arguments];
          CA1859, CA1863,
          CA2016, CA5399    interface return types, culture invariant file names
-                           and fire-and-forget process launches are intentional.
+                           and fire-and-forget process launches are intentional;
+         CA1711            "stream" is the media noun ffprobe itself uses
+                           (index=, codec_type), so SourceStream/SubtitleStream
+                           are named for the domain, not for System.IO.Stream.
     -->
-    <NoWarn>$(NoWarn);CA1031;CA1062;CA1303;CA1305;CA1310;CA1707;CA1859;CA1861;CA1863;CA2016;CA5399</NoWarn>
+    <NoWarn>$(NoWarn);CA1031;CA1062;CA1303;CA1305;CA1310;CA1707;CA1711;CA1859;CA1861;CA1863;CA2016;CA5399</NoWarn>
   </PropertyGroup>
 
 </Project>

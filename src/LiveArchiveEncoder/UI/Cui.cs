@@ -69,8 +69,6 @@ public static class Cui
             Console.WriteLine($" 7. {L.T("menu.filters")}");
             Console.WriteLine($" 8. {L.T("menu.showconfig")}");
             Console.WriteLine($" 9. {L.T("menu.start")}");
-            // No Turbo entry: it is deprecated as of v7.7 and only reachable
-            // from the command line (or from a settings file written earlier).
             Console.WriteLine($"10. {L.Pad(L.T("menu.language"), 22)} = {c.Language}");
             Console.WriteLine($"11. {L.Pad(L.T("menu.parallel"), 22)} = {(c.Parallel > 1 ? c.Parallel.ToString(CultureInfo.InvariantCulture) : L.T("menu.parallel.off"))}");
             Console.WriteLine($"12. {L.Pad(L.T("menu.toolchain"), 22)} = {c.FfmpegSource}");
@@ -78,6 +76,7 @@ public static class Cui
             Console.WriteLine($"14. {L.Pad(L.T("era.menu"), 22)} = {DescribeEra(c)}");
             Console.WriteLine($"15. {L.Pad(L.T("wm.menu"), 22)} = {DescribeWatermark(c)}");
             Console.WriteLine($"16. {L.Pad(L.T("rc.menu"), 22)} = {DescribeRecompress(c)}");
+            Console.WriteLine($"17. {L.Pad(L.T("menu.streams"), 22)} = {DescribeStreams(c)}");
             Console.WriteLine($" 0. {L.T("menu.exit")}");
             Console.Write(L.T("menu.select"));
 
@@ -187,6 +186,10 @@ public static class Cui
                     EditRecompress(c);
                     Persist(c);
                     break;
+                case "17":
+                    EditStreams(c, ffprobe);
+                    Persist(c);
+                    break;
                 default:
                     Console.WriteLine(L.T("menu.invalid"));
                     break;
@@ -202,6 +205,75 @@ public static class Cui
 
     private static FileInfo DefaultOutput(FileInfo src, EncoderInfo encoder) =>
         new(Path.Combine(src.DirectoryName ?? ".", $"{Path.GetFileNameWithoutExtension(src.Name)}_live.{encoder.Extension}"));
+
+    /// <summary>Menu summary of the two stream picks; null means "first".</summary>
+    private static string DescribeStreams(Config c) => L.T("stream.value",
+        c.VideoStream?.ToString(CultureInfo.InvariantCulture) ?? L.T("stream.first"),
+        c.AudioStream?.ToString(CultureInfo.InvariantCulture) ?? L.T("stream.first"));
+
+    /// <summary>
+    /// v7.9: pick which video and audio track of a multi-stream source to use.
+    ///
+    /// The source is probed here so the menu can show the indexes -- that is the
+    /// whole point, since the number to type is the number ffprobe assigns.
+    /// Leaving a prompt blank clears the pick, which is the v7.8 behaviour and
+    /// has to stay reachable.
+    /// </summary>
+    private static void EditStreams(Config c, string ffprobe)
+    {
+        if (c.InputPath is null)
+        {
+            Console.WriteLine(L.T("stream.selectfirst"));
+            return;
+        }
+
+        FFmpeg.SourceInfo source;
+        try
+        {
+            source = FFmpeg.Probe.Source(ffprobe, c.InputPath.FullName);
+        }
+        catch (InvalidOperationException exc)
+        {
+            Console.WriteLine(L.T("stream.probefailed", exc.Message));
+            return;
+        }
+
+        Console.WriteLine(L.T("stream.heading", c.InputPath.Name));
+        Console.WriteLine(LiveArchiveEncoder.Encoding.StreamSelection.Describe(source));
+
+        c.VideoStream = ReadStreamIndex(source, "video", c.VideoStream, "stream.prompt.video");
+        c.AudioStream = ReadStreamIndex(source, "audio", c.AudioStream, "stream.prompt.audio");
+
+        if (c.VideoStream is null && c.AudioStream is null)
+            Console.WriteLine(L.T("stream.cleared"));
+    }
+
+    /// <summary>
+    /// One index, validated against the source before it is stored: a wrong one
+    /// would otherwise only surface minutes into the encode.
+    /// </summary>
+    private static int? ReadStreamIndex(FFmpeg.SourceInfo source, string type, int? current, string promptKey)
+    {
+        while (true)
+        {
+            Console.Write(L.T(promptKey, current?.ToString(CultureInfo.InvariantCulture) ?? L.T("stream.first")));
+            string raw = (Console.ReadLine() ?? "").Trim();
+            if (raw.Length == 0) return null;
+
+            if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
+            {
+                Console.WriteLine(L.T("menu.invalid"));
+                continue;
+            }
+            if (LiveArchiveEncoder.Encoding.StreamSelection.Check(
+                    source, type == "video" ? value : null, type == "audio" ? value : null) is not null)
+            {
+                Console.WriteLine(L.T("stream.invalid"));
+                continue;
+            }
+            return value;
+        }
+    }
 
     /// <summary>
     /// Re-resolve everything that depends on which FFmpeg is in use. Called after
@@ -1176,7 +1248,6 @@ public static class Cui
                 AvailableFilters = availableFilters,
                 AvailableScaleAlgorithms = availableScaleAlgorithms,
                 Verbose = true,
-                Turbo = c.Turbo,
                 Parallel = c.Parallel,
             };
 

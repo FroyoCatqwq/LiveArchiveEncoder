@@ -78,7 +78,7 @@ public static class Completion
 
     private static readonly string[] FlagOptions =
     [
-        "-h", "--help", "--no-crop", "--deint-marked-only", "--no-cuda", "--turbo",
+        "-h", "--help", "--no-crop", "--deint-marked-only", "--no-cuda",
         "--list-filters", "--quiet", "--no-cui", "--cpu-info", "--ffmpeg-list",
         "--no-watermark", "--recompress", "--recompress-keep", "--no-recompress",
     ];

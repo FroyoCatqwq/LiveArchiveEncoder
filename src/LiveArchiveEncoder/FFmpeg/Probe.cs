@@ -10,11 +10,30 @@ public sealed class SourceInfo
     public required StreamInfo Video { get; init; }
     public double? Duration { get; init; }
     public bool HasAudio { get; init; }
+
+    /// <summary>
+    /// v7.9: every stream of the source, in index order. <see cref="Video"/>
+    /// is the first video stream unless the caller picked another one; this
+    /// list is what makes that pick validatable and listable.
+    /// </summary>
+    public IReadOnlyList<SourceStream> Streams { get; init; } = [];
 }
 
 /// <summary>ffprobe wrappers for stream metadata, duration and audio presence.</summary>
 public static class Probe
 {
+    /// <summary>
+    /// Timeout for probing a <em>source</em>.
+    ///
+    /// The 30 s <see cref="ProcessRunner"/> default is not enough for the
+    /// sources this tool actually meets: a 179 MB VOB on a network share took
+    /// <b>2m15s</b> to probe (measured 2026-10-21), because MPEG-PS carries no
+    /// index and the duration only falls out of reading the whole programme
+    /// stream. A network stall is bounded by <c>-rw_timeout</c> already, so this
+    /// is the backstop behind it, not the first line of defence.
+    /// </summary>
+    public const int SourceTimeoutSeconds = 300;
+
     /// <summary>
     /// Stream metadata, duration and audio presence in a <b>single</b> ffprobe run.
     ///
@@ -23,16 +42,21 @@ public static class Probe
     /// This is behaviour-preserving: <c>-show_streams -show_format</c> already
     /// carries every field the individual calls asked for, including the video
     /// stream duration that takes precedence over the container one.
+    ///
+    /// Takes the path as a string because the source may be an HTTP(S) URL
+    /// (v7.9), which is not a <see cref="FileInfo"/>.
     /// </summary>
-    public static SourceInfo Source(string ffprobe, FileInfo src)
+    public static SourceInfo Source(string ffprobe, string path)
     {
         // -rw_timeout for UNC sources only: ffprobe is the first process to touch
         // the file, so a stalled share would hang there before FFmpeg ever runs.
+        // A URL gets the same courtesy for the same reason.
         CaptureResult p = ProcessRunner.Run([
             ffprobe, "-v", "error",
-            .. Remote.Smb.RemoteProbeArgs(src.FullName),
-            "-show_streams", "-show_format", "-of", "json", src.FullName,
-        ]);
+            .. Remote.Smb.RemoteProbeArgs(path),
+            .. Remote.HttpSource.ProbeArgs(path),
+            "-show_streams", "-show_format", "-of", "json", path,
+        ], SourceTimeoutSeconds);
         if (p.ExitCode != 0)
         {
             throw new InvalidOperationException(
@@ -44,15 +68,51 @@ public static class Probe
             using JsonDocument doc = JsonDocument.Parse(p.Stdout);
             JsonElement root = doc.RootElement;
 
+            static string? Get(JsonElement e, string name)
+                => e.TryGetProperty(name, out JsonElement x) ? x.GetString() : null;
+
+            static StreamInfo ReadVideo(JsonElement e) => new()
+            {
+                Width = int.Parse(e.GetProperty("width").ToString(), CultureInfo.InvariantCulture),
+                Height = int.Parse(e.GetProperty("height").ToString(), CultureInfo.InvariantCulture),
+                PixFmt = Get(e, "pix_fmt") ?? "yuv420p",
+                ColorRange = Get(e, "color_range"),
+                ColorSpace = Get(e, "color_space"),
+                ColorPrimaries = Get(e, "color_primaries"),
+                ColorTransfer = Get(e, "color_transfer"),
+            };
+
             JsonElement? video = null;
             bool hasAudio = false;
-            if (root.TryGetProperty("streams", out JsonElement streams))
+            var streams = new List<SourceStream>();
+            if (root.TryGetProperty("streams", out JsonElement streamsElement))
             {
-                foreach (JsonElement s in streams.EnumerateArray())
+                foreach (JsonElement s in streamsElement.EnumerateArray())
                 {
                     string? type = s.TryGetProperty("codec_type", out JsonElement t) ? t.GetString() : null;
                     if (type == "video") video ??= s;
                     else if (type == "audio") hasAudio = true;
+
+                    // v7.9: the full inventory, for --list-streams and for
+                    // validating a --video-stream/--audio-stream pick. A video
+                    // stream carries its own metadata so a non-default pick
+                    // still gets the right transport pixel format.
+                    if (s.TryGetProperty("index", out JsonElement idx)
+                        && int.TryParse(idx.ToString(), CultureInfo.InvariantCulture, out int index))
+                    {
+                        StreamInfo? vinfo = type == "video" && s.TryGetProperty("width", out JsonElement _)
+                            ? ReadVideo(s)
+                            : null;
+                        streams.Add(new SourceStream(
+                            index,
+                            type ?? "?",
+                            s.TryGetProperty("codec_name", out JsonElement cn) ? cn.GetString() : null,
+                            s.TryGetProperty("tags", out JsonElement tags)
+                                && tags.TryGetProperty("language", out JsonElement lang) ? lang.GetString() : null,
+                            s.TryGetProperty("tags", out JsonElement titleTags)
+                                && titleTags.TryGetProperty("title", out JsonElement title) ? title.GetString() : null,
+                            vinfo));
+                    }
                 }
             }
             if (video is null)
@@ -60,19 +120,7 @@ public static class Probe
 
             JsonElement v = video.Value;
 
-            static string? Get(JsonElement e, string name)
-                => e.TryGetProperty(name, out JsonElement x) ? x.GetString() : null;
-
-            var info = new StreamInfo
-            {
-                Width = int.Parse(v.GetProperty("width").ToString(), CultureInfo.InvariantCulture),
-                Height = int.Parse(v.GetProperty("height").ToString(), CultureInfo.InvariantCulture),
-                PixFmt = Get(v, "pix_fmt") ?? "yuv420p",
-                ColorRange = Get(v, "color_range"),
-                ColorSpace = Get(v, "color_space"),
-                ColorPrimaries = Get(v, "color_primaries"),
-                ColorTransfer = Get(v, "color_transfer"),
-            };
+            var info = ReadVideo(v);
 
             // Same precedence as the old split probes: the video stream duration
             // wins, the container duration is the fallback.
@@ -93,7 +141,13 @@ public static class Probe
                 duration = fv;
             }
 
-            return new SourceInfo { Video = info, Duration = duration, HasAudio = hasAudio };
+            return new SourceInfo
+            {
+                Video = info,
+                Duration = duration,
+                HasAudio = hasAudio,
+                Streams = streams,
+            };
         }
         catch (Exception exc) when (exc is KeyNotFoundException or FormatException
                                         or JsonException or InvalidOperationException)

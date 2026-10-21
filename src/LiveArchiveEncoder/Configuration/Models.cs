@@ -22,6 +22,23 @@ public sealed class StreamInfo
     public string? ColorTransfer { get; init; }
 }
 
+/// <summary>
+/// One stream of the source, as ffprobe describes it.
+///
+/// v7.9: a source may carry several video tracks (a VOB with an angle, an MKV
+/// with a duplicate encode) and several audio tracks (language tracks), and
+/// the user needs to be able to name one. <see cref="Index"/> is the absolute
+/// stream index -- the number ffprobe prints and the number the user types.
+/// </summary>
+/// <param name="Index">Absolute stream index (what ffprobe shows as <c>index=</c>).</param>
+/// <param name="Type">codec_type: video, audio, subtitle, ...</param>
+/// <param name="Codec">codec_name, e.g. h264 or ac3.</param>
+/// <param name="Language">Language tag, when the container carries one.</param>
+/// <param name="Title">Stream title, when the container carries one.</param>
+/// <param name="Video">Video metadata; null for every other stream type.</param>
+public sealed record SourceStream(
+    int Index, string Type, string? Codec, string? Language, string? Title, StreamInfo? Video = null);
+
 /// <summary>Capabilities reported by `ffmpeg -h encoder=NAME`.</summary>
 public sealed class EncoderCaps
 {
@@ -109,6 +126,18 @@ public sealed class Config
     public string? Container { get; set; }
 
     public string? AudioEncoder { get; set; } = "libmp3lame";
+
+    /// <summary>
+    /// v7.9: absolute stream index of the video track to encode. Null means
+    /// "the first video stream", which is what every version up to v7.8 did.
+    /// </summary>
+    public int? VideoStream { get; set; }
+
+    /// <summary>
+    /// v7.9: absolute stream index of the audio track to keep. Null means
+    /// "the first audio stream".
+    /// </summary>
+    public int? AudioStream { get; set; }
     public double Fps { get; set; } = Constants.DefaultFps;
     public List<double> FpsLevels { get; set; } = [13.0, 8.0, 5.0, 3.0];
 
@@ -159,13 +188,6 @@ public sealed class Config
     public string X264Tune { get; set; } = "";
     public string X264Profile { get; set; } = "";
     public string X264Level { get; set; } = "";
-
-    /// <summary>
-    /// Drop the 1/fps realtime pacing. Off by default: it is much faster but the
-    /// fresh/repeat mix and the adaptive ladder change, so the archive no longer
-    /// matches what a live recording would have produced.
-    /// </summary>
-    public bool Turbo { get; set; }
 
     /// <summary>Shard count for the parallel pipeline; 1 disables it.</summary>
     public int Parallel { get; set; } = 1;

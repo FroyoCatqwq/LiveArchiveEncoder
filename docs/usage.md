@@ -117,17 +117,16 @@ Linux 上的 NativeAOT 是**实验性**的：ILCompiler 在 Linux 上要链接�
 v7.8.1 起不再产出第三种 NativeAOT 变体 `publish\aot-avx2`（
 `-p:IlcInstructionSet=avx2`）。原因：指令集基线只影响本工具的 C# 侧，而真正的编码
 发生在 FFmpeg 子进程里，FFmpeg 自己按 CPU 运行时派发 SIMD。实测（`--cpu-info`
-确认两套的 `Vector<byte>.Count` 分别是 16 与 32）turbo 20s mpeg4 三轮取中位数：
+确认两套的 `Vector<byte>.Count` 分别是 16 与 32）。进程启动耗时：
 
-| 产物 | turbo 20s 墙钟 | 进程启动（`--help`） |
-| --- | --- | --- |
-| `publish\jit` | 1.65 s | 0.336 s |
-| `publish\aot` | 1.44 s | 0.268 s |
-| ~~`publish\aot-avx2`~~ | ~~1.42 s~~ | ~~0.278 s~~ |
+| 产物 | 进程启动（`--help`） |
+| --- | --- |
+| `publish\jit` | 0.336 s |
+| `publish\aot` | 0.268 s |
+| ~~`publish\aot-avx2`~~ | ~~0.278 s~~（v7.8.1 起不再构建） |
 
-AOT 比 JIT 快约 0.22 s（省掉 JIT 预热），**AVX2 相对 AOT 只有 0.02 s，在噪声内**，
-却换来了"只能在 AVX2 CPU 上运行"的代价，所以不再构建。`--turbo` + `publish\aot`
-就是最快的组合。
+AOT 比 JIT 快约 0.07 s（省掉 JIT 预热）。**AVX2 相对 AOT 在噪声内**，
+却换来了"只能在 AVX2 CPU 上运行"的代价，所以 v7.8.1 起不再构建。
 
 NativeAOT 需要 Visual Studio 的 **Desktop development with C++** 工作负载（要用到
 `link.exe`）。如果构建环境里 `vcvarsall.bat` 定位不到 Windows SDK，会报
@@ -190,6 +189,13 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--audio-kbps` | `32` | 音频码率；超出编码器/采样率允许的范围会报错（见 §5 音频边界表） |
 | `--audio-channels` | `1` | 声道数 |
 | `--audio-rate` | 跟随源 | 采样率（Hz）；编码器或容器不接受会报错（见 §5 音频边界表） |
+| `--video-stream` | 第一条 | **v7.9**：要编码的视频流编号（ffprobe 打印的绝对编号），多视频轨的源用 |
+| `--audio-stream` | 第一条 | **v7.9**：要保留的音频流编号，多音轨的源用（配 `--list-streams`） |
+| `--list-streams` | — | **v7.9**：打印源里全部流（含编号、类型、编码、语言）后退出 |
+| `--subtitle` | 无 | **v7.9**：外挂字幕文件（`.ass/.ssa/.srt/.vtt`），可重复给多份（如 clip.sc.ass + clip.tc.ass），配合 `--subtitle-mode` |
+| `--subtitle-stream` | 无 | **v7.9**：使用源内嵌的字幕轨（编号同上） |
+| `--subtitle-mode` | `burn` | **v7.9**：`burn` 把字幕渲染进画面（默认）/ `copy` 作为字幕轨封装进输出 / `off` |
+| `--subtitle-codec` | 按容器自动 | **v7.9**：copy 模式的字幕编码器，默认按容器从 `ffmpeg -encoders` 里挑 |
 | `--width` `--height` | `256` `192` | 输出分辨率（16:9 预设见 §7.15） |
 | `--container` | 编码器默认 | 容器切换（见 §7.14） |
 | `--fit` | `crop` | 画面适配：`crop` 裁切填满 / `fit` 完整画面＋补边 / `stretch` 拉伸变形（见 §7.15） |
@@ -212,7 +218,6 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--audio-mode` | `inline` | `inline` / `separate` / `auto`，见第 7 节 |
 | `--help` / `-h` | — | 打印用法后退出（退出码 0） |
 | `--cpu-info` | — | 打印运行时检测到的指令集（诊断用） |
-| `--turbo` | 关 | 去掉实时节奏，跑到解码/编码的极限速度（见 7.5 节） |
 | `--parallel` | `1` | 把时间范围切成 N 段并行编码再拼接（见 7.5 节） |
 | `--lang` | `en` | 界面语言：`en` 或 `zh`（见 7.6 节） |
 | `--completion` | — | 打印 shell 补全脚本后退出：`bash` / `zsh` / `fish` / `powershell`（见 7.7 节） |
@@ -261,8 +266,9 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
 
 6 – 16 改完立即写进配置文件，下一次打开就是这次的值。
 
-**Turbo 已不在菜单里**（v7.7 起弃用）。命令行 `--turbo` 还能用，只是每次都会
-打印弃用警告；配置文件里已有的 `Turbo: true` 仍然生效。
+**Turbo 已彻底移除**（v7.9）：菜单里没有，命令行 `--turbo` 直接报
+`unrecognized argument`（rc=2），配置文件里遗留的 `Turbo` 键被静默忽略
+（见 §7.5）。
 
 选编码器时会自动做三件事：把不支持的帧率吸附到合法值、把尺寸归一化到编码器
 支持的尺寸、按容器挑一个默认音频编码器。AMV 和 RoQ 还会额外强制音频参数
@@ -453,10 +459,13 @@ LiveArchiveEncoder src.mp4 out.avi --encoder mpeg4 --fps 15 \
 
 ---
 
-## 7.5 提速：`--turbo` 与 `--parallel`
+## 7.5 提速：`--parallel`
 
-> **v7.8 起 Turbo 不再出现在主菜单**，只有命令行 `--turbo` 还在（每次打印弃用
-> 警告）。配置文件里已有的 `Turbo: true` 仍然生效，所以老脚本不会被打断。
+> **v7.9 起 Turbo 彻底移除**：命令行 `--turbo` 会直接报
+> `unrecognized argument`（退出码 2），配置文件里遗留的 `Turbo: true` 被静默忽略，
+> 代码归档在 `archive/retired/RetiredTurbo.cs`。理由见 v7.9 说明——它去掉的正是
+> 本工具存在的理由（模拟直播录档的节奏），且自适应码率控制在全速下必然失效。
+> 想快速验证编码链路，用 `--parallel`（白名单容器）或短片段即可。
 
 并行分片在交互式菜单里是主菜单第 11 项 `Parallel shards`，改完立即写进配置
 （**默认关闭**）。命令行用 `--parallel N`（分片上限 8）。
@@ -468,34 +477,9 @@ v7 按 1/fps 的墙钟节奏输出，用来模拟直播录档。实测 20 秒素
 | 模式 | 墙钟 |
 | --- | --- |
 | 实时（默认） | 21.4 s |
-| `--turbo` | **1.6 s（13×）** |
 
 也就是说默认模式 96% 的时间在 sleep，CPU 只用了约 1.4%。
 `--limit` 是码率上限（触发降 FPS），**不是速度开关**，调大它不会加速。
-
-### `--turbo`（v7.7 起弃用）
-
-> **已弃用。** 功能照旧可用，老脚本不会坏，但每次使用都会打印一行
-> `WARNING: DEPRECATED: ...`，菜单第 9 项也标了"（已弃用）"。
-> 它去掉的是本工具存在的理由（模拟直播录档的节奏），后续版本会移除。
-
-去掉输出循环和采集线程两处墙钟节流，改为「等采集线程真的交出下一帧」。
-滞回判定的 0.18 / 0.30 / 0.75 / 0.80 秒从墙钟改为**媒体时间**，
-否则每个窗口会多放行几十倍的帧，自适应阶梯永远不会稳定。
-
-```powershell
-# 20 秒素材，实时需 21s，turbo 约 1.6s
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --turbo
-```
-
-**要注意的代价（必须知道，不是免费的）：**
-
-1. **产物会变。** `pool.TryTakeLatest` 取的是「此刻已解码的最新帧」，
-   fresh/repeat 比例本来就是墙钟竞态的结果；跑得快，采集线程供不上，
-   repeat 会增多。想要和 v6.3.3 逐字节对齐的归档，别开 turbo。
-2. **自适应码率控制在 turbo 下基本失效。** 反馈环依赖实时进度回传，
-   全速跑时槽位循环在编码器追上来之前就结束了。等价于 `--limit 99999` 的行为。
-3. 剩下的墙钟几乎全是**固定开销**（见下），不是编码。20s 和 1s 只差 0.1s。
 
 ### `--parallel N`
 
@@ -530,19 +514,19 @@ v7.7 之前最后一个分片会因此要一个超过片尾的时间，被 ffpro
 
 ```powershell
 # 只在 avi/mp4/flv/asf/mpeg 上真正生效
-LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --turbo --parallel 4
+LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --parallel 4
 
 # roq / rm 会打印 "Sharding skipped: ..." 后走单段，不会损坏产物
-LiveArchiveEncoder.exe src.mp4 out.roq --encoder roqvideo --turbo --parallel 4
+LiveArchiveEncoder.exe src.mp4 out.roq --encoder roqvideo --parallel 4
 ```
 
 **实测结论：目前分段基本是净亏损。** 白名单内编码器的边际成本只有 0.06–0.26 s
 （20s 素材），而每段要多付约 1.5 s 启动开销，所以 20s 源 `--parallel 4`
-反而比单段 turbo 慢（2.33 s vs 1.85 s）。唯一边际成本够高、值得分段的是
+反而比单段慢。唯一边际成本够高、值得分段的是
 **roqvideo（8.3 s）**，而 roq 恰好不能拼接。
 接口留着，等固定开销压下去之后才有意义。
 
-### 固定开销花在哪（turbo 之后的新瓶颈）
+### 固定开销花在哪
 
 | 阶段 | 耗时 |
 | --- | --- |
@@ -551,8 +535,7 @@ LiveArchiveEncoder.exe src.mp4 out.roq --encoder roqvideo --turbo --parallel 4
 | ffprobe 探测 | ~0.25 s（已由 3 次合并为 1 次） |
 | Preflight（Video + Audio） | ~0.2 s（已改为并发） |
 
-想再快：用 `publish\aot\LiveArchiveEncoder.exe`（AOT 单文件），
-配合 `--turbo` 就是目前最快的组合。
+想再快：用 `publish\aot\LiveArchiveEncoder.exe`（AOT 单文件）。
 
 ---
 
@@ -560,7 +543,7 @@ LiveArchiveEncoder.exe src.mp4 out.roq --encoder roqvideo --turbo --parallel 4
 
 ### 配置自动保存
 
-交互式菜单（CUI）在**退出时、切换 turbo/语言/分片数时、每次开始编码前**都会把当前
+交互式菜单（CUI）在**退出时、切换语言/分片数等设置时、每次开始编码前**都会把当前
 设置写进 JSON，下次打开自动恢复（顶部会打印 `Restored settings / 已恢复上次配置`）。
 位置：
 
@@ -625,7 +608,7 @@ Register-ArgumentCompleter -Native -CommandName 'LiveArchiveEncoder' -ScriptBloc
 
 ---
 
-## 7.8 远程资源（SMB 共享）
+## 7.8 远程资源（SMB 共享 / HTTP 直链）
 
 输入**和输出**都可以直接给远程路径，两边写法不同：
 
@@ -634,6 +617,9 @@ Register-ArgumentCompleter -Native -CommandName 'LiveArchiveEncoder' -ScriptBloc
 LiveArchiveEncoder.exe \\nas\share\record.mp4 out.rm --encoder rv20
 LiveArchiveEncoder.exe //nas/share/record.mp4 out.rm --encoder rv20
 LiveArchiveEncoder.exe record.mp4 \\nas\share\out.rm --encoder rv20   # 直接写回共享
+
+# v7.9 —— HTTP/HTTPS 直链（初步支持，见下）
+LiveArchiveEncoder.exe https://archive.org/download/<item>/<file>.mp4 out.rm --encoder rv20
 ```
 
 ```bash
@@ -660,6 +646,22 @@ LiveArchiveEncoder /mnt/lae/record.mp4 /mnt/lae/out.rm --encoder rv20
 > `Option reconnect not found. Error opening input file`。结果是**源放在 SMB 共享
 > 上会解出 0 帧**（fresh=0、0 字节、码率显示 48 kbps），而报错还被缓冲吃掉了。
 > 现在读取、写入、ffprobe 三处统一只加 `-rw_timeout`。
+
+### HTTP/HTTPS 直链（v7.9，初步支持）
+
+输入可以是 `http://` / `https://` 的**渐进式直链**（`/download/…/文件名` 这类，
+archive.org、各种 CDN 都是）。FFmpeg 原生会说这两个协议，本工具做的是：
+
+- 识别 URL，按 HTTP 协议给 FFmpeg 加 **`-reconnect 1 -reconnect_streamed 1
+  -reconnect_on_network_error 1`**（这三个只属于 HTTP/FTP——放到 UNC 路径上正是
+  v7.5 修掉的那个 bug）+ `-rw_timeout 30000000`。404 不会重试
+  （`-reconnect_on_http_error` 故意不加：错 URL 重试五次只是把 2 秒的错误拖成 2 分钟）。
+- 片段裁剪（`--start-time`）依赖服务器支持 **Range 请求**——archive.org 和 CDN
+  都支持；不支持的本地服务器（如 `python -m http.server`）会在 seek 处报错。
+- **不处理**：鉴权、Cookie、HLS/DASH 列表、需要二次读的非可寻址流。字幕烧录对
+  URL 源会先把字幕轨落盘到临时文件再渲染。
+- 默认输出名取 URL 的最后一段（去查询串、百分号解码、消毒分隔符），落在当前
+  目录，如 `clip_live.avi`。
 
 ### 写入侧
 
@@ -918,7 +920,7 @@ live 编码 → (14) 时代预设   ← 可选，一层把两层参数都填好
 
 ```powershell
 # 一条命令跑完"2007 年传优酷"：live 用 flv1，二次压缩参数自动填好
-LiveArchiveEncoder.exe src.mp4 out.flv --era flv07 --turbo --recompress
+LiveArchiveEncoder.exe src.mp4 out.flv --era flv07 --recompress
 ```
 
 `--era` 不碰你显式给的 `--encoder` / `--width` / `--limit`：预设是兜底，不是覆盖。
@@ -928,7 +930,7 @@ LiveArchiveEncoder.exe src.mp4 out.flv --era flv07 --turbo --recompress
 你只写 FFmpeg 命令的**中间参数段**，`-i <live产物>` 和输出路径由程序生成：
 
 ```powershell
-LiveArchiveEncoder.exe src.mp4 out.rm --era flv07 --recompress --turbo
+LiveArchiveEncoder.exe src.mp4 out.rm --era flv07 --recompress
 # -> clip_live.rm      (live)
 # -> clip_live_web.mp4 (二次压缩，用 flv07 预设的参数)
 
@@ -958,7 +960,7 @@ LiveArchiveEncoder.exe src.mp4 out.rm --recompress --recompress-args ^
 
 ```powershell
 # 文字 + 位置，字号颜色留空 = 按画面尺寸自适应
-LiveArchiveEncoder.exe src.mp4 out.rm --watermark "优酷网" --watermark-position top-right --turbo
+LiveArchiveEncoder.exe src.mp4 out.rm --watermark "优酷网" --watermark-position top-right
 
 # 全套
 LiveArchiveEncoder.exe src.mp4 out.rm --watermark "土豆网" ^
@@ -1138,6 +1140,68 @@ stretch: fps=…,scale=W:H:flags=…,format=…
 
 ---
 
+## 7.16 多流选择与字幕（v7.9）
+
+### 流选择：`--video-stream` / `--audio-stream`
+
+一个源可能有多条视频轨（VOB 的多角度）和多条音频轨（DVD 的多语言）。编号用
+**ffprobe 打印的绝对流编号**，`--list-streams` 先列出来：
+
+```text
+$ LiveArchiveEncoder.exe --list-streams dvd.vob
+streams in this source:
+    0  data      dvd_nav_packet
+    1  audio     dts
+    2  video     mpeg2video 720x576
+    3  audio     ac3
+```
+
+```powershell
+# 要第 2 条流里的视频 + 第 3 条流的 AC3 音轨
+LiveArchiveEncoder.exe dvd.vob out.avi --encoder mpeg4 --video-stream 2 --audio-stream 3
+```
+
+规则：
+
+- 编号不存在、或者类型不符（给 `--video-stream` 一个音频流编号）都会在编码开始前
+  被拒绝，并附上完整的流清单——**不会**静默编错流。
+- 不给编号就是"各类型第一条"，与 v7.8 及之前完全一致。
+- 选中的视频流的像素格式会驱动传输格式选择（第一条流的元数据不会被误用）。
+- CUI 主菜单第 17 项同样能选：先打印清单再逐个询问，留空＝第一条。
+- 选择会写进配置文件，供下次交互会话沿用；CLI 不读取它作为默认。
+
+### 字幕：`--subtitle` / `--subtitle-stream` + `--subtitle-mode`
+
+```powershell
+# 烧录外挂简中字幕（默认模式就是 burn；可重复给多份，全部渲染进画面）
+LiveArchiveEncoder.exe src.mkv out.avi --encoder mpeg4 ^
+    --subtitle "src.sc.ass" --subtitle "src.tc.ass"
+
+# 用源内嵌的字幕轨（编号来自 --list-streams）
+LiveArchiveEncoder.exe src.mkv out.avi --encoder mpeg4 --subtitle-stream 2
+
+# 作为字幕轨封装（容器必须支持；编码器从 ffmpeg -encoders 里按容器挑）
+LiveArchiveEncoder.exe src.mp4 out.mkv --encoder libx264 --container mkv ^
+    --subtitle src.srt --subtitle-mode copy
+```
+
+规则：
+
+- `burn`（默认）用 libass 的 `subtitles` 滤镜把文字渲染进画面，**渲染在缩放之后**
+  （文字不会跟着缩放糊掉），并自动带上工具字体目录作 `fontsdir`——ASS 里写了
+  "Microsoft YaHei" 而机器上没有时，会从 `fonts/` 目录兜底。
+- `copy` 按容器挑编码器（实测过的默认：Matroska→ass、MP4→mov_text、AVI→xsub、
+  MPEG-PS→dvdsub、MPEG-TS→dvbsub），也可以 `--subtitle-codec` 指定（必须在
+  `ffmpeg -encoders` 里真的存在，否则报错并列出全部可用项）。rm/flv/asf/roq/amv
+  没有字幕轨概念，会直接报错让你改用 burn。
+- **位图字幕**（dvdsub/dvbsub/xsub 这类子图片）只能 copy 不能烧：libass 渲染的是
+  文字，图片转文字是 OCR，FFmpeg 不做。
+- 分离音频通路（`--audio-mode separate`）合并时会丢字幕轨，所以 copy 模式自动
+  改走单进程并打 NOTE；burn 不受影响。
+- 缺文件、两处来源同时给、编号越界等都在编码开始前报错（CLI 缺文件是 rc=2）。
+
+---
+
 ## 8. 实用命令示例
 
 ```powershell
@@ -1251,7 +1315,7 @@ C# v7 是 v6.3.3 的**行为等价**移植：FFmpeg 命令行（包括 `-threads
 
 所以**同一条命令在 Python 版和 C# 版上应产出等价的结果**，可以直接对照着用。
 
-C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，见 §7.5）、配置
+C# 版在 v7.3 之外多出来的东西：`--parallel`（分片提速，见 §7.5）、配置
 持久化（§7.6）、中英文（§7.6）、Shell 自动补全（§7.7）、SMB 读取优化（§7.8）、
 `--help` / `--cpu-info` 两个辅助标志。这些都不改变默认行为：不加任何开关时，
 命令行语义与 v6.3.3 一致。
@@ -1409,6 +1473,36 @@ C# 版在 v7.3 之外多出来的东西：`--turbo` / `--parallel`（提速，�
    SMB 不稳定导致画面冻结"（解码器提前 EOF 时旧代码静默用上一帧填满槽位），
    实测定位到根因后决定**不修**：该静默行为是 option_smoke 既有断言的依赖项，
    修复会改变长年稳定的输出形态。根因记录留在代码注释里，留待 v8 评估。
+
+### v7.9 新增
+
+1. **视频流 / 音频流选择（目标 1）**：`--video-stream N` / `--audio-stream N`
+   直接用 ffprobe 打印的**绝对流编号**（`--list-streams` 先列出），编号不存在或
+   类型不符会在编码前被拒绝并列出全部流。CUI 主菜单新增第 17 项。VOB（DVD）
+   这类多音轨源终于可以点名要哪条音轨了。真实素材验证：179MB VOB 经 SMB 选
+   `--video-stream 2 --audio-stream 3` 编 00:00–00:30 片段，PSNR/零交叉率双重
+   证明选的确实是目标流。
+2. **字幕：读取、烧录、内嵌（目标 2）**：`--subtitle FILE`（外挂 .ass/.srt，可
+   重复）与 `--subtitle-stream N`（内嵌轨）二选一；`--subtitle-mode burn`（默认，
+   libass 渲染进画面，带 `fontsdir` 自动加载工具自带字体）或 `copy`（按容器从
+   `ffmpeg -encoders` 挑字幕编码器封装成字幕轨）。位图字幕（dvdsub/dvbsub）只能
+   copy 不能烧（转文字需要 OCR）。真实素材验证：Re:Zero S2 外挂简中 .ass 烧进
+   256x192 归档产物，字幕清晰可读。
+3. **Turbo 彻底移除（目标 3）**：`--turbo` → `unrecognized argument`，配置键被
+   忽略，原实现归档于 `archive/retired/RetiredTurbo.cs`（见 §7.5）。
+4. **字体相对路径修复（目标 4）**：水印字体不再必须写绝对路径——裸文件名会先到
+   工具字体目录（`fonts/` 或 `LAE_WATERMARK_FONT_DIR`）里找；顺带修了
+   simsun.ttc 首个 face 是单色 1bpp 被 drawtext 拒绝的问题（自动回退可用的
+   中文字体并打 WARNING）。
+5. **AVI 容器扩容（目标 5）**：h261/h263/h263p 加入 AVI 容器白名单；h261/h263
+   从裸流（无音频）换成 AVI 后自动获得音频能力。
+6. **HTTP/HTTPS 输入（目标 6，初步支持）**：输入可以是
+   `https://archive.org/download/.../file.mp4` 这类直链。带 `-reconnect` 家族 +
+   30s socket 超时；seek 依赖服务器支持 Range（archive.org/CDN 都支持）。只覆盖
+   渐进式直链：不处理鉴权、Cookie、HLS/DASH。
+7. **顺手修的两个老 bug**：`ffmpeg -filters` 的 flags 列宽是 2 字符（旧正则要求
+   3 → 所有未标记滤镜从未被检出）；ffprobe 源超时 30s 不够——179MB VOB 实测要
+   2m15s，放宽到 300s 并把 `--list-streams` 的超时变成干净报错。
 
 ---
 

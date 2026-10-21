@@ -12,9 +12,8 @@ namespace LiveArchiveEncoder.Encoding;
 ///
 /// Measured on a 320x240 h264 source (2026-10-17, see
 /// tests/PARALLEL_SPLIT_VERIFICATION.md): the realtime pipeline spends ~98.6% of
-/// its wall clock asleep, so sharding only pays off together with
-/// <see cref="RealtimeOptions.Turbo"/>. On its own it is still useful for long
-/// ranges where a single pass would otherwise run for minutes.
+/// its wall clock asleep, so sharding pays off for long ranges where a single
+/// pass would otherwise run for minutes -- it overlaps the sleep with real work.
 ///
 /// Two hard constraints are enforced here, both learned the hard way:
 ///   1. Only <see cref="Constants.ConcatSafeFormats"/> may be sharded. RoQ loses
@@ -28,10 +27,18 @@ public static class ParallelEncoder
 {
     public static EncodeResult Run(RealtimeOptions o, CancellationToken cancellationToken = default)
     {
-        var src = new FileInfo(Path.GetFullPath(o.SourcePath));
         var dst = new FileInfo(Path.GetFullPath(o.DestinationPath));
 
-        SourceInfo source = Probe.Source(o.FFprobe, src);
+        // v7.9: the source may be an HTTP(S) URL; only a local path has a
+        // FileInfo, and the shards themselves are always local files.
+        string sourcePath = Remote.HttpSource.IsUrl(o.SourcePath)
+            ? o.SourcePath
+            : new FileInfo(Path.GetFullPath(o.SourcePath)).FullName;
+
+        // v7.9: stream picks are validated against this probe, before any
+        // shard is spawned -- a bad index must not cost N process starts.
+        SourceInfo source = StreamSelection.Resolve(
+            Probe.Source(o.FFprobe, sourcePath), o.VideoStream, o.AudioStream);
         (double? resolvedEnd, double? duration) =
             Timecode.ResolveRange(o.StartSeconds, o.EndSeconds, source.Duration);
 
@@ -94,6 +101,12 @@ public static class ParallelEncoder
                             AudioKbps = o.AudioKbps,
                             AudioChannels = o.AudioChannels,
                             AudioRate = o.AudioRate,
+                            // Every shard re-enters RunSingle, which probes
+                            // again: the picks have to survive the round trip.
+                            VideoStream = o.VideoStream,
+                            AudioStream = o.AudioStream,
+                            Subtitles = o.Subtitles,
+                            AvailableSubtitleEncoders = o.AvailableSubtitleEncoders,
                             Hwaccel = o.Hwaccel,
                             Width = o.Width,
                             Height = o.Height,
@@ -116,7 +129,6 @@ public static class ParallelEncoder
                             // Shards are quiet; the caller prints one summary.
                             Verbose = false,
                             AudioMode = o.AudioMode,
-                            Turbo = o.Turbo,
                             // Never recurse into sharding a shard.
                             Parallel = 1,
                             Progress = (done, target) => progress.Report(i, done, target),

@@ -142,6 +142,41 @@ public sealed class ContainerChoiceTests
             .Select(x => x.Format)).Contains("matroska");
     }
 
+    /// <summary>
+    /// v7.9 #5: h261 / h263 / h263p gain AVI. The raw .h261/.h263 streams carry
+    /// no audio, so the point of the AVI option is the mp3 track that comes with
+    /// it -- verified against the BtbN build (2026-10-21): all three mux and
+    /// probe back with a working audio stream.
+    /// </summary>
+    [Test]
+    public async Task H261H263H263pGainAvi()
+    {
+        foreach (string name in new[] { "h261", "h263", "h263p" })
+        {
+            await Assert.That(EncoderMath.AllowedContainers(Encoder(name, "x", "x"))
+                    .Select(x => x.Format)).Contains("avi").Because($"{name} should offer AVI");
+        }
+
+        // Defaults stay put: the raw streams remain the default for h261/h263,
+        // and h263p was already an AVI encoder.
+        await Assert.That(EncoderMath.AllowedContainers(Encoder("h261", "h261", "h261"))[0].Format).IsEqualTo("h261");
+        await Assert.That(EncoderMath.AllowedContainers(Encoder("h263", "h263", "h263"))[0].Format).IsEqualTo("h263");
+        await Assert.That(EncoderMath.AllowedContainers(Encoder("h263p", "avi", "avi"))[0].Format).IsEqualTo("avi");
+    }
+
+    [Test]
+    public async Task AviLiftsTheNoAudioRuleForH261AndH263()
+    {
+        // The raw formats are still audio-free ...
+        await Assert.That(Constants.NoAudioFormats).Contains("h261");
+        await Assert.That(Constants.NoAudioFormats).Contains("h263");
+        await Assert.That(EncoderMath.ChooseAudioEncoder("h261", ["libmp3lame"])).IsNull();
+        // ... but the AVI container is not, and that is what --container avi
+        // switches the encoder to.
+        await Assert.That(EncoderMath.ChooseAudioEncoder("avi", ["libmp3lame"])).IsEqualTo("libmp3lame");
+        await Assert.That(AudioCatalog.SupportsContainer("libmp3lame", "avi")).IsTrue();
+    }
+
     [Test]
     public async Task ResolveSwapsTheContainerAndKeepsTheEncoder()
     {

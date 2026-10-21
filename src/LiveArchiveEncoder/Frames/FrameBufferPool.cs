@@ -23,7 +23,6 @@ public sealed class FrameBufferPool
     private int _readyHead;
     private int _readyCount;
     private readonly object _sync = new();
-    private bool _closed;
 
     public int FrameSize { get; }
 
@@ -80,38 +79,6 @@ public sealed class FrameBufferPool
             Monitor.Pulse(_sync);
         }
         if (evicted >= 0) Release(evicted);
-    }
-
-    /// <summary>
-    /// Signal that no further frames will ever be published, so that anyone
-    /// blocked in <see cref="WaitForFrame"/> wakes up instead of hanging.
-    /// </summary>
-    public void Close()
-    {
-        lock (_sync)
-        {
-            _closed = true;
-            Monitor.PulseAll(_sync);
-        }
-    }
-
-    /// <summary>
-    /// Block until a frame is ready, the pool is closed, or the timeout expires.
-    ///
-    /// Turbo mode replaces the wall-clock slot deadline with this data-driven
-    /// wait. Without it the consumer loop outruns the capture thread and every
-    /// slot degenerates into a duplicate of the previous frame, which would
-    /// silently produce a near-empty video.
-    /// </summary>
-    public bool WaitForFrame(int timeoutMs)
-    {
-        lock (_sync)
-        {
-            if (_readyCount > 0) return true;
-            if (_closed || timeoutMs <= 0) return false;
-            Monitor.Wait(_sync, timeoutMs);
-            return _readyCount > 0;
-        }
     }
 
     /// <summary>

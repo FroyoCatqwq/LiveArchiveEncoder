@@ -38,6 +38,33 @@ public sealed class CliOptions
     public int AudioKbps { get; init; } = 32;
     public int AudioChannels { get; init; } = 1;
     public int? AudioRate { get; init; }
+
+    /// <summary>
+    /// v7.9: absolute stream index of the video track to encode (the number
+    /// <c>ffprobe -show_streams</c> prints). Null means the first video stream,
+    /// which is what every version up to v7.8 used.
+    /// </summary>
+    public int? VideoStream { get; init; }
+
+    /// <summary>v7.9: absolute stream index of the audio track to keep; null means the first.</summary>
+    public int? AudioStream { get; init; }
+
+    /// <summary>v7.9: print the source's streams and exit (pairs with the two picks above).</summary>
+    public bool ListStreams { get; init; }
+
+    // ---- v7.9 #2: subtitles ----
+
+    /// <summary>External subtitle file(s), e.g. clip.sc.ass. Repeatable.</summary>
+    public IReadOnlyList<string> SubtitleFiles { get; init; } = [];
+
+    /// <summary>Absolute index of an embedded subtitle track to use.</summary>
+    public int? SubtitleStream { get; init; }
+
+    /// <summary>burn (into the picture), copy (as a stream) or off.</summary>
+    public string SubtitleMode { get; init; } = "burn";
+
+    /// <summary>Explicit subtitle codec for copy mode; null picks it per container.</summary>
+    public string? SubtitleCodec { get; init; }
     public int Width { get; init; } = 256;
     public int Height { get; init; } = 192;
 
@@ -81,17 +108,6 @@ public sealed class CliOptions
     public Encoding.AudioMode AudioMode { get; init; } = Encoding.AudioMode.Inline;
     public bool Help { get; init; }
     public bool CpuInfo { get; init; }
-
-    /// <summary>
-    /// Drop the deliberate 1/fps wall-clock pacing. Measured ~58x on a 20s source.
-    /// The fresh/repeat mix and the adaptive-FPS ladder are wall-clock driven, so
-    /// this changes the output; it stays opt-in for that reason.
-    ///
-    /// DEPRECATED in v7.7: still honoured so old scripts keep working, but it
-    /// fights the point of the tool -- a live recording simulation -- and prints
-    /// a warning on every use. It will be removed in a later release.
-    /// </summary>
-    public bool Turbo { get; init; }
 
     /// <summary>Shard count for the parallel pipeline. 1 disables sharding.</summary>
     public int Parallel { get; init; } = 1;
@@ -179,6 +195,13 @@ public static class CliParser
         int audioKbps = 32;
         int audioChannels = 1;
         int? audioRate = null;
+        int? videoStream = null;
+        int? audioStream = null;
+        bool listStreams = false;
+        var subtitleFiles = new List<string>();
+        int? subtitleStream = null;
+        string subtitleMode = "burn";
+        string? subtitleCodec = null;
         int width = 256;
         int height = 192;
         string? container = null;
@@ -205,7 +228,6 @@ public static class CliParser
         Encoding.AudioMode audioMode = Encoding.AudioMode.Inline;
         bool help = false;
         bool cpuInfo = false;
-        bool turbo = false;
         int parallel = 1;
         string? language = null;
         string? completion = null;
@@ -339,6 +361,43 @@ public static class CliParser
                         return (null, "--audio-rate requires an integer");
                     audioRate = rateValue;
                     break;
+                // ---- v7.9: stream selection ----
+                case "--video-stream":
+                    if (!TryValue(out string vsRaw) || !int.TryParse(vsRaw, out int vsValue))
+                        return (null, "--video-stream requires an integer (see --list-streams)");
+                    if (vsValue < 0) return (null, "--video-stream must be 0 or greater");
+                    videoStream = vsValue;
+                    break;
+                case "--audio-stream":
+                    if (!TryValue(out string asRaw) || !int.TryParse(asRaw, out int asValue))
+                        return (null, "--audio-stream requires an integer (see --list-streams)");
+                    if (asValue < 0) return (null, "--audio-stream must be 0 or greater");
+                    audioStream = asValue;
+                    break;
+                case "--list-streams": listStreams = true; break;
+
+                // ---- v7.9 #2: subtitles ----
+                case "--subtitle":
+                    if (!TryValue(out string subRaw)) return (null, "--subtitle requires a file path");
+                    // Repeatable: a release usually ships two language tracks.
+                    subtitleFiles.Add(subRaw.Trim().Trim('"'));
+                    break;
+                case "--subtitle-stream":
+                    if (!TryValue(out string ssRaw) || !int.TryParse(ssRaw, out int ssValue))
+                        return (null, "--subtitle-stream requires an integer (see --list-streams)");
+                    if (ssValue < 0) return (null, "--subtitle-stream must be 0 or greater");
+                    subtitleStream = ssValue;
+                    break;
+                case "--subtitle-mode":
+                    if (!TryValue(out subtitleMode)) return (null, "--subtitle-mode requires a value");
+                    subtitleMode = subtitleMode.Trim().ToLowerInvariant();
+                    if (!Constants.SubtitleModes.Contains(subtitleMode))
+                        return (null, $"--subtitle-mode must be one of {string.Join(", ", Constants.SubtitleModes)}");
+                    break;
+                case "--subtitle-codec":
+                    if (!TryValue(out subtitleCodec)) return (null, "--subtitle-codec requires a value");
+                    subtitleCodec = subtitleCodec.Trim().ToLowerInvariant();
+                    break;
                 case "--width":
                     if (!TryValue(out string wRaw) || !int.TryParse(wRaw, out width))
                         return (null, "--width requires an integer");
@@ -408,7 +467,6 @@ public static class CliParser
                     hwaccel = hwaccel.Trim().ToLowerInvariant();
                     if (hwaccel.Length == 0) return (null, "--hwaccel requires a method name");
                     break;
-                case "--turbo": turbo = true; break;
                 case "--parallel":
                     if (!TryValue(out string parRaw) || !int.TryParse(parRaw, out parallel))
                         return (null, "--parallel requires an integer");
@@ -548,6 +606,13 @@ public static class CliParser
             AudioKbps = audioKbps,
             AudioChannels = audioChannels,
             AudioRate = audioRate,
+            VideoStream = videoStream,
+            AudioStream = audioStream,
+            ListStreams = listStreams,
+            SubtitleFiles = subtitleFiles,
+            SubtitleStream = subtitleStream,
+            SubtitleMode = subtitleMode,
+            SubtitleCodec = subtitleCodec,
             Width = width,
             Height = height,
             Container = container,
@@ -576,7 +641,6 @@ public static class CliParser
             AudioMode = audioMode,
             Help = help,
             CpuInfo = cpuInfo,
-            Turbo = turbo,
             Parallel = parallel,
             Language = language,
             Completion = completion,
@@ -627,6 +691,16 @@ public static class CliParser
             ("--audio-kbps", "N", "audio bitrate (default: 32)"),
             ("--audio-channels", "N", "audio channels (default: 1)"),
             ("--audio-rate", "HZ", "audio sample rate (default: source)"),
+            // v7.9: multi-stream sources. The index is the number ffprobe shows.
+            ("--video-stream", "N", "video stream index to encode, e.g. 2 (default: the first one)"),
+            ("--audio-stream", "N", "audio stream index to keep, e.g. 3 (default: the first one)"),
+            ("--list-streams", "", "print the source's streams (and their indexes), then exit"),
+            ("--subtitle", "FILE", "external subtitle file (.ass/.ssa/.srt/.vtt); repeatable, "
+                                 + "e.g. clip.sc.ass and clip.tc.ass"),
+            ("--subtitle-stream", "N", "index of an embedded subtitle track to use"),
+            ("--subtitle-mode", "MODE", "burn the text into the picture (default) or copy it as a stream"),
+            ("--subtitle-codec", "NAME", "subtitle codec for --subtitle-mode copy (default: per container, "
+                                       + "from \"ffmpeg -encoders\")"),
             ("--width", "N", "output width (default: 256)"),
             ("--height", "N", "output height (default: 192)"),
             ("--container", "NAME", "container override where the encoder allows one, e.g. avi for "
@@ -654,7 +728,6 @@ public static class CliParser
             ("--audio-mode", "MODE", "auto, inline or separate (default: inline)"),
             ("--lang", "CODE", "UI language: en or zh (default: en)"),
             ("--completion", "SHELL", "print a completion script (bash/zsh/fish/powershell) and exit"),
-            ("--turbo", "", "DEPRECATED: drop the 1/fps realtime pacing (much faster; output differs)"),
             ("--parallel", "N", "shard the range and encode concurrently (default: 1)"),
             ("--quiet", "", "suppress the progress banner"),
             ("--no-cui", "", "never enter the interactive UI"),

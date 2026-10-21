@@ -7,7 +7,18 @@ namespace LiveArchiveEncoder.FFmpeg;
 /// <summary>Capability probing: filter registry, scaler kernels and encoder capabilities.</summary>
 public static partial class FFmpegCapabilities
 {
-    [GeneratedRegex(@"^\s*[TSC.]{3}\s+(\S+)\s+[VAFN|.>-]+(?:\s|$)")]
+    /// <summary>
+    /// One line of <c>ffmpeg -filters</c>: a space, two or three flag characters
+    /// (<c>T</c>imeline, <c>S</c>lice threading, <c>C</c>ommand), the filter
+    /// name, then the <c>V-&gt;V</c> style I/O description.
+    ///
+    /// The flag column is <b>two</b> characters wide in a current build
+    /// (<c>" .. subtitles"</c>, verified 2026-10-21) and three in some older
+    /// ones, so both have to match -- the previous three-only pattern silently
+    /// dropped every unflagged filter, which is how the subtitles filter went
+    /// unreported in a build that clearly has it.
+    /// </summary>
+    [GeneratedRegex(@"^\s*[TSC.]{2,3}\s+(\S+)\s+[VAFN|.>-]+(?:\s|$)")]
     private static partial Regex FilterLine();
 
     [GeneratedRegex(@"Supported pixel formats:\s*(.+)", RegexOptions.IgnoreCase)]
@@ -21,6 +32,32 @@ public static partial class FFmpegCapabilities
 
     [GeneratedRegex(@"^\s*-qscale\s+", RegexOptions.Multiline)]
     private static partial Regex QscaleOption();
+
+    /// <summary>
+    /// <c>ffmpeg -encoders</c> subtitle lines: <c> S..... ass    ASS (...)</c>.
+    /// v7.9 goal 2 asked for subtitle support "以 ffmpeg -encoders 为准", so the
+    /// set is read from the binary in use rather than hard-coded. The name has
+    /// to be a word: the legend block (<c> S..... = Subtitle</c>) would
+    /// otherwise contribute an encoder called "=".
+    /// </summary>
+    [GeneratedRegex(@"^\s*S\.+\s+([A-Za-z0-9_]+)\s", RegexOptions.Multiline)]
+    private static partial Regex SubtitleEncoderLine();
+
+    /// <summary>
+    /// Every subtitle encoder this FFmpeg can write, or an empty set when the
+    /// build has none (a stripped-down build simply cannot carry a text track,
+    /// which the caller turns into "use --subtitle-mode burn").
+    /// </summary>
+    public static HashSet<string> DetectSubtitleEncoders(string ffmpeg)
+    {
+        CaptureResult p = ProcessRunner.Run([ffmpeg, "-hide_banner", "-encoders"], 30);
+        if (p.ExitCode != 0) return [];
+
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match m in SubtitleEncoderLine().Matches(p.Stdout + "\n" + p.Stderr))
+            found.Add(m.Groups[1].Value);
+        return found;
+    }
 
     /// <summary>
     /// Parse the -filters registry. FFmpeg writes it to stdout, but builds/wrappers
@@ -37,6 +74,15 @@ public static partial class FFmpegCapabilities
         }
 
         string text = p.Stdout + "\n" + p.Stderr;
+        return ParseFilterNames(text);
+    }
+
+    /// <summary>
+    /// Filter names inside <c>ffmpeg -filters</c> output. Split out from the
+    /// process call so the parsing is testable without running FFmpeg.
+    /// </summary>
+    public static HashSet<string> ParseFilterNames(string text)
+    {
         var filters = new HashSet<string>(StringComparer.Ordinal);
         foreach (string line in text.Split('\n'))
         {

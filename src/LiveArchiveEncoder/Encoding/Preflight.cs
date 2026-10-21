@@ -20,7 +20,7 @@ public static class Preflight
 {
     public static void Video(
         string ffmpeg,
-        FileInfo src,
+        string sourcePath,
         EncoderInfo encoder,
         double fps,
         int quality,
@@ -34,7 +34,9 @@ public static class Preflight
         string? x264Level,
         string hwaccel,
         double startSeconds,
-        AudioTrial? audio = null)
+        AudioTrial? audio = null,
+        int? videoStream = null,
+        int? audioStream = null)
     {
         string tempDir = Path.Combine(Path.GetTempPath(),
             "live_archive_preflight_" + Guid.NewGuid().ToString("N"));
@@ -43,13 +45,17 @@ public static class Preflight
         {
             string output = Path.Combine(tempDir, $"preflight.{encoder.Extension}");
             var cmd = new List<string> { ffmpeg, "-hide_banner", "-loglevel", "error" };
+            // v7.9: a URL source needs the reconnect family on this throwaway
+            // read too, or a flaky connection fails the preflight and with it
+            // an encode that would have survived.
+            cmd.AddRange(Remote.HttpSource.ReadArgs(sourcePath));
             if (!string.Equals(hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
                 cmd.AddRange(["-hwaccel", hwaccel]);
             if (startSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(startSeconds)]);
             cmd.AddRange([
                 "-threads", Math.Max(1, threads).ToString(),
-                "-i", src.FullName,
-                "-map", "0:v:0",
+                "-i", sourcePath,
+                "-map", StreamSelection.VideoMap(videoStream),
                 "-vf", vf,
                 "-frames:v", "3",
                 "-c:v", encoder.Name,
@@ -62,7 +68,7 @@ public static class Preflight
             {
                 // Containers such as AMV only hold two streams, so the trial must
                 // mirror the real command and carry an audio track too.
-                cmd.AddRange(["-map", "0:a:0", "-c:a", audio.Encoder]);
+                cmd.AddRange(["-map", StreamSelection.AudioMap(0, audioStream), "-c:a", audio.Encoder]);
 
                 // ADPCM/DPCM/PCM have no rate control; -b:a is silently ignored.
                 if (!EncoderMath.AudioIgnoresBitrate(audio.Encoder))
@@ -104,16 +110,18 @@ public static class Preflight
 
     public static void Audio(
         string ffmpeg,
-        FileInfo src,
+        string sourcePath,
         string audioEncoder,
         int audioKbps,
         int audioChannels,
         int? audioRate,
-        double startSeconds)
+        double startSeconds,
+        int? audioStream = null)
     {
         var cmd = new List<string> { ffmpeg, "-hide_banner", "-loglevel", "error" };
+        cmd.AddRange(Remote.HttpSource.ReadArgs(sourcePath));
         if (startSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(startSeconds)]);
-        cmd.AddRange(["-i", src.FullName, "-map", "0:a:0", "-vn", "-t", "2"]);
+        cmd.AddRange(["-i", sourcePath, "-map", StreamSelection.AudioMap(0, audioStream), "-vn", "-t", "2"]);
         cmd.AddRange(["-c:a", audioEncoder]);
         if (!EncoderMath.AudioIgnoresBitrate(audioEncoder))
             cmd.AddRange(["-b:a", $"{audioKbps}k"]);

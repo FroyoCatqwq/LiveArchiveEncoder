@@ -179,14 +179,22 @@ public sealed class CliParserTests
     public async Task LongstandingOptionsStillParse()
     {
         CliOptions options = (await Parse("in.mp4", "out.rm", "--encoder", "rv20",
-            "--fps", "13", "--fps-levels", "13,8,5,3", "--turbo", "--parallel", "4"));
+            "--fps", "13", "--fps-levels", "13,8,5,3", "--parallel", "4"));
 
         await Assert.That(options.Input).IsEqualTo("in.mp4");
         await Assert.That(options.Output).IsEqualTo("out.rm");
         await Assert.That(options.Encoder).IsEqualTo("rv20");
-        await Assert.That(options.Turbo).IsTrue();
         await Assert.That(options.Parallel).IsEqualTo(4);
     }
+
+    /// <summary>
+    /// v7.9 removed Turbo outright. The flag is gone, not hidden: an old script
+    /// that still passes it must fail loudly instead of silently losing the
+    /// pacing change it asked for.
+    /// </summary>
+    [Test]
+    public async Task TurboIsGone() =>
+        await Assert.That(Error("--turbo")).Contains("unrecognized argument");
 
     [Test]
     public async Task HelpAndCpuInfoStillWork()
@@ -199,6 +207,51 @@ public sealed class CliParserTests
     [Test]
     public async Task UnknownArgumentsAreStillRejected() =>
         await Assert.That(Error("--bogus-flag")).Contains("unrecognized argument");
+
+    // ------------------------------------------------- v7.9: stream selection
+
+    [Test]
+    public async Task StreamPicksDefaultToNull()
+    {
+        CliOptions options = await Parse();
+        await Assert.That(options.VideoStream).IsNull();
+        await Assert.That(options.AudioStream).IsNull();
+        await Assert.That(options.ListStreams).IsFalse();
+    }
+
+    [Test]
+    public async Task StreamPicksParseAsIntegers()
+    {
+        CliOptions options = await Parse("--video-stream", "2", "--audio-stream", "3");
+        await Assert.That(options.VideoStream).IsEqualTo(2);
+        await Assert.That(options.AudioStream).IsEqualTo(3);
+    }
+
+    /// <summary>
+    /// Stream 0 is a real pick (the first track) and must not read as "unset" --
+    /// that is why these are <c>int?</c> rather than 0-based ints.
+    /// </summary>
+    [Test]
+    public async Task StreamPickZeroIsKept() =>
+        await Assert.That((await Parse("--video-stream", "0")).VideoStream).IsEqualTo(0);
+
+    [Test]
+    public async Task ListStreamsIsAFlag() =>
+        await Assert.That((await Parse("--list-streams")).ListStreams).IsTrue();
+
+    [Test]
+    public async Task StreamPicksNeedAnInteger()
+    {
+        await Assert.That(Error("--video-stream", "first")).Contains("--video-stream requires an integer");
+        await Assert.That(Error("--audio-stream", "two")).Contains("--audio-stream requires an integer");
+    }
+
+    [Test]
+    public async Task StreamPicksRejectNegative()
+    {
+        await Assert.That(Error("--video-stream", "-1")).Contains("0 or greater");
+        await Assert.That(Error("--audio-stream", "-1")).Contains("0 or greater");
+    }
 
     [Test]
     public async Task Usage_ListsTheNewOptions()
@@ -213,5 +266,10 @@ public sealed class CliParserTests
         await Assert.That(usage).Contains("--proxy");
         await Assert.That(usage).Contains("--play");
         await Assert.That(usage).Contains("--player");
+        // v7.9: --list-streams has to be discoverable, since the index it
+        // prints is the only way to know what to pass to the two picks.
+        await Assert.That(usage).Contains("--list-streams");
+        await Assert.That(usage).Contains("--video-stream");
+        await Assert.That(usage).Contains("--audio-stream");
     }
 }

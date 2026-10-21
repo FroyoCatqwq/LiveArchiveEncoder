@@ -32,6 +32,9 @@ E2E = Path(__file__).resolve().parent
 TESTS = E2E.parent
 ROOT = TESTS.parent
 SRC = TESTS / "media" / "test_src.mp4"
+# v7.9: a four-stream source (0 video, 1 audio, 2 video of different content,
+# 3 audio at a different pitch) for stream selection.
+MULTI = TESTS / "media" / "test_multi.mp4"
 # The v6.3.3 baseline defaults to CUDA decoding; v7.5 defaults to software on
 # both platforms. Pin the baseline to software too, otherwise the two sides
 # decode differently on a machine that has an NVIDIA card.

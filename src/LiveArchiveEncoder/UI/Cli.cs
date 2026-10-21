@@ -73,8 +73,12 @@ public static class Cli
             encoder.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, encoder);
         }
 
-        var src = new FileInfo(args.Input ?? "");
-        if (!src.Exists)
+        // v7.9: an HTTP(S) URL is an input too. It has no FileInfo and no
+        // existence check -- the probe inside the encoder decides whether it is
+        // any good, and its error names the URL either way.
+        bool urlInput = Remote.HttpSource.IsUrl(args.Input);
+        var src = urlInput ? null : new FileInfo(args.Input ?? "");
+        if (src is not null && !src.Exists)
         {
             Console.Error.WriteLine($"ERROR: input not found: {src.FullName}");
             return 2;
@@ -82,8 +86,8 @@ public static class Cli
 
         FileInfo dst = !string.IsNullOrEmpty(args.Output)
             ? new FileInfo(args.Output)
-            : DefaultOutput(src, encoder);
-        if (string.Equals(Path.GetFullPath(dst.FullName), Path.GetFullPath(src.FullName),
+            : DefaultOutput(src, encoder, urlInput ? args.Input! : null);
+        if (!urlInput && string.Equals(Path.GetFullPath(dst.FullName), Path.GetFullPath(src!.FullName),
                 StringComparison.OrdinalIgnoreCase))
         {
             Console.Error.WriteLine("ERROR: output must differ from input");
@@ -211,7 +215,10 @@ public static class Cli
 
             config = new Config
             {
-                InputPath = src,
+                // A URL is not a FileInfo and the interactive shell cannot
+                // browse to one, so it stays out of the persisted input slot:
+                // the run itself carries it in RealtimeOptions.SourcePath.
+                InputPath = urlInput ? null : src,
                 OutputPath = dst,
                 StartTimeSeconds = args.StartTime,
                 EndTimeSeconds = args.EndTime,
@@ -229,6 +236,11 @@ public static class Cli
                 AudioKbps = audioKbps,
                 AudioChannels = audioChannels,
                 AudioRate = audioRate,
+                // v7.9: which source streams to use. An index that does not
+                // name a stream of the right type is refused by the encoder,
+                // against the source's own probe.
+                VideoStream = args.VideoStream,
+                AudioStream = args.AudioStream,
                 Container = args.Container,
                 Width = width,
                 Height = height,
@@ -245,7 +257,6 @@ public static class Cli
                 X264Tune = args.X264Tune,
                 X264Profile = args.X264Profile,
                 X264Level = args.X264Level,
-                Turbo = args.Turbo,
                 Parallel = args.Parallel,
                 // --lang wins; without it the stored preference is preserved so a
                 // CLI run never silently resets the language chosen in the UI.
@@ -262,10 +273,21 @@ public static class Cli
             if (config.EndTimeSeconds is not null && config.EndTimeSeconds <= config.StartTimeSeconds)
                 throw new ArgumentException("end time must be later than start time");
 
-            // Check the post-processing stages before the live pass, not after:
-            // a live encode runs at the source's pace, so discovering a bad
-            // recompress fragment twenty minutes in would waste the whole run.
-            ValidatePostProcessing(config);
+        // Check the post-processing stages before the live pass, not after:
+        // a live encode runs at the source's pace, so discovering a bad
+        // recompress fragment twenty minutes in would waste the whole run.
+        ValidatePostProcessing(config);
+
+        // v7.9 #2: same rule for subtitles -- a typo in a sidecar path must
+        // cost nothing, and the encoder re-checks the rest at probe time.
+        foreach (string file in args.SubtitleFiles)
+        {
+            if (!File.Exists(file))
+            {
+                Console.Error.WriteLine($"ERROR: subtitle file not found: {file}");
+                return 2;
+            }
+        }
         }
         catch (ArgumentException exc)
         {
@@ -284,7 +306,7 @@ public static class Cli
         {
             FFmpeg = ffmpeg,
             FFprobe = ffprobe,
-            SourcePath = src.FullName,
+            SourcePath = urlInput ? args.Input! : src!.FullName,
             DestinationPath = dst.FullName,
             Encoder = encoder,
             Fps = config.Fps,
@@ -300,6 +322,16 @@ public static class Cli
             AudioKbps = config.AudioKbps,
             AudioChannels = config.AudioChannels,
             AudioRate = config.AudioRate,
+            VideoStream = config.VideoStream,
+            AudioStream = config.AudioStream,
+            Subtitles = new Encoding.SubtitleSettings(
+                args.SubtitleFiles, args.SubtitleStream,
+                Encoding.SubtitleTrack.ParseMode(args.SubtitleMode), args.SubtitleCodec),
+            // Detected once here (and inherited by shards) instead of once per
+            // shard: the copy path needs the build's own encoder list.
+            AvailableSubtitleEncoders = args.SubtitleFiles.Count > 0 || args.SubtitleStream is not null
+                ? FFmpeg.FFmpegCapabilities.DetectSubtitleEncoders(ffmpeg)
+                : null,
             Hwaccel = config.Hwaccel,
             Width = config.Width,
             Height = config.Height,
@@ -321,7 +353,6 @@ public static class Cli
             AvailableScaleAlgorithms = availableScaleAlgorithms,
             Verbose = !args.Quiet,
             AudioMode = args.AudioMode,
-            Turbo = args.Turbo,
             Parallel = args.Parallel,
         };
 
@@ -380,7 +411,7 @@ public static class Cli
     /// a recompress pass silently re-encodes an already lossy file, so a setting
     /// that stuck from yesterday's interactive session would keep degrading
     /// today's output. The interactive shell keeps its own state; a CLI run
-    /// writes what it was given, same as turbo.
+    /// writes exactly what it was given.
     /// </summary>
     private static WatermarkSettings ResolveWatermark(CliOptions args)
     {
@@ -454,6 +485,17 @@ public static class Cli
             throw new ArgumentException(L.T("wm.empty"));
     }
 
-    private static FileInfo DefaultOutput(FileInfo src, EncoderInfo encoder) =>
-        new(Path.Combine(src.DirectoryName ?? ".", $"{Path.GetFileNameWithoutExtension(src.Name)}_live.{encoder.Extension}"));
+    private static FileInfo DefaultOutput(FileInfo? src, EncoderInfo encoder, string? url = null)
+    {
+        // v7.9: a URL has no directory to write next to, so the product lands in
+        // the working directory under the name the URL ends with.
+        if (url is not null)
+        {
+            string stem = Remote.HttpSource.FileNameFromUrl(url);
+            int dot = stem.LastIndexOf('.');
+            if (dot > 0) stem = stem[..dot];
+            return new(Path.Combine(".", $"{stem}_live.{encoder.Extension}"));
+        }
+        return new(Path.Combine(src!.DirectoryName ?? ".", $"{Path.GetFileNameWithoutExtension(src.Name)}_live.{encoder.Extension}"));
+    }
 }

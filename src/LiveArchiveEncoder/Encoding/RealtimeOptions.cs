@@ -28,6 +28,29 @@ public sealed class RealtimeOptions
     public int AudioKbps { get; init; } = 32;
     public int AudioChannels { get; init; } = 1;
     public int? AudioRate { get; init; }
+
+    /// <summary>
+    /// v7.9: absolute stream index of the video track to encode; null is the
+    /// first video stream (the v7.8 and earlier behaviour). See
+    /// <see cref="StreamSelection"/>.
+    /// </summary>
+    public int? VideoStream { get; init; }
+
+    /// <summary>v7.9: absolute stream index of the audio track to keep; null is the first.</summary>
+    public int? AudioStream { get; init; }
+
+    /// <summary>
+    /// v7.9: subtitles -- an external sidecar file and/or an embedded track,
+    /// burned into the picture or carried as a stream. Null means none.
+    /// </summary>
+    public SubtitleSettings? Subtitles { get; init; }
+
+    /// <summary>
+    /// Subtitle encoders this FFmpeg build can write, when they were already
+    /// discovered. Null means "detect them if subtitles are in play" -- shards
+    /// inherit the set so N of them do not each spawn an <c>ffmpeg -encoders</c>.
+    /// </summary>
+    public HashSet<string>? AvailableSubtitleEncoders { get; init; }
     /// <summary>
     /// Hardware decode method: "off" (the default since v7.5), "auto", or any
     /// name <c>ffmpeg -hwaccels</c> prints (cuda, vaapi, d3d11va, qsv, ...).
@@ -78,17 +101,6 @@ public sealed class RealtimeOptions
     /// but falls back to the single-process pipeline when the muxer rejects the split.
     /// </summary>
     public AudioMode AudioMode { get; init; } = AudioMode.Inline;
-
-    /// <summary>
-    /// Drop the deliberate wall-clock pacing and run as fast as the decode/encode
-    /// pipeline allows (measured ~58x on a 20s 320x240 source).
-    ///
-    /// This is NOT a free lunch: the output slot loop and the capture thread are
-    /// both pinned to 1/fps on purpose, and the fresh/repeat mix plus the
-    /// adaptive-FPS hysteresis are wall-clock driven. Turbo trades the "live
-    /// archive" simulation for throughput, so it stays opt-in.
-    /// </summary>
-    public bool Turbo { get; init; }
 
     /// <summary>
     /// Split the time range into this many shards, encode them concurrently and

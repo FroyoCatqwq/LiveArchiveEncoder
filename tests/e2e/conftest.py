@@ -35,6 +35,14 @@ def src() -> Path:
 
 
 @pytest.fixture(scope="session")
+def multi_src() -> Path:
+    """A source with two video and two audio tracks (v7.9 stream selection)."""
+    if not harness.MULTI.is_file():
+        raise pytest.UsageError(f"missing multi-stream source: {harness.MULTI}")
+    return harness.MULTI
+
+
+@pytest.fixture(scope="session")
 def py_baseline() -> list[str]:
     """The v6.3.3 reference implementation as an argv prefix."""
     if not harness.PY_BASELINE.is_file():

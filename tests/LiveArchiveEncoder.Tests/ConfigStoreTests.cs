@@ -62,7 +62,6 @@ public sealed class ConfigStoreTests
             Play = PlayMode.External,
             PlayerPath = @"C:\mpc\mpc-hc64.exe",
             Language = "zh",
-            Turbo = true,
             Parallel = 4,
         };
 
@@ -77,7 +76,6 @@ public sealed class ConfigStoreTests
         await Assert.That(restored.Play).IsEqualTo(PlayMode.External);
         await Assert.That(restored.PlayerPath).IsEqualTo(@"C:\mpc\mpc-hc64.exe");
         await Assert.That(restored.Language).IsEqualTo("zh");
-        await Assert.That(restored.Turbo).IsTrue();
         await Assert.That(restored.Parallel).IsEqualTo(4);
     }
 

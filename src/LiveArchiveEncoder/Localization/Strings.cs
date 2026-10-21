@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.8.3 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.0 (.NET 10 / .NET 11)",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -48,7 +48,6 @@ public static class L
         ["menu.filters"] = "Show FFmpeg filters",
         ["menu.showconfig"] = "Show configuration",
         ["menu.start"] = "Start encoding",
-        ["menu.turbo"] = "Turbo mode",
         ["menu.language"] = "Language",
         ["menu.parallel"] = "Parallel shards",
         ["menu.parallel.off"] = "off (single pass)",
@@ -63,18 +62,18 @@ public static class L
         ["menu.notselected"] = "(not selected)",
         ["menu.auto"] = "(auto)",
 
-        ["turbo.on"] = "ON (no realtime pacing)",
-        ["turbo.off"] = "off (realtime)",
-        ["turbo.enabled"] = "Turbo ON: the 1/fps realtime pacing is disabled. Much faster, but the "
-            + "fresh/repeat mix and the adaptive bitrate ladder change, so the result no longer "
-            + "matches a genuine live recording.",
-        ["turbo.disabled"] = "Turbo off: realtime pacing restored.",
-        // v7.7: still honoured, no longer advertised. It fights what this tool is
-        // for -- a live recording simulation -- so it is on its way out.
-        ["turbo.deprecated"] = "DEPRECATED: Turbo is deprecated and will be removed in a later "
-            + "version. It skips the realtime pacing, so the result is no longer what a live "
-            + "archive would have looked like.",
-        ["turbo.menu.deprecated"] = "Turbo mode (deprecated)",
+        // v7.9: a source may carry several video and audio tracks; the index
+        // here is the one ffprobe prints (and --list-streams lists).
+        ["menu.streams"] = "Video/audio stream",
+        ["stream.value"] = "video {0} / audio {1}",
+        ["stream.first"] = "first",
+        ["stream.heading"] = "=== Streams in {0} ===",
+        ["stream.selectfirst"] = "Select an input file first.",
+        ["stream.probefailed"] = "Could not read that source: {0}",
+        ["stream.prompt.video"] = "Video stream index (blank = first) [{0}]: ",
+        ["stream.prompt.audio"] = "Audio stream index (blank = first) [{0}]: ",
+        ["stream.invalid"] = "No stream of that type with that index; see the list above.",
+        ["stream.cleared"] = "Stream selection reset to the first stream of each type.",
 
         ["config.settingsfile"] = "Settings file",
         ["config.restored"] = "Restored settings",
@@ -216,6 +215,8 @@ public static class L
         ["note.splitunavailable"] = "\nNOTE: split audio pipeline unavailable ({0}); "
             + "falling back to single-process encoding.",
         ["note.splitmux"] = "NOTE: split audio pipeline unavailable ({0}); using single-process encoding.",
+        ["note.subtitleinline"] = "NOTE: subtitles are carried as a stream, so the split audio "
+            + "pipeline is skipped -- the join would drop the track.",
         ["note.shardingskipped"] = "Sharding skipped: {0}",
         ["note.hwaccelfallback"] = "NOTE: {0} decoded the probe frame but failed the real preflight; "
             + "using software decode.",
@@ -438,7 +439,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.8.3 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.0 (.NET 10 / .NET 11)",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 
@@ -470,7 +471,6 @@ public static class L
         ["menu.filters"] = "查看 FFmpeg 滤镜",
         ["menu.showconfig"] = "查看当前配置",
         ["menu.start"] = "开始编码",
-        ["menu.turbo"] = "Turbo 模式",
         ["menu.language"] = "界面语言",
         ["menu.parallel"] = "并行分片数",
         ["menu.parallel.off"] = "关闭（单次编码）",
@@ -485,14 +485,18 @@ public static class L
         ["menu.notselected"] = "(未选择)",
         ["menu.auto"] = "(自动)",
 
-        ["turbo.on"] = "开启（无实时节流）",
-        ["turbo.off"] = "关闭（实时）",
-        ["turbo.enabled"] = "Turbo 已开启：1/fps 实时节流被关闭。速度大幅提升，但 fresh/repeat 比例和"
-            + "自适应码率阶梯都会改变，产物不再等同于真实的直播录制。",
-        ["turbo.disabled"] = "Turbo 已关闭：恢复实时节流。",
-        ["turbo.deprecated"] = "已弃用：Turbo 模式已弃用，将在后续版本移除。它跳过实时节流，产物不再是"
-            + "真实直播录档应有的样子。",
-        ["turbo.menu.deprecated"] = "Turbo 模式（已弃用）",
+        // v7.9: 一个源可能包含多条视频/音频流；这里的编号就是 ffprobe 打印的
+        //（--list-streams 列出的）那个编号。
+        ["menu.streams"] = "视频/音频流",
+        ["stream.value"] = "视频 {0} / 音频 {1}",
+        ["stream.first"] = "第一条",
+        ["stream.heading"] = "=== {0} 中的流 ===",
+        ["stream.selectfirst"] = "请先选择输入文件。",
+        ["stream.probefailed"] = "无法读取该源：{0}",
+        ["stream.prompt.video"] = "视频流编号（留空=第一条）[{0}]：",
+        ["stream.prompt.audio"] = "音频流编号（留空=第一条）[{0}]：",
+        ["stream.invalid"] = "该编号没有对应类型的流；请参照上面的列表。",
+        ["stream.cleared"] = "已重置为各类型的第一条流。",
 
         ["config.settingsfile"] = "配置文件",
         ["config.restored"] = "已恢复上次配置",
@@ -633,6 +637,7 @@ public static class L
         ["note.transportadjusted"] = "已按 {0} 调整输出尺寸：{1}x{2}",
         ["note.splitunavailable"] = "\n注意：分离音频通路不可用（{0}），回退为单进程编码。",
         ["note.splitmux"] = "注意：分离音频通路不可用（{0}），改用单进程编码。",
+        ["note.subtitleinline"] = "注意：字幕以内嵌字幕轨方式承载，已跳过分离音频通路——合并时会丢失该轨。",
         ["note.shardingskipped"] = "已跳过分片：{0}",
         ["note.hwaccelfallback"] = "注意：{0} 通过了探测帧，但在正式预检中失败，改用软件解码。",
         ["note.levelsclamped"] = "注意：{0} 超过基础 FPS {1}，已忽略；动态档位不得快于基础帧率。",

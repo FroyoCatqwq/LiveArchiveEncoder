@@ -40,8 +40,8 @@ class Checks:
 
 def test_run1_fresh_start(exe, cui_config):
     """Fresh start: no stored settings. Switch to Chinese, set 4 parallel
-    shards, then exit. Turbo is gone from the menu as of v7.8 (still available
-    from the command line), and the audio encoder has its own row."""
+    shards, then exit. Turbo was removed outright in v7.9 -- no menu entry, no
+    flag, no settings key -- and the audio encoder has its own row."""
     if cui_config.exists():
         cui_config.unlink()
     p1 = harness.cui(exe, [], "6\n10\nzh\n11\n4\n0\n")
@@ -59,7 +59,7 @@ def test_run1_fresh_start(exe, cui_config):
     c1 = harness.read_config()
     c.check("settings file written", c1 is not None)
     if c1:
-        c.check("turbo not persisted", c1.get("Turbo") is not True, str(c1.get("Turbo")))
+        c.check("turbo not persisted at all", "Turbo" not in c1, str(c1.get("Turbo")))
         c.check("language persisted", c1.get("Language") == "zh", str(c1.get("Language")))
         c.check("parallel persisted", c1.get("Parallel") == 4, str(c1.get("Parallel")))
     c.finish()
@@ -165,4 +165,45 @@ def test_run8_play_mode_off(exe, cui_config):
     c8 = harness.read_config()
     c.check("play mode back to off", c8 and c8.get("PlayMode") == "off",
             str(c8.get("PlayMode") if c8 else None))
+    c.finish()
+
+
+def test_run9_stream_pick(exe, cui_config, multi_src):
+    """v7.9: the streams menu lists the source's tracks and remembers the pick.
+
+    The index the user types is the one ffprobe assigns, so the menu has to
+    print them rather than expect the user to know. A blank answer clears the
+    pick again -- "first of each type" is the v7.8 behaviour and stays reachable.
+    """
+    # 1 = input, then the path; 17 = streams; 2 = the second video track,
+    # 3 = the second audio track; 0 = exit.
+    p9 = harness.cui(exe, [], f"1\n{multi_src}\n17\n2\n3\n0\n")
+
+    c = Checks()
+    c.check("exit code 0", p9.returncode == 0, f"rc={p9.returncode}")
+    c.check("streams menu offered", "17." in p9.stdout and "Video/audio stream" in p9.stdout)
+    c.check("lists the streams before asking", "streams in this source:" in p9.stdout.lower())
+    c.check("asks for a video index", "Video stream index" in p9.stdout)
+    c.check("asks for an audio index", "Audio stream index" in p9.stdout)
+    c.check("menu shows the pick", "video 2 / audio 3" in p9.stdout)
+    c9 = harness.read_config()
+    c.check("video pick persisted", c9 and c9.get("VideoStream") == 2,
+            str(c9.get("VideoStream") if c9 else None))
+    c.check("audio pick persisted", c9 and c9.get("AudioStream") == 3,
+            str(c9.get("AudioStream") if c9 else None))
+    c.finish()
+
+
+def test_run10_stream_pick_clears(exe, cui_config, multi_src):
+    """Blank answers must return to "first of each type"."""
+    p10 = harness.cui(exe, [], f"1\n{multi_src}\n17\n\n\n0\n")
+
+    c = Checks()
+    c.check("exit code 0", p10.returncode == 0, f"rc={p10.returncode}")
+    c.check("reset confirmed", "reset to the first stream" in p10.stdout)
+    c10 = harness.read_config()
+    c.check("video pick cleared", c10 and c10.get("VideoStream") is None,
+            str(c10.get("VideoStream") if c10 else None))
+    c.check("audio pick cleared", c10 and c10.get("AudioStream") is None,
+            str(c10.get("AudioStream") if c10 else None))
     c.finish()

@@ -1,7 +1,7 @@
 """Option-path smoke test (pytest).
 
 The encoder matrix (test_compare_matrix.py) covers "does this codec work"; this
-one covers "do the option paths still work" -- turbo, sharding, the split audio
+one covers "do the option paths still work" -- sharding, the split audio
 pipeline, deinterlacing, cropping and time ranges. Each case only has to produce
 a structurally valid file; bit-exactness is the matrix's job.
 
@@ -18,13 +18,13 @@ from harness import run
 
 # name, extra args, output extension. Every case names its encoder explicitly:
 # the default is rv20 (rm), and the extension has to match the muxer.
+# v7.9 removed --turbo; these cases run at the realtime pace, which is the only
+# pace there is now.
 CASES = [
     ("baseline",        ["--encoder", "rv20"],                  "rm"),
-    ("turbo",           ["--encoder", "rv20", "--turbo"],       "rm"),
-    ("turbo_mpeg4",     ["--encoder", "mpeg4", "--turbo"],      "avi"),
-    ("parallel4",       ["--encoder", "mpeg4", "--turbo", "--parallel", "4"], "avi"),
-    ("parallel_roq",    ["--encoder", "roqvideo", "--turbo", "--parallel", "4"], "roq"),
-    ("parallel_rv20",   ["--encoder", "rv20", "--turbo", "--parallel", "4"],     "rm"),
+    ("parallel4",       ["--encoder", "mpeg4", "--parallel", "4"], "avi"),
+    ("parallel_roq",    ["--encoder", "roqvideo", "--parallel", "4"], "roq"),
+    ("parallel_rv20",   ["--encoder", "rv20", "--parallel", "4"],     "rm"),
     ("audio_separate",  ["--encoder", "mpeg4", "--audio-mode", "separate"], "avi"),
     ("audio_auto",      ["--encoder", "mpeg4", "--audio-mode", "auto"],     "avi"),
     ("audio_inline",    ["--encoder", "mpeg4", "--audio-mode", "inline"],   "avi"),
@@ -39,13 +39,13 @@ CASES = [
                          "--fps-levels", "25,15,10,5"],         "avi"),
     # v7.7 #6: per-rung bitrate thresholds. 10 fps is entered at 120 kbps and
     # 5 fps at 150 kbps, instead of the multiples of --limit the ladder used.
-    ("level_kbps",      ["--encoder", "mpeg4", "--turbo",
+    ("level_kbps",      ["--encoder", "mpeg4",
                          "--fps-levels", "10:120:110,5:150"],   "avi"),
     # v7.7 #1: 19.010s at 15 fps is 285.15 slots, so the slot grid reaches
     # 19.067s -- past the end of the source. This case failed with
     # "end time ... exceeds the source duration" before the planner clamped the
     # last boundary to the end of the range.
-    ("shard_rounding",  ["--encoder", "mpeg4", "--turbo", "--parallel", "4",
+    ("shard_rounding",  ["--encoder", "mpeg4", "--parallel", "4",
                          "--end-time", "00:00:19.010"],         "avi"),
     ("x264",            ["--encoder", "libx264", "--qv", "23",
                          "--x264-preset", "faster"],            "mp4"),
@@ -54,19 +54,19 @@ CASES = [
                          "--recover", "90000"],                 "avi"),
     # "path" is the escape hatch back to the system FFmpeg: discovery must skip
     # any managed build and still produce a normal encode.
-    ("source_path",     ["--encoder", "mpeg4", "--turbo", "--ffmpeg-source", "path"], "avi"),
+    ("source_path",     ["--encoder", "mpeg4", "--ffmpeg-source", "path"], "avi"),
     # --play off must be a no-op, or scripting an encode would pop a window.
-    ("play_off",        ["--encoder", "mpeg4", "--turbo", "--play", "off"], "avi"),
+    ("play_off",        ["--encoder", "mpeg4", "--play", "off"], "avi"),
 
     # ---- v7.6: era preset + post-processing stages ----
     # An era preset rewrites the encoder, frame size and bitrate ceiling, so the
     # output container follows the preset's encoder, not the old default.
-    ("era_flv",         ["--era", "flv07", "--turbo"],                    "flv"),
+    ("era_flv",         ["--era", "flv07"],                              "flv"),
     # The watermark stage writes <stem>_wm.mp4 next to the main product.
-    ("watermark_only",  ["--encoder", "mpeg4", "--turbo", "--watermark", "测试"], "avi"),
+    ("watermark_only",  ["--encoder", "mpeg4", "--watermark", "测试"], "avi"),
     # Both stages: watermark -> recompress, and --recompress-keep keeps the
     # intermediate so both can be probed below.
-    ("post_full_chain", ["--encoder", "mpeg4", "--turbo", "--watermark", "测试",
+    ("post_full_chain", ["--encoder", "mpeg4", "--watermark", "测试",
                          "--recompress", "--recompress-keep",
                          "--recompress-args", "-vf scale=320:240,fps=15 "
                                               "-c:v libx264 -crf 28 -ac 1 -b:a 32k"], "avi"),
@@ -75,35 +75,33 @@ CASES = [
     # mpeg1video/mpeg2video/mpeg4/libxvid/libx264 gain AVI, libx264 gains MKV.
     # The default container is unchanged, which is why every case above still
     # names the same extension it always did.
-    ("container_m1v_avi",  ["--encoder", "mpeg1video", "--container", "avi",
-                            "--turbo"],                                       "avi"),
-    ("container_m2v_avi",  ["--encoder", "mpeg2video", "--container", "avi",
-                            "--turbo"],                                       "avi"),
-    ("container_xvid_mp4", ["--encoder", "libxvid", "--container", "mp4",
-                            "--turbo"],                                       "mp4"),
-    ("container_x264_avi", ["--encoder", "libx264", "--container", "avi",
-                            "--turbo"],                                       "avi"),
-    ("container_x264_mkv", ["--encoder", "libx264", "--container", "mkv",
-                            "--turbo"],                                       "mkv"),
+    ("container_m1v_avi",  ["--encoder", "mpeg1video", "--container", "avi"], "avi"),
+    ("container_m2v_avi",  ["--encoder", "mpeg2video", "--container", "avi"], "avi"),
+    ("container_xvid_mp4", ["--encoder", "libxvid", "--container", "mp4"],   "mp4"),
+    ("container_x264_avi", ["--encoder", "libx264", "--container", "avi"],   "avi"),
+    ("container_x264_mkv", ["--encoder", "libx264", "--container", "mkv"],   "mkv"),
 
     # ---- v7.8 #5/#6: 16:9 output and the three fit modes ----
-    ("size_169",        ["--encoder", "libx264", "--width", "640", "--height", "360",
-                         "--turbo"],                                          "mp4"),
+    ("size_169",        ["--encoder", "libx264", "--width", "640", "--height", "360"], "mp4"),
     ("fit_letterbox",   ["--encoder", "mpeg4", "--width", "320", "--height", "240",
-                         "--fit", "fit", "--turbo"],                           "avi"),
+                         "--fit", "fit"],                              "avi"),
     ("fit_pad_colour",  ["--encoder", "mpeg4", "--width", "320", "--height", "240",
-                         "--fit", "fit", "--pad-color", "0x404040", "--turbo"], "avi"),
-    ("fit_stretch",     ["--encoder", "mpeg4", "--fit", "stretch", "--turbo"],  "avi"),
+                         "--fit", "fit", "--pad-color", "0x404040"],  "avi"),
+    ("fit_stretch",     ["--encoder", "mpeg4", "--fit", "stretch"],   "avi"),
     ("fit_crop_left",   ["--encoder", "mpeg4", "--fit", "crop",
-                         "--crop-anchor", "left", "--turbo"],                   "avi"),
+                         "--crop-anchor", "left"],                    "avi"),
 
     # ---- v7.8 #3: audio encoders matched to the container ----
     # ac3 in RealMedia at the source's own 44.1 kHz: valid, and it used to be
     # the pair that broke when a preset asked for 16 kHz.
-    ("audio_ac3",       ["--encoder", "rv20", "--audio-encoder", "ac3",
-                         "--turbo"],                                           "rm"),
+    ("audio_ac3",       ["--encoder", "rv20", "--audio-encoder", "ac3"], "rm"),
     ("audio_mp2",       ["--encoder", "mpeg2video", "--container", "avi",
-                         "--audio-encoder", "mp2", "--turbo"],                 "avi"),
+                         "--audio-encoder", "mp2"],                  "avi"),
+
+    # ---- v7.9 #5: h261/h263/h263p gain AVI, and with it an audio track ----
+    ("container_h261_avi",  ["--encoder", "h261", "--container", "avi"],  "avi"),
+    ("container_h263_avi",  ["--encoder", "h263", "--container", "avi"],  "avi"),
+    ("container_h263p_avi", ["--encoder", "h263p", "--container", "avi"], "avi"),
 ]
 
 # v7.6: files the post-processing stages leave next to the main product.
@@ -169,6 +167,9 @@ OPTION_CHECKS = [
                            "--crop-anchor", "sideways",
                            "SRC", "OUT/an_bad.avi"],  2, "--crop-anchor must be one of"),
     ("completion_new_opts", ["--completion", "bash"],             0, "--container"),
+    # ---- v7.9: Turbo is gone, not deprecated. An old script still passing it
+    # must fail loudly rather than silently lose the pacing change it asked for.
+    ("turbo_gone",        ["--lang", "en", "--no-cui", "--turbo"], 2, "unrecognized argument"),
 ]
 
 
@@ -195,6 +196,13 @@ def test_option_case(exe, src, workdir, name, extra, ext):
     assert not info.get("no_video"), "no video stream"
     if name == "quiet":
         assert not proc.stdout.strip(), "--quiet still printed output"
+
+    # v7.9 #5: the point of h261/h263/h263p in AVI is the audio track the raw
+    # .h261/.h263 streams cannot carry, so those cases must actually have one.
+    if name.startswith("container_h26"):
+        streams = (harness.probe(dst) or {}).get("streams", [])
+        assert any(s.get("codec_type") == "audio" for s in streams), \
+            f"{name} produced no audio stream"
 
     # The live product exists; now the stage products.
     for rel, want_codec in POST_PRODUCTS.get(name, []):

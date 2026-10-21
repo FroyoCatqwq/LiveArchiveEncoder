@@ -73,11 +73,16 @@ public static class AudioTrack
         int? audioRate,
         double startSeconds,
         double duration,
-        string outputPath)
+        string outputPath,
+        int? audioStream = null)
     {
         var cmd = new List<string> { ffmpeg, "-hide_banner", "-loglevel", "error" };
+        // v7.9: a URL source needs the reconnect family here just like the
+        // video pass does -- this is its own process reading its own connection.
+        cmd.AddRange(Remote.HttpSource.ReadArgs(sourcePath));
+        cmd.AddRange(Remote.Smb.RemoteReadArgs(sourcePath));
         if (startSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(startSeconds)]);
-        cmd.AddRange(["-i", sourcePath, "-map", "0:a:0", "-vn"]);
+        cmd.AddRange(["-i", sourcePath, "-map", StreamSelection.AudioMap(0, audioStream), "-vn"]);
         cmd.AddRange(["-t", ArgsBuilder.FloatArg(duration)]);
         cmd.AddRange(["-c:a", audioEncoder]);
         if (!EncoderMath.AudioIgnoresBitrate(audioEncoder))
@@ -131,11 +136,11 @@ public static class AudioTrack
     public static CaptureResult Encode(
         string ffmpeg, string sourcePath, string audioEncoder, int audioKbps,
         int audioChannels, int? audioRate, double startSeconds, double duration,
-        string outputPath, int timeoutSeconds)
+        string outputPath, int timeoutSeconds, int? audioStream = null)
     {
         return ProcessRunner.Run(
             BuildEncodeCommand(ffmpeg, sourcePath, audioEncoder, audioKbps,
-                audioChannels, audioRate, startSeconds, duration, outputPath),
+                audioChannels, audioRate, startSeconds, duration, outputPath, audioStream),
             timeoutSeconds,
             System.Diagnostics.ProcessPriorityClass.BelowNormal);
     }

@@ -62,6 +62,17 @@ public sealed class UserConfig
     public int AudioKbps { get; set; } = 32;
     public int AudioChannels { get; set; } = 1;
     public int? AudioRate { get; set; }
+
+    /// <summary>
+    /// v7.9: absolute stream index of the video track to encode; null is "the
+    /// first video stream". Absent from older files, which is fine -- System.Text.Json
+    /// leaves the property alone and the default is the v7.8 behaviour.
+    /// </summary>
+    public int? VideoStream { get; set; }
+
+    /// <summary>v7.9: absolute stream index of the audio track to keep; null is the first.</summary>
+    public int? AudioStream { get; set; }
+
     public int Width { get; set; } = Constants.DefaultWidth;
     public int Height { get; set; } = Constants.DefaultHeight;
 
@@ -93,7 +104,6 @@ public sealed class UserConfig
     public string X264Profile { get; set; } = "";
     public string X264Level { get; set; } = "";
 
-    public bool Turbo { get; set; }
     public int Parallel { get; set; } = 1;
     public string Language { get; set; } = "en";
 
@@ -209,6 +219,8 @@ public static class ConfigStore
         AudioKbps = c.AudioKbps,
         AudioChannels = c.AudioChannels,
         AudioRate = c.AudioRate,
+        VideoStream = c.VideoStream,
+        AudioStream = c.AudioStream,
         Width = c.Width,
         Height = c.Height,
         FitMode = c.FitMode,
@@ -224,7 +236,6 @@ public static class ConfigStore
         X264Tune = c.X264Tune,
         X264Profile = c.X264Profile,
         X264Level = c.X264Level,
-        Turbo = c.Turbo,
         Parallel = c.Parallel,
         Language = c.Language,
         FfmpegSource = c.FfmpegSource,
@@ -306,6 +317,11 @@ public static class ConfigStore
         c.AudioKbps = stored.AudioKbps;
         c.AudioChannels = stored.AudioChannels;
         c.AudioRate = stored.AudioRate;
+        // A remembered stream index is only a request: the encoder re-checks it
+        // against the actual source and refuses one that is out of range or of
+        // the wrong type, so a stale index cannot silently pick the wrong track.
+        c.VideoStream = stored.VideoStream;
+        c.AudioStream = stored.AudioStream;
         c.Width = stored.Width;
         c.Height = stored.Height;
         c.FitMode = Core.EncoderMath.CanonicalFitMode(stored.FitMode);
@@ -323,7 +339,6 @@ public static class ConfigStore
         c.X264Tune = stored.X264Tune;
         c.X264Profile = stored.X264Profile;
         c.X264Level = stored.X264Level;
-        c.Turbo = stored.Turbo;
         // Never restore a nonsensical shard count from an older/corrupt file.
         c.Parallel = Math.Max(1, stored.Parallel);
         c.Language = stored.Language;

@@ -88,10 +88,8 @@ public static class Report
         Line(L.T("report.scaleavail"),
             string.Join(", ", availableScaleAlgorithms.OrderBy(x => x, StringComparer.Ordinal)));
         Line(L.T("report.impairments"), "use frame_damage.py (separate post-processing tool)");
-        // Turbo and the shard count change what the run actually does, so they
-        // belong in the configuration dump even though they are not encoder state.
-        // v7.7: Turbo is deprecated but still honoured, so it says so here.
-        Line(L.T("turbo.menu.deprecated"), c.Turbo ? L.T("turbo.on") : L.T("turbo.off"));
+        // The shard count changes what the run actually does, so it belongs in
+        // the configuration dump even though it is not encoder state.
         Line(L.T("menu.parallel"),
             c.Parallel > 1 ? c.Parallel.ToString(CultureInfo.InvariantCulture) : L.T("menu.parallel.off"));
         Line(L.T("menu.language"), c.Language);
