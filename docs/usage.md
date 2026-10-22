@@ -1,7 +1,8 @@
 # Live Archive Encoder v7 (.NET 10 / .NET 11 / C#) — 使用教程
 
 面向使用者的操作手册。想了解迁移细节与验证数据，看 `README.md` 和
-`docs/test-report-v7.md`。
+`docs/test-report-v7.md`；想了解**每个版本改了什么**，看
+[`CHANGELOG.md`](CHANGELOG.md)。
 
 > **一句话说明**：把一个现代视频，以"当年直播录档"的方式，实时节奏地重新编码成
 > RV20 / RoQ / MPEG-1 / MPEG-4 / WMV2 等老式编码器格式，并带自适应码率控制。
@@ -680,6 +681,8 @@ LiveArchiveEncoder.exe src.mkv out.avi --encoder mpeg4 --fps 15 --save-config my
   这个编码器就跳过**，不会因为一份旧档案把状态搞坏。
 - 名字只保留最后一段并过滤非法字符：输入 `../../evil` 存的是 `configs/evil.json`，
   **不会写到目录外**。
+- **读不懂的文件会被拒绝，一个字段都不动**：档案是完整快照，一段坏 JSON 若按
+  "全部缺省"应用，等于把当前设置清成默认值（v7.9.3.1 之前就是这样，还报载入成功）。
 - 档案只是设置快照，不含产物；载入后仍需自己按 9 开跑。
 - 想把配置整体搬到别处（便携 U 盘、CI 沙箱）：设 `LAE_CONFIG_DIR` 指向目标目录，
   `config.json` 与 `configs/` 都会跟着走。
@@ -1087,7 +1090,10 @@ live 编码 → (14) 时代预设   ← 可选，把两层参数都填好
 LiveArchiveEncoder.exe src.mp4 out.flv --era flv07 --recompress
 ```
 
-`--era` 不碰你显式给的 `--encoder` / `--width` / `--limit`：预设是兜底，不是覆盖。
+`--era` 不碰你显式给的 `--encoder` / `--fps` / `--width` / `--height` / `--limit` /
+`--scale-algo` / `--audio-kbps` / `--audio-channels`：预设是兜底，不是覆盖。
+（v7.9.3.1 之前这条只在文档里成立——代码里预设会盖掉显式值，`--era flv07 --width 320`
+实际按 352 编码；现在是真的了。）
 
 ### 二次压缩（菜单 15）
 

@@ -47,7 +47,14 @@ public static class ConfigProfiles
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
 
-        string name = Path.GetFileName(raw.Trim().Trim('"'));
+        // Both separators, on every platform (v7.9.3.1). Path.GetFileName only
+        // splits on the *native* separator, so a Windows-style path typed on
+        // Linux kept its backslashes: "../../evil" became "evil.json" but
+        // "..\..\evil.json" became the single file name "..\..\evil.json"
+        // inside the shelf. It never escaped the directory -- backslash is not a
+        // separator there -- but it produced a name nobody meant to create, and
+        // the same input behaved differently on the two platforms.
+        string name = raw.Trim().Trim('"').Split('/', '\\')[^1].Trim();
         if (name.Length == 0) return null;
 
         foreach (char bad in Path.GetInvalidFileNameChars()) name = name.Replace(bad, '_');

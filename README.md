@@ -355,6 +355,7 @@ tools/
 reference/
   live_archive_encoder.py     v6.3.3 — the Python baseline the port is measured against
 docs/
+  CHANGELOG.md                version history, Python v6.2.2 -> now
   usage.md                    full user guide (CLI, CUI, FFmpeg toolchain, playback)
   test-report-v7.md           measured porting results
   runs/                       archived harness output from past verification runs
