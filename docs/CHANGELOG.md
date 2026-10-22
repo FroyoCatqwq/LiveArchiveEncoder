@@ -97,12 +97,15 @@ Matroska 暂存流复制进来的码流没有 codec 帧率，只有 1/1000 的�
 
 | 项 | 结果 |
 | --- | --- |
-| 单测 Windows | **424 × {net10.0, net11.0}**（新增 16 条：pal8 帧长、可用帧率、扩展名定容器） |
-| 单测 Linux（ci1） | 见下 |
-| e2e Windows | 见下（新增 4 条：msrle 非黑、扩展名定 avi、AVI 帧率头、CUI 保存的 fps/扩展名纠正） |
+| 单测 Windows | **424 × {net10.0, net11.0}** 全绿（新增 16 条：pal8 帧长、可用帧率、扩展名定容器） |
+| 单测 Linux（ci1 Ubuntu 26.10） | **423 = 422 通过 + 1 跳过** × 两个 TFM（跳过的是 `PathMeansSystemFfmpeg`） |
+| e2e Windows | **167 项 = 165 通过 + 2 跳过**，两阶段 409 s + 113 s |
+| e2e Linux（ci1） | 两阶段全绿（27 独占 + 138 通过 + 2 跳过，330 s + 190 s） |
+| 产物实测（JIT / AOT × Windows / Linux） | 四个产物各自跑 2 秒 msrle：YAVG 121（非黑）；`mpeg1video out.avi --fps 15` 四个都写出 AVI + 23.976 fps，容器头 `r_frame_rate = avg_frame_rate` |
 
 新增回归：pal8 帧长与 rgb8 的区别、mpeg1video 拒绝 unofficial 帧率、mpeg2video
-保留全部声明帧率、扩展名→容器（含不可能组合仍报错）、AVI 头帧率一致。
+保留全部声明帧率、扩展名→容器（含不可能组合仍报错）、msrle 产物非黑、AVI 头帧率
+一致、CUI 保存的 fps/扩展名在开跑前被纠正。
 
 ---
 

@@ -1653,20 +1653,23 @@ PATH 里的 ffprobe，以及**Python 基线也要能用系统 FFmpeg**——Linu
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 408
-dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 408
-pytest  162 项（Windows 实测 160 通过 + 2 跳过）：
-  option_smoke      63（39 组参数 + 23 项参数检查 + 1 条分片拼接回归）
+dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 424
+dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 424
+pytest  167 项（Windows 实测 165 通过 + 2 跳过）：
+  option_smoke      67（41 组参数 + 23 项参数检查 + 3 条专项回归：分片拼接、pal8 非黑、AVI 帧率头）
   feature_sweep     35（33 通过 + 2 跳过：a64multi / a64multi5 只有 muxer 没有 demuxer）
   compare_matrix    12
   error_paths       11
-  cui_smoke         12 个阶段（内含 40+ 项检查，Linux 多一条）
+  cui_smoke         13 个阶段（内含 40+ 项检查，Linux 多一条）
   stream_selection   9
   subtitles          7
   http_source        7
   config_conversion  4（配置 ↔ 命令行往返）
   ab_duration        2（mpeg1video / wmv2 各 4 变体 × 4 runs 的中位数对比）
 ```
+
+Linux（ci1）上是 423 = 422 通过 + 1 跳过（`PathMeansSystemFfmpeg`；映射盘那条
+只存在于 Windows），e2e 两阶段同样全绿。
 
 v7.9.3.1 的数字：单测 408 × 两个目标框架、e2e 162（160 通过 + 2 跳过）。
 其中 Linux 侧没有重跑（ci1/ci2 仍是 v7.9.1 的读数），下面这段说明它差在哪。
