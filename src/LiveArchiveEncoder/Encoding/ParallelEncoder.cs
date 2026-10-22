@@ -15,13 +15,17 @@ namespace LiveArchiveEncoder.Encoding;
 /// its wall clock asleep, so sharding pays off for long ranges where a single
 /// pass would otherwise run for minutes -- it overlaps the sleep with real work.
 ///
-/// Two hard constraints are enforced here, both learned the hard way:
+/// Three hard constraints are enforced here, all learned the hard way:
 ///   1. Only <see cref="Constants.ConcatSafeFormats"/> may be sharded. RoQ loses
 ///      the second shard entirely (250 frames -> 125) and RM drifts by ~0.03s
 ///      per join. Anything unlisted falls back to a single pass.
 ///   2. A shard shorter than <see cref="Constants.MinShardSeconds"/> is pointless:
 ///      each shard spawns its own decoder and encoder process, so below a few
 ///      seconds the spawn cost exceeds the saving.
+///   3. Shards are staged as Matroska and remuxed to the target container only
+///      after the join (v7.9.2). Joining FLV shards directly produces a file
+///      whose picture stops partway through while the sound carries on -- see
+///      the comment at the staging step for the measurement.
 /// </summary>
 public static class ParallelEncoder
 {
@@ -75,20 +79,34 @@ public static class ParallelEncoder
             Lock sync = new();
             var progress = new ShardProgress(shards, o.Verbose);
 
+            // v7.9.2: shards are staged as Matroska, never in the target
+            // container. Measured on a 243s 196 Mbit/s rawvideo source split
+            // into 5 shards: joining the FLV shards themselves with
+            // `-f concat -c copy` silently corrupts the picture partway in --
+            // 2921 of 3651 frames decode, the rest fail with "Bad picture
+            // start code", and the audio still runs to the end, so the length
+            // check below cannot see it. The very same shards, remuxed to
+            // Matroska and joined there, come back whole (3651/3651, no decode
+            // errors), and one final `-c copy` remux to the requested container
+            // stays clean. Matroska is the only container that accepts every
+            // legacy codec pair this tool writes, so it is always the staging
+            // format regardless of what the user asked for.
+            EncoderInfo staging = StagingEncoder(o.Encoder);
+
             Parallel.For(0, shards,
                 new ParallelOptions { MaxDegreeOfParallelism = shards, CancellationToken = cancellationToken },
                 i =>
                 {
                     try
                     {
-                        string shardPath = Path.Combine(stageDir, $"s{i:D3}{dst.Extension}");
+                        string shardPath = Path.Combine(stageDir, $"s{i:D3}.mkv");
                         var shardOptions = new RealtimeOptions
                         {
                             FFmpeg = o.FFmpeg,
                             FFprobe = o.FFprobe,
                             SourcePath = o.SourcePath,
                             DestinationPath = shardPath,
-                            Encoder = o.Encoder,
+                            Encoder = staging,
                             Fps = o.Fps,
                             FpsLevels = o.FpsLevels,
                             Quality = o.Quality,
@@ -149,19 +167,43 @@ public static class ParallelEncoder
             string listPath = Path.Combine(stageDir, "shards.txt");
             File.WriteAllLines(listPath,
                 Enumerable.Range(0, shards).Select(i =>
-                    $"file '{Path.Combine(stageDir, $"s{i:D3}{dst.Extension}").Replace("'", "'\\''")}'"));
+                    $"file '{Path.Combine(stageDir, $"s{i:D3}.mkv").Replace("'", "'\\''")}'"));
 
-            dst.Directory?.Create();
+            string joinedPath = Path.Combine(stageDir, "joined.mkv");
             CaptureResult join = ProcessRunner.Run([
                 o.FFmpeg, "-hide_banner", "-loglevel", "error",
                 "-f", "concat", "-safe", "0", "-i", listPath,
-                "-c", "copy", "-y", dst.FullName,
+                "-c", "copy", "-y", joinedPath,
             ], timeoutSeconds: Math.Max(120, (int)span * 2));
 
             if (join.ExitCode != 0)
             {
                 throw new InvalidOperationException(
                     $"shard join failed (code {join.ExitCode}): {join.Stderr.Trim()}");
+            }
+
+            dst.Directory?.Create();
+            if (string.Equals(dst.Extension, ".mkv", StringComparison.OrdinalIgnoreCase))
+            {
+                // The join already is the final container: no second pass.
+                File.Move(joinedPath, dst.FullName, overwrite: true);
+            }
+            else
+            {
+                // -map 0 keeps every stream the shards carried (a copied
+                // subtitle track included); -c copy means this is a remux, not
+                // a re-encode, so the picture is untouched.
+                CaptureResult remux = ProcessRunner.Run([
+                    o.FFmpeg, "-hide_banner", "-loglevel", "error",
+                    "-i", joinedPath, "-map", "0", "-c", "copy", "-y", dst.FullName,
+                ], timeoutSeconds: Math.Max(120, (int)span * 2));
+
+                if (remux.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(
+                        $"shard join succeeded but remuxing to '{o.Encoder.FormatName}' failed "
+                        + $"(code {remux.ExitCode}): {remux.Stderr.Trim()}");
+                }
             }
 
             dst.Refresh();
@@ -178,6 +220,22 @@ public static class ParallelEncoder
                     $"shard join lost data: expected {span:F3}s, got {joined:F3}s "
                     + $"(tolerance {tolerance:F3}s). Format '{o.Encoder.FormatName}' is not "
                     + "safe to concatenate; rerun without --parallel.");
+            }
+
+            // v7.9.2: the picture can go missing while the sound stays whole --
+            // the flv bug above did exactly that, and the duration check passed
+            // because FLV carries no per-stream duration. Every shard emits one
+            // slot per 1/fps (a slot is fresh or repeated), so the joined file
+            // must hold as many video packets as the shards produced slots.
+            int expectedPackets = results.Sum(r => r.Slots);
+            if (Probe.VideoPacketCount(o.FFprobe, dst) is { } actualPackets
+                && expectedPackets > 0
+                && Math.Abs(actualPackets - expectedPackets) > Math.Max(4, expectedPackets / 50))
+            {
+                throw new InvalidOperationException(
+                    $"shard join lost video: the shards produced {expectedPackets} frames, "
+                    + $"the joined file has {actualPackets}. Format '{o.Encoder.FormatName}' "
+                    + "is not safe to concatenate here; rerun without --parallel.");
             }
 
             long totalBytes = dst.Length;
@@ -205,7 +263,14 @@ public static class ParallelEncoder
         }
         finally
         {
-            try { Directory.Delete(stageDir, recursive: true); } catch { /* best effort */ }
+            // Diagnostics: a bad join is impossible to diagnose after the shards
+            // are gone, and "the video stops 4/5 of the way in" is exactly that
+            // kind of report. LAE_KEEP_SHARDS=1 leaves the stage directory and
+            // says where it is.
+            if (Environment.GetEnvironmentVariable("LAE_KEEP_SHARDS") is { Length: > 0 })
+                Console.WriteLine($"Shard files kept: {stageDir}");
+            else
+                try { Directory.Delete(stageDir, recursive: true); } catch { /* best effort */ }
         }
     }
 
@@ -302,6 +367,17 @@ public static class ParallelEncoder
             if (force) Console.WriteLine();
         }
     }
+
+    /// <summary>
+    /// Container every shard is written in, whatever the user asked for.
+    ///
+    /// Public only so the guard test can pin it down: switching back to the
+    /// target container reintroduces v7.9.1's silent corruption (see the
+    /// measurement at the call site), and nothing else in the build would
+    /// notice until someone encoded an hour-long recording again.
+    /// </summary>
+    public static EncoderInfo StagingEncoder(EncoderInfo encoder) =>
+        encoder.WithContainer("mkv", "matroska");
 
     /// <summary>Why sharding must not be used, or null when it is allowed.</summary>
     private static string? BlockReason(RealtimeOptions o, double? duration)

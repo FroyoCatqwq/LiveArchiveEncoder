@@ -224,3 +224,38 @@ def test_completion_drops_retired_flags(exe):
     assert proc.returncode == 0
     for gone in ("watermark", "recompress-keep"):
         assert gone not in proc.stdout, f"retired {gone!r} still completes"
+
+
+def test_parallel_flv_join_has_no_corrupt_frames(exe, src, workdir):
+    """v7.9.2: joining FLV shards used to corrupt the picture partway through.
+
+    Reported against a 243 s / 196 Mbit/s rawvideo source cut into five shards:
+    the product played sound to the end while the picture stopped at the fourth
+    boundary (194.8 s of 243.4 s). 730 of 3651 frames were undecodable with
+    "Bad picture start code" -- the shards themselves were perfect, the join was
+    not, and the audio kept the format duration long enough to pass the length
+    check.
+
+    Shards are staged in Matroska now and remuxed to the requested container
+    after the join, so the whole file has to decode.
+    """
+    out = workdir("options")
+    dst = out / "parallel_flv.flv"
+
+    proc = run([str(exe), str(src), str(dst), "--end", "00:00:20",
+                "--encoder", "flv", "--parallel", "5", "--fps", "15",
+                "--ffmpeg-source", "path"], timeout=300)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:300]}")
+    assert dst.exists() and dst.stat().st_size > 0, "no output"
+
+    # Decode the whole thing; a bad join shows up as demuxer complaints on
+    # stderr long before the duration check would notice.
+    dec = run(["ffmpeg", "-v", "error", "-i", str(dst),
+               "-map", "0:v:0", "-f", "null", "-"], timeout=300)
+    assert dec.returncode == 0, f"decode failed: {dec.stderr[-300:]}"
+    assert not dec.stderr.strip(), f"undecodable frames in the join: {dec.stderr[:400]}"
+
+    info = harness.probe(dst) or {}
+    duration = float((info.get("format") or {}).get("duration") or 0.0)
+    assert 19.0 <= duration <= 21.0, f"joined duration {duration}"

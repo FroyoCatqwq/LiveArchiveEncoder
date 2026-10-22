@@ -214,6 +214,13 @@ public static class Constants
     ///
     /// Only formats actually verified are listed; untested ones stay out so the
     /// parallel path never silently damages an archive.
+    ///
+    /// v7.9.2 note: the list still gates *which user-facing containers may be
+    /// sharded*, but shards are no longer written in the target container --
+    /// they are staged in Matroska and remuxed after the join (see
+    /// ParallelEncoder). The two-shard flv result above stopped holding at five
+    /// shards on a long rawvideo source, which is exactly the kind of thing a
+    /// 5-second sample cannot show.
     /// </summary>
     public static readonly FrozenSet<string> ConcatSafeFormats =
         new HashSet<string> { "avi", "mp4", "flv", "asf", "mpeg" }.ToFrozenSet();

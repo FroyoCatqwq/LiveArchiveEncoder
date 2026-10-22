@@ -123,7 +123,7 @@ distributions should take the JIT build. FFmpeg is still needed either way.
 
 ```bash
 # TUnit unit tests — identical command on both platforms (runs on MTP since v7.8.3)
-dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 381 on Windows
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 385 on Windows
 # and the same suite against the other runtime:
 dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 ```
@@ -148,7 +148,7 @@ put that build's `bin` on `PATH` first):
 ```bash
 pip install -r tests/e2e/requirements.txt   # pytest==9.1.1 + pytest-xdist
 python tools/e2e.py                          # two-phase run (see below)
-pytest                                       # same 155 cases, one at a time
+pytest                                       # same 156 cases, one at a time
 pytest tests/e2e/test_compare_matrix.py -k wmv2   # a single case
 CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 ```
@@ -158,7 +158,7 @@ CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 | `test_compare_matrix.py` | 12 | encoder/param matrix, ffprobe structure vs v6.3.3 |
 | `test_error_paths.py` | 11 | failure paths, exit codes vs the baseline |
 | `test_feature_sweep.py` | 35 | every legacy encoder, 2 s clip (2 skipped: no demuxer) |
-| `test_option_smoke.py` | 57 | option plumbing, incl. the recompress stage and era presets |
+| `test_option_smoke.py` | 58 | option plumbing, incl. the recompress stage and era presets |
 | `test_cui_smoke.py` | 11 | interactive menu assertions (40+ checks, one extra on Linux) |
 | `test_stream_selection.py` | 9 | stream picks by absolute index, plus time-range clipping |
 | `test_subtitles.py` | 7 | burn / copy / off, sidecar and embedded, bad requests |
@@ -317,6 +317,27 @@ in `docs/usage.md` §7.16 and the v7.9 notes there.
 * **Settings file ↔ command line.** `--emit-args[=FILE]` and `--save-config FILE`
   convert between the two, both without encoding; see §7.6 of the guide.
 * `publish/aot-avx2` is gone for good, and the app title now says v7.9.1.
+
+### v7.9.2
+
+**Fixed: parallel shards joined straight into FLV corrupted the picture.**
+
+Reported against a 243 s / 196 Mbit/s rawvideo capture cut into five shards: the
+product played sound to the end while the picture stopped at 00:03:14. Every
+shard was fine on its own (730 frames, zero decode errors each); joining only
+`3+4` with `-f concat -c copy` reproduced 5589 decoder complaints
+(`Bad picture start code`), and the audio track kept the format duration at
+238.6 s, so the 2% length check passed.
+
+Shards are now staged as Matroska and remuxed to the requested container after
+the join: same shards, 3651/3651 frames, no decode errors. The join is also
+verified by **video packet count** against the slots the shards produced, since
+the duration check alone cannot see a missing picture. `LAE_KEEP_SHARDS=1`
+keeps the shard directory for diagnosis. Details in `docs/usage.md` §7.5 and the
+v7.9.2 notes there.
+
+This release was verified on Windows only (the stated goal); Linux numbers in
+the docs are the v7.9.1 run.
 
 ### Audio limits (v7.8.2)
 

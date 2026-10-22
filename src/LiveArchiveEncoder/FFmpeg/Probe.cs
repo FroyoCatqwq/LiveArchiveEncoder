@@ -228,4 +228,26 @@ public static class Probe
         ]);
         return p.ExitCode == 0 && p.Stdout.Trim().Length > 0;
     }
+
+    /// <summary>
+    /// Number of video packets, counted without decoding.
+    ///
+    /// v7.9.2: the shard-join check needs this because a container can lose the
+    /// picture while keeping the sound. FLV writes no per-stream duration, so
+    /// <see cref="Duration"/> falls back to the format duration -- which the
+    /// audio track keeps at full length even when the last shard's video never
+    /// made it. Counting packets catches exactly that.
+    /// </summary>
+    public static int? VideoPacketCount(string ffprobe, FileInfo src)
+    {
+        CaptureResult p = ProcessRunner.Run([
+            ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets",
+            "-show_entries", "stream=nb_read_packets", "-of", "default=nw=1:nk=1", src.FullName,
+        ]);
+        if (p.ExitCode != 0) return null;
+        return int.TryParse(p.Stdout.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)
+            && n > 0
+            ? n
+            : null;
+    }
 }

@@ -517,6 +517,21 @@ v7 按 1/fps 的墙钟节奏输出，用来模拟直播录档。实测 20 秒素
 
 另外每段不足 4 秒也回退——每段要额外付约 1.5s 的进程启动开销。
 
+> **v7.9.2：分片一律先落 Matroska，拼接后再 `-c copy` 转成你要的容器。**
+> 起因是一个真实事故：243 秒 / 196 Mbit/s 的 rawvideo 源切 5 段，**直接拼 flv**
+> 得到的成品播到 3:14 画面就停了，声音却一直到 3:58。逐片检查 5 个分片全是好的
+> （各 730 帧、零解码错误），坏的是拼接本身——3651 帧里 730 帧解不出来，报
+> `Bad picture start code`。同一批分片改用 Matroska 拼接，再 `-c copy` 转回 flv，
+> 3651/3651 帧全好、零错误。
+>
+> 所以现在的链路是：`分片 → sNNN.mkv → concat → joined.mkv → -c copy → 目标容器`。
+> 多出来的一次 remux 只搬字节不解码，几分钟的片子是毫秒级；换来的是拼接不再碰
+> 目标容器的坑。白名单仍然有效——它管的是"这个容器/编码组合值不值得分段"。
+>
+> 拼接后还会**按视频包数**复核一遍：成品视频包数必须对得上各分片产出的槽位总数，
+> 差超过 2% 直接报错。以前只比 format 时长，而 flv 不写流时长，音频把总时长撑住了，
+> 整片画面丢失也能"检查通过"。
+
 v7.7 起分片会打进度（每 0.2 秒刷新同一行，不会被 7 个分片刷屏）：
 
 ```text
@@ -1627,6 +1642,42 @@ C# 版在 v7.3 之外多出来的东西：`--parallel`（分片提速，见 §7.
    用 marker 表达（`timing` / `shared_config`），`conftest.py` 会拒绝裸 `pytest -n`
    以免时序断言变成偶发失败。见 §12。
 
+### v7.9.2 修复
+
+**并行分片直接拼 flv 会把画面拼坏（v7.8.0 起潜伏，v7.9.2 修）。**
+
+现象：243 秒 / 196 Mbit/s rawvideo 源、5 段分片、flv 容器，成品播到 **00:03:14
+画面停住**，声音继续到结尾。
+
+定位过程（都是可复现的硬数据）：
+
+| 检查 | 结果 |
+| --- | --- |
+| 产物分流时长 | 视频 194.82s / 音频 238.6s，194.8 ≈ 第 4 段边界 |
+| 5 个分片逐个解码 | 各 730 帧、**0 解码错误**，全长 48.6s |
+| 两两拼接 | `0+1` `1+2` `2+3` 全 0 错误，**`3+4` 直接 5589 处错误** |
+| 分片转 mkv 再拼 | 3651/3651 帧，**0 错误** |
+| mkv 拼完 `-c copy` 转回 flv | 3651 帧、0 错误、243.54s |
+
+结论：**分片没问题，`ffmpeg -f concat -c copy` 拼 flv 有问题**——从第 4 次拼接起
+视频码流被写坏（`Bad picture start code`），而音频一路正常、把 format 时长撑到了
+238.6s，于是原来的长度校验（容差 2%）恰好放行。
+
+修复：
+
+1. 分片改落 Matroska：`sNNN.mkv` → `concat` → `joined.mkv` → `-c copy` 目标容器。
+   多一次 remux，只搬字节不解码。
+2. 拼接后**按视频包数**复核：成品视频包数要对得上各段槽位总和（容差 2%），
+   对不上直接报错并提示去掉 `--parallel`。
+3. 排查开关：`LAE_KEEP_SHARDS=1` 保留分片目录并打印路径（默认仍然清掉）。
+
+回归：单测 `ShardStagingTests`（4 条）锁住"分片必须落 matroska、编码器不变、
+扩展名与音频表都认识 mkv"；e2e 新增 `parallel_flv_join_has_no_corrupt_frames`
+（5 片 flv 拼接后整段解码零错误）。
+
+> 20 秒测试素材复现不出这个 bug（5 片各 4 秒时拼接恰好没问题），所以真正的锁是
+> 单测里那条"暂存容器必须是 matroska"，e2e 那条是整段可解码的守卫。
+
 ---
 
 ## 12. 自测
@@ -1766,10 +1817,10 @@ PATH 里的 ffprobe，以及**Python 基线也要能用系统 FFmpeg**——Linu
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 381
-dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 381
-pytest  155 项（Windows 实测 153 通过 + 2 跳过）：
-  option_smoke      57（39 组参数 + 18 项参数检查）
+dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 385
+dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 385
+pytest  156 项（Windows 实测 154 通过 + 2 跳过）：
+  option_smoke      58（39 组参数 + 18 项参数检查 + 1 条分片拼接回归）
   feature_sweep     35（33 通过 + 2 跳过：a64multi / a64multi5 只有 muxer 没有 demuxer）
   compare_matrix    12
   error_paths       11
@@ -1781,11 +1832,11 @@ pytest  155 项（Windows 实测 153 通过 + 2 跳过）：
   ab_duration        2（mpeg1video / wmv2 各 4 变体 × 4 runs 的中位数对比）
 ```
 
-Linux 的数字和 Windows 差一点：单测总数 **380（379 通过 + 1 跳过）**——跳过的是
-`PathMeansSystemFfmpeg`（需要 PATH 上的系统 FFmpeg），而总数少的那一条是映射网络
-驱动器的用例（Windows-only）。ci1（Ubuntu 26.10）与 ci2（Fedora 44）都是这个数字，
-两个 TFM 也一样。e2e 用例数三平台一致，都是 153 通过 + 2 跳过；Linux 上 phase 2
-只有 2 个 worker（`os.process_cpu_count` 决定的，VM 核少）。
+v7.9.2 **只做了 Windows 验证**（用户在外地，目标 1）。Linux 的数字沿用 v7.9.1
+实测：单测总数 380（379 通过 + 1 跳过，跳过的是 `PathMeansSystemFfmpeg`，需要
+PATH 上的系统 FFmpeg；总数少的那一条是映射网络驱动器用例，Windows-only），
+ci1（Ubuntu 26.10）与 ci2（Fedora 44）一致。v7.9.2 新增的 4 条单测是纯逻辑
+（`ShardStagingTests`），跨平台成立但不作为 Linux 验收记录。
 
 MPEG-PS 那两条（mpeg1video）在 Linux 上时长差得比 Windows 大——实测 0.167 s，正好
 是 23.976 fps 下的 4 帧，而**帧数两边都是 120**。那是容器按字节到达时刻打戳的老
