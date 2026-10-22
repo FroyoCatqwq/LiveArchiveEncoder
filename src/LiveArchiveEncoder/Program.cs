@@ -54,7 +54,15 @@ public static class Program
                 Console.Error.WriteLine($"ERROR: settings file not found: {emitFile}");
                 return 2;
             }
-            Console.Out.WriteLine(CliArgs.Join(CliArgs.FromUserConfig(ConfigStore.Load(emitFile))));
+            // v7.9.3.1: TryLoad, not Load -- Load answers "defaults" for a file
+            // it cannot parse, so a truncated settings file used to print the
+            // command line of the *defaults* and look like a success.
+            if (ConfigStore.TryLoad(emitFile) is not { } stored)
+            {
+                Console.Error.WriteLine($"ERROR: cannot read {emitFile} as a settings file");
+                return 2;
+            }
+            Console.Out.WriteLine(CliArgs.Join(CliArgs.FromUserConfig(stored)));
             return 0;
         }
 
