@@ -279,10 +279,13 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
 15. Recompress        二次压缩（见 §7.12）
 16. Streams           视频/音频流选择（见 §7.16）
 17. Subtitles         字幕：烧录 / 封装 / 关闭（见 §7.16）
+18. Command line      把当前设置打印成一条等价命令行（见 §7.6）
+19. Config files      命名配置档案：载入 / 另存 / 删除（见 §7.6）
  0. Exit
 ```
 
-6 – 17 改完立即写进配置文件，下一次打开就是这次的值。
+6 – 17 改完立即写进配置文件，下一次打开就是这次的值。18 是**只读**的（打印完就回菜单）；
+19 载入档案后会把结果写回配置，和其它项一样。
 
 **Turbo 已彻底移除**（v7.9）：菜单里没有，命令行 `--turbo` 直接报
 `unrecognized argument`（rc=2），配置文件里遗留的 `Turbo` 键被静默忽略
@@ -628,6 +631,58 @@ LiveArchiveEncoder.exe src.mkv out.avi --encoder mpeg4 --fps 15 --save-config my
   承载——否则 `13,8,5,3` 会被误当成用户自定义阶梯来回震荡。
 - 退出码与普通运行一致：`--save-config` 写不进去是 `2`，`--emit-args` 的文件不存在
   也是 `2`。
+
+### 在菜单里看命令行（v7.9.3，菜单 18）
+
+菜单调好一套参数，想变成脚本又不想照着屏幕敲：
+
+```
+18. Command line       = （只读，打印完回菜单）
+```
+
+输出就是上面那个发射器生成的一行，和 `--emit-args` 完全同源：
+
+```
+命令行
+  D:\rec\cam.mkv D:\rec\cam_live.flv --encoder flv --fps 15 --width 512 --height 288 ^
+  --limit 384 --parallel 5 --recompress --recompress-args "-vf ""fps=23.976"" -c:v libx264 -crf 27"
+  与菜单里这一模一样的一次运行——粘进脚本就能重跑。
+```
+
+另外这一行会在**正式编码前的确认提示之前**自动打印一次——看到配置摘要的同时就能
+看到等价命令，觉得对就回车，觉得该留档就复制走。
+
+> 引号是 Windows shell 的写法（`"…""…"…"` 在 cmd 与 PowerShell 里都表示内层引号），
+> 直接粘进这两个 shell 可用；bash 里需要自己改成单引号。
+
+### 多个配置档案（v7.9.3，菜单 19）
+
+`config.json` 是"当前这份"，`configs/` 目录下则是可以随手切换的**命名档案**：
+
+```
+%LOCALAPPDATA%\LiveArchiveEncoder\config.json          ← 当前设置（退出时自动写）
+%LOCALAPPDATA%\LiveArchiveEncoder\configs\*.json        ← 命名档案（菜单 19 管理）
+```
+
+菜单 19 进去先列出档案（按文件名排序，带修改时间），然后：
+
+| 输入 | 作用 |
+| --- | --- |
+| `1`..`N` | 载入第 N 份，立刻应用到当前设置（随后写回 `config.json`） |
+| `s` | 把**当前设置**另存为一个新档案（输入名字即可，自动补 `.json`） |
+| `p` | 按**完整路径**载入一份档案（用于 `--save-config` 生成在别处的文件） |
+| `d` | 删除档案（会先问 `[y/N]`） |
+| `0` | 返回主菜单 |
+
+细节：
+
+- 载入走的是和启动恢复同一套 `Apply`：**输入文件不存在就跳过、当前 FFmpeg 没有
+  这个编码器就跳过**，不会因为一份旧档案把状态搞坏。
+- 名字只保留最后一段并过滤非法字符：输入 `../../evil` 存的是 `configs/evil.json`，
+  **不会写到目录外**。
+- 档案只是设置快照，不含产物；载入后仍需自己按 9 开跑。
+- 想把配置整体搬到别处（便携 U 盘、CI 沙箱）：设 `LAE_CONFIG_DIR` 指向目标目录，
+  `config.json` 与 `configs/` 都会跟着走。
 
 ### 中英文
 
@@ -1678,6 +1733,20 @@ C# 版在 v7.3 之外多出来的东西：`--parallel`（分片提速，见 §7.
 > 20 秒测试素材复现不出这个 bug（5 片各 4 秒时拼接恰好没问题），所以真正的锁是
 > 单测里那条"暂存容器必须是 matroska"，e2e 那条是整段可解码的守卫。
 
+### v7.9.3 新增
+
+1. **菜单里看命令行（目标 1）**：主菜单第 18 项把当前设置打印成一条等价命令行，
+   和 `--emit-args` 同源（同一个 `CliArgs` 发射器，不是手写的复述）。这条命令还会
+   在**正式编码开始前的确认提示之前**自动打印一次。见 §7.6。
+2. **多个配置档案（目标 2）**：主菜单第 19 项管理 `configs/*.json`：列出、按编号
+   载入、把当前设置另存、按路径载入、删除。载入走启动恢复同一套 `Apply`，旧档案
+   不会装进当前 FFmpeg 没有的编码器；名字做了消毒，`../../evil` 只会在档案目录里
+   生成 `evil.json`。新增 `LAE_CONFIG_DIR` 可整体改配置根目录（便携 / 测试隔离）。
+   见 §7.6。
+3. 测试：单测 **392**（新增 `ConfigProfilesTests` 7 条：路径逃逸、扩展名、往返、
+   缺文件不改状态、删除幂等）；e2e **157**（新增
+   `test_run12_profiles_and_command_line`，用 `LAE_CONFIG_DIR` 隔离）。
+
 ---
 
 ## 12. 自测
@@ -1817,14 +1886,14 @@ PATH 里的 ffprobe，以及**Python 基线也要能用系统 FFmpeg**——Linu
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 385
-dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 385
-pytest  156 项（Windows 实测 154 通过 + 2 跳过）：
+dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 392
+dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 392
+pytest  157 项（Windows 实测 155 通过 + 2 跳过）：
   option_smoke      58（39 组参数 + 18 项参数检查 + 1 条分片拼接回归）
   feature_sweep     35（33 通过 + 2 跳过：a64multi / a64multi5 只有 muxer 没有 demuxer）
   compare_matrix    12
   error_paths       11
-  cui_smoke         11 个阶段（内含 40+ 项检查，Linux 多一条）
+  cui_smoke         12 个阶段（内含 40+ 项检查，Linux 多一条）
   stream_selection   9
   subtitles          7
   http_source        7

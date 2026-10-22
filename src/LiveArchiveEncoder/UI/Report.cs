@@ -154,6 +154,20 @@ public static class Report
         Line(L.T("result.repeated"), result.Repeated.ToString(CultureInfo.InvariantCulture));
     }
 
+    /// <summary>
+    /// The current settings as one command line (v7.9.3).
+    ///
+    /// Built by <see cref="CliArgs.FromConfig"/>, i.e. the same emitter that
+    /// backs <c>--emit-args</c> and the round-trip test, so what the menu shows
+    /// is what a script would actually have to type -- not a paraphrase.
+    /// </summary>
+    public static void PrintCommandLine(Config c)
+    {
+        Console.WriteLine($"\n{L.T("args.heading")}");
+        Console.WriteLine($"  {CliArgs.Join(CliArgs.FromConfig(c))}");
+        Console.WriteLine($"  {L.T("args.hint")}");
+    }
+
     /// <summary>"label               : value", padded by display width.</summary>
     private static void Line(string? label, string value) =>
         Console.WriteLine(label is null ? value : $"{L.Pad(label, 17)}: {value}");

@@ -263,3 +263,39 @@ def test_run11_subtitle_menu(exe, cui_config):
         c.check("stream pick cleared in the file too", subs.get("Stream") is None,
                 str(subs.get("Stream")))
     c.finish()
+
+
+def test_run12_profiles_and_command_line(exe, workdir):
+    """v7.9.3: a named settings file can be loaded, and menu 18 shows the command
+    line that reproduces it.
+
+    Runs against a private config root (LAE_CONFIG_DIR), so the shelf it writes
+    is not the user's -- the real one is covered by everything else in this
+    module.
+    """
+    root = workdir("cui-profile-root")
+    env = os.environ | {"LAE_CONFIG_DIR": str(root)}
+    (root / "configs").mkdir(parents=True, exist_ok=True)
+    (root / "configs" / "arch2007.json").write_text(
+        '{"Version": 4, "Encoder": "mpeg4", "Width": 320, "Height": 240, "Fps": 15, "Parallel": 1}',
+        encoding="utf-8")
+
+    # 19 -> the shelf, 1 -> load the first entry, back out, 18 -> command line.
+    p = harness.run([str(exe), "--lang", "en"], input="19\n1\n0\n18\n0\n",
+                    env=env, timeout=180)
+
+    c = Checks()
+    c.check("exit code 0", p.returncode == 0, f"rc={p.returncode}")
+    c.check("shelf listed the profile", "arch2007.json" in p.stdout)
+    c.check("profile loaded", "Loaded arch2007.json" in p.stdout)
+    c.check("encoder applied from the profile", "= mpeg4" in p.stdout)
+    c.check("command line shown", "Command line" in p.stdout)
+    c.check("line names the encoder", "--encoder mpeg4" in p.stdout, p.stdout[-400:])
+    c.finish()
+
+    # Saving is the other direction: name it, then check it landed on the shelf.
+    p2 = harness.run([str(exe), "--lang", "en"], input="19\ns\nmy-setup\n0\n0\n",
+                     env=env, timeout=180)
+    assert p2.returncode == 0, f"rc={p2.returncode}"
+    assert "Saved as my-setup.json" in p2.stdout, p2.stdout[-400:]
+    assert (root / "configs" / "my-setup.json").is_file()

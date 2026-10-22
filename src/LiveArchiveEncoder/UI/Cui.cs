@@ -85,6 +85,10 @@ public static class Cui
             Console.WriteLine($"15. {L.Pad(L.T("rc.menu"), 22)} = {DescribeRecompress(c)}");
             Console.WriteLine($"16. {L.Pad(L.T("menu.streams"), 22)} = {DescribeStreams(c)}");
             Console.WriteLine($"17. {L.Pad(L.T("sub.menu"), 22)} = {DescribeSubtitles(c)}");
+            // v7.9.3: the command line that reproduces this menu state, and a
+            // shelf of named settings files to switch between.
+            Console.WriteLine($"18. {L.Pad(L.T("menu.showargs"), 22)}");
+            Console.WriteLine($"19. {L.Pad(L.T("menu.profiles"), 22)} = {DescribeProfiles()}");
             Console.WriteLine($" 0. {L.T("menu.exit")}");
             Console.Write(L.T("menu.select"));
 
@@ -217,6 +221,14 @@ public static class Cui
                     EditSubtitles(c, ffprobe);
                     Persist(c);
                     break;
+                case "18":
+                    Report.PrintCommandLine(c);
+                    break;
+                case "19":
+                    // Loading a profile rewrites the live config, so persist it
+                    // the same way every other menu item does.
+                    if (ConfigFilesMenu(c, encoders)) Persist(c);
+                    break;
                 default:
                     Console.WriteLine(L.T("menu.invalid"));
                     break;
@@ -318,6 +330,123 @@ public static class Cui
         string mode = s.Mode == "copy" ? L.T("sub.mode.copy") : L.T("sub.mode.burn");
         string codec = s is { Mode: "copy", Codec: { Length: > 0 } code } ? $" ({code})" : "";
         return $"{mode}: {what}{codec}";
+    }
+
+    /// <summary>
+    /// v7.9.3: how many named settings files are on the shelf.
+    /// </summary>
+    private static string DescribeProfiles()
+    {
+        int count = ConfigProfiles.List().Count;
+        return count == 0 ? L.T("value.none") : L.T("profile.count", count);
+    }
+
+    /// <summary>
+    /// v7.9.3: the settings-file shelf.
+    ///
+    /// Three ways in, one way out: load by number from the tool's own folder,
+    /// load any path ("p", for a file written by <c>--save-config</c>), save the
+    /// current state under a new name, or delete one. Everything ends with the
+    /// live config updated, and the caller persists it.
+    ///
+    /// Returns true when the live config may have changed, so the main loop
+    /// knows whether a write-back is needed.
+    /// </summary>
+    private static bool ConfigFilesMenu(Config c, List<EncoderInfo> encoders)
+    {
+        bool changed = false;
+        while (true)
+        {
+            List<FileInfo> files = ConfigProfiles.List();
+            Console.WriteLine($"\n{L.T("profile.heading")}");
+            Console.WriteLine($"{L.Pad(L.T("profile.dir"), 8)}: {ConfigProfiles.Directory}");
+            if (files.Count == 0) Console.WriteLine($"  {L.T("profile.empty")}");
+            for (int i = 0; i < files.Count; i++)
+            {
+                Console.WriteLine("  " + L.T("profile.entry",
+                    i + 1,
+                    files[i].Name,
+                    files[i].LastWriteTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)));
+            }
+
+            Console.Write(L.T("profile.pick"));
+            string pick = (Console.ReadLine() ?? "").Trim();
+            if (pick.Length == 0 || pick == "0") return changed;
+
+            switch (pick)
+            {
+                case "s":
+                    Console.Write(L.T("profile.saveprompt"));
+                    FileInfo? saved = ConfigProfiles.SaveAs(c, (Console.ReadLine() ?? "").Trim());
+                    Console.WriteLine(saved is null
+                        ? L.T("profile.badname")
+                        : L.T("profile.saved", saved.Name));
+                    break;
+
+                case "p":
+                    Console.Write(L.T("profile.pathprompt"));
+                    string raw = (Console.ReadLine() ?? "").Trim().Trim('"');
+                    if (raw.Length == 0) break;
+                    var external = new FileInfo(raw);
+                    if (!external.Exists)
+                    {
+                        Console.WriteLine(L.T("profile.notfound", raw));
+                        break;
+                    }
+                    changed |= ApplyProfile(c, external, encoders);
+                    break;
+
+                case "d":
+                    Console.Write(L.T("profile.deleteprompt"));
+                    if (!TryPick((Console.ReadLine() ?? "").Trim(), files, out FileInfo? victim))
+                        break;
+                    Console.Write(L.T("profile.confirmdelete", victim!.Name));
+                    string yes = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+                    if (yes is not ("y" or "yes")) break;
+                    Console.WriteLine(ConfigProfiles.Delete(victim.Name)
+                        ? L.T("profile.deleted", victim.Name)
+                        : L.T("profile.deletefailed", victim.Name));
+                    // Deleting does not touch the live config, so "changed" stays.
+                    break;
+
+                default:
+                    if (TryPick(pick, files, out FileInfo? chosen))
+                        changed |= ApplyProfile(c, chosen!, encoders);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>1-based menu index to entry, or false with the usual complaint.</summary>
+    private static bool TryPick(string raw, List<FileInfo> files, out FileInfo? file)
+    {
+        file = null;
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index)
+            || index < 1 || index > files.Count)
+        {
+            Console.WriteLine(L.T("menu.invalid"));
+            return false;
+        }
+        file = files[index - 1];
+        return true;
+    }
+
+    /// <summary>
+    /// Apply one settings file to the live config. Returns true when it was read
+    /// -- a missing or unparsable file changes nothing and says so.
+    /// </summary>
+    private static bool ApplyProfile(Config c, FileInfo file, List<EncoderInfo> encoders)
+    {
+        if (ConfigProfiles.LoadInto(c, file, encoders) is null)
+        {
+            Console.WriteLine(L.T("profile.loadfailed", file.Name));
+            return false;
+        }
+        Console.WriteLine(L.T("profile.loaded", file.Name, L.T("profile.summary",
+            c.Encoder?.Name ?? L.T("value.none"), c.Width, c.Height,
+            c.Fps.ToString("G6", CultureInfo.InvariantCulture),
+            c.Encoder?.Extension ?? "?")));
+        return true;
     }
 
     /// <summary>
@@ -1380,6 +1509,9 @@ public static class Cui
         }
 
         Report.PrintConfig(c, ffmpeg, btbn, encoders.Count, availableFilters, availableScaleAlgorithms);
+        // v7.9.3: show the equivalent command line right before the go-ahead, so
+        // a run the user likes can become a script without retyping it.
+        Report.PrintCommandLine(c);
         Console.Write(L.T("start.confirm"));
         string confirm = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
         if (confirm is not ("" or "y" or "yes")) return;

@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.2 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.3 (.NET 10 / .NET 11)",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -48,6 +48,8 @@ public static class L
         ["menu.audioencoder"] = "Audio encoder (scan)",
         ["menu.filters"] = "Show FFmpeg filters",
         ["menu.showconfig"] = "Show configuration",
+        ["menu.showargs"] = "Show command line",
+        ["menu.profiles"] = "Config files",
         ["menu.start"] = "Start encoding",
         ["menu.language"] = "Language",
         ["menu.parallel"] = "Parallel shards",
@@ -119,6 +121,29 @@ public static class L
         ["config.restored"] = "Restored settings",
         ["config.savefailed"] = "WARNING: could not write settings to {0}",
         ["config.saved"] = "Settings written to {0} (no encode was run).",
+
+        // ---- v7.9.3: command line preview + named settings files ----
+        ["args.heading"] = "Command line",
+        ["args.hint"] = "Same run without the menu -- paste it into a script to repeat it.",
+        ["profile.heading"] = "Settings files",
+        ["profile.dir"] = "Folder",
+        ["profile.empty"] = "No saved settings files yet.",
+        ["profile.entry"] = "{0}. {1}  ({2})",
+        ["profile.count"] = "{0} saved",
+        ["profile.summary"] = "{0} {1}x{2} @{3}fps -> .{4}",
+        ["profile.pick"] = "Number to load, s = save current as, p = load a path, d = delete, 0 = back: ",
+        ["profile.saveprompt"] = "Name for this settings file: ",
+        ["profile.saved"] = "Saved as {0}.",
+        ["profile.savefailed"] = "Could not write {0}.",
+        ["profile.badname"] = "That name cannot be used; try a plain file name.",
+        ["profile.notfound"] = "No such settings file: {0}",
+        ["profile.loaded"] = "Loaded {0} ({1}).",
+        ["profile.loadfailed"] = "Could not read {0} as a settings file.",
+        ["profile.pathprompt"] = "Path to a settings file: ",
+        ["profile.deleteprompt"] = "Number to delete, 0 = cancel: ",
+        ["profile.confirmdelete"] = "Delete {0}? [y/N]: ",
+        ["profile.deleted"] = "Deleted {0}.",
+        ["profile.deletefailed"] = "Could not delete {0}.",
 
         ["input.prompt"] = "\nInput file or directory: ",
         ["input.notfound"] = "Path not found.",
@@ -453,7 +478,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.2 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.3 (.NET 10 / .NET 11)",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 
@@ -485,6 +510,8 @@ public static class L
         ["menu.audioencoder"] = "音频编码器（扫描）",
         ["menu.filters"] = "查看 FFmpeg 滤镜",
         ["menu.showconfig"] = "查看当前配置",
+        ["menu.showargs"] = "显示命令行参数",
+        ["menu.profiles"] = "配置文件（多个）",
         ["menu.start"] = "开始编码",
         ["menu.language"] = "界面语言",
         ["menu.parallel"] = "并行分片数",
@@ -550,6 +577,29 @@ public static class L
         ["config.restored"] = "已恢复上次配置",
         ["config.savefailed"] = "警告：无法写入配置到 {0}",
         ["config.saved"] = "设置已写入 {0}（未执行编码）。",
+
+        // ---- v7.9.3：命令行预览 + 命名配置文件 ----
+        ["args.heading"] = "命令行",
+        ["args.hint"] = "与菜单里这一模一样的一次运行——粘进脚本就能重跑。",
+        ["profile.heading"] = "配置文件",
+        ["profile.dir"] = "目录",
+        ["profile.empty"] = "还没有保存过配置文件。",
+        ["profile.entry"] = "{0}. {1}  （{2}）",
+        ["profile.count"] = "已保存 {0} 份",
+        ["profile.summary"] = "{0} {1}x{2} @{3}fps -> .{4}",
+        ["profile.pick"] = "编号＝载入，s＝把当前设置另存，p＝按路径载入，d＝删除，0＝返回：",
+        ["profile.saveprompt"] = "这份配置的名字：",
+        ["profile.saved"] = "已保存为 {0}。",
+        ["profile.savefailed"] = "无法写入 {0}。",
+        ["profile.badname"] = "这个名字不能用，换个普通的文件名。",
+        ["profile.notfound"] = "没有这个配置文件：{0}",
+        ["profile.loaded"] = "已载入 {0}（{1}）。",
+        ["profile.loadfailed"] = "无法把 {0} 读成配置文件。",
+        ["profile.pathprompt"] = "配置文件路径：",
+        ["profile.deleteprompt"] = "要删除的编号（0＝取消）：",
+        ["profile.confirmdelete"] = "删除 {0}？[y/N]：",
+        ["profile.deleted"] = "已删除 {0}。",
+        ["profile.deletefailed"] = "无法删除 {0}。",
 
         ["input.prompt"] = "\n输入文件或目录: ",
         ["input.notfound"] = "路径不存在。",

@@ -149,17 +149,27 @@ public sealed class UserConfig
 /// </summary>
 public static class ConfigStore
 {
-    public static string DefaultPath
+    /// <summary>
+    /// Folder holding <c>config.json</c> and the <c>configs</c> shelf of named
+    /// profiles. <c>LAE_CONFIG_DIR</c> overrides it -- that is what a portable
+    /// install (config next to the exe on a USB stick) and an isolated test run
+    /// both need.
+    /// </summary>
+    public static string RootDirectory
     {
         get
         {
+            string? over = Environment.GetEnvironmentVariable("LAE_CONFIG_DIR");
+            if (!string.IsNullOrWhiteSpace(over)) return over;
+
             string? appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string dir = string.IsNullOrEmpty(appData)
+            return string.IsNullOrEmpty(appData)
                 ? AppContext.BaseDirectory
                 : Path.Combine(appData, "LiveArchiveEncoder");
-            return Path.Combine(dir, "config.json");
         }
     }
+
+    public static string DefaultPath => Path.Combine(RootDirectory, "config.json");
 
     public static UserConfig Load(string? path = null)
     {

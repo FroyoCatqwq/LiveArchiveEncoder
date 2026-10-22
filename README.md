@@ -123,7 +123,7 @@ distributions should take the JIT build. FFmpeg is still needed either way.
 
 ```bash
 # TUnit unit tests — identical command on both platforms (runs on MTP since v7.8.3)
-dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 385 on Windows
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 392 on Windows
 # and the same suite against the other runtime:
 dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 ```
@@ -148,7 +148,7 @@ put that build's `bin` on `PATH` first):
 ```bash
 pip install -r tests/e2e/requirements.txt   # pytest==9.1.1 + pytest-xdist
 python tools/e2e.py                          # two-phase run (see below)
-pytest                                       # same 156 cases, one at a time
+pytest                                       # same 157 cases, one at a time
 pytest tests/e2e/test_compare_matrix.py -k wmv2   # a single case
 CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 ```
@@ -159,7 +159,7 @@ CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 | `test_error_paths.py` | 11 | failure paths, exit codes vs the baseline |
 | `test_feature_sweep.py` | 35 | every legacy encoder, 2 s clip (2 skipped: no demuxer) |
 | `test_option_smoke.py` | 58 | option plumbing, incl. the recompress stage and era presets |
-| `test_cui_smoke.py` | 11 | interactive menu assertions (40+ checks, one extra on Linux) |
+| `test_cui_smoke.py` | 12 | interactive menu assertions (40+ checks, one extra on Linux) |
 | `test_stream_selection.py` | 9 | stream picks by absolute index, plus time-range clipping |
 | `test_subtitles.py` | 7 | burn / copy / off, sidecar and embedded, bad requests |
 | `test_http_source.py` | 7 | `http(s)://` inputs, timeout and failure behaviour |
@@ -338,6 +338,25 @@ v7.9.2 notes there.
 
 This release was verified on Windows only (the stated goal); Linux numbers in
 the docs are the v7.9.1 run.
+
+### v7.9.3
+
+Two small additions to the interactive shell:
+
+* **Menu 18 shows the command line.** Whatever the menu is currently holding is
+  printed as one equivalent command line, from the same emitter that backs
+  `--emit-args` — not a hand-written paraphrase. The same line is printed right
+  before the "start encoding?" prompt, so a setup worth keeping can be copied
+  into a script instead of retyped.
+* **Menu 19 manages named settings files.** Anything under
+  `LiveArchiveEncoder/configs/*.json` is listed, loadable by number, and can be
+  created with "save current as", loaded from an arbitrary path, or deleted.
+  Loading goes through the same `Apply` as startup restore, so a profile written
+  against another FFmpeg build cannot install a codec this build lacks, and name
+  normalisation keeps `../../evil` inside the shelf. `LAE_CONFIG_DIR` moves the
+  whole config root, which is also how the e2e test isolates itself.
+
+Details in `docs/usage.md` §7.6.
 
 ### Audio limits (v7.8.2)
 
