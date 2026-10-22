@@ -156,44 +156,11 @@ public static class Probe
         }
     }
 
-    /// <summary>Single-field probe; prefer <see cref="Source"/> when more is needed.</summary>
-    public static StreamInfo Stream(string ffprobe, FileInfo src)
-    {
-        CaptureResult p = ProcessRunner.Run([
-            ffprobe, "-v", "error", "-select_streams", "v:0",
-            "-show_entries",
-            "stream=width,height,pix_fmt,color_range,color_space,color_primaries,color_transfer",
-            "-of", "json", src.FullName,
-        ]);
-        if (p.ExitCode != 0)
-            throw new InvalidOperationException(p.Stderr.Trim() is { Length: > 0 } err ? err : "cannot probe video stream");
-
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(p.Stdout);
-            JsonElement stream = doc.RootElement.GetProperty("streams")[0];
-
-            static string? Get(JsonElement e, string name)
-                => e.TryGetProperty(name, out JsonElement v) ? v.GetString() : null;
-
-            return new StreamInfo
-            {
-                Width = int.Parse(stream.GetProperty("width").ToString(), CultureInfo.InvariantCulture),
-                Height = int.Parse(stream.GetProperty("height").ToString(), CultureInfo.InvariantCulture),
-                PixFmt = Get(stream, "pix_fmt") ?? "yuv420p",
-                ColorRange = Get(stream, "color_range"),
-                ColorSpace = Get(stream, "color_space"),
-                ColorPrimaries = Get(stream, "color_primaries"),
-                ColorTransfer = Get(stream, "color_transfer"),
-            };
-        }
-        catch (Exception exc) when (exc is KeyNotFoundException or IndexOutOfRangeException
-                                        or FormatException or JsonException or InvalidOperationException)
-        {
-            throw new InvalidOperationException("ffprobe returned incomplete video stream information", exc);
-        }
-    }
-
+    /// <summary>
+    /// Duration of an existing product file: the video stream's own duration,
+    /// falling back to the container's. Prefer <see cref="Source"/> when more
+    /// than one field is needed.
+    /// </summary>
     public static double? Duration(string ffprobe, FileInfo src)
     {
         CaptureResult streamProbe = ProcessRunner.Run([
@@ -218,15 +185,6 @@ public static class Probe
             && double.IsFinite(formatValue) && formatValue > 0
             ? formatValue
             : null;
-    }
-
-    public static bool HasAudio(string ffprobe, FileInfo src)
-    {
-        CaptureResult p = ProcessRunner.Run([
-            ffprobe, "-v", "error", "-select_streams", "a:0",
-            "-show_entries", "stream=index", "-of", "csv=p=0", src.FullName,
-        ]);
-        return p.ExitCode == 0 && p.Stdout.Trim().Length > 0;
     }
 
     /// <summary>

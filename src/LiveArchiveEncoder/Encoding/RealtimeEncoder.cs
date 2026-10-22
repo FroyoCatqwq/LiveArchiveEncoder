@@ -493,6 +493,9 @@ public static class RealtimeEncoder
                 OutputHeight = video.OutputHeight,
                 AvgVideoKbps = avgVideoKbps,
                 AvgTotalKbps = avgTotalKbps,
+                // This path never runs without an audio track (see the
+                // `!hasAudio` early return above).
+                HasAudio = true,
                 Fresh = video.Fresh,
                 Repeated = video.Repeated,
                 Deinterlace = o.Deinterlace,
@@ -565,7 +568,7 @@ public static class RealtimeEncoder
         int subtitleInput = -1;
         if (subs is { Mode: SubtitleMode.Copy })
         {
-            cmd.AddRange(SubtitleTrack.CopyInputArgs(subs, o.SourcePath, o.StartSeconds, duration));
+            cmd.AddRange(SubtitleTrack.CopyInputArgs(subs, o.SourcePath, o.StartSeconds));
             subtitleInput = nextInput++;
         }
 
@@ -1028,6 +1031,7 @@ public static class RealtimeEncoder
                 OutputHeight = height,
                 AvgVideoKbps = avgVideoKbps,
                 AvgTotalKbps = avgTotalKbps,
+                HasAudio = hasAudio,
                 Fresh = fresh,
                 Repeated = repeated,
                 Deinterlace = o.Deinterlace,

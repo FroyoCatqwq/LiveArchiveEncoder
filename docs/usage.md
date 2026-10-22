@@ -1484,268 +1484,15 @@ C# 版在 v7.3 之外多出来的东西：`--parallel`（分片提速，见 §7.
 `--help` / `--cpu-info` 两个辅助标志。这些都不改变默认行为：不加任何开关时，
 命令行语义与 v6.3.3 一致。
 
-### v7.4 新增
+### 逐版变更记录去哪了
 
-1. **SMB 读写**（§7.8）：修掉 `-stimeout` 这个让 UNC 输入必然失败的参数；新增
-   写入侧韧性参数、写前可写探测、输出侧协议版本报告。
-2. **FFmpeg 工具链**（§7.10）：四个发行版（BtbN / gyan.dev / avbuild / nonfree），
-   支持切换、下载、删除；默认每日构建版；下载可选代理；有 `aria2c` 就多线程下载；
-   安装目录 `%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg\<来源>\bin`。
-3. **编码后播放**（§7.11）：`--play ffplay|external`，外部播放器可指定，留空走
-   系统关联；默认 `off`。
-4. **源码纳入 git 管理**：v7.3 基线 + 按改动逐步提交，方便回溯每一步。
+**搬到 [`CHANGELOG.md`](CHANGELOG.md) 了**：从 Python 6.2.2 到当前版本，每版一节，
+写明"改了什么、为什么、会不会打动产物"。本文件只讲**怎么用**，不再混入版本历史
+——两者放一起时，找参数的人要先翻过十几个版本。
 
-### v7.4.1 新增
-
-1. **引入 NUnit**（`tests/LiveArchiveEncoder.Tests`，当时 121 个用例，v7.6 已达
-   214，v7.7 是 236，v7.8 已达 258，v7.8.1 是 280，v7.8.2 是 298）：纯逻辑单测，不依赖 FFmpeg 和网络，几秒跑完；Python harness
-   继续负责
-   "与 v6.3.3 是否等价"那一层。见 §12。
-2. 首次跑就抓到并修掉了一个真 Bug：`note.*` / `run.*` 共 13 个词条只有英文没有
-   中文，中文界面下会漏回英文并把对齐顶歪。现在有词条完整性测试盯着。
-
-### v7.5 新增
-
-1. **支持 Windows + Linux 双平台**（§1）。执行文件名、受管理 FFmpeg 目录、播放器
-   调用、压缩包类型（新增 `.tar.xz`）、SMB 路径识别都按平台分支；`tools/build.sh`
-   是 `tools\build.ps1` 的对应物。
-2. **Linux 端的 SMB**（§7.8）：识别 CIFS 挂载点（读 `/proc/self/mountinfo`），
-   显示协商到的 dialect；读写两侧都验证过。
-3. **硬件解码改为可选且默认关闭**：`--hwaccel NAME`，`NAME` 可以是
-   `ffmpeg -hwaccels` 里的任意方法（cuda / vaapi / qsv / d3d11va …），`auto` 让
-   程序挑一个能用的。原来那个默认开 CUDA 的行为在无显卡机器（包括 CI 容器和
-   Linux 虚拟机）上会直接崩在 `Cannot load libcuda.so.1`，所以默认值改成 `off`。
-   启用前会**真的解一帧**验证，验证不过自动回退软件解码。
-4. **去掉了 SMB 读取侧的 `-reconnect*`**（§7.8）：它属于 HTTP/FTP 协议，UNC 走
-   的是 `file`，新 FFmpeg 构建会直接拒绝，导致共享上的源解出 0 帧。
-5. **CI 双轨**：GitHub Actions 跑 windows + ubuntu 矩阵；Codeberg 用 Woodpecker
-   （`.woodpecker.yaml`）做 restore + build + test。
-
-### v7.6 新增
-
-从 v7.6 起，C# 版**不再承诺与 Python v6.3.3 的输出一致**——原有行为全部保留，
-新功能只在显式开启时生效，默认行为不变。
-
-1. **后处理管线**（§7.12）：live 编码之后接一个独立阶段——**二次压缩**（模拟
-   0 几年视频网站转码，你写 FFmpeg 参数段，程序负责 `-i` 和输出）。默认关闭。
-   产物命名：`clip_live.rm` → `clip_live_web.mp4`。文字水印阶段在 v7.9.1 已移除
-   （见 §7.12 顶部说明）。
-2. **时代预设**（§7.12，`--era ID`）：五个年代一套一套的 live + 二次压缩参数，
-   从 1997 年拨号时代的 RealVideo G2 到 2016 年的 720p H.264。数字有出处
-   （RealSystem G2 官方手册、实测的土豆 FLV 文件、杂志里的网速报道），见
-   [`docs/era-presets.md`](era-presets.md)。
-3. **安全设计**：二次压缩的参数段逐 token 校验，`-i`、`-o`、末尾裸路径直接拒绝
-   ——这些写法会让 FFmpeg 覆盖你的源文件。校验发生在 live 编码**之前**。
-4. **CLI 语义不变**：`--recompress` 不读取配置文件里的状态，不给就没有；交互
-   菜单里的设置会保存，菜单之间粘性保留。
-5. **字体目录**（§7.12）：字幕烧录的字体放在程序自己的 `fonts` 目录（与受管理
-   FFmpeg 同级），Windows 和 Linux 都不查系统字体。Linux 实测发现：最小化安装
-   没有 `/usr/share/fonts`，点名微软雅黑的 ASS 在只找到拉丁字体时还会让中文
-   字幕变成方块而编码照报成功——两种都是"错了不报错"。目录位置可用
-   `LAE_FONT_DIR` 覆盖（旧名 `LAE_WATERMARK_FONT_DIR` 仍有效）。
-
-### v7.7 新增
-
-1. **修复：并行分片末尾越界。** 帧槽网格比媒体时间轴粗，最后一个分片会要一个
-   超过片尾的时间（`end time 00:03:34.333 exceeds the source duration
-   (00:03:34.280)`），整次编码直接失败。现在边界全部夹在片段终点内，
-   最后一片精确对齐终点（§7.5）。规划逻辑抽成了 `ShardPlanner`，有单测覆盖。
-2. **并行分片显示进度。** 7 个分片各打一行是没法看的，改成共享一行聚合进度
-   （已完成片数 / 总帧槽 / 百分比 / 用时），每 0.2 秒刷新（§7.5）。
-3. **升级到 .NET 11 / C# 15。** 两个工程 `TargetFramework` 改为 `net11.0`；
-   Windows 用 `winget install Microsoft.DotNet.SDK.Preview`，Linux 用
-   `mise use -g dotnet@11.0.100-rc.2.26504.105`（ci1/ci2 都已装好）。
-   CI 的 `dotnet-version` 与 Woodpecker 镜像同步升到 11.0。
-   > **v7.8.1 起回退为默认 `net10.0`**，并靠 `RollForward=Major` 让同一份产物同时
-   > 兼容 .NET 10 与 .NET 11 运行时；`-p:LaeTfm=net11.0` 仍然可用，CI 两套都跑。
-4. **Turbo 标记弃用。** `--turbo` 和菜单第 9 项功能完全不变，只是每次使用都会
-   打印弃用警告、菜单里标注"（已弃用）"。老脚本不受影响（§7.5）。
-5. **动态档位不能超过基础 FPS。** 阶梯只会往下压，写 `20` 而基础是 `15` 是笔误：
-   菜单里拒绝并提示，命令行显式给了 `--fps-levels` 时报 rc=2（§6）。
-6. **档位码率可调。** `--fps-levels` 支持 `FPS:降档码率:升档码率`，
-   例如 `12:128:115,5:140:130`；菜单新增 **参数设置 → 27**（§6）。
-   不写就是 v7.6 的老行为，默认值一点没变。
-
-### v7.8 新增
-
-1. **按编码器 + 容器扫描音频编码器。** 菜单新增"扫描音频编码器"，只列出当前
-   容器**真的能复用的**音频编码器；显式选择时校验采样率/声道数（§7.13）。
-2. **容器可切换。** mpeg1video / mpeg2video / mpeg4 / libxvid 可用 AVI，
-   libx264 可用 MKV，命令行 `--container avi|mp4|mkv`，菜单 **参数 29**（§7.14）。
-3. **画面比例与三种适配。** 分辨率预设区分 4:3 与 16:9；`--fit crop|fit|stretch`
-   决定 16:9 画面进 4:3 帧时是裁掉、加黑边还是拉伸（§7.15）。
-
-### v7.8.1 新增
-
-1. **一个产物同时支持 .NET 10 与 .NET 11。** 默认目标框架回到 `net10.0`，发布时
-   带 `RollForward=Major`：只有 .NET 11 运行时的机器也能启动，有 .NET 10 的机器
-   继续用 .NET 10。显式 `-p:LaeTfm=net11.0` 可指定 .NET 11，CI 两套都跑
-   （§1）。单测 280 条在两个目标框架下全部通过。
-2. **引入 .NET 10 / C# 14 的语法与库特性**，行为不变：
-   - **扩展成员（extension block）**：`Core/TextExtensions.cs` 提供
-     `value.HasText` / `value.Or(fallback)`，替换了全项目 28 处
-     `string.IsNullOrWhiteSpace(...)`；receiver 上的 `[NotNullWhen(true)]`
-     让编译器照旧做空值流分析。
-   - **`System.Threading.Lock`**：`OutputMonitor`、`ParallelEncoder` 进度器、
-     `RealtimeEncoder` 诊断队列、`Toolchain` 管道捕获改用新的锁类型
-     （更小的对象头、不会被人从外面 `Monitor.Enter`）。
-   - **`FrozenDictionary` / `FrozenSet`**：`Constants` 里所有只读查表（默认码率、
-     容器映射、像素格式、扩展名等）改为冻结集合——构建时多花一点，之后查询最快。
-   - **`[GeneratedRegex]`**：28 条"是否老编码器"的正则合成一条源生成正则，
-     JIT 与 NativeAOT 行为一致，且不再需要运行时编译。
-3. **只构建 JIT 与 AOT。** 第三种产物 `publish\aot-avx2`
-   （`-p:IlcInstructionSet=avx2`）被移除：指令集基线只影响本工具的 C# 侧，
-     编码在 FFmpeg 里由它自己派发 SIMD，实测差异在噪声内（§1）。
-4. **代码整理与归档。** 全项目逐个声明交叉核对引用，把零引用的成员移入
-   `archive/retired/`（不删除，带退役版本和替代说明），删除 3 处无用赋值、
-   2 组未使用参数（`Preflight.Video` 的 width/height、
-   `Watermark.BuildFilter` 的 width）；新增 `Directory.Build.props` 统一
-   属性、`AnalysisLevel=latest-recommended` 让构建自带分析器，现在零告警。
-
-### v7.8.2 新增
-
-1. **音频数字边界表**（§5）。以前只有采样率白名单、没有码率约束，且白名单本身
-   不全：`mp2` 实际从 16000 Hz 起（表里写成 22050），`aac` 支持 96000 Hz（表里
-   漏了），`libvorbis` 支持 12000/24000（漏了）。现在 `Core/AudioCatalog.cs`
-   同时约束采样率与码率，**所有数字都是实测出来的**（拿工具链下载的 FFmpeg
-   master 逐个编码器 × 采样率 × 码率探出来的）：
-   - 码率下限/上限按编码器、必要时按采样率分带：`mp2` 在 44.1 kHz 起要 32 kbps
-     且只认标准码率（36 不行、144 只在低采样率合法），`wmav1/wmav2` 最低 24，
-     `libvorbis` 整条带随采样率缩放（8 kHz：8–40；22050：16–80；48 kHz：32–224），
-     `libopus` 最高 256；
-   - **容器级约束**：FLV 对 MP3 只接受 11025/22050/44100/48000，MP4 拒绝低于
-     16 kHz 的 MP3（AVI/MKV/MOV/ASF 不受限）——这类失败以前只在 FFmpeg 跑到一半
-     时才暴露。
-2. **显式报错、预设纠正。** 命令行显式写的采样率/码率不合规 → 退出码 2 并列出
-   合法值；`--era` 带来的值 → 自动就近纠正（dialup98 + FLV 的 16 kHz 改成
-   11025，+ WMV 的 16 kbps 改成 24）并在日志说明。菜单 16（码率）也改成和
-   17/18 一样的"纠正并告知"。
-3. **拒绝实验性编码器。** FFmpeg 里不带 lib 前缀的 `vorbis` / `opus` 需要
-   `-strict` 才会打开，选了必然失败；现在直接报错提示换 `libvorbis` / `libopus`，
-   OGG 的默认音频列表也只剩这两个。单测 298 条（新增 18 条边界护栏）。
-
-### v7.8.3 新增
-
-1. **测试框架双换代**（§12）：单元测试从 NUnit 迁到 **TUnit 1.75.0**（原生
-   AOT 友好、源码生成、无反射），e2e 六个独立脚本合并为 **pytest 9.1.1**
-   套件（`tests/e2e/test_*.py` + 共享 `harness.py`）。用例数不变、判据不变，
-   只是换引擎：`dotnet test --solution ...` 走 Microsoft.Testing.Platform，
-   `pytest` 一把跑完 123 个 e2e 用例。迁移中顺修了 NUnit 时代遗留的集合
-   断言按引用比较的问题（TUnit 的 `IsEqualTo` 对集合是引用相等，统一改
-   `IsEquivalentTo`）。
-2. **并行分片 + SMB 韧性修复取消。** v7.8.3 开发周期中原计划修复"并行分片时
-   SMB 不稳定导致画面冻结"（解码器提前 EOF 时旧代码静默用上一帧填满槽位），
-   实测定位到根因后决定**不修**：该静默行为是 option_smoke 既有断言的依赖项，
-   修复会改变长年稳定的输出形态。根因记录留在代码注释里，留待 v8 评估。
-
-### v7.9 新增
-
-1. **视频流 / 音频流选择（目标 1）**：`--video-stream N` / `--audio-stream N`
-   直接用 ffprobe 打印的**绝对流编号**（`--list-streams` 先列出），编号不存在或
-   类型不符会在编码前被拒绝并列出全部流。CUI 主菜单新增一项（v7.9.0 里是第 17
-   项，v7.9.1 删掉水印后是第 16 项）。VOB（DVD）
-   这类多音轨源终于可以点名要哪条音轨了。真实素材验证：179MB VOB 经 SMB 选
-   `--video-stream 2 --audio-stream 3` 编 00:00–00:30 片段，PSNR/零交叉率双重
-   证明选的确实是目标流。
-2. **字幕：读取、烧录、内嵌（目标 2）**：`--subtitle FILE`（外挂 .ass/.srt，可
-   重复）与 `--subtitle-stream N`（内嵌轨）二选一；`--subtitle-mode burn`（默认，
-   libass 渲染进画面，带 `fontsdir` 自动加载工具自带字体）或 `copy`（按容器从
-   `ffmpeg -encoders` 挑字幕编码器封装成字幕轨）。位图字幕（dvdsub/dvbsub）只能
-   copy 不能烧（转文字需要 OCR）。真实素材验证：Re:Zero S2 外挂简中 .ass 烧进
-   256x192 归档产物，字幕清晰可读。
-3. **Turbo 彻底移除（目标 3）**：`--turbo` → `unrecognized argument`，配置键被
-   忽略，原实现归档于 `archive/retired/RetiredTurbo.cs`（见 §7.5）。
-4. **字体相对路径修复（目标 4）**：水印字体不再必须写绝对路径——裸文件名会先到
-   工具字体目录（`fonts/` 或 `LAE_WATERMARK_FONT_DIR`）里找；顺带修了
-   simsun.ttc 首个 face 是单色 1bpp 被 drawtext 拒绝的问题（自动回退可用的
-   中文字体并打 WARNING）。
-5. **AVI 容器扩容（目标 5）**：h261/h263/h263p 加入 AVI 容器白名单；h261/h263
-   从裸流（无音频）换成 AVI 后自动获得音频能力。
-6. **HTTP/HTTPS 输入（目标 6，初步支持）**：输入可以是
-   `https://archive.org/download/.../file.mp4` 这类直链。带 `-reconnect` 家族 +
-   30s socket 超时；seek 依赖服务器支持 Range（archive.org/CDN 都支持）。只覆盖
-   渐进式直链：不处理鉴权、Cookie、HLS/DASH。
-7. **顺手修的两个老 bug**：`ffmpeg -filters` 的 flags 列宽是 2 字符（旧正则要求
-   3 → 所有未标记滤镜从未被检出）；ffprobe 源超时 30s 不够——179MB VOB 实测要
-   2m15s，放宽到 300s 并把 `--list-streams` 的超时变成干净报错。
-
-### v7.9.1 变更
-
-1. **水印功能移除（目标 1）**：静态文字水印整段退役——`--watermark` /
-   `--watermark-position` / `--watermark-size` / `--watermark-color` /
-   `--watermark-font` / `--no-watermark` 六个旗标、CUI 的第 15 项、配置里的
-   `Watermark` 段、`_wm` 中间产物全部没有了。代码归档在
-   `archive/retired/RetiredWatermark.cs`（含恢复说明），drawtext 时代那套字体
-   挑选逻辑归档在 `RetiredFontPicking.cs`。**二次压缩保留**，`_web` 产物照旧。
-2. **CUI 补上字幕（目标 2）**：主菜单第 17 项 `Subtitles`，可以选模式
-   （burn / copy / off）、列内嵌字幕轨、指定外挂文件、换 copy 模式的编码器。
-   文件与内嵌流**互斥**（选一个就清掉另一个），模式 `off` 时明确提示"不会带字幕"。
-   以前只有 CLI 能用字幕，等于菜单用户没有这个功能。
-3. **网络驱动器（目标 3）**：映射盘（`DriveType == Network`）现在也算远程路径：
-   打印稳定性提示，并把并行分片强制成单遍（CLI / CUI 菜单 11 / 恢复配置三处
-   都拦，`ParallelEncoder.BlockReason` 再兜一次）。见 §7.8。
-4. **配置 ↔ 命令行互转（目标 4）**：`--emit-args[=FILE]` 把设置打印成一条等价
-   命令行，`--save-config FILE` 把这次运行的解析结果写成配置文件，两者都不编码。
-   见 §7.6。
-5. **彻底删掉 `publish/aot-avx2`（目标 5）**：产物目录、CI 步骤、文档里的
-   AVX2 产物说法一起清掉——指令集基线对 FFmpeg 子进程编码没有收益。
-6. **测试**：单测 381（水印 11 条转归档、增补 CliArgs / 映射盘 / 字幕配置项），
-   e2e 155（删 3 条水印用例，加 4 条配置转换，CUI 字幕菜单用例重写为三次独立
-   调用）。
-7. **e2e 提速（目标 7）**：新增 `tools/e2e.py`，把 155 条拆成"排他 25 条先独占
-   跑 + 其余 130 条交给 xdist"，Windows 32 核实测 **794 s → 492 s**。排他规则
-   用 marker 表达（`timing` / `shared_config`），`conftest.py` 会拒绝裸 `pytest -n`
-   以免时序断言变成偶发失败。见 §12。
-
-### v7.9.2 修复
-
-**并行分片直接拼 flv 会把画面拼坏（v7.8.0 起潜伏，v7.9.2 修）。**
-
-现象：243 秒 / 196 Mbit/s rawvideo 源、5 段分片、flv 容器，成品播到 **00:03:14
-画面停住**，声音继续到结尾。
-
-定位过程（都是可复现的硬数据）：
-
-| 检查 | 结果 |
-| --- | --- |
-| 产物分流时长 | 视频 194.82s / 音频 238.6s，194.8 ≈ 第 4 段边界 |
-| 5 个分片逐个解码 | 各 730 帧、**0 解码错误**，全长 48.6s |
-| 两两拼接 | `0+1` `1+2` `2+3` 全 0 错误，**`3+4` 直接 5589 处错误** |
-| 分片转 mkv 再拼 | 3651/3651 帧，**0 错误** |
-| mkv 拼完 `-c copy` 转回 flv | 3651 帧、0 错误、243.54s |
-
-结论：**分片没问题，`ffmpeg -f concat -c copy` 拼 flv 有问题**——从第 4 次拼接起
-视频码流被写坏（`Bad picture start code`），而音频一路正常、把 format 时长撑到了
-238.6s，于是原来的长度校验（容差 2%）恰好放行。
-
-修复：
-
-1. 分片改落 Matroska：`sNNN.mkv` → `concat` → `joined.mkv` → `-c copy` 目标容器。
-   多一次 remux，只搬字节不解码。
-2. 拼接后**按视频包数**复核：成品视频包数要对得上各段槽位总和（容差 2%），
-   对不上直接报错并提示去掉 `--parallel`。
-3. 排查开关：`LAE_KEEP_SHARDS=1` 保留分片目录并打印路径（默认仍然清掉）。
-
-回归：单测 `ShardStagingTests`（4 条）锁住"分片必须落 matroska、编码器不变、
-扩展名与音频表都认识 mkv"；e2e 新增 `parallel_flv_join_has_no_corrupt_frames`
-（5 片 flv 拼接后整段解码零错误）。
-
-> 20 秒测试素材复现不出这个 bug（5 片各 4 秒时拼接恰好没问题），所以真正的锁是
-> 单测里那条"暂存容器必须是 matroska"，e2e 那条是整段可解码的守卫。
-
-### v7.9.3 新增
-
-1. **菜单里看命令行（目标 1）**：主菜单第 18 项把当前设置打印成一条等价命令行，
-   和 `--emit-args` 同源（同一个 `CliArgs` 发射器，不是手写的复述）。这条命令还会
-   在**正式编码开始前的确认提示之前**自动打印一次。见 §7.6。
-2. **多个配置档案（目标 2）**：主菜单第 19 项管理 `configs/*.json`：列出、按编号
-   载入、把当前设置另存、按路径载入、删除。载入走启动恢复同一套 `Apply`，旧档案
-   不会装进当前 FFmpeg 没有的编码器；名字做了消毒，`../../evil` 只会在档案目录里
-   生成 `evil.json`。新增 `LAE_CONFIG_DIR` 可整体改配置根目录（便携 / 测试隔离）。
-   见 §7.6。
-3. 测试：单测 **392**（新增 `ConfigProfilesTests` 7 条：路径逃逸、扩展名、往返、
-   缺文件不改状态、删除幂等）；e2e **157**（新增
-   `test_run12_profiles_and_command_line`，用 `LAE_CONFIG_DIR` 隔离）。
+v6.3.3 基线的已知缺陷（AMV 0 字节、默认开 CUDA、SMB 两个错误选项、音频只有采样率
+白名单、字体不落地、字幕滤镜检不出）在 CHANGELOG 的 v6.3.3 一节里列了表，附修在
+哪一版——这些是**有意偏离**，不是"行为差异"。
 
 ---
 
@@ -1886,10 +1633,10 @@ PATH 里的 ffprobe，以及**Python 基线也要能用系统 FFmpeg**——Linu
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 392
-dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 392
-pytest  157 项（Windows 实测 155 通过 + 2 跳过）：
-  option_smoke      58（39 组参数 + 18 项参数检查 + 1 条分片拼接回归）
+dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 408
+dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 408
+pytest  162 项（Windows 实测 160 通过 + 2 跳过）：
+  option_smoke      63（39 组参数 + 23 项参数检查 + 1 条分片拼接回归）
   feature_sweep     35（33 通过 + 2 跳过：a64multi / a64multi5 只有 muxer 没有 demuxer）
   compare_matrix    12
   error_paths       11
@@ -1900,6 +1647,9 @@ pytest  157 项（Windows 实测 155 通过 + 2 跳过）：
   config_conversion  4（配置 ↔ 命令行往返）
   ab_duration        2（mpeg1video / wmv2 各 4 变体 × 4 runs 的中位数对比）
 ```
+
+v7.9.3.1 的数字：单测 408 × 两个目标框架、e2e 162（160 通过 + 2 跳过）。
+其中 Linux 侧没有重跑（ci1/ci2 仍是 v7.9.1 的读数），下面这段说明它差在哪。
 
 v7.9.2 **只做了 Windows 验证**（用户在外地，目标 1）。Linux 的数字沿用 v7.9.1
 实测：单测总数 380（379 通过 + 1 跳过，跳过的是 `PathMeansSystemFfmpeg`，需要

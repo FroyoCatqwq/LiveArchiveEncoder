@@ -85,14 +85,19 @@ public static class ConfigProfiles
     /// Returns the file that was read, or null when it does not exist or cannot
     /// be parsed -- the caller reports which, because "no such profile" and
     /// "that file is not a settings file" need different answers.
+    ///
+    /// A profile is a <em>snapshot</em>: a field the file mentions replaces the
+    /// live value, a field it omits keeps the default rather than the live one.
+    /// That is correct for files this tool writes (--save-config emits every
+    /// setting) and the reason a truncated or unparsable file must not be
+    /// applied at all -- before v7.9.3.1 it loaded as "all defaults", which
+    /// silently wiped the session's settings.
     /// </summary>
     public static FileInfo? LoadInto(Config c, FileInfo file, IReadOnlyList<EncoderInfo> encoders)
     {
         if (!file.Exists) return null;
-        UserConfig stored = ConfigStore.Load(file.FullName);
-        // A structurally empty file (or one from a much older build) still
-        // applies: every field is optional and the live config keeps whatever
-        // the profile does not mention.
+        UserConfig? stored = ConfigStore.TryLoad(file.FullName);
+        if (stored is null) return null;
         ConfigStore.Apply(stored, c, encoders);
         return file;
     }

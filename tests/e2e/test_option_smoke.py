@@ -165,6 +165,24 @@ OPTION_CHECKS = [
     # ---- v7.9: Turbo is gone, not deprecated. An old script still passing it
     # must fail loudly rather than silently lose the pacing change it asked for.
     ("turbo_gone",        ["--lang", "en", "--no-cui", "--turbo"], 2, "unrecognized argument"),
+    # ---- v7.9.3.1: an unknown --audio-mode is a parse error. It used to be
+    # thrown out of the parser, which Program.Main does not catch, so a typo
+    # produced an unhandled-exception stack trace instead of "ERROR:" + rc 2.
+    ("audio_mode_bad",    ["--lang", "en", "--no-cui", "--audio-mode", "bogus",
+                           "SRC", "OUT/amode.avi"],  2, "auto, inline or separate"),
+    # ---- v7.9.3.1: a preset is a fallback, not an override (manual §7.12).
+    # --emit-args prints the resolved run, so the width the preset would have
+    # imposed (352) must not appear where the explicit 320 belongs.
+    ("era_explicit_wins", ["--lang", "en", "--no-cui", "--era", "flv07",
+                           "--width", "320", "--height", "180", "--emit-args",
+                           "SRC", "OUT/era_x.flv"],  0, "--width 320"),
+    # ...and with no explicit size the preset still applies.
+    ("era_preset_applies", ["--lang", "en", "--no-cui", "--era", "flv07",
+                            "--emit-args", "SRC", "OUT/era_p.flv"], 0, "--width 352"),
+    # ---- v7.9.3.1: the stream picks and the x264 knobs were missing from every
+    # generated completion script, so `--video-str<Tab>` completed nothing.
+    ("completion_streams", ["--completion", "bash"], 0, "--video-stream"),
+    ("completion_x264",    ["--completion", "zsh"],  0, "--x264-profile"),
 ]
 
 

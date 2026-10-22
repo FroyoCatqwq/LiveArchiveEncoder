@@ -55,8 +55,11 @@ public static class FontResolver
                 overrideDir = Environment.GetEnvironmentVariable(LegacyDirectoryEnvironmentVariable);
             if (overrideDir.HasText) return overrideDir;
 
-            // Same rule as Toolchain.Root: fall back to the executable's own
-            // directory when there is no user profile (service accounts, CI).
+            // Same root as the managed FFmpeg install (Toolchain.Root): the two
+            // are siblings under the app directory and a portable copy has to
+            // move both. LAE_CONFIG_DIR deliberately does not move this -- it
+            // relocates the settings only, so a test run cannot silence the
+            // fonts an encode needs.
             string? appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string dir = string.IsNullOrEmpty(appData)
                 ? AppContext.BaseDirectory

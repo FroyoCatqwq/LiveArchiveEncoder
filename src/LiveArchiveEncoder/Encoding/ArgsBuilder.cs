@@ -49,28 +49,10 @@ public static class ArgsBuilder
         return $"{filterName}=mode={modeValue}:parity={parityValue}:deint={deintValue}";
     }
 
-    public static string BuildFilters(
-        int outW,
-        int outH,
-        double baseFps,
-        bool crop43,
-        string scaleAlgo,
-        string transportFmt,
-        string deinterlace,
-        string deintMode,
-        string deintParity,
-        bool deintMarkedOnly)
-    {
-        // v7.7's boolean survives as a fit mode: "crop 4:3 = yes" is a crop,
-        // "no" is a stretch. Newer callers pass the mode directly.
-        return BuildFilters(outW, outH, baseFps,
-            crop43 ? "crop" : "stretch", "center", "black", scaleAlgo, transportFmt,
-            deinterlace, deintMode, deintParity, deintMarkedOnly);
-    }
-
     /// <summary>
-    /// v7.8: the same chain with an explicit fit mode.
+    /// Build the filter chain.
     ///
+    /// <paramref name="fitMode"/> decides how the source fills the output:
     /// crop    -- crop to the output aspect ratio, then scale (fills the frame,
     ///            discards the overflowing edge)
     /// fit     -- scale down until both edges fit, then pad (keeps the whole

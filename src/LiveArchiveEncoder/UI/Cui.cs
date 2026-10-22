@@ -48,10 +48,14 @@ public static class Cui
             $"{L.Pad(L.T("banner.deinterlacers"), 17)}: {(string.Join(", ", Constants.DeinterlaceFilters.Where(f => availableFilters.Contains(f))) is var d && d.Length > 0 ? d : L.T("value.none"))}");
         Console.WriteLine($"{L.Pad(L.T("banner.scalers"), 17)}: {string.Join(", ", availableScaleAlgorithms.OrderBy(x => x, StringComparer.Ordinal))}");
 
+        Console.WriteLine($"{L.Pad(L.T("config.settingsfile"), 17)}: {ConfigStore.DefaultPath}");
         if (restored)
         {
-            Console.WriteLine($"{L.Pad(L.T("config.restored"), 17)}: {ConfigStore.DefaultPath}"
-                + (stored.SavedAt is null ? "" : $" (saved {stored.SavedAt.Value.LocalDateTime:G})"));
+            // v7.9.3.1: this used to print the same path a second time as
+            // "Restored settings: <path>". One line for the path, one for the
+            // fact that it was restored, and only the date is new information.
+            Console.WriteLine($"{L.Pad(L.T("config.restored"), 17)}: "
+                + (stored.SavedAt is null ? L.T("value.yes") : $"{stored.SavedAt.Value.LocalDateTime:G}"));
         }
         // v7.9.1: a remembered shard count belongs to whatever input it was
         // chosen for. If that input is on a network drive, sharding is off for
@@ -61,7 +65,6 @@ public static class Cui
             c.Parallel = 1;
             Console.WriteLine(L.T("parallel.networkoff"));
         }
-        Console.WriteLine($"{L.Pad(L.T("config.settingsfile"), 17)}: {ConfigStore.DefaultPath}");
         while (true)
         {
             Console.WriteLine($"\n{L.T("menu.heading")}");
@@ -757,12 +760,14 @@ public static class Cui
 
             c.Qv = EncoderMath.DefaultQuality(effective.Name);
 
-            // Audio follows the container: whatever was selected stays only if
-            // it still muxes, otherwise the container's own preference wins.
+            // Audio follows the container. v7.9.3.1: this used to null the
+            // current codec when it no longer muxed and then unconditionally
+            // overwrite it on the next line, so the "keep what still works"
+            // intent was never reached. Say what is being replaced, then pick.
             if (c.AudioEncoder is { Length: > 0 } current
                 && !AudioCatalog.SupportsContainer(current, effective.FormatName))
             {
-                c.AudioEncoder = null;
+                Console.WriteLine(L.T("audio.replaced", current, effective.FormatName));
             }
             c.AudioEncoder = EncoderMath.ChooseAudioEncoder(effective.FormatName, audioAvailable);
             (c.AudioRate, c.AudioChannels, c.AudioKbps) = AudioCatalog.Effective(

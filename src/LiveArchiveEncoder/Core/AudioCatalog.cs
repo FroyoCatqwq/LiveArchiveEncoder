@@ -266,11 +266,16 @@ public static class AudioCatalog
     }
 
     /// <summary>
-    /// Retired in v7.8.1 and moved to
-    /// <c>archive/retired/RetiredConstants.cs</c>: <c>Names</c>, <c>IsKnown</c>
-    /// and <c>KnownFor</c> returned catalogue entries without checking whether
-    /// this FFmpeg build actually has them. The picker only ever uses
-    /// <see cref="Compatible"/>, which filters by availability.
+    /// Whether this codec can be muxed into <paramref name="containerFormat"/>.
+    /// An unmodelled container (absent from <see cref="ContainerCodecs"/>) is
+    /// permissive: the codec list in this file cannot know about a muxer it has
+    /// never been told about.
+    ///
+    /// Only <see cref="Compatible"/> is what the picker offers, because
+    /// availability in the current build is the other half of the question --
+    /// v7.8.1 retired the helpers that answered this one alone
+    /// (<c>Names</c>, <c>IsKnown</c>, <c>KnownFor</c>; see
+    /// <c>archive/retired/RetiredConstants.cs</c>).
     /// </summary>
     public static bool SupportsContainer(string? codec, string containerFormat)
     {

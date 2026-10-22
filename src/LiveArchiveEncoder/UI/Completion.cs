@@ -26,6 +26,9 @@ public static class Completion
         ("--limit", []), ("--recover", []), ("--window", []), ("--fps", []),
         ("--fps-levels", ["13,8,5,3", "25,15,10,5"]),
         ("--qv", []), ("--threads", []), ("--buffer-frames", []),
+        // v7.9.3.1: the stream picks and the x264 knobs were missing from every
+        // shell, so `--video-str<TAB>` completed nothing at all.
+        ("--video-stream", []), ("--audio-stream", []),
         ("--audio-kbps", []), ("--audio-channels", ["1", "2"]), ("--audio-rate", ["22050", "44100"]),
         ("--width", []), ("--height", []),
         // v7.8: container choice and picture fit.
@@ -41,6 +44,8 @@ public static class Completion
         ("--deint-parity", ["auto", "tff", "bff"]),
         ("--x264-preset", ["ultrafast", "veryfast", "faster", "fast", "medium", "slow", "slower"]),
         ("--x264-tune", ["film", "animation", "grain", "stillimage", "fastdecode", "zerolatency"]),
+        ("--x264-profile", ["baseline", "main", "high", "high10", "high422", "high444"]),
+        ("--x264-level", ["3.0", "3.1", "4.0", "4.1", "5.0", "5.1"]),
         ("--audio-mode", ["inline", "separate", "auto"]),
         ("--lang", ["en", "zh"]),
         ("--completion", ["bash", "zsh", "fish", "powershell"]),
@@ -59,10 +64,15 @@ public static class Completion
         // outside a fixed list, so --subtitle completes as a file (paths with
         // spaces are the common case).
         ("--subtitle", ["@FILE"]),
+        ("--subtitle-stream", []),
         ("--subtitle-mode", [.. Constants.SubtitleModes]),
+        // Codecs the container table knows about, unioned: which of them muxes
+        // depends on the output container, which completion cannot know yet.
+        ("--subtitle-codec",
+            [.. Constants.SubtitleCodecsByContainer.Values.SelectMany(v => v).Distinct(StringComparer.Ordinal)]),
         // v7.6: post-processing. --recompress-args takes free text, so it
         // completes as a file (paths with spaces are the common case).
-        ("--recompress", []),
+        // (--recompress itself is a bare flag and lives in FlagOptions.)
         ("--recompress-args", ["@FILE"]),
         ("--recompress-container", ["mp4", "mkv", "avi", "flv"]),
         ("--era", [.. PostProcess.EraPresets.All.Select(p => p.Id)]),
@@ -82,9 +92,8 @@ public static class Completion
     private static readonly string[] FlagOptions =
     [
         "-h", "--help", "--no-crop", "--deint-marked-only", "--no-cuda",
-        "--list-filters", "--quiet", "--no-cui", "--cpu-info", "--ffmpeg-list",
-        "--emit-args",
-        "--recompress", "--no-recompress",
+        "--list-filters", "--list-streams", "--quiet", "--no-cui", "--cpu-info",
+        "--ffmpeg-list", "--emit-args", "--recompress", "--no-recompress",
     ];
 
     private static string[] Resolve(string[] values, IEnumerable<string> encoders)

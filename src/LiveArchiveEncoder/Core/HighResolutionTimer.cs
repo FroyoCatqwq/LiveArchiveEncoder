@@ -8,10 +8,19 @@ namespace LiveArchiveEncoder.Core;
 /// The default Windows timer granularity is ~15.6 ms, which is far too coarse
 /// for a 13 fps (76.9 ms) output slot; raising the resolution to 1 ms keeps the
 /// output cadence stable without busy-waiting for the whole slot.
+///
+/// Reference counted (v7.9.3.1). <c>timeBeginPeriod</c> is a process-wide
+/// setting, and the parallel pipeline runs one <c>Execute</c> per shard: without
+/// a count, the first shard to finish called <c>timeEndPeriod</c> and handed the
+/// coarse 15.6 ms timer back to every shard still encoding. The count is taken
+/// under a lock because Enable/Disable are called from several shard threads at
+/// once.
 /// </summary>
 public static class HighResolutionTimer
 {
-    private static bool _enabled;
+    private static readonly Lock _gate = new();
+    private static int _depth;
+    private static bool _periodRaised;
 
     [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
     private static extern uint TimeBeginPeriod(uint period);
@@ -19,28 +28,44 @@ public static class HighResolutionTimer
     [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
     private static extern uint TimeEndPeriod(uint period);
 
-    public static void Enable()
+    /// <summary>How many callers currently hold the fine timer (0 = not raised).</summary>
+    public static int Depth
     {
-        if (_enabled || !OperatingSystem.IsWindows()) return;
-        if (TimeBeginPeriod(1) == 0) _enabled = true;
+        get { lock (_gate) return _depth; }
     }
 
     /// <summary>
-    /// Give the coarse timer back. Returns the raw winmm result so a failure is
+    /// Take a reference to the 1 ms timer. The period is raised by the first
+    /// caller only; on every other platform this just counts.
+    /// </summary>
+    public static void Enable()
+    {
+        lock (_gate)
+        {
+            _depth++;
+            if (_depth > 1 || _periodRaised) return;
+            if (!OperatingSystem.IsWindows()) return;
+            if (TimeBeginPeriod(1) == 0) _periodRaised = true;
+        }
+    }
+
+    /// <summary>
+    /// Give back one reference. The coarse timer returns only when the last
+    /// holder lets go, so a shard finishing early cannot change the pacing of
+    /// the shards still running. Returns the raw winmm result so a failure is
     /// visible to the caller instead of being swallowed -- <c>timeEndPeriod</c>
     /// reports TIMERR_NOCANDO when the period was never begun, which is exactly
     /// the mistake worth surfacing.
     /// </summary>
     public static uint Disable()
     {
-        if (!_enabled)
+        lock (_gate)
         {
-            _enabled = false;
-            return 0;
+            if (_depth > 0) _depth--;
+            if (_depth > 0 || !_periodRaised) return 0;
+            _periodRaised = false;
+            return TimeEndPeriod(1);
         }
-        uint result = TimeEndPeriod(1);
-        _enabled = false;
-        return result;
     }
 
     /// <summary>Monotonic seconds since boot (same origin as Python's time.monotonic()).</summary>

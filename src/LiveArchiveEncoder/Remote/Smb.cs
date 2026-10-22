@@ -100,14 +100,13 @@ public static class Smb
     public static string? StabilityHint(string? path) =>
         IsRemotePath(path) ? L.T("smb.stability") : null;
 
-    /// <summary>UNC paths always use backslashes; accept what users paste from Explorer or bash.</summary>
-    public static string Normalize(string path)
-    {
-        if (IsSmbUrl(path)) return path.Trim();
-        string p = path.Trim().Replace('/', '\\');
-        if (p.StartsWith(@"\\", StringComparison.Ordinal)) return p;
-        return p;
-    }
+    /// <summary>
+    /// UNC paths always use backslashes; accept what users paste from Explorer or bash.
+    /// An <c>smb://</c> URL keeps its own form, which
+    /// <see cref="UnreachableHint"/> turns into instructions.
+    /// </summary>
+    public static string Normalize(string path) =>
+        IsSmbUrl(path) ? path.Trim() : path.Trim().Replace('/', '\\');
 
     /// <summary>Split <c>\\server\share\rest</c> into its three parts.</summary>
     public static (string Server, string Share, string Remainder)? Split(string path)

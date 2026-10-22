@@ -25,6 +25,7 @@ decision can be re-read later with its original context intact.
 | --- | --- | --- |
 | `retired/RetiredConstants.cs` | v7.8.1 | Unreferenced lookup tables and helpers: `Constants.DefaultFpsLevels`, `Constants.BtbnGplReleaseUrl`, `Constants.LegacyEncoderPatterns` (superseded by one source-generated regex), `EncoderMath.FallbackTransportFormat()`, `AudioCatalog.Names` / `IsKnown` / `KnownFor`, `CliOptions.EffectiveRecover`. |
 | `retired/RetiredTurbo.cs` | v7.9 | The Turbo mode: `RealtimeOptions.Turbo`, the three slot-loop branches plus `FrameBufferPool.WaitForFrame`/`Close`, the `--turbo` CLI plumbing and its seven localisation keys per language. Removed outright after two releases of deprecation — it fought the live-recording simulation the tool exists to produce. |
+| `retired/RetiredHelpers.cs` | v7.9.3.1 | Unreferenced duplicate helpers found by a full declaration/reference sweep: `Probe.HasAudio` and `Probe.Stream` (both superseded by the single-run `Probe.Source`), `SubtitleTrack.FormatMode`, the last copy of the transport-format preference list, and the boolean "crop 4:3" filter chain from v7.7. |
 
 Every entry carries the version it was retired in and what replaced it, so
 restoring one is a copy-paste rather than an archaeology exercise.

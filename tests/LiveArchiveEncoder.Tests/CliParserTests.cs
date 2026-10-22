@@ -272,4 +272,67 @@ public sealed class CliParserTests
         await Assert.That(usage).Contains("--video-stream");
         await Assert.That(usage).Contains("--audio-stream");
     }
+
+    // ------------------------------------------------ v7.9.3.1: hardening
+
+    /// <summary>
+    /// An unknown mode is a parse error, not an exception.
+    ///
+    /// It used to be thrown out of <see cref="CliParser.Parse"/> as a
+    /// FormatException, and Program.Main only inspects the returned error --
+    /// so `--audio-mode bogus` crashed with a stack trace instead of printing
+    /// "ERROR: ..." and exiting 2 like every other bad value.
+    /// </summary>
+    [Test]
+    public async Task AudioMode_RejectsAnUnknownValue()
+    {
+        await Assert.That(Error("--audio-mode", "bogus")).Contains("auto, inline or separate");
+        await Assert.That(Error("--audio-mode")).Contains("--audio-mode requires a value");
+    }
+
+    [Test]
+    [Arguments("inline", LiveArchiveEncoder.Encoding.AudioMode.Inline)]
+    [Arguments("auto", LiveArchiveEncoder.Encoding.AudioMode.Auto)]
+    [Arguments("separate", LiveArchiveEncoder.Encoding.AudioMode.Separate)]
+    public async Task AudioMode_AcceptsTheThreeNames(
+        string text, LiveArchiveEncoder.Encoding.AudioMode expected) =>
+        await Assert.That((await Parse("--audio-mode", text)).AudioMode).IsEqualTo(expected);
+
+    /// <summary>
+    /// The era-preset values have non-nullable defaults, so "was this given?"
+    /// cannot be read off the value. Without these flags an explicit
+    /// <c>--width 320</c> lost to the preset's 352, which is the opposite of
+    /// what the manual promises ("preset is a fallback, not an override").
+    /// </summary>
+    [Test]
+    public async Task ExplicitFlags_AreRecordedSoAPresetCannotWin()
+    {
+        CliOptions bare = await Parse("--era", "flv07");
+        await Assert.That(bare.WidthExplicit).IsFalse();
+        await Assert.That(bare.HeightExplicit).IsFalse();
+        await Assert.That(bare.FpsExplicit).IsFalse();
+        await Assert.That(bare.LimitExplicit).IsFalse();
+        await Assert.That(bare.ScaleAlgoExplicit).IsFalse();
+        await Assert.That(bare.AudioKbpsExplicit).IsFalse();
+        await Assert.That(bare.AudioChannelsExplicit).IsFalse();
+
+        CliOptions typed = await Parse("--era", "flv07", "--width", "320", "--height", "180",
+            "--fps", "12", "--limit", "250", "--scale-algo", "lanczos",
+            "--audio-kbps", "64", "--audio-channels", "2");
+        await Assert.That(typed.WidthExplicit).IsTrue();
+        await Assert.That(typed.HeightExplicit).IsTrue();
+        await Assert.That(typed.FpsExplicit).IsTrue();
+        await Assert.That(typed.LimitExplicit).IsTrue();
+        await Assert.That(typed.ScaleAlgoExplicit).IsTrue();
+        await Assert.That(typed.AudioKbpsExplicit).IsTrue();
+        await Assert.That(typed.AudioChannelsExplicit).IsTrue();
+        // The values themselves still carry what was typed.
+        await Assert.That(typed.Width).IsEqualTo(320);
+        await Assert.That(typed.Limit).IsEqualTo(250.0);
+    }
+
+    /// <summary>--scale-flags is the v7.4 spelling of --scale-algo; both set the flag.</summary>
+    [Test]
+    public async Task ScaleFlags_CountsAsAnExplicitScaleChoice() =>
+        await Assert.That((await Parse("--scale-flags", "bicubic")).ScaleAlgoExplicit).IsTrue();
 }

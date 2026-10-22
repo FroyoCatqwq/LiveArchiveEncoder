@@ -122,6 +122,15 @@ public sealed class FrameBufferPool
     public void Release(int index)
     {
         if (index < 0) return;
-        lock (_sync) _free[_freeCount++] = index;
+        lock (_sync)
+        {
+            // v7.9.3.1: the free list is a fixed array, so a double release
+            // would write past its end and hand the same buffer to two
+            // consumers. Nothing double-releases today; the check is here
+            // because the failure mode is silent corruption rather than an
+            // exception at the call site.
+            if (_freeCount >= _free.Length) return;
+            _free[_freeCount++] = index;
+        }
     }
 }

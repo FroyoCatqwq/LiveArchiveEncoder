@@ -299,8 +299,13 @@ public static class SubtitleTrack
     /// The extra FFmpeg input carrying the track in copy mode, seeked to the
     /// segment like the audio input is -- a subtitle file holds the whole
     /// timeline, so without this the events would land at the wrong moment.
+    ///
+    /// No <c>-t</c> here: the encoder already bounds the whole output with the
+    /// segment duration, and a second copy of it per input is one more thing to
+    /// keep in step. (v7.9.3.1 dropped a duration argument that was never read.)
     /// </summary>
-    public static List<string> CopyInputArgs(SubtitlePlan plan, string sourcePath, double startSeconds, double? duration)
+    public static List<string> CopyInputArgs(
+        SubtitlePlan plan, string sourcePath, double startSeconds)
     {
         string file = plan.CopyFile ?? sourcePath;
         var args = new List<string>();
@@ -356,13 +361,4 @@ public static class SubtitleTrack
         }
         return (target, dir);
     }
-
-    /// <summary>Total subtitle event count is unknown here; this only reports
-    /// the mode for the verbose banner.</summary>
-    public static string FormatMode(SubtitleMode mode) => mode switch
-    {
-        SubtitleMode.Burn => "burn",
-        SubtitleMode.Copy => "copy",
-        _ => "off",
-    };
 }

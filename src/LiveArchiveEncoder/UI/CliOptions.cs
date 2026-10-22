@@ -32,6 +32,21 @@ public sealed class CliOptions
     /// ladder the user actually typed is validated against the base rate.
     /// </summary>
     public bool FpsLevelsExplicit { get; init; }
+
+    // ---- v7.9.3.1: which of the era-shaped values the user actually typed ----
+    //
+    // Every property below has a non-nullable default, so "was it given?" cannot
+    // be read off the value. An era preset is documented as a *fallback*
+    // ("预设是兜底，不是覆盖"), and without these flags `--era flv07 --width 320`
+    // silently encoded at the preset's 352 -- the opposite of what the manual
+    // says. One flag per value the presets touch.
+    public bool FpsExplicit { get; init; }
+    public bool WidthExplicit { get; init; }
+    public bool HeightExplicit { get; init; }
+    public bool LimitExplicit { get; init; }
+    public bool ScaleAlgoExplicit { get; init; }
+    public bool AudioKbpsExplicit { get; init; }
+    public bool AudioChannelsExplicit { get; init; }
     public int? Qv { get; init; }
     public int Threads { get; init; } = 16;
     public int BufferFrames { get; init; } = 6;
@@ -196,6 +211,13 @@ public static class CliParser
         double fps = 13.0;
         string fpsLevels = "13,8,5,3";
         bool fpsLevelsExplicit = false;
+        bool fpsExplicit = false;
+        bool widthExplicit = false;
+        bool heightExplicit = false;
+        bool limitExplicit = false;
+        bool scaleAlgoExplicit = false;
+        bool audioKbpsExplicit = false;
+        bool audioChannelsExplicit = false;
         int? qv = null;
         int threads = 16;
         int bufferFrames = 6;
@@ -320,6 +342,7 @@ public static class CliParser
                 case "--limit":
                     if (!TryValue(out string limitRaw) || !TryDouble(limitRaw, out limit))
                         return (null, "--limit requires a number");
+                    limitExplicit = true;
                     break;
                 case "--recover":
                     if (!TryValue(out string recoverRaw) || !TryDouble(recoverRaw, out double recoverValue))
@@ -333,6 +356,7 @@ public static class CliParser
                 case "--fps":
                     if (!TryValue(out string fpsRaw) || !TryDouble(fpsRaw, out fps))
                         return (null, "--fps requires a number");
+                    fpsExplicit = true;
                     break;
                 case "--fps-levels":
                     if (!TryValue(out fpsLevels)) return (null, "--fps-levels requires a value");
@@ -354,10 +378,12 @@ public static class CliParser
                 case "--audio-kbps":
                     if (!TryValue(out string kbpsRaw) || !int.TryParse(kbpsRaw, out audioKbps))
                         return (null, "--audio-kbps requires an integer");
+                    audioKbpsExplicit = true;
                     break;
                 case "--audio-channels":
                     if (!TryValue(out string chRaw) || !int.TryParse(chRaw, out audioChannels))
                         return (null, "--audio-channels requires an integer");
+                    audioChannelsExplicit = true;
                     break;
                 case "--audio-rate":
                     if (!TryValue(out string rateRaw) || !int.TryParse(rateRaw, out int rateValue))
@@ -404,10 +430,12 @@ public static class CliParser
                 case "--width":
                     if (!TryValue(out string wRaw) || !int.TryParse(wRaw, out width))
                         return (null, "--width requires an integer");
+                    widthExplicit = true;
                     break;
                 case "--height":
                     if (!TryValue(out string hRaw) || !int.TryParse(hRaw, out height))
                         return (null, "--height requires an integer");
+                    heightExplicit = true;
                     break;
                 case "--container":
                     if (!TryValue(out container)) return (null, "--container requires a value");
@@ -431,6 +459,7 @@ public static class CliParser
                 case "--no-crop": noCrop = true; break;
                 case "--scale-algo" or "--scale-flags":
                     if (!TryValue(out scaleAlgo)) return (null, "--scale-algo requires a value");
+                    scaleAlgoExplicit = true;
                     break;
                 case "--deinterlace":
                     if (!TryValue(out deinterlace)) return (null, "--deinterlace requires a value");
@@ -523,13 +552,17 @@ public static class CliParser
                 case "--no-cui": noCui = true; break;
                 case "--audio-mode":
                     if (!TryValue(out string modeRaw)) return (null, "--audio-mode requires a value");
-                    audioMode = modeRaw.Trim().ToLowerInvariant() switch
+                    // v7.9.3.1: this used to throw out of Parse(), which
+                    // Program.Main does not catch -- a typo in a flag turned
+                    // into an unhandled-exception crash instead of the
+                    // "ERROR: ..." + exit 2 every other bad value gets.
+                    switch (modeRaw.Trim().ToLowerInvariant())
                     {
-                        "auto" => Encoding.AudioMode.Auto,
-                        "inline" => Encoding.AudioMode.Inline,
-                        "separate" => Encoding.AudioMode.Separate,
-                        _ => (Encoding.AudioMode?)null ?? throw new FormatException("bad audio mode"),
-                    };
+                        case "auto": audioMode = Encoding.AudioMode.Auto; break;
+                        case "inline": audioMode = Encoding.AudioMode.Inline; break;
+                        case "separate": audioMode = Encoding.AudioMode.Separate; break;
+                        default: return (null, "--audio-mode must be auto, inline or separate");
+                    }
                     break;
                 case "--cpu-info": cpuInfo = true; break;
                 case "--help" or "-h":
@@ -592,6 +625,13 @@ public static class CliParser
             Fps = fps,
             FpsLevels = fpsLevels,
             FpsLevelsExplicit = fpsLevelsExplicit,
+            FpsExplicit = fpsExplicit,
+            WidthExplicit = widthExplicit,
+            HeightExplicit = heightExplicit,
+            LimitExplicit = limitExplicit,
+            ScaleAlgoExplicit = scaleAlgoExplicit,
+            AudioKbpsExplicit = audioKbpsExplicit,
+            AudioChannelsExplicit = audioChannelsExplicit,
             Qv = qv,
             Threads = threads,
             BufferFrames = bufferFrames,

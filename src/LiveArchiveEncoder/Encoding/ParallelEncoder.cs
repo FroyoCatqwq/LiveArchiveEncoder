@@ -240,7 +240,7 @@ public static class ParallelEncoder
 
             long totalBytes = dst.Length;
             double avgTotalKbps = totalBytes * 8.0 / Math.Max(0.001, joined) / 1000.0;
-            bool hasAudio = results[0].AvgTotalKbps != results[0].AvgVideoKbps;
+            bool hasAudio = results[0].HasAudio;
 
             return new EncodeResult
             {
@@ -253,6 +253,7 @@ public static class ParallelEncoder
                 OutputHeight = results[0].OutputHeight,
                 AvgVideoKbps = Math.Max(0.0, avgTotalKbps - (hasAudio ? o.AudioKbps : 0.0)),
                 AvgTotalKbps = avgTotalKbps,
+                HasAudio = hasAudio,
                 Fresh = results.Sum(r => r.Fresh),
                 Repeated = results.Sum(r => r.Repeated),
                 Deinterlace = results[0].Deinterlace,

@@ -7,8 +7,6 @@ namespace LiveArchiveEncoder.Core;
 /// <summary>Selection/derivation helpers shared by CUI, CLI and the encoder.</summary>
 public static class EncoderMath
 {
-    private static readonly string[] PreferredTransportFallback = ["yuv420p", "yuv422p", "yuv444p", "rgb24", "gray"];
-
     public static int DefaultQuality(string name) =>
         Constants.DefaultQuality.TryGetValue(name, out int value) ? value : 10;
 

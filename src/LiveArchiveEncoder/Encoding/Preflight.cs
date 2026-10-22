@@ -48,7 +48,11 @@ public static class Preflight
             // v7.9: a URL source needs the reconnect family on this throwaway
             // read too, or a flaky connection fails the preflight and with it
             // an encode that would have survived.
+            // v7.9.3.1: the share half was missing here -- every other read path
+            // adds both, and without -rw_timeout a stalled CIFS mount hangs the
+            // trial instead of failing it fast, which is this file's whole job.
             cmd.AddRange(Remote.HttpSource.ReadArgs(sourcePath));
+            cmd.AddRange(Remote.Smb.RemoteReadArgs(sourcePath));
             if (!string.Equals(hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
                 cmd.AddRange(["-hwaccel", hwaccel]);
             if (startSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(startSeconds)]);
@@ -120,6 +124,8 @@ public static class Preflight
     {
         var cmd = new List<string> { ffmpeg, "-hide_banner", "-loglevel", "error" };
         cmd.AddRange(Remote.HttpSource.ReadArgs(sourcePath));
+        // Same reason as the video trial: a share read needs its timeout.
+        cmd.AddRange(Remote.Smb.RemoteReadArgs(sourcePath));
         if (startSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(startSeconds)]);
         cmd.AddRange(["-i", sourcePath, "-map", StreamSelection.AudioMap(0, audioStream), "-vn", "-t", "2"]);
         cmd.AddRange(["-c:a", audioEncoder]);

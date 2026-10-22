@@ -78,6 +78,11 @@ public static class Hwaccel
             [
                 ffmpeg, "-hide_banner", "-loglevel", "error",
                 .. Remote.HttpSource.ReadArgs(sourcePath),
+                // v7.9.3.1: the probe reads the source like any other pass, so a
+                // share gets its rw_timeout here too -- without it a stalled CIFS
+                // mount turns a one-frame trial into a 120 s timeout, which reads
+                // as "this hwaccel method does not work" for the wrong reason.
+                .. Remote.Smb.RemoteReadArgs(sourcePath),
                 "-hwaccel", method,
                 "-i", sourcePath,
                 "-frames:v", "1",

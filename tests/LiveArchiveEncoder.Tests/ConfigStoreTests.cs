@@ -47,6 +47,78 @@ public sealed class ConfigStoreTests
         await Assert.That(loaded.Language).IsEqualTo("en");
     }
 
+    /// <summary>
+    /// v7.9.3.1: the same file, asked for the other answer.
+    ///
+    /// <see cref="ConfigStore.Load"/> answers "start from defaults", which is
+    /// right at startup. A caller that installs the result over a live
+    /// configuration needs the opposite answer, because "defaults" means every
+    /// setting the user had is gone.
+    /// </summary>
+    [Test]
+    public async Task TryLoad_ReportsACorruptFileAsNull()
+    {
+        File.WriteAllText(_file, "{ this is not json");
+
+        await Assert.That(ConfigStore.TryLoad(_file)).IsNull();
+        await Assert.That(ConfigStore.TryLoad(Path.Combine(_dir, "nope.json"))).IsNull();
+    }
+
+    [Test]
+    public async Task TryLoad_ReadsAValidFile()
+    {
+        File.WriteAllText(_file, """{ "Version": 4, "Encoder": "flv", "Width": 352 }""");
+
+        UserConfig? loaded = ConfigStore.TryLoad(_file);
+
+        await Assert.That(loaded).IsNotNull();
+        await Assert.That(loaded!.Encoder).IsEqualTo("flv");
+        await Assert.That(loaded.Width).IsEqualTo(352);
+    }
+
+    /// <summary>
+    /// A list or nested object spelled as null must not crash the shell.
+    ///
+    /// System.Text.Json writes a JSON null straight into the property, so every
+    /// Count/Select in Apply has to survive it. Before v7.9.3.1 a single
+    /// <c>"FpsLevels": null</c> in a hand-edited file killed the process on
+    /// startup -- with an NRE pointing at ConfigStore, which says nothing about
+    /// the file the user just edited.
+    /// </summary>
+    [Test]
+    public async Task NullBlocksInJsonApplyWithoutThrowing()
+    {
+        File.WriteAllText(_file, """
+            {
+              "Version": 4,
+              "Encoder": "flv",
+              "FpsLevels": null,
+              "FpsLevelKbps": null,
+              "Recompress": null,
+              "Subtitles": null,
+              "Language": null,
+              "X264Preset": null,
+              "ScaleAlgo": null,
+              "PadColor": null
+            }
+            """);
+
+        UserConfig? loaded = ConfigStore.TryLoad(_file);
+        await Assert.That(loaded).IsNotNull();
+
+        var c = new Config();
+        ConfigStore.Apply(loaded!, c, []);
+
+        // Whatever came back has to be usable, not merely non-null.
+        await Assert.That(c.FpsLevels.Count).IsGreaterThan(0);
+        await Assert.That(c.Recompress.Args).IsNotNull();
+        await Assert.That(c.Subtitles.Files.Count).IsEqualTo(0);
+        await Assert.That(c.Language).IsEqualTo("en");
+        await Assert.That(c.X264Preset).IsEqualTo("medium");
+        await Assert.That(c.ScaleAlgo).IsEqualTo("neighbor");
+        await Assert.That(c.PadColor).IsEqualTo("black");
+    }
+
     [Test]
     public async Task ToolchainAndPlaybackSettingsSurviveARoundTrip()
     {

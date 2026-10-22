@@ -172,19 +172,30 @@ public static class ConfigStore
     public static string DefaultPath => Path.Combine(RootDirectory, "config.json");
 
     public static UserConfig Load(string? path = null)
+        => TryLoad(path ?? DefaultPath) ?? new UserConfig();
+
+    /// <summary>
+    /// Same read, but a missing or unparsable file returns null instead of an
+    /// empty <see cref="UserConfig"/> (v7.9.3.1).
+    ///
+    /// The difference matters for a named profile: <see cref="Load"/> answers
+    /// "start from defaults", which is right at startup and wrong when the
+    /// caller is about to install the result over a live configuration -- a
+    /// truncated profile used to reset every setting instead of being reported
+    /// as the bad file it is.
+    /// </summary>
+    public static UserConfig? TryLoad(string? path)
     {
-        string file = path ?? DefaultPath;
-        if (!File.Exists(file)) return new UserConfig();
+        if (path is null || !File.Exists(path)) return null;
         try
         {
-            UserConfig? cfg = JsonSerializer.Deserialize(
-                File.ReadAllText(file), UserConfigJsonContext.Default.UserConfig);
-            return cfg ?? new UserConfig();
+            return JsonSerializer.Deserialize(
+                File.ReadAllText(path), UserConfigJsonContext.Default.UserConfig);
         }
         catch (Exception exc) when (exc is JsonException or IOException or UnauthorizedAccessException)
         {
             // A corrupt file must never keep the program from starting.
-            return new UserConfig();
+            return null;
         }
     }
 
@@ -263,8 +274,11 @@ public static class ConfigStore
 
     private static SubtitleConfig CloneSubtitles(SubtitleConfig s) => new()
     {
-        Mode = s.Mode,
-        Files = [.. s.Files],
+        // v7.9.3.1: a hand-edited or third-party file can spell any of these as
+        // null, and a null in a non-nullable slot only surfaces later as an
+        // NRE somewhere unrelated (Config.Subtitles.Files.Count, Args.Length).
+        Mode = s.Mode.Or("burn"),
+        Files = s.Files is null ? [] : [.. s.Files.Where(f => f.HasText)],
         Stream = s.Stream,
         Codec = s.Codec,
     };
@@ -279,8 +293,8 @@ public static class ConfigStore
     private static RecompressSettings CloneRecompress(RecompressSettings s) => new()
     {
         Enabled = s.Enabled,
-        Args = s.Args,
-        Container = s.Container,
+        Args = s.Args.Or(""),
+        Container = s.Container.Or("mp4"),
     };
 
     /// <summary>
@@ -313,11 +327,15 @@ public static class ConfigStore
         c.StartTimeSeconds = stored.StartTimeSeconds;
         c.EndTimeSeconds = stored.EndTimeSeconds;
         c.Fps = stored.Fps;
-        if (stored.FpsLevels.Count > 0) c.FpsLevels = [.. stored.FpsLevels];
+        // v7.9.3.1: a JSON file may spell any list (or nested object) as null.
+        // System.Text.Json honours that literally, so every Count/Select below
+        // has to survive it -- a `"FpsLevels": null` used to crash the shell on
+        // startup with an NRE, which is a lot of blast radius for one typo.
+        if (stored.FpsLevels is { Count: > 0 } levels) c.FpsLevels = [.. levels];
         // Thresholds are keyed by FPS, so a rung that is no longer on the ladder
         // is dropped here instead of silently resurrecting a stale value later.
-        if (stored.FpsLevelKbps.Count > 0)
-            c.FpsLevelKbps = [.. stored.FpsLevelKbps.Select(CloneRung)];
+        if (stored.FpsLevelKbps is { Count: > 0 } rungs)
+            c.FpsLevelKbps = [.. rungs.Select(CloneRung)];
         c.Limit = stored.Limit;
         c.Recover = stored.Recover;
         c.Window = stored.Window;
@@ -339,19 +357,21 @@ public static class ConfigStore
         c.PadColor = stored.PadColor.Or("black").Trim();
         // Migration: "crop 4:3 = no" meant no crop at all, i.e. a plain stretch.
         if (stored.Crop43 is false) c.FitMode = "stretch";
-        c.ScaleAlgo = stored.ScaleAlgo;
-        c.Deinterlace = stored.Deinterlace;
-        c.DeintMode = stored.DeintMode;
-        c.DeintParity = stored.DeintParity;
+        c.ScaleAlgo = stored.ScaleAlgo.Or(c.ScaleAlgo);
+        c.Deinterlace = stored.Deinterlace.Or(c.Deinterlace);
+        c.DeintMode = stored.DeintMode.Or(c.DeintMode);
+        c.DeintParity = stored.DeintParity.Or(c.DeintParity);
         c.DeintMarkedOnly = stored.DeintMarkedOnly;
         c.Hwaccel = SanitiseHwaccel(stored.Hwaccel);
-        c.X264Preset = stored.X264Preset;
-        c.X264Tune = stored.X264Tune;
-        c.X264Profile = stored.X264Profile;
-        c.X264Level = stored.X264Level;
+        // Every one of these is read with .Length / fed to FFmpeg as a value, so
+        // a null has to become the safe spelling rather than travel onwards.
+        c.X264Preset = stored.X264Preset.Or("medium");
+        c.X264Tune = stored.X264Tune.Or("");
+        c.X264Profile = stored.X264Profile.Or("");
+        c.X264Level = stored.X264Level.Or("");
         // Never restore a nonsensical shard count from an older/corrupt file.
         c.Parallel = Math.Max(1, stored.Parallel);
-        c.Language = stored.Language;
+        c.Language = stored.Language.HasText ? stored.Language : c.Language;
 
         // A source that is not installed is still remembered (so an install picks
         // it up later). "path" means "stay on the system FFmpeg" and is the only
@@ -368,9 +388,10 @@ public static class ConfigStore
 
         // Restored whole rather than field by field: the stage is plain data
         // with no dependency on the FFmpeg build, so there is nothing here that
-        // could be unavailable the way an encoder can be.
-        c.Recompress = CloneRecompress(stored.Recompress);
-        c.Subtitles = CloneSubtitles(stored.Subtitles);
+        // could be unavailable the way an encoder can be. A file that omits or
+        // nulls the block keeps the live one.
+        if (stored.Recompress is not null) c.Recompress = CloneRecompress(stored.Recompress);
+        if (stored.Subtitles is not null) c.Subtitles = CloneSubtitles(stored.Subtitles);
         c.EraPreset = stored.EraPreset;
     }
 

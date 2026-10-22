@@ -110,12 +110,18 @@ public static class Cli
         try { Validation.ValidateOutputExtension(dst, encoder); }
         catch (ArgumentException exc) { Console.Error.WriteLine($"ERROR: {exc.Message}"); return 2; }
 
-        // Era values are the fallback, not an override: an explicit flag still wins.
-        double effectiveFps = era?.Fps ?? args.Fps;
-        int effectiveWidth = era?.Width ?? args.Width;
-        int effectiveHeight = era?.Height ?? args.Height;
-        double effectiveLimit = era?.LimitKbps ?? args.Limit;
-        string effectiveScaleAlgo = era?.ScaleAlgo ?? args.ScaleAlgo;
+        // Era values are the fallback, not an override: an explicit flag still
+        // wins (v7.9.3.1 -- this used to read `era?.Fps ?? args.Fps`, and since
+        // every one of those properties has a non-nullable default, the preset
+        // won every time. The manual has always said the opposite: "预设是兜底，
+        // 不是覆盖").
+        double effectiveFps = args.FpsExplicit ? args.Fps : era?.Fps ?? args.Fps;
+        int effectiveWidth = args.WidthExplicit ? args.Width : era?.Width ?? args.Width;
+        int effectiveHeight = args.HeightExplicit ? args.Height : era?.Height ?? args.Height;
+        double effectiveLimit = args.LimitExplicit ? args.Limit : era?.LimitKbps ?? args.Limit;
+        string effectiveScaleAlgo = args.ScaleAlgoExplicit
+            ? args.ScaleAlgo
+            : era?.ScaleAlgo ?? args.ScaleAlgo;
 
         (double baseFps, bool fpsExact) = EncoderMath.ChooseBaseFps(effectiveFps, encoder.Caps);
         if (!fpsExact)
@@ -178,8 +184,12 @@ public static class Cli
         // --audio-kbps is reported as the error it is.
         int? audioRate = args.AudioRate ?? era?.AudioRate;
         bool audioRateExplicit = args.AudioRate is not null;
-        int audioChannels = era?.AudioChannels ?? args.AudioChannels;
-        int audioKbps = era?.AudioKbps ?? args.AudioKbps;
+        // Same rule as the picture: an explicit flag beats the preset.
+        // --audio-rate needs no flag because null already means "not given".
+        int audioChannels = args.AudioChannelsExplicit
+            ? args.AudioChannels
+            : era?.AudioChannels ?? args.AudioChannels;
+        int audioKbps = args.AudioKbpsExplicit ? args.AudioKbps : era?.AudioKbps ?? args.AudioKbps;
         if (encoder.Name == "amv")
         {
             if (audioAvailable.Contains("adpcm_ima_amv")) audioEncoder = "adpcm_ima_amv";

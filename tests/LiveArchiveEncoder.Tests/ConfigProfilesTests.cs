@@ -127,4 +127,61 @@ public sealed class ConfigProfilesTests
             await Assert.That(File.Exists(Path.Combine(root, "outside.json"))).IsFalse();
         });
     }
+
+    /// <summary>
+    /// v7.9.3.1: a truncated profile is refused instead of applied.
+    ///
+    /// It used to load through <c>ConfigStore.Load</c>, which answers with a
+    /// default snapshot when the JSON is unreadable -- so "load this broken
+    /// file" quietly reset every setting in the session and reported success.
+    /// </summary>
+    [Test]
+    public async Task MalformedProfileChangesNothing()
+    {
+        await WithTempRoot(async root =>
+        {
+            string shelf = Path.Combine(root, "configs");
+            Directory.CreateDirectory(shelf);
+            string broken = Path.Combine(shelf, "broken.json");
+            await File.WriteAllTextAsync(broken, "{ this is not json");
+
+            var config = new Config { Width = 512, Height = 288, Fps = 15 };
+
+            FileInfo? read = ConfigProfiles.LoadInto(config, new FileInfo(broken), []);
+
+            await Assert.That(read).IsNull();
+            await Assert.That(config.Width).IsEqualTo(512);
+            await Assert.That(config.Height).IsEqualTo(288);
+            await Assert.That(config.Fps).IsEqualTo(15);
+        });
+    }
+
+    /// <summary>A profile written by the tool is a complete snapshot: it round-trips.</summary>
+    [Test]
+    public async Task FullSnapshotsRoundTrip()
+    {
+        await WithTempRoot(async _ =>
+        {
+            var saved = new Config
+            {
+                Width = 352, Height = 264, Fps = 15, Limit = 300, Recover = 225,
+                ScaleAlgo = "bicubic", AudioKbps = 32, AudioChannels = 1,
+                Subtitles = new SubtitleConfig { Mode = "copy", Files = ["a.ass"], Codec = "ass" },
+                Recompress = new RecompressSettings { Enabled = true, Args = "-c:v libx264", Container = "mp4" },
+            };
+            ConfigProfiles.SaveAs(saved, "snapshot");
+
+            var live = new Config();
+            FileInfo? read = ConfigProfiles.LoadInto(live, ConfigProfiles.List()[0], []);
+
+            await Assert.That(read).IsNotNull();
+            await Assert.That(live.Width).IsEqualTo(352);
+            await Assert.That(live.Fps).IsEqualTo(15);
+            await Assert.That(live.ScaleAlgo).IsEqualTo("bicubic");
+            await Assert.That(live.Recompress.Enabled).IsTrue();
+            await Assert.That(live.Recompress.Args).IsEqualTo("-c:v libx264");
+            await Assert.That(live.Subtitles.Mode).IsEqualTo("copy");
+            await Assert.That(live.Subtitles.Files).IsEquivalentTo(new[] { "a.ass" });
+        });
+    }
 }

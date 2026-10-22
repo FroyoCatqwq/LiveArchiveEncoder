@@ -12,8 +12,9 @@ exactly what v6.3.3 would have produced.
 > `archive/retired/`, so it can come back as a separate project). Subtitle
 > burning/copying, added in v7.9, covers the "put text on the picture" job.
 
-Full user guide: [`docs/usage.md`](docs/usage.md); where the era-preset numbers
-come from: [`docs/era-presets.md`](docs/era-presets.md).
+Full user guide: [`docs/usage.md`](docs/usage.md). Version history, from Python
+v6.2.2 to the current release: [`docs/CHANGELOG.md`](docs/CHANGELOG.md). Where
+the era-preset numbers come from: [`docs/era-presets.md`](docs/era-presets.md).
 
 **The port keeps the realtime simulation semantics of v6.3.3.** The capture
 thread feeds frames at the source cadence and the main loop emits one output
@@ -123,7 +124,7 @@ distributions should take the JIT build. FFmpeg is still needed either way.
 
 ```bash
 # TUnit unit tests — identical command on both platforms (runs on MTP since v7.8.3)
-dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 392 on Windows
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 408 on Windows
 # and the same suite against the other runtime:
 dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 ```
@@ -148,7 +149,7 @@ put that build's `bin` on `PATH` first):
 ```bash
 pip install -r tests/e2e/requirements.txt   # pytest==9.1.1 + pytest-xdist
 python tools/e2e.py                          # two-phase run (see below)
-pytest                                       # same 157 cases, one at a time
+pytest                                       # same 162 cases, one at a time
 pytest tests/e2e/test_compare_matrix.py -k wmv2   # a single case
 CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 ```
@@ -158,7 +159,7 @@ CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 | `test_compare_matrix.py` | 12 | encoder/param matrix, ffprobe structure vs v6.3.3 |
 | `test_error_paths.py` | 11 | failure paths, exit codes vs the baseline |
 | `test_feature_sweep.py` | 35 | every legacy encoder, 2 s clip (2 skipped: no demuxer) |
-| `test_option_smoke.py` | 58 | option plumbing, incl. the recompress stage and era presets |
+| `test_option_smoke.py` | 63 | option plumbing, incl. the recompress stage and era presets |
 | `test_cui_smoke.py` | 12 | interactive menu assertions (40+ checks, one extra on Linux) |
 | `test_stream_selection.py` | 9 | stream picks by absolute index, plus time-range clipping |
 | `test_subtitles.py` | 7 | burn / copy / off, sidecar and embedded, bad requests |
@@ -288,88 +289,20 @@ it is **not** the default and it is **not** faster:
 pipeline when the muxer rejects the split. Measured numbers are in
 `docs/test-report-v7.md` §7.
 
-### v7.9
+## Changes since the port
 
-Stream selection (`--video-stream`/`--audio-stream`/`--list-streams`), subtitles
-(read + burn with libass, or carry as a stream where the container has one),
-HTTP/HTTPS input, AVI for h261/h263/h263p, a font-path fix (bare file names now
-resolve against the tool's `fonts/` directory, and a monochrome-first `.ttc`
-falls back to a usable CJK font), and **Turbo removed outright** — `--turbo` is
-now an unrecognized argument and the code lives in `archive/retired/`. Details
-in `docs/usage.md` §7.16 and the v7.9 notes there.
+Version-by-version history moved to **[`docs/CHANGELOG.md`](docs/CHANGELOG.md)** —
+it covers Python v6.2.2 through the current release, with what changed, why, and
+whether an output changes. This file stays about *how to use* the tool.
 
-### v7.9.1
-
-* **Watermark stage retired.** The six `--watermark*` flags, the CUI item, the
-  `Watermark` settings block and the `_wm` intermediate product are gone; passing
-  an old flag is an `unrecognized argument`. The code is archived (with revival
-  notes) in `archive/retired/RetiredWatermark.cs` and `RetiredFontPicking.cs`.
-  The recompress pass stays — `_web` products are unchanged.
-* **Subtitles in the interactive menu.** A new item edits mode (burn/copy/off),
-  picks an embedded track by probing the source, names sidecar files, and
-  chooses the copy-mode codec. Files and an embedded track are mutually
-  exclusive. Previously subtitles were CLI-only.
-* **Mapped network drives.** A drive letter pointing at a share
-  (`DriveInfo.DriveType == Network`, which is how Tailscale and "map network
-  drive" appear) now counts as remote: it prints a stability warning and forces
-  `--parallel 1`, because sharding a realtime capture across several readers of
-  one network file is how you get a bitrate collapse in the middle of a recording.
-* **Settings file ↔ command line.** `--emit-args[=FILE]` and `--save-config FILE`
-  convert between the two, both without encoding; see §7.6 of the guide.
-* `publish/aot-avx2` is gone for good, and the app title now says v7.9.1.
-
-### v7.9.2
-
-**Fixed: parallel shards joined straight into FLV corrupted the picture.**
-
-Reported against a 243 s / 196 Mbit/s rawvideo capture cut into five shards: the
-product played sound to the end while the picture stopped at 00:03:14. Every
-shard was fine on its own (730 frames, zero decode errors each); joining only
-`3+4` with `-f concat -c copy` reproduced 5589 decoder complaints
-(`Bad picture start code`), and the audio track kept the format duration at
-238.6 s, so the 2% length check passed.
-
-Shards are now staged as Matroska and remuxed to the requested container after
-the join: same shards, 3651/3651 frames, no decode errors. The join is also
-verified by **video packet count** against the slots the shards produced, since
-the duration check alone cannot see a missing picture. `LAE_KEEP_SHARDS=1`
-keeps the shard directory for diagnosis. Details in `docs/usage.md` §7.5 and the
-v7.9.2 notes there.
-
-This release was verified on Windows only (the stated goal); Linux numbers in
-the docs are the v7.9.1 run.
-
-### v7.9.3
-
-Two small additions to the interactive shell:
-
-* **Menu 18 shows the command line.** Whatever the menu is currently holding is
-  printed as one equivalent command line, from the same emitter that backs
-  `--emit-args` — not a hand-written paraphrase. The same line is printed right
-  before the "start encoding?" prompt, so a setup worth keeping can be copied
-  into a script instead of retyped.
-* **Menu 19 manages named settings files.** Anything under
-  `LiveArchiveEncoder/configs/*.json` is listed, loadable by number, and can be
-  created with "save current as", loaded from an arbitrary path, or deleted.
-  Loading goes through the same `Apply` as startup restore, so a profile written
-  against another FFmpeg build cannot install a codec this build lacks, and name
-  normalisation keeps `../../evil` inside the shelf. `LAE_CONFIG_DIR` moves the
-  whole config root, which is also how the e2e test isolates itself.
-
-Details in `docs/usage.md` §7.6.
-
-### Audio limits (v7.8.2)
-
-Every audio encoder has sample-rate and bitrate limits, some of them stricter
-than they look: `mp2` starts at 16 kHz and needs 32+ kbps at 44.1/48 kHz (and
-only takes standard Layer II bitrates), `wmav1/wmav2` bottom out at 24 kbps,
-`libvorbis` scales its whole band with the rate (8-40 kbps at 8 kHz, 32-224 at
-48 kHz), and the muxer can be the stricter side — FLV takes only
-11025/22050/44100/48000 for MP3, and MP4 refuses MP3 below 16 kHz. All of these
-numbers were probed against the FFmpeg master build the toolchain downloads and
-live in `Core/AudioCatalog.cs`. Explicit CLI values that break a limit are
-rejected with the legal list (exit 2); era-preset values are snapped to the
-nearest legal one and the correction is logged. Full table: `docs/usage.md` §5.
+The short version of the last few releases: v7.9 added stream selection,
+subtitles (burn or carry), HTTP input and removed Turbo; v7.9.1 retired the
+watermark stage, added the subtitle menu, forced single-pass on network drives,
+and added `--emit-args` / `--save-config`; v7.9.2 fixed a corrupted picture when
+parallel shards were joined straight into FLV; v7.9.3 added the equivalent
+command line (menu 18) and named settings files (menu 19); v7.9.3.1 is a
+full-project review — presets no longer override explicit flags, and a handful
+of crash paths are gone.
 
 ## Layout
 
@@ -427,20 +360,19 @@ docs/
   runs/                       archived harness output from past verification runs
 ```
 
-## What was actually changed versus v6.3.3
+## How this differs from v6.3.3
 
-| Area | Python v6.3.3 | C# v7 |
-| --- | --- | --- |
-| Frame storage | `deque(maxlen=N)` of freshly allocated `bytes` | pre-allocated pool of `capacity + 2` buffers, ownership transferred instead of copied; zero per-frame allocation |
-| Pipe reads | 3 blocking threads | 3 async readers over raw byte buffers, no per-line `string` until a key matches |
-| Slot timing | `time.sleep` (~15.6 ms granularity) | `timeBeginPeriod(1)` + sleep to an absolute deadline (~1 ms granularity) |
-| Progress parsing | `str.split` per line | span-based parse, no intermediate strings |
-| Cancellation | `KeyboardInterrupt` | `CancellationToken` propagated to the loop; child processes killed in `finally` |
-| Result | dict | typed `EncodeResult` |
+The port is behaviour-equivalent by default: FFmpeg command lines (including the
+position of `-threads`), the adaptive FPS state machine, frame-selection rules,
+the rolling bitrate maths and every default stay as they were. What changed is
+below the waterline — pre-allocated frame buffers instead of a `deque` of fresh
+`bytes`, three async pipe readers instead of three blocking threads, a 1 ms
+timer instead of a 15.6 ms `sleep`, and typed results instead of dicts.
 
-Deliberately **not** changed: the FFmpeg command lines (including the position of
-`-threads`), the adaptive FPS state machine, frame-selection rules, rolling
-bitrate maths, preflight steps, and every default value.
+The full table, plus the six baseline defects this rewrite deliberately fixes
+(AMV produced 0 bytes, CUDA on by default, two wrong SMB options, audio limits
+checked only for sample rate, fonts never resolved), is in
+[`docs/CHANGELOG.md`](docs/CHANGELOG.md) under "v7.0 → v7.2" and "v6.3.3".
 
 ## Known constraints
 
