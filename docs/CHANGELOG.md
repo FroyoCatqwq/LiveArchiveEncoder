@@ -18,6 +18,94 @@
 
 ---
 
+## v7.9.4（2026-10-22）
+
+**主题：把三个报上来的编码缺陷修到底。** 一个是"能编码但画面全黑"，一个是"合法的
+容器组合被拒"，一个是"声明支持、实际拒绝的帧率把整场分片跑废"。修第三个时又牵出
+第四个：并行产物写 AVI 时，容器头里的帧率是假的。
+
+### ⚠ msrle 编码出来是黑屏
+
+`--encoder msrle` 出的片子能播、有时长、有音轨，但画面纯黑。根因有两个，都在
+pal8 这条路上：
+
+* **rawvideo 的 pal8 帧比 `w*h` 多 1024 字节**（调色板跟着每一帧走）。管道读写
+  按 `w*h` 切帧，于是每帧少读 1024 字节、帧数据整体前移了 1 KB —— 实测这份
+  BtbN 构建：64x48 的 pal8 rawvideo 每帧 **4096** 字节，不是 3072。索引颜色编码器
+  的全部颜色都在调色板里，调色板位置一错就是黑屏。
+  `PixelFormatUtil.RawFrameSize` 现在对 pal8 加回 1024 字节（`rgb8` / `bgr8` 是
+  打包的 8 位色，不加）。
+* **Matroska 暂存会丢调色板**。分片一律先写 `.mkv` 再拼（v7.9.2 的铁律），而
+  Matroska 里未知的 VfW 编码器只存 `V_MS/VFW/FOURCC` + `BITMAPINFOHEADER`，那个
+  头里没有调色板。实测同一段 2 秒素材：直接写 AVI 是 YAVG **123**，过一趟 `.mkv`
+  之后是 YAVG **16**（纯黑）。所以 pal8 编码器现在**拒绝分片**，改单遍编码
+  （`--parallel` 会打印"已跳过分片"并说明原因），而不是交出黑屏产物。
+
+实测（2026-10-22，用户报告的完整命令）：修复前画面纯黑，修复后首帧 YAVG 122.6，
+颜色条与运动元素都在；20 秒 384x216 msrle + mp3，302 槽 / 106 新帧。
+
+### ⚠ mpeg1video / mpeg2video 不能写 AVI
+
+`... --encoder mpeg1video ... out.avi` 被拒：
+`Output extension '.avi' does not match selected muxer 'mpeg'`。AVI 从 v7.8 起就是
+这两个编码器的合法目标（`ContainerChoicesByEncoder` 里有），但扩展名检查只认
+**编码器的默认容器**，于是"用户把输出名写成 .avi"这件事完全没有生效路径 ——
+只有额外再给一个 `--container avi` 才行。
+
+现在**没给 `--container` 时，输出扩展名就是容器请求**：`EncoderMath.ResolveByExtension`
+在 mpeg1video/mpeg2video（以及 mpeg4→mp4、libxvid→mp4、libx264→mkv/avi）上生效，
+CLI 与 CUI 都会打印一句说明。扩展名不属于该编码器任何容器时（`rv20` + `.mkv`）
+仍按原样报错，不做静默兜底。
+
+### ⚠ mpeg1video 的 fps 校验（声明值与实际能力不一致）
+
+`ffmpeg -h encoder=mpeg1video` 的 "Supported framerates" 里**明明列着 5/1、10/1、
+12/1、15/1**，但真正开编码器时全部被拒：
+
+```
+MPEG-1/2 does not support 15/1 fps
+```
+
+那是 libmpeg3 的"unofficial economy rates"，libavcodec 只在降低 strict 标准时
+才允许。实测（2026-10-22）：mpeg1video 接受 24/23.976/25/30/29.97/50/60/59.94，
+20/22/45 这类会被悄悄重定到最近的合法值，而 5/10/12/15（以及最近邻落在它们身上的
+13/14/16/18）直接失败；mpeg2video 因为有 frame rate extension，5/10/12/15/75 全部
+真的能编。
+
+于是新增 `EncoderMath.UsableRates`：mpeg1video 只报**八个真正的 frame_rate_code**
+（报告里的"FPS 支持"也跟着改），amv 用它自己的 22050 整除表，其余编码器照旧用声明
+列表。请求 15 fps 现在会就近落到 23.976 并打印一句说明，而不是让四个分片在预检里
+同时炸掉。
+
+**CUI 的另一半**：这条校验以前只在"手动换编码器"和"改 fps"时跑。设置文件里存着
+`Encoder=mpeg1video` + `Fps=15` 时，菜单 9 直接开跑 —— 正是报告里的场景。现在
+`StartEncoding` 在编码前用同一套规则再校验一次（顺带按上面的扩展名规则定容器）。
+
+### ⚠ 并行产物写 AVI 时，容器头里的帧率是假的
+
+修 AVI 容器这条路时量出来的：AVI 把帧率写在文件头里（dwRate/dwScale），而从
+Matroska 暂存流复制进来的码流没有 codec 帧率，只有 1/1000 的时间基，于是 muxer
+自己编一个。实测：13 fps 的 mpeg4 探回来是 `r_frame_rate 13/1` 但
+`avg_frame_rate 1000/1`；mpeg1video 是 `48000/1001` / `1000/1`。按 avg_frame_rate
+播放的播放器会拿到荒唐的帧率。
+
+并行路径在回封到 AVI 时补上 `-fps_mode passthrough -r <编码帧率>`：只改容器头，
+不丢帧不插帧（480 槽进、480 帧出已核对）。其它目标容器不加（MP4/Matroska 自己
+带时间基，MPEG-PS 的帧率在码流序列头里）。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| 单测 Windows | **424 × {net10.0, net11.0}**（新增 16 条：pal8 帧长、可用帧率、扩展名定容器） |
+| 单测 Linux（ci1） | 见下 |
+| e2e Windows | 见下（新增 4 条：msrle 非黑、扩展名定 avi、AVI 帧率头、CUI 保存的 fps/扩展名纠正） |
+
+新增回归：pal8 帧长与 rgb8 的区别、mpeg1video 拒绝 unofficial 帧率、mpeg2video
+保留全部声明帧率、扩展名→容器（含不可能组合仍报错）、AVI 头帧率一致。
+
+---
+
 ## v7.9.3.1（2026-10-22）
 
 **主题：全项目复查。** 没有新功能，只修真实缺陷、清死代码、拆文档。结论是找到

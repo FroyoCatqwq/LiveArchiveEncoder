@@ -32,8 +32,11 @@ public static class Report
                     ? string.Join(", ", c.Encoder.Caps.SupportedPixFmts)
                     : L.T("value.auto");
                 Line(L.T("report.pixfmts"), pixText);
-                string rateText = c.Encoder.Caps.SupportedRates.Count > 0
-                    ? string.Join(", ", c.Encoder.Caps.SupportedRates.Take(16).Select(x => x.ToString("G6")))
+                // v7.9.4: the usable list, not the declared one. mpeg1video
+                // declares 15 fps and then refuses it when the encoder opens.
+                List<double> rates = EncoderMath.UsableRates(c.Encoder.Caps);
+                string rateText = rates.Count > 0
+                    ? string.Join(", ", rates.Take(16).Select(x => x.ToString("G6")))
                     : L.T("value.notdeclared");
                 Line(L.T("report.fpssupport"), rateText);
             }

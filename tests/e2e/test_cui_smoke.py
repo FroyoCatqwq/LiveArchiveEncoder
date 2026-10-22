@@ -17,6 +17,7 @@ report-everything behaviour the standalone script had.
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -299,3 +300,59 @@ def test_run12_profiles_and_command_line(exe, workdir):
     assert p2.returncode == 0, f"rc={p2.returncode}"
     assert "Saved as my-setup.json" in p2.stdout, p2.stdout[-400:]
     assert (root / "configs" / "my-setup.json").is_file()
+
+
+def test_run13_stored_avi_and_fps_are_corrected(exe, workdir):
+    """v7.9.4: a stored settings file must not be able to poison a run.
+
+    Two faults met here. The encoder's default container is MPEG-PS while the
+    stored output name ends in .avi, so the run was refused outright; and the
+    stored 15 fps is an mpeg1video rate this FFmpeg rejects at encoder-open
+    time, so even a run that got past the container check died in preflight.
+    The shell re-checks both right before encoding: the extension picks the
+    container and the rate is snapped.
+
+    Runs against a private config root (LAE_CONFIG_DIR) so the real settings
+    file is untouched, and stops after 3 s of video.
+    """
+    root = workdir("cui-v794-root")
+    root.mkdir(parents=True, exist_ok=True)
+    src = harness.TESTS / "media" / "test_src.mp4"
+    dst = root / "stored_m1v.avi"
+    (root / "config.json").write_text(json.dumps({
+        "Version": 4,
+        "InputPath": str(src),
+        "OutputPath": str(dst),
+        "OutputIsAuto": False,
+        "Encoder": "mpeg1video",
+        "AudioEncoder": "libmp3lame",
+        "EndTimeSeconds": 3,
+        "Fps": 15,
+        "FpsLevels": [15, 5],
+        "Limit": 256,
+        "Recover": 224,
+        "Width": 384,
+        "Height": 216,
+        "Language": "zh",
+        "FfmpegSource": "path",
+        "Parallel": 4,
+    }, ensure_ascii=False), encoding="utf-8")
+    env = os.environ | {"LAE_CONFIG_DIR": str(root)}
+
+    # 9 = start encoding, blank = accept the confirmation, 0 = exit.
+    p = harness.run([str(exe)], input="9\n\n0\n", env=env, timeout=300)
+
+    c = Checks()
+    c.check("exit code 0", p.returncode == 0, f"rc={p.returncode}")
+    c.check("extension picks the container",
+            "按输出扩展名 .avi 改用 avi 容器" in p.stdout, p.stdout[-500:])
+    c.check("stored 15 fps is snapped",
+            "15 fps 不受支持，改用 23.976 fps" in p.stdout, p.stdout[-500:])
+    c.check("report shows the avi container", "容器" in p.stdout and "avi (.avi)" in p.stdout)
+    c.check("product written", dst.is_file() and dst.stat().st_size > 0)
+    if dst.is_file():
+        info = harness.video_summary(dst) or {}
+        c.check("product is mpeg1video", info.get("codec") == "mpeg1video", str(info))
+        c.check("product has audio", (info.get("audio") or 0) >= 1, str(info))
+    c.finish()
+

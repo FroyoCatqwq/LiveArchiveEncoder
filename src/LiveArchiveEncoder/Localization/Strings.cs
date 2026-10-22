@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.3.1 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.4 (.NET 10 / .NET 11)",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -278,6 +278,8 @@ public static class L
         ["note.specialsizes"] = "NOTE: {0} requires a special frame size; using {1}x{2}.",
         ["note.sizeadjusted"] = "Adjusted {0} to supported output size: {1}x{2}",
         ["note.transportadjusted"] = "Adjusted output size for {0}: {1}x{2}",
+        ["note.containerfromext"] = "NOTE: {0} writes {2} for this output; "
+            + "the '{1}' extension selected it.",
         ["note.splitunavailable"] = "\nNOTE: split audio pipeline unavailable ({0}); "
             + "falling back to single-process encoding.",
         ["note.splitmux"] = "NOTE: split audio pipeline unavailable ({0}); using single-process encoding.",
@@ -478,7 +480,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.3.1 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.4 (.NET 10 / .NET 11)",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 
@@ -734,6 +736,7 @@ public static class L
         ["note.specialsizes"] = "注意：{0} 需要特殊的帧尺寸，改用 {1}x{2}。",
         ["note.sizeadjusted"] = "已把 {0} 调整为受支持的输出尺寸：{1}x{2}",
         ["note.transportadjusted"] = "已按 {0} 调整输出尺寸：{1}x{2}",
+        ["note.containerfromext"] = "注意：{0} 按输出扩展名 {1} 改用 {2} 容器。",
         ["note.splitunavailable"] = "\n注意：分离音频通路不可用（{0}），回退为单进程编码。",
         ["note.splitmux"] = "注意：分离音频通路不可用（{0}），改用单进程编码。",
         ["note.subtitleinline"] = "注意：字幕以内嵌字幕轨方式承载，已跳过分离音频通路——合并时会丢失该轨。",

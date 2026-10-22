@@ -46,7 +46,7 @@ public static class ParallelEncoder
         (double? resolvedEnd, double? duration) =
             Timecode.ResolveRange(o.StartSeconds, o.EndSeconds, source.Duration);
 
-        string? blocked = BlockReason(o, duration);
+        string? blocked = BlockReason(o, duration, source.Video.PixFmt);
         if (blocked is not null)
         {
             if (o.Verbose) Console.WriteLine(L.T("note.shardingskipped", blocked));
@@ -193,10 +193,25 @@ public static class ParallelEncoder
                 // -map 0 keeps every stream the shards carried (a copied
                 // subtitle track included); -c copy means this is a remux, not
                 // a re-encode, so the picture is untouched.
-                CaptureResult remux = ProcessRunner.Run([
+                //
+                // v7.9.4: AVI keeps its frame rate in the file header
+                // (dwRate/dwScale), and a copied MPEG-4/MPEG-1 stream arrives
+                // from the Matroska staging file with a 1/1000 time base but no
+                // codec frame rate, so the muxer invents one. Measured
+                // (2026-10-22): mkv -> avi -c copy of 13 fps mpeg4 probes back
+                // as r_frame_rate 13/1 but avg_frame_rate 1000/1, and
+                // mpeg1video as 48000/1001 / 1000/1. Restating the rate the
+                // shards were encoded at fixes the header, and passthrough
+                // makes sure no frame is dropped or duplicated on the way.
+                List<string> remuxArgs = [
                     o.FFmpeg, "-hide_banner", "-loglevel", "error",
-                    "-i", joinedPath, "-map", "0", "-c", "copy", "-y", dst.FullName,
-                ], timeoutSeconds: Math.Max(120, (int)span * 2));
+                    "-i", joinedPath, "-map", "0", "-c", "copy",
+                ];
+                if (string.Equals(o.Encoder.FormatName, "avi", StringComparison.OrdinalIgnoreCase))
+                    remuxArgs.AddRange(["-fps_mode", "passthrough", "-r", ArgsBuilder.FpsArg(o.Fps)]);
+                remuxArgs.AddRange(["-y", dst.FullName]);
+
+                CaptureResult remux = ProcessRunner.Run(remuxArgs, timeoutSeconds: Math.Max(120, (int)span * 2));
 
                 if (remux.ExitCode != 0)
                 {
@@ -381,7 +396,7 @@ public static class ParallelEncoder
         encoder.WithContainer("mkv", "matroska");
 
     /// <summary>Why sharding must not be used, or null when it is allowed.</summary>
-    private static string? BlockReason(RealtimeOptions o, double? duration)
+    private static string? BlockReason(RealtimeOptions o, double? duration, string sourcePixFmt)
     {
         if (o.Parallel <= 1) return null;
         // v7.9.1: a network source is a single pass on purpose. Every shard
@@ -391,6 +406,20 @@ public static class ParallelEncoder
         if (Remote.Smb.IsRemotePath(o.SourcePath))
             return L.T("parallel.networkrefused");
         if (duration is null) return "source duration is unknown";
+        // v7.9.4: a palette codec cannot go through the Matroska staging pass.
+        // Matroska stores an unknown VfW codec as V_MS/VFW/FOURCC with a
+        // BITMAPINFOHEADER, and that header carries no palette -- measured on
+        // msrle (2026-10-22): the very same 2-second clip is YAVG 123 encoded
+        // straight to AVI and YAVG 16 (pure black) after one hop through .mkv.
+        // Since every shard is staged in Matroska, such an encoder is a single
+        // pass or nothing.
+        o.Encoder.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(o.FFmpeg, o.Encoder);
+        if (PixelFormatUtil.CarriesPalette(
+                PixelFormatUtil.ChooseTransportPixFmt(sourcePixFmt, o.Encoder.Caps)))
+        {
+            return $"{o.Encoder.Name} writes pal8 frames, and the Matroska staging pass "
+                   + "drops their palette (the picture would come out black)";
+        }
         if (!Constants.ConcatSafeFormats.Contains(o.Encoder.FormatName))
         {
             return $"format '{o.Encoder.FormatName}' cannot be joined safely "

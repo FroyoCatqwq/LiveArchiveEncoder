@@ -12,12 +12,7 @@ public static class EncoderMath
 
     public static (double Fps, bool Exact) ChooseBaseFps(double requested, EncoderCaps caps)
     {
-        List<double> rates = caps.SupportedRates;
-        // AMV has no declared rate list of its own, and any fps that does not
-        // divide 22050 makes the muxer reject the header, so its ladder is
-        // mandatory rather than a fallback.
-        if (caps.Name == "amv") rates = [.. Constants.AmvFps];
-        if (caps.Name == "mpeg1video") rates = [.. Constants.Mpeg1RealFps];
+        List<double> rates = UsableRates(caps);
         if (rates.Count == 0) return (requested, true);
 
         double nearest = rates[0];
@@ -27,6 +22,34 @@ public static class EncoderMath
         }
         return (nearest, Math.Abs(nearest - requested) < 0.01);
     }
+
+    /// <summary>
+    /// The frame rates an encoder <b>really</b> accepts, as opposed to the ones
+    /// it declares in <c>ffmpeg -h encoder=NAME</c>.
+    ///
+    /// v7.9.4: mpeg1video declares 5/1, 10/1, 12/1 and 15/1 in its
+    /// "Supported framerates" line, and then refuses every one of them when the
+    /// encoder actually opens -- measured against this build (2026-10-22):
+    ///
+    ///   mpeg1video 15 -> "MPEG-1/2 does not support 15/1 fps" (also 5, 10, 12,
+    ///   and 13/14/16/18, which are nearest to one of those unofficial rates)
+    ///   mpeg1video 20/22/45 -> encodes, retimed onto 23.976/24/50
+    ///   mpeg2video 5/10/12/15/20/75 -> all encode (frame rate extension)
+    ///
+    /// The extra rates are the "libmpeg3 unofficial economy rates": libavcodec
+    /// only allows them below the default strictness, so the honest list for
+    /// MPEG-1 is the eight real frame_rate_code values. Snapping here means a
+    /// requested 15 becomes 23.976 instead of failing a whole sharded run.
+    ///
+    /// AMV has no declared list and its fps must divide 22050, so its table is
+    /// mandatory rather than a preference.
+    /// </summary>
+    public static List<double> UsableRates(EncoderCaps caps) => caps.Name switch
+    {
+        "amv" => [.. Constants.AmvFps],
+        "mpeg1video" => [.. Constants.Mpeg1RealFps],
+        _ => caps.SupportedRates,
+    };
 
     public static List<double> SelectLevels(double baseFps, IEnumerable<double>? raw)
     {
@@ -311,6 +334,41 @@ public static class EncoderMath
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Take the container from the output file name when nobody named one.
+    ///
+    /// v7.9.4: <c>mpeg1video out.avi</c> was rejected with "Output extension
+    /// '.avi' does not match selected muxer 'mpeg'" even though AVI has been a
+    /// legal target for mpeg1video/mpeg2video since v7.8 -- the extension check
+    /// only ever looked at the encoder's <em>default</em> container. The typed
+    /// extension is the request: if the encoder can write it, write it. An
+    /// extension no container of this encoder carries (say mkv for rv20) is
+    /// left alone, so the caller still reports the mismatch instead of guessing.
+    /// </summary>
+    public static EncoderInfo ResolveByExtension(EncoderInfo encoder, string? path)
+    {
+        if (!path.HasText) return encoder;
+
+        string extension = Path.GetExtension(path).TrimStart('.').ToLowerInvariant();
+        if (extension.Length == 0) return encoder;
+
+        // Already the encoder's own container: nothing to do, and returning the
+        // same instance keeps callers able to test for "unchanged" cheaply.
+        if (Constants.FormatExtensions.TryGetValue(encoder.FormatName,
+                out IReadOnlySet<string>? current) && current.Contains("." + extension))
+        {
+            return encoder;
+        }
+
+        foreach ((string ext, string format) in AllowedContainers(encoder))
+        {
+            if (format == encoder.FormatName) continue;
+            if (!Constants.FormatExtensions.TryGetValue(format, out IReadOnlySet<string>? exts)) continue;
+            if (exts.Contains("." + extension)) return encoder.WithContainer(ext, format);
+        }
+        return encoder;
     }
 
     public static string? ChooseAudioEncoder(string container, ICollection<string> available)

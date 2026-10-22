@@ -350,8 +350,16 @@ mp2 会改成 32），20 只允许填当前容器装得下的编码器。
 * **`roq_dpcm`**：只接受 22050 Hz + 单/双声道。设了别的采样率会直接被拒：
   `roq_dpcm requires --audio-rate 22050 (or leave it unset for automatic correction)`。
 * **AMV**：帧率只能在 `10/14/15/18/21/25/30` 里选，音频固定 22050 Hz IMA-ADPCM。
-* **MPEG-1/2**：帧率会被吸附到 `23.976 / 24 / 25 / 29.97 / 30 / 50 / 59.94 / 60`
-  里最接近的一个。
+* **MPEG-1**：帧率只能落在 `23.976 / 24 / 25 / 29.97 / 30 / 50 / 59.94 / 60`
+  这八个真正的 MPEG-1 frame_rate_code 上，请求别的值会被吸附到最接近的一个。
+  `ffmpeg -h encoder=mpeg1video` 里列的 `5/10/12/15` 是 libmpeg3 的"非官方"
+  帧率，默认严格度下开编码器就会报
+  `MPEG-1/2 does not support 15/1 fps` —— 所以那份列表不算数，工具按八个合法值
+  校验并吸附（v7.9.4）。**MPEG-2** 有 frame rate extension，`5/10/12/15/75`
+  之类都真的能编，因此照旧用 FFmpeg 声明的列表。
+* **调色板编码器（`msrle`）只能单遍编码**：它的传输格式是 `pal8`，而 Matroska
+  暂存（分片拼装用）会丢调色板，产物会变成纯黑。`--parallel` 会被自动跳过分片
+  并在日志里说明（v7.9.4）。
 * **h261 / h263**：尺寸会被强制成标准档（h261：`176x144` 或 `352x288`）。
 * **h261 / h263 / a64**：容器不支持音频，自动输出纯视频。
 
@@ -1229,8 +1237,9 @@ ERROR: 'ac3' does not support 16000 Hz; supported sample rates: 32000, 44100, 48
 | 其它 | 保持原来的单一容器 |
 
 ```bash
-# mpeg1video 写进 AVI
+# mpeg1video 写进 AVI：两条都行，第二条不用再点名容器
 LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg1video --container avi
+LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg1video
 # libx264 写进 Matroska
 LiveArchiveEncoder.exe src.mp4 out.mkv --encoder libx264 --container mkv
 ```
@@ -1238,9 +1247,14 @@ LiveArchiveEncoder.exe src.mp4 out.mkv --encoder libx264 --container mkv
 `--container` 认封装器名也认扩展名（`mkv` 和 `matroska` 都行）。菜单在
 **参数设置 → 28**；换视频编码器时若新编码器写不了当前容器，会提示并回退。
 
-输出扩展名必须和新容器一致，否则照旧报扩展名不匹配。选不了的组合（例如
-`--encoder rv20 --container mkv`）**直接报错而不是静默回退**——静默回退会给
-你一个没点过的扩展名。
+**不给 `--container` 时，输出扩展名就是容器请求**（v7.9.4）：上表里任何一格
+都只要把输出名写成对应的扩展名即可，CLI 与 CUI 会打印一句
+`NOTE: mpeg1video writes avi for this output; the '.avi' extension selected it.`
+`--container` 显式给了就按它来，扩展名对不上照样报错；扩展名不属于该编码器任何
+容器时（`--encoder rv20` + `out.mkv`）也照旧报错，不做静默兜底。
+
+选不了的组合（例如 `--encoder rv20 --container mkv`）**直接报错而不是静默回退**
+——静默回退会给你一个没点过的扩展名。
 
 默认容器一个都没动，所以 35 个编码器的扫描结果跟 v7.7 完全一致。
 

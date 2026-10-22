@@ -74,6 +74,15 @@ CASES = [
     # names the same extension it always did.
     ("container_m1v_avi",  ["--encoder", "mpeg1video", "--container", "avi"], "avi"),
     ("container_m2v_avi",  ["--encoder", "mpeg2video", "--container", "avi"], "avi"),
+    # v7.9.4 #2: the same run without --container, because the extension
+    # already says AVI. This used to be rejected with "Output extension '.avi'
+    # does not match selected muxer 'mpeg'" -- the check only knew the encoder
+    # default. #3 rides along: 15 fps is an mpeg1video rate this build refuses,
+    # so the run has to snap it instead of dying in preflight.
+    ("container_m1v_byext", ["--encoder", "mpeg1video", "--fps", "15"], "avi"),
+    # v7.9.4 #1: an indexed codec (msrle is pal8-only) must come out with a
+    # picture, not a black frame -- see test_palette_output_is_not_black.
+    ("msrle",              ["--encoder", "msrle"],                            "avi"),
     ("container_xvid_mp4", ["--encoder", "libxvid", "--container", "mp4"],   "mp4"),
     ("container_x264_avi", ["--encoder", "libx264", "--container", "avi"],   "avi"),
     ("container_x264_mkv", ["--encoder", "libx264", "--container", "mkv"],   "mkv"),
@@ -242,6 +251,76 @@ def test_completion_drops_retired_flags(exe):
     assert proc.returncode == 0
     for gone in ("watermark", "recompress-keep"):
         assert gone not in proc.stdout, f"retired {gone!r} still completes"
+
+
+def test_palette_output_is_not_black(exe, src, workdir):
+    """v7.9.4 #1: an indexed encoder must produce a picture, not a black frame.
+
+    msrle only writes pal8. Two things used to go wrong at once:
+      * the rawvideo pipe cut every frame 1024 bytes short (a pal8 frame is
+        w*h + palette, not w*h), which shifted the frame data out from under
+        the palette, and
+      * the Matroska staging pass that sharding uses drops the palette
+        outright -- the same 2 s clip probes YAVG 123 written straight to AVI
+        and YAVG 16 (black) after one hop through .mkv.
+
+    So the run has to be a single pass, and the product has to have colour.
+    """
+    out = workdir("options")
+    dst = out / "msrle_black.avi"
+
+    proc = run([str(exe), str(src), str(dst), "--end", "00:00:04",
+                "--encoder", "msrle", "--parallel", "4", "--fps", "15",
+                "--ffmpeg-source", "path"], timeout=180)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+    assert dst.exists() and dst.stat().st_size > 0, "no output"
+
+    # Sharding asks for a Matroska staging pass, which this codec cannot use.
+    assert "Sharding skipped" in proc.stdout, proc.stdout[-400:]
+
+    stats = run(["ffmpeg", "-hide_banner", "-i", str(dst), "-vf",
+                 "signalstats,metadata=print:key=lavfi.signalstats.YAVG",
+                 "-frames:v", "3", "-f", "null", "-"], timeout=120)
+    readings = [float(line.rsplit("=", 1)[1]) for line in stats.stderr.splitlines()
+                if "lavfi.signalstats.YAVG=" in line]
+    assert readings, f"no luma readings: {stats.stderr[-300:]}"
+    # 16.0 is black; the fixture's colour bars sit around 120.
+    assert min(readings) > 40.0, f"msrle came out black: YAVG {readings}"
+
+
+def test_avi_header_keeps_the_encoded_rate(exe, src, workdir):
+    """v7.9.4: an AVI product must not lie about its frame rate.
+
+    AVI stores the rate in its header, and a stream copied out of the Matroska
+    staging file lands there with no codec frame rate, so the muxer invents
+    one: 13 fps mpeg4 probed back as r_frame_rate 13/1 but avg_frame_rate
+    1000/1, mpeg1video as 48000/1001 / 1000/1. Both are restated now.
+    """
+    out = workdir("options")
+
+    for name, encoder, fps in (("avi_rate_mpeg4", "mpeg4", "13"),
+                               ("avi_rate_m1v", "mpeg1video", "24")):
+        dst = out / f"{name}.avi"
+        proc = run([str(exe), str(src), str(dst), "--end", "00:00:08",
+                    "--encoder", encoder, "--fps", fps, "--parallel", "4",
+                    "--ffmpeg-source", "path"], timeout=300)
+        assert proc.returncode == 0, (
+            f"{name}: exit={proc.returncode}: "
+            f"{(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+
+        info = harness.probe(dst) or {}
+        video = [s for s in info.get("streams", []) if s.get("codec_type") == "video"]
+        assert video, f"{name}: no video stream"
+
+        def rate(text: str) -> float:
+            num, _, den = (text or "0/0").partition("/")
+            return float(num) / float(den or 1)
+
+        nominal = rate(video[0].get("r_frame_rate"))
+        average = rate(video[0].get("avg_frame_rate"))
+        assert abs(nominal - float(fps)) < 0.1, f"{name}: r_frame_rate {nominal}"
+        assert abs(average - float(fps)) < 0.1, f"{name}: avg_frame_rate {average}"
 
 
 def test_parallel_flv_join_has_no_corrupt_frames(exe, src, workdir):

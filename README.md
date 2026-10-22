@@ -302,7 +302,10 @@ and added `--emit-args` / `--save-config`; v7.9.2 fixed a corrupted picture when
 parallel shards were joined straight into FLV; v7.9.3 added the equivalent
 command line (menu 18) and named settings files (menu 19); v7.9.3.1 is a
 full-project review — presets no longer override explicit flags, and a handful
-of crash paths are gone.
+of crash paths are gone; v7.9.4 fixes three encoder defects (msrle's black
+picture, AVI being refused for mpeg1video/mpeg2video, and mpeg1video's fps
+check trusting a rate list the encoder itself rejects) plus the frame-rate
+header of sharded AVI products.
 
 ## Layout
 

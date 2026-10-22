@@ -5,6 +5,31 @@ namespace LiveArchiveEncoder.Core;
 /// <summary>Raw transport pixel-format helpers (port of the Python helpers).</summary>
 public static class PixelFormatUtil
 {
+    /// <summary>
+    /// Bytes an indexed pixel format adds to every raw frame: FFmpeg's rawvideo
+    /// format carries the palette inline, 1024 bytes (256 entries x BGRA) in
+    /// front of/behind the indices.
+    /// </summary>
+    public const int PaletteBytes = 1024;
+
+    /// <summary>
+    /// True for the indexed formats whose frame buffer is indices plus a
+    /// palette. Only <c>pal8</c> qualifies among the formats here: rgb8/bgr8
+    /// are packed 8-bit RGB and carry no palette, despite the name.
+    /// </summary>
+    public static bool CarriesPalette(string pixFmt) =>
+        string.Equals(pixFmt, "pal8", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Bytes per frame on the rawvideo pipe.
+    ///
+    /// v7.9.4: a pal8 frame is w*h <b>+ 1024</b>, not w*h. Measured against this
+    /// build (2026-10-22): 64x48 pal8 is 4096 bytes per frame, not 3072. The
+    /// pipe reader used to cut every frame 1024 bytes short, so each read
+    /// swallowed the previous frame's palette and the frame data shifted by a
+    /// kilobyte per frame -- msrle came out black because its palette, which is
+    /// the only place the colours live, ended up in the wrong place entirely.
+    /// </summary>
     public static int RawFrameSize(int width, int height, string pixFmt)
     {
         if (!Constants.PixelFormatSize.TryGetValue(pixFmt, out double ratio))
@@ -13,7 +38,8 @@ public static class PixelFormatUtil
                 $"Unsupported raw transport pixel format '{pixFmt}'. "
                 + "Choose a known encoder-compatible raw format.");
         }
-        return (int)(width * height * ratio + 0.5);
+        int size = (int)(width * height * ratio + 0.5);
+        return CarriesPalette(pixFmt) ? size + PaletteBytes : size;
     }
 
     public static string Family(string fmt)

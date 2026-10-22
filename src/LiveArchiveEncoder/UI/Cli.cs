@@ -107,6 +107,20 @@ public static class Cli
             return 2;
         }
 
+        // v7.9.4: with no --container, the extension the user typed decides
+        // between this encoder's containers. mpeg1video writes MPEG-PS by
+        // default but takes AVI fine, and "out.avi" is a request, not a typo.
+        if (!args.Container.HasText)
+        {
+            EncoderInfo byExtension = EncoderMath.ResolveByExtension(encoder, dst.Name);
+            if (byExtension.FormatName != encoder.FormatName)
+            {
+                Console.WriteLine(L.T("note.containerfromext",
+                    encoder.Name, dst.Extension, byExtension.FormatName));
+                encoder = byExtension;
+            }
+        }
+
         try { Validation.ValidateOutputExtension(dst, encoder); }
         catch (ArgumentException exc) { Console.Error.WriteLine($"ERROR: {exc.Message}"); return 2; }
 
@@ -123,7 +137,9 @@ public static class Cli
             ? args.ScaleAlgo
             : era?.ScaleAlgo ?? args.ScaleAlgo;
 
-        (double baseFps, bool fpsExact) = EncoderMath.ChooseBaseFps(effectiveFps, encoder.Caps);
+        // Caps are probed above and every container swap copies the reference
+        // (EncoderInfo.WithContainer), so this is never null here.
+        (double baseFps, bool fpsExact) = EncoderMath.ChooseBaseFps(effectiveFps, encoder.Caps!);
         if (!fpsExact)
             Console.WriteLine(L.T("note.fpsunsupported", encoder.Name, $"{effectiveFps:G6}", $"{baseFps:G6}"));
 

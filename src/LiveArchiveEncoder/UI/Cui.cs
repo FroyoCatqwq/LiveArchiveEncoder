@@ -1485,6 +1485,16 @@ public static class Cui
             return;
         }
 
+        // v7.9.4: no container requested by the menu, so the output name decides
+        // -- "out.avi" with mpeg1video is a request for AVI, not a mismatch.
+        EncoderInfo byExtension = EncoderMath.ResolveByExtension(c.Encoder, c.OutputPath.Name);
+        if (byExtension.FormatName != c.Encoder.FormatName)
+        {
+            Console.WriteLine(L.T("note.containerfromext",
+                c.Encoder.Name, c.OutputPath.Extension, byExtension.FormatName));
+            c.Encoder = byExtension;
+        }
+
         try
         {
             Validation.ValidateOutputExtension(c.OutputPath, c.Encoder);
@@ -1496,6 +1506,20 @@ public static class Cui
         }
 
         c.Encoder.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, c.Encoder);
+
+        // v7.9.4: the settings file can carry a rate this encoder never accepts
+        // (mpeg1video + 15 fps), and the menu only re-checks when the encoder is
+        // picked by hand. Re-check here, right before the encode, or the run
+        // dies in preflight after every shard has already started.
+        (double baseFps, bool fpsExact) = EncoderMath.ChooseBaseFps(c.Fps, c.Encoder.Caps);
+        if (!fpsExact)
+        {
+            Console.WriteLine(L.T("encoder.fpsadjusted",
+                c.Encoder.Name, $"{c.Fps:G6}", $"{baseFps:G6}"));
+            c.Fps = baseFps;
+            c.FpsLevels = EncoderMath.SelectLevels(c.Fps, c.FpsLevels);
+            c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
+        }
 
         try
         {
