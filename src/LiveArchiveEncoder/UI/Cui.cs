@@ -4,6 +4,7 @@ using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
+using LiveArchiveEncoder.PostProcess;
 
 namespace LiveArchiveEncoder.UI;
 
@@ -54,6 +55,11 @@ public static class Cui
         Console.WriteLine($"{L.Pad(L.T("banner.scalers"), 17)}: {string.Join(", ", availableScaleAlgorithms.OrderBy(x => x, StringComparer.Ordinal))}");
 
         Console.WriteLine($"{L.Pad(L.T("config.settingsfile"), 17)}: {ConfigStore.DefaultPath}");
+        // v7.9.5.1: the documented minimums, checked on the machine that is
+        // actually here. A warning, not a refusal -- a slow box still makes a
+        // correct file, it just cannot shard.
+        foreach (string warning in EnvCheck.Warnings(c.OutputPath?.FullName ?? c.InputPath?.FullName))
+            Console.WriteLine($"{L.Pad(L.T("env.heading"), 17)}: {warning}");
         if (restored)
         {
             // v7.9.3.1: this used to print the same path a second time as
@@ -220,11 +226,11 @@ public static class Cui
                     Persist(c);
                     break;
                 case "14":
-                    PickEraPreset(c);
+                    PickEraPreset(c, encoders, audioAvailable);
                     Persist(c);
                     break;
                 case "15":
-                    EditRecompress(c, ffmpeg);
+                    EditRecompress(c, ffmpeg, caps);
                     Persist(c);
                     break;
                 case "16":
@@ -482,6 +488,7 @@ public static class Cui
             Console.WriteLine($" 2. {L.Pad(L.T("sub.menu.files"), 30)} = {(s.Files.Count == 0 ? L.T("value.notselected") : string.Join(", ", s.Files.Select(f => Path.GetFileName(f))))}");
             Console.WriteLine($" 3. {L.Pad(L.T("sub.menu.stream"), 30)} = {(s.Stream is int idx ? idx.ToString(CultureInfo.InvariantCulture) : L.T("value.notselected"))}");
             Console.WriteLine($" 4. {L.Pad(L.T("sub.menu.codec"), 30)} = {(s.Codec is { Length: > 0 } code ? code : L.T("value.auto"))}");
+            Console.WriteLine($" 5. {L.Pad(L.T("sub.menu.fonts"), 30)} = {(s.FallbackFont is { Length: > 0 } f ? f : L.T("value.auto"))}");
             Console.WriteLine($" 0. {L.T("sub.menu.back")}");
             Console.Write(L.T("menu.select"));
 
@@ -594,6 +601,71 @@ public static class Cui
                     {
                         s.Codec = codecRaw;
                         Console.WriteLine(L.T("sub.codec.set", codecRaw));
+                    }
+                    break;
+                case "5":
+                    EditSubtitleFonts(s);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// v7.9.5.1: the font half of the subtitle menu. An ASS file names its fonts
+    /// in its style table; if the program's own directory does not have them,
+    /// libass substitutes something and CJK text becomes boxes. This is where
+    /// they get imported, and where a fallback family is chosen for SRT (which
+    /// names none at all).
+    /// </summary>
+    private static void EditSubtitleFonts(SubtitleConfig s)
+    {
+        while (true)
+        {
+            Console.WriteLine($"\n== {L.T("sub.menu.fonts")} ==");
+            Console.WriteLine($" 1. {L.T("sub.fonts.heading")}");
+            Console.WriteLine($" 2. {L.Pad(L.T("sub.fonts.import"), 22)}");
+            Console.WriteLine($" 3. {L.Pad(L.T("sub.fonts.fallback"), 22)} = {(s.FallbackFont is { Length: > 0 } f ? f : L.T("value.auto"))}");
+            Console.WriteLine($" 0. {L.T("sub.menu.back")}");
+            Console.Write(L.T("menu.select"));
+
+            switch ((Console.ReadLine() ?? "").Trim())
+            {
+                case "0": return;
+                case "1":
+                    if (s.Files.Count == 0)
+                    {
+                        Console.WriteLine(L.T("sub.fonts.nofile"));
+                        break;
+                    }
+                    foreach (FontLookup lookup in SubtitleFonts.Check(s.Files, s.FontDir))
+                    {
+                        Console.WriteLine(lookup.FoundAt is null
+                            ? L.T("sub.fonts.missing", lookup.Required)
+                            : L.T("sub.fonts.required", lookup.Required, lookup.FoundAt));
+                    }
+                    if (SubtitleFonts.DefaultFamily(s.FontDir) is { Length: > 0 } suggestion)
+                        Console.WriteLine(L.T("sub.fonts.default", suggestion));
+                    break;
+                case "2":
+                    Console.Write(L.T("sub.fonts.importprompt", FontResolver.FontDirectory));
+                    string path = (Console.ReadLine() ?? "").Trim().Trim('"');
+                    if (path.Length == 0) break;
+                    (int copied, int skipped, string dir) = SubtitleFonts.Import([path]);
+                    Console.WriteLine(L.T("sub.fonts.imported", copied, dir, skipped));
+                    break;
+                case "3":
+                    Console.Write(L.T("sub.fonts.fallback.prompt", s.FallbackFont ?? ""));
+                    string family = (Console.ReadLine() ?? "").Trim();
+                    if (family.Length == 0) break;
+                    if (family == "-")
+                    {
+                        s.FallbackFont = null;
+                        Console.WriteLine(L.T("sub.fonts.fallback.none"));
+                    }
+                    else
+                    {
+                        s.FallbackFont = family;
+                        Console.WriteLine(L.T("sub.fonts.fallback.set", family));
                     }
                     break;
             }
@@ -870,7 +942,7 @@ public static class Cui
         for (int i = 0; i < compatible.Count; i++)
         {
             string name = compatible[i];
-            AudioCodecInfo? info = AudioCatalog.Find(name);
+            Core.AudioCodecInfo? info = AudioCatalog.Find(name);
             string marker = string.Equals(c.AudioEncoder, name, StringComparison.OrdinalIgnoreCase) ? " <" : "";
             Console.WriteLine($" {i + 1,3}. {name,-16}{AudioCatalog.DescribeRates(name),-34}"
                 + $"{(info is null ? "" : $"{info.MinChannels}-{info.MaxChannels}ch")}"
@@ -1561,6 +1633,19 @@ public static class Cui
         // v7.9.3: show the equivalent command line right before the go-ahead, so
         // a run the user likes can become a script without retyping it.
         Report.PrintCommandLine(c);
+
+        // v7.9.5.1: an ASS file names its fonts; say now which ones this tool
+        // will not find on its own, rather than after the picture is burned.
+        if (c.Subtitles.Mode == "burn" && c.Subtitles.Files.Count > 0)
+        {
+            foreach (FontLookup lookup in
+                     SubtitleFonts.Check(c.Subtitles.Files, c.Subtitles.FontDir, includeSystem: false))
+            {
+                if (lookup.FoundAt is null)
+                    Console.WriteLine(L.T("note.fontmissing", lookup.Required, FontResolver.FontDirectory));
+            }
+        }
+
         Console.Write(L.T("start.confirm"));
         string confirm = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
         if (confirm is not ("" or "y" or "yes")) return;
@@ -1595,7 +1680,11 @@ public static class Cui
                 // shape the CLI half hands the encoder.
                 Subtitles = new Encoding.SubtitleSettings(
                     [.. c.Subtitles.Files], c.Subtitles.Stream,
-                    Encoding.SubtitleTrack.ParseMode(c.Subtitles.Mode), c.Subtitles.Codec),
+                    Encoding.SubtitleTrack.ParseMode(c.Subtitles.Mode), c.Subtitles.Codec)
+                {
+                    FontDir = c.Subtitles.FontDir,
+                    FallbackFont = c.Subtitles.FallbackFont,
+                },
                 // Detected once here (and inherited by shards) instead of once
                 // per shard: the copy path needs the build's own encoder list.
                 AvailableSubtitleEncoders = c.Subtitles.Active
@@ -1692,27 +1781,58 @@ public static class Cui
 
     private static string DescribeEra(Config c) =>
         c.EraPreset is { Length: > 0 } id && PostProcess.EraPresets.Find(id) is not null
-            ? id
+            ? id + (c.EraNative ? "" : " (modern)")
             : L.T("era.none");
 
     private static string DescribeRecompress(Config c) =>
         (c.Recompress.Enabled ? "on" : L.T("value.off"))
         + (c.Recompress.Args.Length > 0 ? $" | {c.Recompress.Args}" : "");
 
-    private static void PickEraPreset(Config c)
+    /// <summary>
+    /// The preset menu (v7.6, extended in v7.9.5.1).
+    ///
+    /// Applying a preset writes its live layer into the config, points the live
+    /// encoder at the codec that site served (when this build has it), and
+    /// pre-fills the second pass. It never arms the second pass: that stays a
+    /// deliberate choice.
+    ///
+    /// The last four entries are the user's own presets: n/e/d maintain them and
+    /// m flips native &lt;-&gt; modern rendering for the next apply.
+    /// </summary>
+    private static void PickEraPreset(
+        Config c, List<EncoderInfo> encoders, HashSet<string> audioAvailable)
     {
-        Console.WriteLine(L.T("era.choose", PostProcess.EraPresets.Ids));
-        foreach (PostProcess.EraPreset preset in PostProcess.EraPresets.All)
+        IReadOnlyList<PostProcess.EraPreset> list = PostProcess.EraPresets.All;
+        Console.WriteLine($"\n== {L.T("era.menu")} ==");
+        foreach (PostProcess.EraPreset preset in list)
         {
-            // v7.9.5: a site preset only rewrites the recompress pass, so the
-            // list says which column of the table it belongs to.
-            string kind = preset.Kind == PostProcess.EraKind.Site ? L.T("era.kind.site") : L.T("era.kind.era");
-            Console.WriteLine($"  {preset.Id,-14} {preset.YearFrom}-{preset.YearTo}  {kind}  {L.T(preset.NoteKey)}");
+            string kind = preset.Kind == PostProcess.EraKind.Site
+                ? L.T("era.kind.site") : L.T("era.kind.era");
+            string mark = preset.BuiltIn ? " " : "*";
+            Console.WriteLine($"  {preset.Id,-16} {preset.YearFrom}-{preset.YearTo} {kind}{mark} "
+                + $"{preset.Summary()}");
+            Console.WriteLine($"  {"",-16} {preset.Note}");
         }
+        Console.WriteLine($"  n. {L.T("era.menu.new")}");
+        Console.WriteLine($"  e. {L.T("era.menu.edit")}");
+        Console.WriteLine($"  d. {L.T("era.menu.delete")}");
+        Console.WriteLine($"  m. {L.T("era.menu.toggle")} = "
+            + (c.EraNative ? L.T("era.native.on") : L.T("era.native.off")));
 
         Console.Write(L.T("era.prompt", c.EraPreset ?? ""));
         string pick = (Console.ReadLine() ?? "").Trim();
         if (pick.Length == 0) return;
+
+        switch (pick.ToLowerInvariant())
+        {
+            case "n": EditCustomEra(c, encoders, null); return;
+            case "e": EditCustomEra(c, encoders, AskPresetId()); return;
+            case "d": DeleteCustomEra(c); return;
+            case "m":
+                c.EraNative = !c.EraNative;
+                Console.WriteLine(c.EraNative ? L.T("era.native.on") : L.T("era.native.off"));
+                return;
+        }
 
         PostProcess.EraPreset? chosen = PostProcess.EraPresets.Find(pick);
         if (chosen is null)
@@ -1721,38 +1841,276 @@ public static class Cui
             return;
         }
 
-        // The preset writes the live layer straight into the config and pre-fills
-        // the recompress arguments. It does not arm the recompress stage: that is
-        // opt-in by design, and the menu is where a user turns it on.
-        bool live = chosen.ApplyLive(c);
-        c.Recompress.Args = chosen.RecompressArgs;
-        c.Recompress.Container = chosen.RecompressContainer;
-        c.EraPreset = chosen.Id;
+        ApplyPreset(c, chosen, encoders, audioAvailable);
+    }
+
+    /// <summary>Apply a preset to a live config; shared by the menu and the wizard.</summary>
+    private static void ApplyPreset(
+        Config c, PostProcess.EraPreset preset, List<EncoderInfo> encoders, HashSet<string> audioAvailable)
+    {
+        bool live = preset.ApplyLive(c);
+        // v7.9.5.1: the site's own codec becomes the live encoder when the build
+        // has it, and the container follows that encoder.
+        bool encoder = preset.ApplyEncoder(c, encoders);
+        if (encoder && c.Encoder is not null)
+        {
+            List<string>? usable = AudioCatalog.Compatible(
+                c.Encoder.FormatName, audioAvailable);
+            if (usable is { Count: > 0 } && (c.AudioEncoder is null || !usable.Contains(c.AudioEncoder)))
+                c.AudioEncoder = usable[0];
+        }
+        if (c.OutputIsAuto && c.InputPath is not null && c.Encoder is not null)
+            c.OutputPath = DefaultOutput(c.InputPath, c.Encoder);
+
+        c.Recompress.Args = preset.Fragment(c.EraNative);
+        c.Recompress.Container = preset.ContainerFor(c.EraNative);
+        c.EraPreset = preset.Id;
 
         if (live)
         {
-            Console.WriteLine(L.T("era.applied", chosen.Id,
+            Console.WriteLine(L.T("era.applied", preset.Id,
                 c.Width, c.Height, $"{c.Fps:G6}", $"{c.Limit:G6}"));
         }
         else
         {
-            // A site preset leaves the encoder alone and only sets the second
-            // pass, which is the whole point of "不限定编码器".
-            Console.WriteLine(L.T("rc.siteapplied", chosen.Id, c.Recompress.Container));
+            Console.WriteLine(L.T("rc.siteapplied", preset.Id, c.Recompress.Container));
         }
+        if (encoder)
+            Console.WriteLine(L.T("era.encoderapplied", preset.Encoder ?? "", preset.Id));
+        else if (preset.HasEncoder)
+            Console.WriteLine(L.T("note.eracodecmissing", preset.Id, preset.Encoder ?? ""));
+        Console.WriteLine(L.T(c.EraNative ? "era.native.on" : "era.native.off"));
+        Console.WriteLine($" {preset.Fragment(c.EraNative)}");
         Console.WriteLine(L.T("rc.hint"));
     }
 
-    private static void EditRecompress(Config c, string ffmpeg)
+    /// <summary>
+    /// Create or edit a user preset (v7.9.5.1). <paramref name="seedId"/> null
+    /// means "new"; an id that matches a built-in preset is allowed and produces
+    /// an override, which is how a user changes history without a rebuild.
+    /// </summary>
+    private static void EditCustomEra(Config c, List<EncoderInfo> encoders, string? seedId)
+    {
+        PostProcess.EraPreset? existing = seedId is null
+            ? null
+            : PostProcess.EraPresets.Find(seedId);
+        bool creating = existing is null;
+
+        Console.WriteLine($"\n== {(creating ? L.T("era.custom.new") : existing!.Id)} ==");
+        string id = ReadRaw(L.T("era.custom.id", existing?.Id ?? "my_2008")).Trim();
+        string normalised = Configuration.EraConfigMap.NormaliseId(id);
+        if (normalised.Length == 0)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("era.custom.badid")}");
+            return;
+        }
+        if (creating && PostProcess.EraPresets.IsBuiltInId(normalised))
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("era.custom.badid")}");
+            return;
+        }
+        if (creating && PostProcess.EraPresets.Find(normalised) is not null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("era.custom.badid")}");
+            return;
+        }
+
+        bool era = existing?.Kind == PostProcess.EraKind.Era;
+        string kind = ReadRaw(L.T("era.custom.kind", era ? "1" : "2")).Trim();
+        if (kind is "1" or "2") era = kind == "1";
+
+        string years = ReadRaw(L.T("era.custom.years", existing?.YearFrom ?? 2006, existing?.YearTo ?? 2009));
+        (int from, int to) = ParseYears(years, existing?.YearFrom ?? 2006, existing?.YearTo ?? 2009);
+
+        int width = existing?.RcWidth ?? 320, height = existing?.RcHeight ?? 240;
+        Console.WriteLine(L.T("era.custom.size", width, height));
+        string size = ReadRaw("> ").Trim();
+        if (size.Contains('x') || size.Contains('X'))
+        {
+            string[] parts = size.ToLowerInvariant().Split('x');
+            if (parts.Length == 2
+                && int.TryParse(parts[0], out int w) && int.TryParse(parts[1], out int h)
+                && w >= 16 && h >= 16)
+            {
+                width = w;
+                height = h;
+            }
+        }
+
+        double fps = ReadDouble(L.T("era.custom.fps", $"{existing?.RcFps ?? 15:G6}"), existing?.RcFps ?? 15);
+        int vkbps = (int)ReadDouble(L.T("era.custom.vkbps", existing?.RcVideoKbps ?? 300),
+            existing?.RcVideoKbps ?? 300);
+        int akbps = (int)ReadDouble(L.T("era.custom.akbps", existing?.RcAudioKbps ?? 32),
+            existing?.RcAudioKbps ?? 32);
+
+        string videoCodec = ReadRaw(L.T("era.custom.vcodec",
+            existing?.VideoCodec ?? "libx264", PostProcess.RecompressCodecs.VideoIdList)).Trim();
+        if (videoCodec.Length == 0) videoCodec = existing?.VideoCodec ?? "libx264";
+        if (PostProcess.RecompressCodecs.FindVideo(videoCodec) is null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.codecmissing", videoCodec)}");
+            return;
+        }
+        videoCodec = PostProcess.RecompressCodecs.FindVideo(videoCodec)!.Name;
+
+        string audioCodec = ReadRaw(L.T("era.custom.acodec",
+            existing?.AudioCodec ?? PostProcess.RecompressCodecs.RecommendedAudio(videoCodec),
+            PostProcess.RecompressCodecs.AudioIdList + ", copy")).Trim();
+        if (audioCodec.Length == 0)
+            audioCodec = PostProcess.RecompressCodecs.RecommendedAudio(videoCodec);
+        if (!PostProcess.RecompressCodecs.IsCopyAudio(audioCodec)
+            && PostProcess.RecompressCodecs.FindAudio(audioCodec) is null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.codecmissing", audioCodec)}");
+            return;
+        }
+
+        List<string> containers = PostProcess.RecompressCodecs.ContainersFor(videoCodec, audioCodec);
+        string container = ReadRaw(L.T("era.custom.container",
+            existing?.RecompressContainer ?? containers.FirstOrDefault() ?? "mp4",
+            string.Join(", ", containers))).Trim().TrimStart('.').ToLowerInvariant();
+        if (container.Length == 0)
+            container = existing?.RecompressContainer ?? containers.FirstOrDefault() ?? "mp4";
+        string? mismatch = PostProcess.RecompressCodecs.ValidateContainer(videoCodec, audioCodec, container);
+        if (mismatch is not null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.container.mismatch", mismatch)}");
+            return;
+        }
+
+        string note = ReadRaw(L.T("era.custom.note", existing?.NoteText ?? "")).Trim();
+
+        // ---- live layer, only for an "era" ----
+        string? encoderName = null;
+        int? liveWidth = null, liveHeight = null;
+        double? liveFps = null, limit = null;
+        if (era)
+        {
+            Console.WriteLine(L.T("era.custom.live"));
+            encoderName = ReadRaw(L.T("era.custom.encoder", existing?.Encoder ?? "libx264")).Trim();
+            if (encoderName.Length == 0) encoderName = existing?.Encoder ?? "libx264";
+
+            int lw = existing?.Width ?? 320, lh = existing?.Height ?? 240;
+            Console.WriteLine(L.T("era.custom.livesize", lw, lh));
+            string liveSize = ReadRaw("> ").Trim();
+            if (liveSize.Contains('x'))
+            {
+                string[] parts = liveSize.ToLowerInvariant().Split('x');
+                if (parts.Length == 2 && int.TryParse(parts[0], out int w2) && int.TryParse(parts[1], out int h2)
+                    && w2 >= 16 && h2 >= 16)
+                {
+                    lw = w2;
+                    lh = h2;
+                }
+            }
+            liveWidth = lw;
+            liveHeight = lh;
+            liveFps = ReadDouble(L.T("era.custom.livefps", $"{existing?.Fps ?? 15:G6}"), existing?.Fps ?? 15);
+            limit = ReadDouble(L.T("era.custom.limit", $"{existing?.LimitKbps ?? 300:G6}"),
+                existing?.LimitKbps ?? 300);
+        }
+
+        var preset = new PostProcess.EraPreset
+        {
+            Id = normalised,
+            BuiltIn = false,
+            Kind = era ? PostProcess.EraKind.Era : PostProcess.EraKind.Site,
+            YearFrom = from,
+            YearTo = to,
+            Encoder = encoderName,
+            Width = liveWidth,
+            Height = liveHeight,
+            Fps = liveFps,
+            LimitKbps = limit,
+            ScaleAlgo = era ? existing?.ScaleAlgo ?? "bicubic" : null,
+            AudioEncoder = era ? existing?.AudioEncoder : null,
+            AudioKbps = era ? existing?.AudioKbps : null,
+            AudioChannels = era ? existing?.AudioChannels : null,
+            AudioRate = era ? existing?.AudioRate : null,
+            RcWidth = width,
+            RcHeight = height,
+            RcFps = fps > 0 ? fps : 15,
+            RcVideoKbps = Math.Max(1, vkbps),
+            RcCrf = existing?.RcCrf ?? (from < 2010 ? 28 : 24),
+            RcProfile = existing?.RcProfile ?? (from < 2010 ? "baseline" : "main"),
+            RcAudioKbps = Math.Max(0, akbps),
+            RcAudioRate = existing?.RcAudioRate ?? (from < 2010 ? 22050 : 44100),
+            RcAudioChannels = existing?.RcAudioChannels ?? (from < 2010 ? 1 : 2),
+            VideoCodec = videoCodec,
+            AudioCodec = audioCodec,
+            RecompressContainer = container,
+            NoteText = note.Length > 0 ? note : null,
+        };
+
+        c.CustomEras.RemoveAll(p => string.Equals(p.Id, preset.Id, StringComparison.OrdinalIgnoreCase));
+        c.CustomEras.Add(preset);
+        PostProcess.EraPresets.SetCustom(c.CustomEras);
+        Console.WriteLine(L.T("era.custom.saved", preset.Id));
+        Console.WriteLine($" {preset.Summary()} -- {preset.RecompressArgs}");
+    }
+
+    private static string AskPresetId()
+    {
+        Console.Write(L.T("era.custom.ask"));
+        return (Console.ReadLine() ?? "").Trim();
+    }
+
+    private static void DeleteCustomEra(Config c)
+    {
+        if (c.CustomEras.Count == 0)
+        {
+            Console.WriteLine(L.T("era.custom.none"));
+            return;
+        }
+        foreach (PostProcess.EraPreset preset in c.CustomEras)
+            Console.WriteLine($"  {preset.Id,-16} {preset.Summary()}");
+
+        string id = AskPresetId();
+        int removed = c.CustomEras.RemoveAll(
+            p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (removed == 0)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("era.custom.notcustom", id)}");
+            return;
+        }
+        PostProcess.EraPresets.SetCustom(c.CustomEras);
+        Console.WriteLine(L.T("era.custom.deleted", id));
+    }
+
+    private static (int From, int To) ParseYears(string raw, int fallbackFrom, int fallbackTo)
+    {
+        if (raw.Length == 0) return (fallbackFrom, fallbackTo);
+        string[] parts = raw.Replace('–', '-').Split('-', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2
+            && int.TryParse(parts[0].Trim(), out int from)
+            && int.TryParse(parts[1].Trim(), out int to))
+        {
+            return (Math.Clamp(from, 1990, 2100), Math.Clamp(Math.Max(from, to), 1990, 2100));
+        }
+        return (fallbackFrom, fallbackTo);
+    }
+
+    private static void EditRecompress(Config c, string ffmpeg, FFmpeg.Capabilities caps)
     {
         while (true)
         {
+            // v7.9.5.1: the fragment is still the source of truth, so the codec
+            // and quality shown here are read back out of it. Editing either one
+            // rewrites the fragment instead of adding a second place to look.
+            (List<string> tokens, _) = PostProcess.PostArgs.Parse(c.Recompress.Args);
+            string video = PostProcess.RecompressCodecs.DetectVideoCodec(tokens) ?? "-";
+            string audio = PostProcess.RecompressCodecs.DetectAudioCodec(tokens) ?? "-";
+            string quality = QualityOf(tokens);
+
             Console.WriteLine($"\n== {L.T("rc.menu")} ==");
             Console.WriteLine($" 1. {L.Pad(L.T("rc.menu.enable"), 30)} = {(c.Recompress.Enabled ? "on" : L.T("value.off"))}");
             Console.WriteLine($" 2. {L.Pad(L.T("rc.menu.args"), 30)} = {(c.Recompress.Args.Length == 0 ? L.T("value.notselected") : c.Recompress.Args)}");
             Console.WriteLine($" 3. {L.Pad(L.T("rc.menu.container"), 30)} = {c.Recompress.Container}");
             // v7.9.5: the stage no longer needs a live recording in front of it.
             Console.WriteLine($" 4. {L.Pad(L.T("rc.menu.only"), 30)}");
+            Console.WriteLine($" 5. {L.Pad(L.T("rc.menu.codec"), 30)} = {video}");
+            Console.WriteLine($" 6. {L.Pad(L.T("rc.menu.quality"), 30)} = {quality}");
+            Console.WriteLine($" 7. {L.Pad(L.T("rc.menu.audio"), 30)} = {audio}");
             Console.WriteLine($" 0. {L.T("rc.menu.back")}");
             Console.Write(L.T("menu.select"));
 
@@ -1792,8 +2150,145 @@ public static class Cui
                 case "4":
                     RecompressFile(c, ffmpeg);
                     break;
+                case "5":
+                    EditRecompressVideoCodec(c, caps);
+                    break;
+                case "6":
+                    EditRecompressQuality(c);
+                    break;
+                case "7":
+                    EditRecompressAudioCodec(c);
+                    break;
             }
         }
+    }
+
+    /// <summary>Pick the second pass's video codec; the container follows it.</summary>
+    private static void EditRecompressVideoCodec(Config c, FFmpeg.Capabilities caps)
+    {
+        Console.WriteLine(L.T("rc.available", PostProcess.RecompressCodecs.VideoIdList));
+        Console.Write(L.T("rc.prompt.codec", PostProcess.RecompressCodecs.DetectVideoCodec(
+            PostProcess.PostArgs.Tokenize(c.Recompress.Args)) ?? "libx264",
+            PostProcess.RecompressCodecs.VideoIdList));
+        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        if (raw.Length == 0) return;
+
+        SecondPassVideoCodec? codec = PostProcess.RecompressCodecs.FindVideo(raw);
+        if (codec is null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.codecmissing", raw)}");
+            return;
+        }
+        if (!caps.VideoEncoders.Contains(codec.Name))
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.codecmissing", codec.Name)}");
+            return;
+        }
+
+        (List<string> tokens, _) = PostProcess.PostArgs.Parse(c.Recompress.Args);
+        string audio = PostProcess.RecompressCodecs.DetectAudioCodec(tokens)
+            ?? PostProcess.RecompressCodecs.RecommendedAudio(codec.Name);
+        int? quality = int.TryParse(QualityOf(tokens), out int q) ? q : null;
+
+        c.Recompress.Args = ComposeSecondPass(tokens, codec, quality, audio, null);
+        c.Recompress.Container = PostProcess.RecompressCodecs.DefaultContainer(codec.Name, audio)
+            ?? c.Recompress.Container;
+        Console.WriteLine(L.T("rc.codec.set", codec.Name));
+        Console.WriteLine(L.T("rc.autoderived", codec.Name, audio, c.Recompress.Container));
+    }
+
+    private static void EditRecompressAudioCodec(Config c)
+    {
+        (List<string> tokens, _) = PostProcess.PostArgs.Parse(c.Recompress.Args);
+        string video = PostProcess.RecompressCodecs.DetectVideoCodec(tokens) ?? "libx264";
+        string current = PostProcess.RecompressCodecs.DetectAudioCodec(tokens)
+            ?? PostProcess.RecompressCodecs.RecommendedAudio(video);
+
+        Console.Write(L.T("rc.prompt.audio", current,
+            PostProcess.RecompressCodecs.AudioIdList + ", copy"));
+        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        if (raw.Length == 0) return;
+
+        if (!PostProcess.RecompressCodecs.IsCopyAudio(raw)
+            && PostProcess.RecompressCodecs.FindAudio(raw) is null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.codecmissing", raw)}");
+            return;
+        }
+        string? mismatch = PostProcess.RecompressCodecs.ValidateContainer(video, raw, c.Recompress.Container);
+        if (mismatch is not null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.container.mismatch", mismatch)}");
+            return;
+        }
+
+        SecondPassVideoCodec? codec = PostProcess.RecompressCodecs.FindVideo(video);
+        c.Recompress.Args = codec is null
+            ? c.Recompress.Args
+            : ComposeSecondPass(tokens, codec, int.TryParse(QualityOf(tokens), out int q) ? q : null, raw, null);
+        Console.WriteLine(L.T("rc.audio.set", raw));
+    }
+
+    private static void EditRecompressQuality(Config c)
+    {
+        (List<string> tokens, _) = PostProcess.PostArgs.Parse(c.Recompress.Args);
+        string video = PostProcess.RecompressCodecs.DetectVideoCodec(tokens) ?? "libx264";
+        SecondPassVideoCodec? codec = PostProcess.RecompressCodecs.FindVideo(video);
+        if (codec is null)
+        {
+            Console.WriteLine(L.T("rc.codecfirst"));
+            return;
+        }
+
+        string current = QualityOf(tokens);
+        Console.Write(L.T("rc.prompt.quality", current.Length > 0 ? current : "auto", codec.QualityFlag));
+        string raw = (Console.ReadLine() ?? "").Trim();
+        if (raw.Length == 0) return;
+        if (!int.TryParse(raw, out int quality) || quality < 1 || quality > 63)
+        {
+            Console.WriteLine(L.T("param.badvalue", raw));
+            return;
+        }
+
+        string audio = PostProcess.RecompressCodecs.DetectAudioCodec(tokens)
+            ?? PostProcess.RecompressCodecs.RecommendedAudio(codec.Name);
+        c.Recompress.Args = ComposeSecondPass(tokens, codec, quality, audio, null);
+        Console.WriteLine(L.T("rc.quality.set", quality));
+    }
+
+    /// <summary>
+    /// Rewrite a fragment around a codec choice: the filter chain the user wrote
+    /// is kept, the codec/quality/audio arguments are replaced.
+    /// </summary>
+    private static string ComposeSecondPass(
+        IReadOnlyList<string> tokens, SecondPassVideoCodec codec, int? quality,
+        string audioCodec, int? audioKbps)
+    {
+        var parts = new List<string>();
+
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            if (tokens[i] is "-vf" or "-filter:v" or "-filter" && i + 1 < tokens.Count)
+            {
+                parts.Add(tokens[i]);
+                parts.Add(tokens[i + 1]);
+                i++;
+            }
+        }
+
+        parts.Add(PostProcess.RecompressCodecs.VideoArgs(codec, quality ?? codec.DefaultQuality));
+        parts.Add(PostProcess.RecompressCodecs.AudioArgs(audioCodec, audioKbps, null, null));
+        return string.Join(' ', parts);
+    }
+
+    /// <summary>Whatever follows <c>-crf</c> or <c>-q:v</c>, or "" when neither is there.</summary>
+    private static string QualityOf(IReadOnlyList<string> tokens)
+    {
+        for (int i = 0; i < tokens.Count - 1; i++)
+        {
+            if (tokens[i] is "-crf" or "-q:v" or "-qscale:v") return tokens[i + 1];
+        }
+        return "";
     }
 
     /// <summary>

@@ -228,6 +228,20 @@ public sealed class Config
     /// explicit settings.
     /// </summary>
     public string? EraPreset { get; set; }
+
+    /// <summary>
+    /// v7.9.5.1: render an era/site preset with the codec that site actually
+    /// served (Sorenson Spark for 2007, VP9 for 2015) instead of a modern
+    /// H.264 viewing copy. True by default: the artefacts are the point.
+    /// </summary>
+    public bool EraNative { get; set; } = true;
+
+    /// <summary>
+    /// Presets the user wrote (v7.9.5.1). They live here rather than in the
+    /// built-in table so an upgrade can add rows without fighting a local edit;
+    /// a custom preset that reuses a built-in id replaces that row.
+    /// </summary>
+    public List<PostProcess.EraPreset> CustomEras { get; set; } = [];
 }
 
 /// <summary>
@@ -252,6 +266,19 @@ public sealed class SubtitleConfig
 
     /// <summary>Explicit codec for copy mode; null picks one per container.</summary>
     public string? Codec { get; set; }
+
+    /// <summary>
+    /// v7.9.5.1: extra directory libass looks in, on top of the program's own
+    /// <c>fonts</c> directory. Null means "only the program's directory".
+    /// </summary>
+    public string? FontDir { get; set; }
+
+    /// <summary>
+    /// v7.9.5.1: family name forced over whatever the subtitle file asks for.
+    /// Used when the file names a font nobody has, and for SRT/VTT, which name
+    /// no font at all.
+    /// </summary>
+    public string? FallbackFont { get; set; }
 
     /// <summary>Same rule as <see cref="Encoding.SubtitleSettings.Active"/>.</summary>
     public bool Active => Mode != "off" && (Files.Count > 0 || Stream is not null);

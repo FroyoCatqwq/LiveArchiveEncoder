@@ -122,6 +122,12 @@ public static class CliArgs
             if (!string.Equals(c.Subtitles.Mode, "burn", StringComparison.OrdinalIgnoreCase))
                 argv.AddRange(["--subtitle-mode", c.Subtitles.Mode]);
             if (c.Subtitles.Codec is { Length: > 0 } codec) argv.AddRange(["--subtitle-codec", codec]);
+            // v7.9.5.1: the font choices are part of the run -- without them the
+            // same file renders differently on a machine with other fonts.
+            if (c.Subtitles.FontDir is { Length: > 0 } fontDir)
+                argv.AddRange(["--subtitle-font-dir", fontDir]);
+            if (c.Subtitles.FallbackFont is { Length: > 0 } font)
+                argv.AddRange(["--subtitle-font", font]);
         }
 
         return argv;

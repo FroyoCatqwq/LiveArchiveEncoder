@@ -203,9 +203,9 @@ public sealed class EncoderRateAndContainerTests
 
 /// <summary>
 /// v7.9.5 #2: the site presets. 2005-2009 China was not one transcode ladder but
-/// six, and a site's preset is a bitrate profile -- it must not claim a live
-/// encoder, because "what Youku did to my upload" says nothing about how the
-/// upload was captured.
+/// a dozen, and a site's preset is a bitrate profile plus the codec that site
+/// served (v7.9.5.1) -- it must not claim a live frame size, because "what Youku
+/// did to my upload" says nothing about how the upload was captured.
 /// </summary>
 public sealed class SitePresetTests
 {
@@ -216,12 +216,73 @@ public sealed class SitePresetTests
         {
             await Assert.That(site.Kind).IsEqualTo(EraKind.Site).Because(site.Id);
             await Assert.That(site.HasLive).IsFalse().Because(site.Id);
-            await Assert.That(site.Encoder).IsNull().Because(site.Id);
             await Assert.That(site.LimitKbps).IsNull().Because(site.Id);
+            // v7.9.5.1: the preset names the site's codec (that is the encoder
+            // the live pass adopts when nothing else was asked for).
+            await Assert.That(site.Encoder).IsNotNull().Because(site.Id);
+            await Assert.That(site.VideoCodec).IsNotEmpty().Because(site.Id);
+            await Assert.That(site.RecompressContainer).IsNotEmpty().Because(site.Id);
         }
 
         await Assert.That(EraPresets.Sites.Select(s => s.Id))
-            .IsEquivalentTo(new[] { "sina06", "sohu06", "qq06", "tudou06", "youku07", "youtube07" });
+            .IsEquivalentTo(new[]
+            {
+                "sina06", "sohu06", "qq06", "tudou06", "youku07", "ku6_07", "56_07",
+                "cctv06", "acfun08", "bilibili09", "youtube07",
+                "bilibili11", "youku11", "iqiyi11", "cctv12", "youtube11",
+                "bilibili14", "youtube15",
+            });
+    }
+
+    [Test]
+    public async Task TheFlvEraUsesTheCodecThatEraActuallyServed()
+    {
+        // A site's ladder is not just numbers: 320 kbps of H.264 does not look
+        // like 320 kbps of Sorenson Spark, so the codec is part of the preset.
+        foreach (string id in new[] { "sina06", "tudou06", "youku07", "bilibili09", "cctv06" })
+        {
+            EraPreset site = EraPresets.Find(id)!;
+            await Assert.That(site.VideoCodec).IsEqualTo("flv").Because(id);
+            await Assert.That(site.Encoder).IsEqualTo("flv").Because(id);
+            await Assert.That(site.RecompressContainer).IsEqualTo("flv").Because(id);
+            await Assert.That(site.AudioCodec).IsEqualTo("libmp3lame").Because(id);
+        }
+
+        // 2010s sites served H.264 in MP4; YouTube's 2014-2016 window was VP9.
+        await Assert.That(EraPresets.Find("bilibili14")!.VideoCodec).IsEqualTo("libx264");
+        await Assert.That(EraPresets.Find("youtube15")!.VideoCodec).IsEqualTo("libvpx-vp9");
+        await Assert.That(EraPresets.Find("youtube15")!.RecompressContainer).IsEqualTo("webm");
+    }
+
+    [Test]
+    public async Task TencentKeptTheHigherFrameRate()
+    {
+        // The one portal that pushed 25 fps among the 320x240 FLV sites; the
+        // rest stayed at 12-15. (CCTV is 25 as well, but for a different reason:
+        // it was PAL broadcast material, not a portal ladder.)
+        EraPreset qq = EraPresets.Find("qq06")!;
+        await Assert.That(qq.RcFps).IsEqualTo(25.0);
+        foreach (string id in new[] { "sina06", "tudou06", "youku07", "ku6_07", "56_07" })
+            await Assert.That(EraPresets.Find(id)!.RcFps).IsLessThan(25.0).Because(id);
+    }
+
+    [Test]
+    public async Task NativeAndModernRenderingDifferOnlyInTheCodec()
+    {
+        EraPreset youku = EraPresets.Find("youku07")!;
+
+        string native = youku.Fragment(native: true);
+        string modern = youku.Fragment(native: false);
+
+        await Assert.That(native).Contains("-c:v flv");
+        await Assert.That(modern).Contains("-c:v libx264");
+        // The same ladder: same scaler expression, same target bitrate.
+        await Assert.That(native).Contains("scale=352:264");
+        await Assert.That(modern).Contains("scale=352:264");
+        await Assert.That(native).Contains("-b:v 320k");
+        // ... and the containers each rendering has to land in.
+        await Assert.That(youku.ContainerFor(native: true)).IsEqualTo("flv");
+        await Assert.That(youku.ContainerFor(native: false)).IsEqualTo("mp4");
     }
 
     [Test]

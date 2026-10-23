@@ -12,7 +12,8 @@ exactly what v6.3.3 would have produced.
 > `archive/retired/`, so it can come back as a separate project). Subtitle
 > burning/copying, added in v7.9, covers the "put text on the picture" job.
 
-Full user guide: [`docs/usage.md`](docs/usage.md). Version history, from Python
+Full user guide: [`docs/usage.md`](docs/usage.md); system and hardware requirements:
+[`docs/requirements.md`](docs/requirements.md). Version history, from Python
 v6.2.2 to the current release: [`docs/CHANGELOG.md`](docs/CHANGELOG.md). Where
 the era-preset numbers come from: [`docs/era-presets.md`](docs/era-presets.md).
 
@@ -262,8 +263,14 @@ Two flags are additions rather than ports:
 | `--audio-mode inline\|separate\|auto` | audio routing; `inline` (default) is v6.3.3 behaviour, see below |
 | `--hwaccel NAME` | hardware decode; `off` (default), `auto`, or any method from `ffmpeg -hwaccels`. The method is probed by actually decoding one frame and falls back to software when it fails |
 | `--recompress`, `--recompress-args ARGS` | re-encode the result the way a video site would. You write the middle of the FFmpeg command (`-vf scale=320:240,fps=15 -c:v libx264 -crf 28 …`); the program owns `-i` and the output path, and the fragment is tokenised and vetted so a stray path cannot overwrite your source. Off by default |
+| `--recompress-codec NAME` | pick the second pass's codec by name instead of writing a fragment — `libx264`, `libx265`, `libvpx-vp9`, `libvpx`, `libaom-av1`, `libsvtav1`, `flv`, `mpeg4`, `mpeg2video`, `mjpeg`, `wmv2`, `h263`. The container follows the codec (VP9 → `.webm`, x265 → `.mp4`), and a pair the muxer cannot hold is refused before anything runs |
+| `--recompress-quality N` | the codec's own knob: `-crf` for x264/x265/VP9/AV1, `-q:v` for the MPEG family |
+| `--recompress-audio-codec NAME` | `aac`, `libmp3lame`, `libopus`, `libvorbis`, `ac3`, `flac` or `copy`, with the same container check |
+| `--subtitle-font FAMILY`, `--subtitle-font-dir DIR` | force a font family over the one an ASS file names (also gives SRT/VTT one, which they never specify), and add an extra font directory |
+| `--list-subtitle-fonts`, `--font-import PATH` | report the fonts a subtitle file asks for and whether this machine has them; copy font files into the program's own `fonts` directory |
 | `--recompress-only` | run that pass on an existing file and stop — no live encode, no encoder discovery (`LiveArchiveEncoder clip.mkv --recompress-only --era youku07`) |
-| `--era ID` | apply an era preset: one set of live + recompress settings per era of online video, 1997→2016 — dial-up RealVideo G2, early-ADSL RealMedia, the FLV/Youku/Tudou years, early H.264, 720p. v7.9.5 adds six **site** presets (`sina06`, `sohu06`, `qq06`, `tudou06`, `youku07`, `youtube07`) that set the second pass only. Sources in `docs/era-presets.md` |
+| `--era ID` | apply an era/site preset: one set of live + recompress settings per era of online video, 1997→2016 — dial-up RealVideo G2, early-ADSL RealMedia, the FLV years, early H.264, 720p. 18 **site** presets (`sina06`, `sohu06`, `qq06`, `tudou06`, `youku07`, `ku6_07`, `56_07`, `cctv06`, `acfun08`, `bilibili09`, `youtube07`, `bilibili11`, `youku11`, `iqiyi11`, `cctv12`, `youtube11`, `bilibili14`, `youtube15`) carry the codec that site served — Sorenson Spark in FLV, H.264 in MP4, VP9 in WebM — and use it for both passes unless you name an encoder. Your own presets go in the settings file (`CustomEras`) and can override a built-in id. Sources in `docs/era-presets.md` |
+| `--era-modern` / `--era-native` | render a preset's second pass with libx264 + AAC in MP4 instead of the site's own codec (the default), or say so explicitly |
 | `--video-stream N`, `--audio-stream N` | v7.9: pick which track of a multi-stream source (a VOB's second audio language, an MKV's duplicate encode) to encode, by the absolute index ffprobe prints; `--list-streams` lists them. Wrong index or type is refused before the encode, with the inventory |
 | `--subtitle FILE`, `--subtitle-stream N` | v7.9: subtitles from a sidecar file (`.ass/.ssa/.srt/.vtt`, repeatable) or an embedded track. `--subtitle-mode burn` (default) renders them into the picture with libass and the tool's own font directory; `--subtitle-mode copy` muxes them as a real subtitle stream where the container has one, with the codec picked from what `ffmpeg -encoders` actually lists. Bitmap subtitles (dvdsub/dvbsub) can be carried but not burned |
 | HTTP/HTTPS input | v7.9, initial support: the input may be a progressive `http(s)://` direct link (archive.org `/download/…` style). Carries the `-reconnect` family and a 30 s socket timeout; seeking needs a Range-capable server. No auth/cookies/HLS |
@@ -311,7 +318,13 @@ altogether: the whole legacy set was swept for real containers and real frame
 rates (`docs/capability-matrix.md`), six 2000s video sites join the era presets
 as bitrate profiles, the site pass can run on an existing file with
 `--recompress-only`, and the capability table is cached so a run launches 3
-processes instead of 8–10.
+processes instead of 8–10. v7.9.5.1 makes the presets look like the year they
+describe: 18 sites, each naming the codec it actually served (Sorenson Spark in
+FLV, H.264 in MP4, VP9 in WebM), plus user-written presets in the settings file;
+subtitle fonts are read out of the ASS style table, reported, importable and
+overridable; the second pass can name any of thirteen video and seven audio
+codecs and gets a container that matches; and `docs/requirements.md` documents
+what the machine needs.
 
 ## Layout
 
@@ -322,7 +335,8 @@ src/LiveArchiveEncoder/
                   Ctrl+C interrupt, AudioCatalog (v7.8: per-codec sample-rate and
                   channel limits; v7.8.2: bitrate bands per codec and rate,
                   muxer-level rate limits, container compatibility), TextExtensions
-                  (v7.8.1: C# 14 extension members)
+                  (v7.8.1: C# 14 extension members), EnvCheck (v7.9.5.1: the
+                  documented minimums, checked on the running machine)
   FFmpeg/         discovery, toolchain (multi-distro install/update/delete),
                   capability probing, ffprobe, process + pipe I/O
   Frames/         bounded pre-allocated frame pool
@@ -335,9 +349,13 @@ src/LiveArchiveEncoder/
   Localization/   en/zh string tables (every key must exist in both)
   UI/             CLI parser + help, CUI menus, shared reporting, --cpu-info,
                   post-encode playback
-  PostProcess/    v7.6: the stages that follow the live encode -- era presets,
-                  the recompress argument validator, font resolution, and the
-                  chain that orders them (the watermark stage retired in v7.9.1)
+  PostProcess/    v7.6: the stages that follow the live encode -- era presets
+                  (v7.9.5.1: 18 sites that name their own codec, plus user
+                  presets), the recompress argument validator and codec catalog
+                  (v7.9.5.1: thirteen video / seven audio encoders with their
+                  legal containers), subtitle font lookup (v7.9.5.1: ASS style
+                  table + font name tables), font resolution, and the chain that
+                  orders them (the watermark stage retired in v7.9.1)
 ```
 
 Two data directories live next to each other under the user's profile, so both

@@ -1,5 +1,6 @@
 using System.Globalization;
 using LiveArchiveEncoder.Core;
+
 namespace LiveArchiveEncoder.PostProcess;
 
 /// <summary>Which half of the pipeline a preset speaks for.</summary>
@@ -12,9 +13,9 @@ public enum EraKind
     Era = 0,
 
     /// <summary>
-    /// One site, recompress layer only (v7.9.5). A site's preset is a bitrate
-    /// profile -- resolution, frame rate, video and audio kbps -- and nothing
-    /// else, so it never fights the encoder the user picked for the live pass.
+    /// One site, second pass only (v7.9.5). A site's preset is a bitrate
+    /// profile -- resolution, frame rate, video and audio kbps -- plus the
+    /// codec that site actually served, which is the encoder the preset names.
     /// </summary>
     Site = 1,
 }
@@ -28,48 +29,40 @@ public enum EraKind
 /// <list type="bullet">
 /// <item><description>the <b>live</b> layer -- the encoder, frame size, frame
 /// rate and bitrate ceiling of the archival pass;</description></item>
-/// <item><description>the <b>recompress</b> layer -- the damage a video site
+/// <item><description>the <b>second</b> layer -- the damage a video site
 /// applied on upload, which is what people actually remember about the
 /// era.</description></item>
 /// </list>
 ///
-/// v7.9.5 adds <see cref="EraKind.Site"/> presets, which speak only for the
-/// second layer: 2005-2009 was a handful of sites with their own transcode
-/// ladders, and "make this look like Youku 2007" does not imply a particular
-/// live encoder.
+/// v7.9.5.1 gives site presets an <see cref="Encoder"/> too: a 2007 portal
+/// transcoded to Sorenson Spark in FLV, a 2014 portal to H.264 in MP4, and
+/// reproducing "what Youku did" means using that codec -- the same 320 kbps of
+/// H.264 looks nothing like 320 kbps of H.263. The live layer size stays the
+/// user's, because a site says nothing about how the recording was captured.
+///
+/// A preset can also be written by the user (see <c>CustomEra</c>): those live
+/// in the settings file next to the built-in table, override a built-in id when
+/// they share it, and never need a rebuild to change.
 ///
 /// The numbers are not invented; see <c>docs/era-presets.md</c> for the sources.
-/// The short version:
-/// <list type="bullet">
-/// <item><description>RealSystem G2 Production Guide -- "for 28.8 Kbps modems
-/// (20 Kbps usable bandwidth), you should use a window no larger than
-/// 176x132", and 176x132 / 240x180 / 320x240 map to 20 / 100 / 200 Kbps
-/// floors at 10-15 fps;</description></item>
-/// <item><description>RealVideo 8 (RV30) targets 100-500 Kbps up to 352x288;
-/// RealVideo 10 reaches DVD-like quality near 1 Mbps;</description></item>
-/// <item><description>measured Tudou FLV downloads: 320x240 at 295 Kbps /
-/// 12 fps and 352x264 at 291 Kbps / 11.8 fps; YouTube in 2007 sat around
-/// 320x240, 150 Kbps, 22 kHz mono audio at 32 Kbps;</description></item>
-/// <item><description>network side from the MicroComputer magazine scans
-/// (W:\\书籍): 56K modems everywhere in 1998-2000, ISDN rollout, ADSL quoted
-/// at 8 Mbps down / 1 Mbps up in 2002, and a 2007 retrospective describing
-/// dial-up as "under 56 Kbps".</description></item>
-/// </list>
 /// </summary>
 public sealed class EraPreset
 {
     public required string Id { get; init; }
 
-    /// <summary>Era (both layers) or site (recompress layer only).</summary>
+    /// <summary>Era (both layers) or site (second pass only).</summary>
     public EraKind Kind { get; init; } = EraKind.Era;
+
+    /// <summary>False for a preset the user wrote; only those can be deleted.</summary>
+    public bool BuiltIn { get; init; } = true;
 
     /// <summary>First year the preset stands for, used only for listing order.</summary>
     public int YearFrom { get; init; }
     public int YearTo { get; init; }
 
-    // ---- live (first pass); null on a site preset ----
+    // ---- live (first pass) ----
 
-    /// <summary>Legacy encoder name as FFmpeg spells it.</summary>
+    /// <summary>Legacy encoder name as FFmpeg spells it. Null on a bare site preset.</summary>
     public string? Encoder { get; init; }
     public int? Width { get; init; }
     public int? Height { get; init; }
@@ -90,29 +83,54 @@ public sealed class EraPreset
     public int? AudioChannels { get; init; }
     public int? AudioRate { get; init; }
 
-    // ---- recompress (second pass) ----
+    // ---- second pass ----
+
+    /// <summary>Frame size / rate and bitrates the site served.</summary>
+    public int RcWidth { get; init; } = 320;
+    public int RcHeight { get; init; } = 240;
+    public double RcFps { get; init; } = 15;
+    public int RcVideoKbps { get; init; } = 300;
+
+    /// <summary>Quality for the modern (CRF) rendering of the same profile.</summary>
+    public int RcCrf { get; init; } = 28;
+
+    /// <summary>libx264 profile for the modern rendering, e.g. baseline / main / high.</summary>
+    public string RcProfile { get; init; } = "baseline";
+
+    public int RcAudioKbps { get; init; } = 32;
+    public int RcAudioRate { get; init; } = 22050;
+    public int RcAudioChannels { get; init; } = 1;
 
     /// <summary>
-    /// The middle of an FFmpeg command -- never the input or the output, which
-    /// the pipeline owns. See <see cref="PostArgs"/>.
+    /// The codec the site itself served. Native rendering uses it; the modern
+    /// rendering uses <c>libx264</c> + <c>aac</c> instead, so the file opens in
+    /// any current player.
     /// </summary>
-    public required string RecompressArgs { get; init; }
+    public string VideoCodec { get; init; } = "libx264";
+    public string AudioCodec { get; init; } = "aac";
 
-    /// <summary>Container extension for the recompressed file, without the dot.</summary>
+    /// <summary>Container for the native rendering; the modern one is always mp4.</summary>
     public string RecompressContainer { get; init; } = "mp4";
 
     /// <summary>Localisation key for the one-line description shown in menus.</summary>
-    public required string NoteKey { get; init; }
+    public string? NoteKey { get; init; }
+
+    /// <summary>Free-text description of a user preset (no localisation).</summary>
+    public string? NoteText { get; init; }
 
     /// <summary>True when this preset has a live layer to apply.</summary>
-    public bool HasLive => Kind == EraKind.Era && Width is not null;
+    public bool HasLive => Width is not null && Height is not null;
+
+    /// <summary>True when the preset names a live encoder (site presets do).</summary>
+    public bool HasEncoder => Encoder is { Length: > 0 };
 
     /// <summary>
-    /// Apply just the live layer of this preset. The recompress layer is a
-    /// separate stage with its own on/off switch, so picking an era does not
-    /// silently turn it on.
+    /// Apply the live layer of this preset. The second pass is a separate stage
+    /// with its own on/off switch, so picking an era does not silently turn it
+    /// on.
     ///
-    /// Returns false for a site preset, which has no live layer at all.
+    /// Returns false when the preset has no frame size (a site preset): the
+    /// caller still gets <see cref="Encoder"/> through <see cref="ApplyEncoder"/>.
     /// </summary>
     public bool ApplyLive(Configuration.Config c)
     {
@@ -133,16 +151,98 @@ public sealed class EraPreset
         if (AudioEncoder is not null) c.AudioEncoder = AudioEncoder;
         return true;
     }
+
+    /// <summary>
+    /// Point the live pass at this preset's encoder, if it names one. The
+    /// container follows the encoder's default, which is also what the output
+    /// extension is rebuilt from.
+    /// </summary>
+    public bool ApplyEncoder(Configuration.Config c, IReadOnlyList<Configuration.EncoderInfo> encoders)
+    {
+        if (!HasEncoder) return false;
+        Configuration.EncoderInfo? match = encoders.FirstOrDefault(
+            e => string.Equals(e.Name, Encoder, StringComparison.OrdinalIgnoreCase));
+        if (match is null) return false;
+        c.Encoder = match;
+        c.Container = null;
+        return true;
+    }
+
+    /// <summary>
+    /// The middle of the FFmpeg command for the second pass.
+    ///
+    /// <paramref name="native"/> true renders with the site's own codec (the
+    /// artefacts people remember); false renders the same resolution/bitrate
+    /// with libx264 in MP4, which is what every version before v7.9.5.1 did.
+    /// </summary>
+    public string Fragment(bool native)
+    {
+        string video = native
+            ? NativeVideoArgs()
+            : $"-c:v libx264 -profile:v {RcProfile} -preset veryfast -crf {RcCrf.ToString(CultureInfo.InvariantCulture)}";
+
+        var parts = new List<string>
+        {
+            $"-vf scale={RcWidth}:{RcHeight}:flags=bicubic,fps={RcFps.ToString("G6", CultureInfo.InvariantCulture)}",
+            video,
+        };
+
+        // A site targeted a bitrate, so the native rendering caps it. The modern
+        // rendering is CRF-based and needs no cap: it is a viewing copy.
+        if (native && Kind == EraKind.Site)
+            parts.Add($"-maxrate {RcVideoKbps * 12 / 10}k -bufsize {RcVideoKbps * 2}k");
+
+        parts.Add(native
+            ? RecompressCodecs.AudioArgs(AudioCodec, RcAudioKbps, RcAudioRate, RcAudioChannels)
+            : RecompressCodecs.AudioArgs("aac", RcAudioKbps, RcAudioRate, RcAudioChannels));
+        return string.Join(' ', parts);
+    }
+
+    private string NativeVideoArgs()
+    {
+        SecondPassVideoCodec? info = RecompressCodecs.FindVideo(VideoCodec);
+        return info is null
+            ? RecompressCodecs.VideoArgs(
+                RecompressCodecs.FindVideo("libx264")!, RcCrf, RcVideoKbps)
+            : RecompressCodecs.VideoArgsAtBitrate(info, RcVideoKbps);
+    }
+
+    /// <summary>
+    /// The fragment the CLI and the menu use when the preset is applied. Kept as
+    /// a property so existing call sites (and the settings file) see one string.
+    /// </summary>
+    public string RecompressArgs => Fragment(native: true);
+
+    /// <summary>Same profile, rendered with libx264/aac so any player opens it.</summary>
+    public string ModernRecompressArgs => Fragment(native: false);
+
+    /// <summary>Container the native rendering lands in.</summary>
+    public string NativeContainer => RecompressContainer;
+
+    /// <summary>Container the modern rendering lands in.</summary>
+    public string ModernContainer => "mp4";
+
+    public string ContainerFor(bool native) => native ? NativeContainer : ModernContainer;
+
+    public string Note => NoteKey is { Length: > 0 } key ? Localization.L.T(key) : (NoteText ?? "");
+
+    /// <summary>
+    /// Every value the two layers hold, in one line, for the report and the
+    /// menu. Kept next to the fields so a new field cannot be forgotten here.
+    /// </summary>
+    public string Summary() => string.Create(CultureInfo.InvariantCulture,
+        $"{RcWidth}x{RcHeight}@{RcFps:G6} {RcVideoKbps}k {VideoCodec}/{AudioCodec} .{RecompressContainer}");
 }
 
 /// <summary>
-/// The built-in eras and sites. Read-only by design: users add or override
-/// entries in their own config file, they never edit this table, so an upgrade
-/// can add a row without fighting a local modification.
+/// The built-in eras and sites, plus whatever the user wrote in the settings
+/// file. Read-only by design for the built-in rows: an upgrade can add one
+/// without fighting a local modification, and a user who wants different
+/// numbers writes a custom preset with the same id, which wins.
 /// </summary>
 public static class EraPresets
 {
-    public static readonly IReadOnlyList<EraPreset> All =
+    private static readonly IReadOnlyList<EraPreset> BuiltIn =
     [
         new EraPreset
         {
@@ -160,10 +260,10 @@ public static class EraPresets
             AudioKbps = 16,
             AudioChannels = 1,
             AudioRate = 16000,
+            RcWidth = 160, RcHeight = 120, RcFps = 10,
+            RcVideoKbps = 45, RcCrf = 34, RcProfile = "baseline",
+            RcAudioKbps = 16, RcAudioRate = 16000, RcAudioChannels = 1,
             // 20 Kbps usable on a 28.8K modem; speech-grade mono audio.
-            RecompressArgs = "-vf scale=160:120:flags=neighbor,fps=10 "
-                           + "-c:v libx264 -profile:v baseline -preset veryfast -crf 34 "
-                           + "-ac 1 -ar 16000 -b:a 16k",
             NoteKey = "era.dialup98",
         },
         new EraPreset
@@ -180,9 +280,9 @@ public static class EraPresets
             AudioKbps = 24,
             AudioChannels = 1,
             AudioRate = 22050,
-            RecompressArgs = "-vf scale=320:240:flags=bicubic,fps=15 "
-                           + "-c:v libx264 -profile:v baseline -preset veryfast -crf 31 "
-                           + "-ac 1 -ar 22050 -b:a 24k",
+            RcWidth = 320, RcHeight = 240, RcFps = 15,
+            RcVideoKbps = 225, RcCrf = 31, RcProfile = "baseline",
+            RcAudioKbps = 24, RcAudioRate = 22050, RcAudioChannels = 1,
             NoteKey = "era.broadband03",
         },
         new EraPreset
@@ -201,9 +301,11 @@ public static class EraPresets
             AudioKbps = 32,
             AudioChannels = 1,
             AudioRate = 22050,
-            RecompressArgs = "-vf scale=352:264:flags=bicubic,fps=15 "
-                           + "-c:v libx264 -profile:v baseline -preset veryfast -crf 28 "
-                           + "-ac 1 -ar 22050 -b:a 32k",
+            RcWidth = 352, RcHeight = 264, RcFps = 15,
+            RcVideoKbps = 300, RcCrf = 28, RcProfile = "baseline",
+            RcAudioKbps = 32, RcAudioRate = 22050, RcAudioChannels = 1,
+            VideoCodec = "libx264",       // an era is not one site; keep it playable
+            AudioCodec = "aac",
             NoteKey = "era.flv07",
         },
         new EraPreset
@@ -219,9 +321,9 @@ public static class EraPresets
             AudioKbps = 64,
             AudioChannels = 1,
             AudioRate = 44100,
-            RecompressArgs = "-vf scale=640:480:flags=lanczos,fps=25 "
-                           + "-c:v libx264 -profile:v main -preset veryfast -crf 25 "
-                           + "-ac 1 -ar 44100 -b:a 64k",
+            RcWidth = 640, RcHeight = 480, RcFps = 25,
+            RcVideoKbps = 900, RcCrf = 25, RcProfile = "main",
+            RcAudioKbps = 64, RcAudioRate = 44100, RcAudioChannels = 1,
             NoteKey = "era.mp4_10",
         },
         new EraPreset
@@ -238,68 +340,154 @@ public static class EraPresets
             AudioKbps = 96,
             AudioChannels = 2,
             AudioRate = 44100,
-            RecompressArgs = "-vf scale=1280:720:flags=lanczos,fps=30 "
-                           + "-c:v libx264 -profile:v high -preset veryfast -crf 23 "
-                           + "-ac 2 -ar 44100 -b:a 96k",
+            RcWidth = 1280, RcHeight = 720, RcFps = 30,
+            RcVideoKbps = 2500, RcCrf = 23, RcProfile = "high",
+            RcAudioKbps = 96, RcAudioRate = 44100, RcAudioChannels = 2,
             NoteKey = "era.hd14",
         },
 
-        // ---- v7.9.5: the sites themselves, recompress layer only ----
+        // ---- the 2005-2009 portals: Sorenson Spark in FLV ----
         //
-        // 2005-2009 China was not one transcode ladder but six: every portal ran
-        // its own FLV settings, which is why the same upload looked different on
-        // Sina, Sohu, Tencent, Youku and Tudou. These presets reproduce the
-        // *second* pass at each site's nominal bitrate and never touch the live
-        // encoder, so "what Youku would have done to my recording" is one flag.
-        Site("sina06", 2005, 2008, 320, 240, 12, 200, 32, 22050, 1, "era.sina06"),
-        Site("sohu06", 2006, 2009, 320, 240, 15, 240, 32, 22050, 1, "era.sohu06"),
-        Site("qq06", 2006, 2009, 320, 240, 15, 260, 32, 22050, 1, "era.qq06"),
-        Site("tudou06", 2005, 2009, 352, 264, 12, 295, 32, 22050, 1, "era.tudou06"),
-        Site("youku07", 2007, 2010, 352, 264, 15, 320, 32, 22050, 1, "era.youku07"),
+        // 2005-2009 China was not one transcode ladder but a dozen: every portal
+        // ran its own FLV settings, which is why the same upload looked
+        // different on Sina, Sohu, Tencent, Youku, Tudou, 56 and Ku6. These are
+        // the *second* pass only -- the live size stays yours -- but they do
+        // name the codec, because that is half of what "looks like 2007" means.
+        Site("sina06", 2005, 2008, 320, 240, 12, 200, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.sina06"),
+        Site("sohu06", 2006, 2009, 320, 240, 15, 240, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.sohu06"),
+        // Tencent's player was the one that pushed a higher frame rate in that
+        // period: 25 fps, not 15, at the same 320x240 the rest of the portals
+        // served. Same bitrate, twice the frames -- visibly smoother, visibly
+        // blockier per frame, which is exactly how QQ播客 looked.
+        Site("qq06", 2006, 2009, 320, 240, 25, 260, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.qq06"),
+        Site("tudou06", 2005, 2009, 352, 264, 12, 295, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.tudou06"),
+        Site("youku07", 2007, 2010, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.youku07"),
+        Site("ku6_07", 2007, 2010, 320, 240, 15, 240, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.ku6"),
+        Site("56_07", 2006, 2010, 320, 240, 15, 220, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.56"),
+        // 央视网 was the odd one out: 4:3, 25 fps (PAL telecine), and the
+        // bitrate of a broadcaster rather than a portal.
+        Site("cctv06", 2006, 2009, 384, 288, 25, 350, 48, 22050, 1, "flv", "libmp3lame", "flv", "era.cctv06"),
+        Site("acfun08", 2008, 2011, 320, 240, 15, 260, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.acfun08"),
+        // Bilibili started as an FLV site too; 384x288@24 is the anime size of
+        // the period (4:3 source, 24 fps telecine).
+        Site("bilibili09", 2009, 2012, 384, 288, 24, 320, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.bilibili09"),
         // YouTube's 2007 standard stream: 320x240, ~150-200 Kbps video, and the
         // 22.05 kHz mono track at 64 Kbps everybody remembers.
-        Site("youtube07", 2006, 2008, 320, 240, 15, 200, 64, 22050, 1, "era.youtube07"),
+        Site("youtube07", 2006, 2008, 320, 240, 15, 200, 64, 22050, 1, "flv", "libmp3lame", "flv", "era.youtube07"),
+
+        // ---- the 2010s: H.264 in MP4, 360p then 720p ----
+        Site("bilibili11", 2011, 2013, 640, 360, 30, 700, 96, 44100, 2, "libx264", "aac", "mp4", "era.bilibili11"),
+        Site("youku11", 2011, 2013, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4", "era.youku11"),
+        Site("iqiyi11", 2011, 2014, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4", "era.iqiyi11"),
+        Site("cctv12", 2010, 2013, 640, 360, 25, 700, 96, 44100, 2, "libx264", "aac", "mp4", "era.cctv12"),
+        Site("youtube11", 2011, 2013, 640, 360, 30, 700, 96, 44100, 2, "libx264", "aac", "mp4", "era.youtube11"),
+        Site("bilibili14", 2014, 2016, 1280, 720, 30, 1800, 128, 44100, 2, "libx264", "aac", "mp4", "era.bilibili14"),
+        // YouTube moved 720p to VP9 + Opus around 2014-2016, which is the one
+        // period-correct case where the "modern" codec is not the site's codec.
+        Site("youtube15", 2014, 2016, 1280, 720, 30, 1500, 96, 48000, 2, "libvpx-vp9", "libopus", "webm", "era.youtube15"),
     ];
+
+    private static readonly List<EraPreset> CustomRows = [];
+    private static readonly Lock Gate = new();
 
     /// <summary>
     /// A site preset: the numbers are the site's transcode ladder, the fragment
     /// is derived from them so the two can never drift apart.
     ///
-    /// The recompressed file stays MP4/H.264 on purpose (see docs/era-presets.md):
-    /// the point is the bitrate and the resolution, and the result has to open in
-    /// a player that is not from 2007. `-b:v` rather than `-crf` because a site
-    /// targeted a bitrate, not a quality level.
+    /// The live encoder is the one that site used (FLV-era portals: flv1;
+    /// H.264-era: libx264), because the codec is half of what "looks like
+    /// 2007" means. The frame size is left alone: a site says nothing about
+    /// how the recording was captured.
     /// </summary>
     private static EraPreset Site(
         string id, int from, int to, int width, int height, double fps,
-        int videoKbps, int audioKbps, int audioRate, int channels, string noteKey) => new()
+        int videoKbps, int audioKbps, int audioRate, int channels,
+        string videoCodec, string audioCodec, string container, string noteKey) => new()
     {
         Id = id,
         Kind = EraKind.Site,
         YearFrom = from,
         YearTo = to,
-        RecompressArgs = string.Create(CultureInfo.InvariantCulture,
-            $"-vf scale={width}:{height}:flags=bicubic,fps={fps:G6} "
-            + $"-c:v libx264 -profile:v baseline -preset veryfast "
-            + $"-b:v {videoKbps}k -maxrate {videoKbps * 12 / 10}k -bufsize {videoKbps * 2}k "
-            + $"-ac {channels} -ar {audioRate} -c:a aac -b:a {audioKbps}k"),
-        RecompressContainer = "mp4",
+        // The live pass adopts the codec the site ingested. A site that only
+        // ever *served* another codec (YouTube's VP9) still took H.264 uploads,
+        // so the fallback is libx264 rather than the delivery codec.
+        Encoder = videoCodec is "flv" or "libx264" ? videoCodec : "libx264",
+        RcWidth = width,
+        RcHeight = height,
+        RcFps = fps,
+        RcVideoKbps = videoKbps,
+        // 2000s portals ran a baseline profile on a Pentium; 2010s ran main.
+        RcProfile = from < 2010 ? "baseline" : "main",
+        RcCrf = from < 2010 ? 28 : 24,
+        RcAudioKbps = audioKbps,
+        RcAudioRate = audioRate,
+        RcAudioChannels = channels,
+        VideoCodec = videoCodec,
+        AudioCodec = audioCodec,
+        RecompressContainer = container,
         NoteKey = noteKey,
     };
+
+    /// <summary>
+    /// Install the user's own presets (v7.9.5.1). Called once per process after
+    /// the settings file is read; a custom preset with a built-in id replaces
+    /// that row in every list.
+    /// </summary>
+    public static void SetCustom(IEnumerable<EraPreset> custom)
+    {
+        lock (Gate)
+        {
+            CustomRows.Clear();
+            CustomRows.AddRange(custom.Where(p => p.Id.HasText));
+        }
+    }
+
+    /// <summary>
+    /// Read the custom rows out of a settings snapshot. Split from
+    /// <see cref="SetCustom"/> so the CLI can register them without a live
+    /// <see cref="Configuration.Config"/> (it never applies the stored settings).
+    /// </summary>
+    public static void Register(Configuration.UserConfig stored)
+    {
+        var rows = new List<EraPreset>();
+        foreach (Configuration.CustomEraConfig row in stored.CustomEras ?? [])
+        {
+            EraPreset? preset = Configuration.EraConfigMap.FromConfig(row);
+            if (preset is not null) rows.Add(preset);
+        }
+        SetCustom(rows);
+    }
+
+    /// <summary>Built-in rows plus the user's, custom first so it wins on lookup.</summary>
+    public static IReadOnlyList<EraPreset> All
+    {
+        get
+        {
+            lock (Gate) return [.. CustomRows, .. BuiltIn.Where(b => !CustomRows.Any(c => Same(c.Id, b.Id)))];
+        }
+    }
+
+    /// <summary>Only the presets that can reshape the live pass.</summary>
+    public static IReadOnlyList<EraPreset> WithLiveLayer => [.. All.Where(p => p.HasLive)];
+
+    /// <summary>Only the site presets (second pass alone, encoder named).</summary>
+    public static IReadOnlyList<EraPreset> Sites => [.. All.Where(p => p.Kind == EraKind.Site)];
+
+    public static IReadOnlyList<EraPreset> Custom
+    {
+        get { lock (Gate) return [.. CustomRows]; }
+    }
 
     public static EraPreset? Find(string? id)
     {
         if (!id.HasText) return null;
-        return All.FirstOrDefault(
-            p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+        return All.FirstOrDefault(p => Same(p.Id, id));
     }
 
-    /// <summary>Only the presets that can reshape the live pass.</summary>
-    public static IReadOnlyList<EraPreset> WithLiveLayer =>
-        [.. All.Where(p => p.HasLive)];
-
-    /// <summary>Only the site presets (recompress layer alone).</summary>
-    public static IReadOnlyList<EraPreset> Sites => [.. All.Where(p => p.Kind == EraKind.Site)];
-
     public static string Ids => string.Join(", ", All.Select(p => p.Id));
+
+    public static bool IsBuiltInId(string id) =>
+        BuiltIn.Any(b => Same(b.Id, id));
+
+    private static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 }

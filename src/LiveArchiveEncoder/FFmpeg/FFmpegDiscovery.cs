@@ -233,6 +233,19 @@ public static partial class FFmpegDiscovery
         return result;
     }
 
+    /// <summary>
+    /// Every video encoder name in <c>ffmpeg -encoders</c>, including the modern
+    /// ones this tool never selects for the live pass (libx265, libvpx-vp9,
+    /// libsvtav1, ...). v7.9.5.1: the second pass can use those, so "is this
+    /// codec in this build" has to be answerable beyond the legacy table.
+    /// </summary>
+    public static HashSet<string> ParseVideoEncoderNames(string text)
+    {
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        foreach ((string name, _, _) in ParseVideoEncoders(text)) found.Add(name);
+        return found;
+    }
+
     public static string ExtractCodec(string description, string name)
     {
         Match m = CodecInDescription().Match(description);

@@ -145,7 +145,9 @@ OPTION_CHECKS = [
     # encode -- which is why the rejection is rc=2 from argument parsing.
     # --lang en pins the message: the CLI otherwise speaks the language stored in
     # the settings file, which is a user choice, not this script's.
-    ("era_unknown",       ["--lang", "en", "--era", "nope"],        2, "must be one of"),
+    # v7.9.5.1: the id is checked after the settings file is read (user presets
+    # live there), so the message now comes from the resolver, not the parser.
+    ("era_unknown",       ["--lang", "en", "--era", "nope"],        2, "unknown era preset"),
     ("rc_bad_args",       ["--lang", "en", "--no-cui", "--encoder", "mpeg4",
                            "--recompress-args", "-i x.mp4",
                            "SRC", "OUT/rc_bad.avi"],      2, "not allowed here"),
@@ -405,18 +407,18 @@ def test_fractional_rate_is_written_as_an_integer(exe, src, workdir):
 
 
 def test_a_site_preset_only_reshapes_the_second_pass(exe, src, workdir):
-    """v7.9.5: a site preset is a bitrate profile, not an encoder choice.
+    """v7.9.5: a site preset is a bitrate profile, not a re-shoot.
 
-    2005-2009 China was not one transcode ladder but six -- every portal ran its
-    own FLV settings. --era youku07 must therefore leave the live pass exactly
-    as the user configured it and rewrite only the recompress fragment.
+    2005-2009 China was not one transcode ladder but a dozen -- every portal ran
+    its own FLV settings. --era youku07 must therefore leave the live pass
+    exactly as the user configured it and rewrite only the recompress fragment.
     """
     out = workdir("options")
     dst = out / "site_preset.avi"
 
     proc = run([str(exe), str(src), str(dst), "--end", "00:00:04",
                 "--encoder", "mpeg4", "--era", "youku07", "--recompress",
-                "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
+                "--era-modern", "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
     assert proc.returncode == 0, (
         f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
 
@@ -432,6 +434,53 @@ def test_a_site_preset_only_reshapes_the_second_pass(exe, src, workdir):
     assert (info.get("width"), info.get("height")) == (352, 264), info
 
 
+def test_a_site_preset_writes_the_codec_its_era_had(exe, src, workdir):
+    """v7.9.5.1: the codec is half of what "looks like 2007" means.
+
+    320 kbps of H.264 is a clean picture; 320 kbps of Sorenson Spark is the
+    blocky thing people actually remember. --era youku07 now renders with the
+    site's own codec in the site's own container, and --era-modern is the
+    viewing copy.
+    """
+    out = workdir("options")
+    existing = out / "era_native.mp4"
+    shutil_copy(src, existing)
+    proc = run([str(exe), str(existing), "--recompress-only", "--era", "youku07",
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:300]}")
+
+    web = out / "era_native_web.flv"
+    assert web.exists() and web.stat().st_size > 0, "no .flv product"
+    info = harness.video_summary(web) or {}
+    assert info.get("codec") == "flv1", info
+    assert (info.get("width"), info.get("height")) == (352, 264), info
+
+
+def test_a_site_preset_sets_the_live_encoder_only_when_not_overridden(exe, src, workdir):
+    """v7.9.5.1: a 2009 site's capture codec is part of the preset.
+
+    --era bilibili09 with no --encoder encodes the live pass with flv1; naming
+    --encoder still wins, because an explicit flag always does.
+    """
+    out = workdir("options")
+
+    auto = out / "preset_encoder.flv"
+    proc = run([str(exe), str(src), str(auto), "--era", "bilibili09",
+                "--end", "00:00:03", "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+    assert (harness.video_summary(auto) or {}).get("codec") == "flv1", harness.video_summary(auto)
+
+    explicit = out / "preset_override.avi"
+    proc = run([str(exe), str(src), str(explicit), "--era", "bilibili09",
+                "--encoder", "mpeg4", "--end", "00:00:03",
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+    assert (harness.video_summary(explicit) or {}).get("codec") == "mpeg4"
+
+
 def test_recompress_only_needs_no_live_pass(exe, src, workdir):
     """v7.9.5: the second pass can be applied to a file that already exists.
 
@@ -445,7 +494,7 @@ def test_recompress_only_needs_no_live_pass(exe, src, workdir):
     shutil.copyfile(src, existing)
 
     proc = run([str(exe), str(existing), "--recompress-only", "--era", "youku07",
-                "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
+                "--era-modern", "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
     assert proc.returncode == 0, (
         f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:300]}")
 
@@ -456,6 +505,46 @@ def test_recompress_only_needs_no_live_pass(exe, src, workdir):
 
     # The whole point: nothing was recorded, so no _live product may appear.
     assert not list(out.glob("already_made_live.*")), "a live pass ran anyway"
+
+
+def test_recompress_codec_picks_its_own_container(exe, src, workdir):
+    """v7.9.5.1: naming a codec is enough; the container follows from it.
+
+    Before this, "-c:v libvpx-vp9" with the default container asked FFmpeg for
+    VP9 in MP4, which muxes badly and plays back in almost nothing.
+    """
+    out = workdir("options")
+    existing = out / "codec_choice.mkv"
+    shutil_copy(src, existing)
+
+    proc = run([str(exe), str(existing), "--recompress-only",
+                "--recompress-codec", "libvpx-vp9",
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=600)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:300]}")
+
+    web = out / "codec_choice_web.webm"
+    assert web.exists() and web.stat().st_size > 0, "no .webm product"
+    info = harness.video_summary(web) or {}
+    assert info.get("codec") == "vp9", info
+
+
+def test_recompress_codec_refuses_an_impossible_container(exe, src, workdir):
+    """A pair the muxer cannot hold is refused before anything runs."""
+    out = workdir("options")
+    existing = out / "codec_clash.mkv"
+    shutil_copy(src, existing)
+
+    proc = run([str(exe), str(existing), "--recompress-only",
+                "--recompress-codec", "libvpx-vp9", "--recompress-container", "mp4",
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=120)
+    assert proc.returncode == 2, f"rc={proc.returncode}"
+    assert "webm" in (proc.stdout + proc.stderr).lower()
+
+
+def shutil_copy(src, dst):
+    import shutil
+    shutil.copyfile(src, dst)
 
 
 def test_recompress_only_refuses_a_nameless_run(exe, src, workdir):

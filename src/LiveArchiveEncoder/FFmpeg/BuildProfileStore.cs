@@ -27,7 +27,7 @@ namespace LiveArchiveEncoder.FFmpeg;
 public sealed class BuildProfile
 {
     /// <summary>Bumped whenever the shape below changes; an older file is ignored.</summary>
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
 
     public int Schema { get; set; } = SchemaVersion;
 
@@ -44,6 +44,13 @@ public sealed class BuildProfile
 
     /// <summary>Legacy/classic video encoders this build has, as EncoderInfo records.</summary>
     public List<EncoderInfo> Encoders { get; set; } = [];
+
+    /// <summary>
+    /// Every video encoder name, legacy or not. v7.9.5.1: the second pass can
+    /// name libx265 / libvpx-vp9 / libsvtav1, which are not in the legacy table,
+    /// and "this build lacks that codec" must be answerable without a launch.
+    /// </summary>
+    public List<string> VideoEncoders { get; set; } = [];
 
     public List<string> AudioEncoders { get; set; } = [];
     public List<string> SubtitleEncoders { get; set; } = [];
@@ -85,6 +92,7 @@ public sealed class Capabilities
         Encoders = profile.Encoders;
         AudioEncoders = [.. profile.AudioEncoders];
         SubtitleEncoders = [.. profile.SubtitleEncoders];
+        VideoEncoders = [.. profile.VideoEncoders];
         Filters = [.. profile.Filters];
         ScaleAlgorithms = [.. profile.ScaleAlgorithms];
     }
@@ -99,6 +107,7 @@ public sealed class Capabilities
     public List<EncoderInfo> Encoders { get; }
     public HashSet<string> AudioEncoders { get; }
     public HashSet<string> SubtitleEncoders { get; }
+    public HashSet<string> VideoEncoders { get; }
     public HashSet<string> Filters { get; }
     public HashSet<string> ScaleAlgorithms { get; }
 
@@ -234,6 +243,7 @@ public static class BuildProfileStore
             Configuration = configuration,
             Gpl = gpl,
             Encoders = FFmpegDiscovery.ParseLegacyEncoders(encoders.Stdout),
+            VideoEncoders = [.. FFmpegDiscovery.ParseVideoEncoderNames(encoders.Stdout)],
             AudioEncoders = [.. FFmpegDiscovery.ParseAudioEncoders(encoders.Stdout)],
             SubtitleEncoders = [.. FFmpegDiscovery.ParseSubtitleEncoders(encoders.Stdout)],
             Filters = [.. names],

@@ -80,6 +80,27 @@ public sealed class CliOptions
 
     /// <summary>Explicit subtitle codec for copy mode; null picks it per container.</summary>
     public string? SubtitleCodec { get; init; }
+
+    /// <summary>
+    /// v7.9.5.1: extra directory libass looks in. Imported fonts belong in the
+    /// program's own <c>fonts</c> directory, which is what travels with it.
+    /// </summary>
+    public string? SubtitleFontDir { get; init; }
+
+    /// <summary>
+    /// v7.9.5.1: family forced over the one a subtitle file asks for. Needed for
+    /// SRT/VTT (which name no font) and for ASS files whose font nobody has.
+    /// </summary>
+    public string? SubtitleFont { get; init; }
+
+    /// <summary>
+    /// v7.9.5.1: copy font files into the program's <c>fonts</c> directory and
+    /// exit. Accepts a file or a directory.
+    /// </summary>
+    public string? FontImport { get; init; }
+
+    /// <summary>v7.9.5.1: print the fonts a subtitle file needs, then exit.</summary>
+    public bool ListSubtitleFonts { get; init; }
     public int Width { get; init; } = 256;
     public int Height { get; init; } = 192;
 
@@ -172,6 +193,30 @@ public sealed class CliOptions
     public bool NoRecompress { get; init; }
 
     /// <summary>
+    /// v7.9.5.1: pick the second pass's video codec by name instead of writing a
+    /// fragment. The container follows the codec when none was named.
+    /// </summary>
+    public string? RecompressCodec { get; init; }
+
+    /// <summary>CRF / q:v for <see cref="RecompressCodec"/>; null = the codec's default.</summary>
+    public int? RecompressQuality { get; init; }
+
+    /// <summary>Audio codec for the second pass (aac, libopus, libvorbis, copy, ...).</summary>
+    public string? RecompressAudioCodec { get; init; }
+
+    /// <summary>Audio bitrate for the second pass; null = the codec's default.</summary>
+    public int? RecompressAudioKbps { get; init; }
+
+    /// <summary>
+    /// v7.9.5.1: render an era/site preset with libx264 + AAC in MP4 instead of
+    /// the codec that site actually served. Default is the site's own codec.
+    /// </summary>
+    public bool EraModern { get; init; }
+
+    /// <summary>The default spelling of <see cref="EraModern"/> being false.</summary>
+    public bool EraNative { get; init; }
+
+    /// <summary>
     /// v7.9.5: run the recompress pass <b>on its own</b>, against an existing
     /// file. No live encode happens, so no video encoder is chosen or probed.
     /// </summary>
@@ -237,6 +282,10 @@ public static class CliParser
         int? subtitleStream = null;
         string subtitleMode = "burn";
         string? subtitleCodec = null;
+        string? subtitleFontDir = null;
+        string? subtitleFont = null;
+        string? fontImport = null;
+        bool listSubtitleFonts = false;
         int width = 256;
         int height = 192;
         string? container = null;
@@ -279,6 +328,12 @@ public static class CliParser
         string? recompressContainer = null;
         bool noRecompress = false;
         bool recompressOnly = false;
+        string? recompressCodec = null;
+        int? recompressQuality = null;
+        string? recompressAudioCodec = null;
+        int? recompressAudioKbps = null;
+        bool eraModern = false;
+        bool eraNative = false;
         string? era = null;
         bool emitArgs = false;
         string? emitArgsFile = null;
@@ -434,6 +489,21 @@ public static class CliParser
                     if (!TryValue(out subtitleCodec)) return (null, "--subtitle-codec requires a value");
                     subtitleCodec = subtitleCodec.Trim().ToLowerInvariant();
                     break;
+                case "--subtitle-font-dir":
+                    if (!TryValue(out string fontDirRaw)) return (null, "--subtitle-font-dir requires a directory");
+                    subtitleFontDir = fontDirRaw.Trim().Trim('"');
+                    break;
+                case "--subtitle-font":
+                    if (!TryValue(out string fontRaw)) return (null, "--subtitle-font requires a family name");
+                    subtitleFont = fontRaw.Trim().Trim('"');
+                    break;
+                case "--font-import":
+                    if (!TryValue(out string importRaw)) return (null, "--font-import requires a file or directory");
+                    fontImport = importRaw.Trim().Trim('"');
+                    break;
+                case "--list-subtitle-fonts":
+                    listSubtitleFonts = true;
+                    break;
                 case "--width":
                     if (!TryValue(out string wRaw) || !int.TryParse(wRaw, out width))
                         return (null, "--width requires an integer");
@@ -587,12 +657,38 @@ public static class CliParser
                     break;
                 case "--no-recompress": noRecompress = true; break;
                 case "--recompress-only": recompressOnly = true; break;
+                case "--recompress-codec":
+                    if (!TryValue(out recompressCodec)) return (null, "--recompress-codec requires a codec name");
+                    recompressCodec = recompressCodec.Trim().ToLowerInvariant();
+                    break;
+                case "--recompress-quality":
+                    if (!TryValue(out string rcqRaw) || !int.TryParse(rcqRaw, out int rcqValue))
+                        return (null, "--recompress-quality requires an integer");
+                    if (rcqValue < 1 || rcqValue > 63)
+                        return (null, "--recompress-quality must be between 1 and 63");
+                    recompressQuality = rcqValue;
+                    break;
+                case "--recompress-audio-codec":
+                    if (!TryValue(out recompressAudioCodec))
+                        return (null, "--recompress-audio-codec requires a codec name");
+                    recompressAudioCodec = recompressAudioCodec.Trim().ToLowerInvariant();
+                    break;
+                case "--recompress-audio-kbps":
+                    if (!TryValue(out string rcabRaw) || !int.TryParse(rcabRaw, out int rcabValue)
+                        || rcabValue < 0)
+                        return (null, "--recompress-audio-kbps requires a non-negative integer");
+                    recompressAudioKbps = rcabValue;
+                    break;
+                case "--era-modern": eraModern = true; break;
+                case "--era-native": eraNative = true; break;
 
                 case "--era":
                     if (!TryValue(out era)) return (null, "--era requires a value");
                     era = era.Trim();
-                    if (PostProcess.EraPresets.Find(era) is null)
-                        return (null, $"--era must be one of {PostProcess.EraPresets.Ids}");
+                    // v7.9.5.1: the table now includes the user's own presets, and
+                    // those live in the settings file -- which Parse() has not read.
+                    // The name is checked in Cli.Run, where the custom rows are
+                    // already registered.
                     break;
 
                 // v7.9.1: settings-file conversion. --emit-args deliberately
@@ -653,6 +749,10 @@ public static class CliParser
             SubtitleStream = subtitleStream,
             SubtitleMode = subtitleMode,
             SubtitleCodec = subtitleCodec,
+            SubtitleFontDir = subtitleFontDir,
+            SubtitleFont = subtitleFont,
+            FontImport = fontImport,
+            ListSubtitleFonts = listSubtitleFonts,
             Width = width,
             Height = height,
             Container = container,
@@ -694,11 +794,18 @@ public static class CliParser
             PlayerPath = playerPath,
             // --recompress-args arms the pass on its own: nobody writes out a
             // full argument list and then expects it not to run.
-            Recompress = recompress || recompressArgs is not null || recompressOnly,
+            Recompress = recompress || recompressArgs is not null || recompressOnly
+                || recompressCodec is not null,
             RecompressArgs = recompressArgs,
             RecompressContainer = recompressContainer,
             NoRecompress = noRecompress,
             RecompressOnly = recompressOnly,
+            RecompressCodec = recompressCodec,
+            RecompressQuality = recompressQuality,
+            RecompressAudioCodec = recompressAudioCodec,
+            RecompressAudioKbps = recompressAudioKbps,
+            EraModern = eraModern,
+            EraNative = eraNative,
             Era = era,
             EmitArgs = emitArgs,
             EmitArgsFile = emitArgsFile,
@@ -738,6 +845,14 @@ public static class CliParser
             ("--subtitle-mode", "MODE", "burn the text into the picture (default) or copy it as a stream"),
             ("--subtitle-codec", "NAME", "subtitle codec for --subtitle-mode copy (default: per container, "
                                        + "from \"ffmpeg -encoders\")"),
+            ("--subtitle-font-dir", "DIR", "extra font directory for burned subtitles (in addition to "
+                                         + "the program's own fonts directory)"),
+            ("--subtitle-font", "FAMILY", "force this font family over the one the file names "
+                                        + "(also gives SRT/VTT a font, which they never specify)"),
+            ("--font-import", "PATH", "copy a font file (or every font in a directory) into the "
+                                    + "program's fonts directory, then exit"),
+            ("--list-subtitle-fonts", "", "print the fonts a subtitle file needs, whether they are "
+                                        + "installed, and where, then exit"),
             ("--width", "N", "output width (default: 256)"),
             ("--height", "N", "output height (default: 192)"),
             ("--container", "NAME", "container override where the encoder allows one, e.g. avi for "
@@ -779,11 +894,19 @@ public static class CliParser
             ("--player", "PATH", "external player executable (default: system file association)"),
             ("--recompress", "", "re-encode the result the way a video site would (default: off)"),
             ("--recompress-args", "ARGS", "FFmpeg arguments for that pass; -i and the output are supplied"),
-            ("--recompress-container", "EXT", "container for the recompressed file (default: mp4)"),
+            ("--recompress-codec", "NAME", $"second-pass video codec instead of a fragment: {PostProcess.RecompressCodecs.VideoIdList}"),
+            ("--recompress-quality", "N", "quality for --recompress-codec (CRF, or q:v for the MPEG family)"),
+            ("--recompress-audio-codec", "NAME", $"second-pass audio codec: {PostProcess.RecompressCodecs.AudioIdList}, or copy"),
+            ("--recompress-audio-kbps", "N", "second-pass audio bitrate (default: the codec's)"),
+            ("--recompress-container", "EXT", "container for the recompressed file (default: implied by the codec)"),
             ("--recompress-only", "", "skip the live encode and apply the recompress pass to an "
                                     + "existing file, then exit"),
             ("--no-recompress", "", "disable the recompress stage"),
-            ("--era", "ID", $"apply an era preset: {PostProcess.EraPresets.Ids}"),
+            ("--era", "ID", $"apply an era/site preset: {PostProcess.EraPresets.Ids} "
+                          + "(custom ids from the settings file also work)"),
+            ("--era-modern", "", "render a preset's second pass with libx264 + AAC in MP4 "
+                               + "instead of the codec that site used"),
+            ("--era-native", "", "render a preset's second pass with the site's own codec (default)"),
             ("--emit-args[=FILE]", "", "print the command line equivalent to the settings, then exit "
                                        + "(FILE = a settings file to read; bare = this run's resolved settings)"),
             ("--save-config", "FILE", "write this run's resolved settings to FILE and exit without encoding"),

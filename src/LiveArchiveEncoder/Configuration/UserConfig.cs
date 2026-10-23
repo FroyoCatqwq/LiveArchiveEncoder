@@ -27,7 +27,7 @@ internal sealed partial class UserConfigJsonContext : JsonSerializerContext;
 /// </summary>
 public sealed class UserConfig
 {
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -135,8 +135,68 @@ public sealed class UserConfig
     /// <summary>Last applied era preset id, or null for "custom settings".</summary>
     public string? EraPreset { get; set; }
 
+    /// <summary>
+    /// v7.9.5.1: whether a preset's second pass uses the site's own codec.
+    /// Absent from an older file, which is fine -- the default is true.
+    /// </summary>
+    public bool EraNative { get; set; } = true;
+
+    /// <summary>
+    /// v7.9.5.1: presets the user wrote. Null (absent from the file) means
+    /// "leave whatever is loaded alone" -- loading a named profile that predates
+    /// this field must not delete presets someone added in the meantime.
+    /// </summary>
+    public List<CustomEraConfig>? CustomEras { get; set; }
+
     /// <summary>Ignored on load; present so the file is self-describing.</summary>
     public DateTimeOffset? SavedAt { get; set; }
+}
+
+/// <summary>
+/// One user-written era/site preset, as it is stored.
+///
+/// The shape mirrors <see cref="PostProcess.EraPreset"/> but with plain values
+/// only: no delegate, no computed fragment, nothing that would make the JSON
+/// contract depend on the code that reads it. The fragment is regenerated from
+/// these numbers on load, so a stored preset can never carry a stale argument
+/// list.
+/// </summary>
+public sealed class CustomEraConfig
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>"era" (both layers) or "site" (second pass only).</summary>
+    public string Kind { get; set; } = "site";
+
+    public int YearFrom { get; set; } = 2005;
+    public int YearTo { get; set; } = 2010;
+
+    // ---- live layer, null for a site preset ----
+    public string? Encoder { get; set; }
+    public int? Width { get; set; }
+    public int? Height { get; set; }
+    public double? Fps { get; set; }
+    public double? LimitKbps { get; set; }
+    public string? ScaleAlgo { get; set; }
+    public string? AudioEncoder { get; set; }
+    public int? AudioKbps { get; set; }
+    public int? AudioChannels { get; set; }
+    public int? AudioRate { get; set; }
+
+    // ---- second pass ----
+    public int RcWidth { get; set; } = 320;
+    public int RcHeight { get; set; } = 240;
+    public double RcFps { get; set; } = 15;
+    public int RcVideoKbps { get; set; } = 300;
+    public int RcCrf { get; set; } = 28;
+    public string RcProfile { get; set; } = "baseline";
+    public int RcAudioKbps { get; set; } = 32;
+    public int RcAudioRate { get; set; } = 22050;
+    public int RcAudioChannels { get; set; } = 1;
+    public string VideoCodec { get; set; } = "libx264";
+    public string AudioCodec { get; set; } = "aac";
+    public string Container { get; set; } = "mp4";
+    public string? Note { get; set; }
 }
 
 /// <summary>
@@ -270,6 +330,8 @@ public static class ConfigStore
         Recompress = CloneRecompress(c.Recompress),
         Subtitles = CloneSubtitles(c.Subtitles),
         EraPreset = c.EraPreset,
+        EraNative = c.EraNative,
+        CustomEras = [.. c.CustomEras.Select(EraConfigMap.ToConfig)],
     };
 
     private static SubtitleConfig CloneSubtitles(SubtitleConfig s) => new()
@@ -281,6 +343,8 @@ public static class ConfigStore
         Files = s.Files is null ? [] : [.. s.Files.Where(f => f.HasText)],
         Stream = s.Stream,
         Codec = s.Codec,
+        FontDir = s.FontDir,
+        FallbackFont = s.FallbackFont,
     };
 
     private static FpsRungSetting CloneRung(FpsRungSetting s) => new()
@@ -393,6 +457,22 @@ public static class ConfigStore
         if (stored.Recompress is not null) c.Recompress = CloneRecompress(stored.Recompress);
         if (stored.Subtitles is not null) c.Subtitles = CloneSubtitles(stored.Subtitles);
         c.EraPreset = stored.EraPreset;
+        c.EraNative = stored.EraNative;
+
+        // v7.9.5.1: the user's own presets become part of the live table here,
+        // so every later `--era` lookup in this process sees them. A file that
+        // does not mention them keeps the ones already loaded (a named profile
+        // written before this field existed must not wipe them).
+        if (stored.CustomEras is { } rows)
+        {
+            c.CustomEras = [];
+            foreach (CustomEraConfig row in rows)
+            {
+                PostProcess.EraPreset? preset = EraConfigMap.FromConfig(row);
+                if (preset is not null) c.CustomEras.Add(preset);
+            }
+            PostProcess.EraPresets.SetCustom(c.CustomEras);
+        }
     }
 
     /// <summary>
@@ -410,4 +490,126 @@ public static class ConfigStore
         // Method names are what `ffmpeg -hwaccels` prints: lowercase, no spaces.
         return name.Any(char.IsWhiteSpace) ? "off" : name.ToLowerInvariant();
     }
+}
+
+/// <summary>
+/// The stored shape &lt;-&gt; live shape mapping for user-written era presets
+/// (v7.9.5.1).
+///
+/// Loading is deliberately forgiving in the same way the rest of the settings
+/// file is: an id that is not a slug, a codec this build of the program has
+/// never heard of, or numbers that make no sense are replaced with sane values
+/// instead of throwing. A preset is a convenience, not a contract -- and a
+/// settings file that refuses to load is worse than one that loads with a row
+/// missing.
+/// </summary>
+public static class EraConfigMap
+{
+    public static CustomEraConfig ToConfig(PostProcess.EraPreset p) => new()
+    {
+        Id = p.Id,
+        Kind = p.Kind == PostProcess.EraKind.Era ? "era" : "site",
+        YearFrom = p.YearFrom,
+        YearTo = p.YearTo,
+        Encoder = p.Encoder,
+        Width = p.Width,
+        Height = p.Height,
+        Fps = p.Fps,
+        LimitKbps = p.LimitKbps,
+        ScaleAlgo = p.ScaleAlgo,
+        AudioEncoder = p.AudioEncoder,
+        AudioKbps = p.AudioKbps,
+        AudioChannels = p.AudioChannels,
+        AudioRate = p.AudioRate,
+        RcWidth = p.RcWidth,
+        RcHeight = p.RcHeight,
+        RcFps = p.RcFps,
+        RcVideoKbps = p.RcVideoKbps,
+        RcCrf = p.RcCrf,
+        RcProfile = p.RcProfile,
+        RcAudioKbps = p.RcAudioKbps,
+        RcAudioRate = p.RcAudioRate,
+        RcAudioChannels = p.RcAudioChannels,
+        VideoCodec = p.VideoCodec,
+        AudioCodec = p.AudioCodec,
+        Container = p.RecompressContainer,
+        Note = p.NoteText,
+    };
+
+    public static PostProcess.EraPreset? FromConfig(CustomEraConfig c)
+    {
+        if (c is null) return null;
+        string id = NormaliseId(c.Id);
+        if (id.Length == 0) return null;
+
+        bool era = string.Equals(c.Kind, "era", StringComparison.OrdinalIgnoreCase);
+        string videoCodec = PostProcess.RecompressCodecs.FindVideo(c.VideoCodec)?.Name ?? "libx264";
+        string audioCodec = PostProcess.RecompressCodecs.IsCopyAudio(c.AudioCodec)
+            ? PostProcess.RecompressCodecs.CopyAudio
+            : PostProcess.RecompressCodecs.FindAudio(c.AudioCodec)?.Name ?? "aac";
+
+        string? container = PostProcess.RecompressCodecs.ValidateContainer(
+            videoCodec, audioCodec, c.Container.Or("mp4")) is null
+            ? c.Container.Or("mp4").Trim().TrimStart('.').ToLowerInvariant()
+            : PostProcess.RecompressCodecs.DefaultContainer(videoCodec, audioCodec) ?? "mp4";
+
+        return new PostProcess.EraPreset
+        {
+            Id = id,
+            BuiltIn = false,
+            Kind = era ? PostProcess.EraKind.Era : PostProcess.EraKind.Site,
+            YearFrom = Math.Clamp(c.YearFrom, 1990, 2100),
+            YearTo = Math.Clamp(Math.Max(c.YearTo, c.YearFrom), 1990, 2100),
+            Encoder = c.Encoder.HasText ? c.Encoder.Trim().ToLowerInvariant() : null,
+            // A site preset has no frame size: that is what makes it "second
+            // pass only". An era without one would be an era that does nothing.
+            Width = era ? Positive(c.Width, 0) : null,
+            Height = era ? Positive(c.Height, 0) : null,
+            Fps = era ? Positive(c.Fps, 0) : null,
+            LimitKbps = era ? Positive(c.LimitKbps, 0) : null,
+            ScaleAlgo = c.ScaleAlgo.HasText ? c.ScaleAlgo.Trim().ToLowerInvariant() : (era ? "bicubic" : null),
+            AudioEncoder = era && c.AudioEncoder.HasText ? c.AudioEncoder.Trim().ToLowerInvariant() : null,
+            AudioKbps = era ? Positive(c.AudioKbps, 0) : null,
+            AudioChannels = era ? Positive(c.AudioChannels, 0) : null,
+            AudioRate = era ? Positive(c.AudioRate, 0) : null,
+            RcWidth = Positive(c.RcWidth, 320) ?? 320,
+            RcHeight = Positive(c.RcHeight, 240) ?? 240,
+            RcFps = Positive(c.RcFps, 15) ?? 15,
+            RcVideoKbps = Positive(c.RcVideoKbps, 300) ?? 300,
+            RcCrf = Math.Clamp(Value(c.RcCrf, 28), 1, 51),
+            RcProfile = c.RcProfile is "baseline" or "main" or "high" ? c.RcProfile : "baseline",
+            RcAudioKbps = Positive(c.RcAudioKbps, 32) ?? 32,
+            RcAudioRate = Positive(c.RcAudioRate, 22050) ?? 22050,
+            RcAudioChannels = Math.Clamp(Value(c.RcAudioChannels, 1), 1, 8),
+            VideoCodec = videoCodec,
+            AudioCodec = audioCodec,
+            RecompressContainer = container,
+            NoteText = c.Note.HasText ? c.Note.Trim() : null,
+            NoteKey = null,
+        };
+    }
+
+    /// <summary>Ids are lower-case slugs so a command line can carry them unquoted.</summary>
+    public static string NormaliseId(string? raw)
+    {
+        if (!raw.HasText) return "";
+        var sb = new System.Text.StringBuilder(raw.Length);
+        foreach (char ch in raw.Trim().ToLowerInvariant())
+        {
+            if (ch is >= 'a' and <= 'z' or >= '0' and <= '9') sb.Append(ch);
+            else if (ch is '_' or '-' or ' ' or '.') sb.Append('_');
+        }
+        string id = sb.ToString().Trim('_');
+        // Keep it short enough to type and to print in a menu column.
+        return id.Length > 24 ? id[..24] : id;
+    }
+
+    private static int Value(int? value, int fallback) =>
+        value is { } v && v != 0 ? v : fallback;
+
+    private static int? Positive(int? value, int fallback) =>
+        value is { } v && v > 0 ? v : (fallback > 0 ? fallback : null);
+
+    private static double? Positive(double? value, double fallback) =>
+        value is { } v && v > 0 && double.IsFinite(v) ? v : (fallback > 0 ? fallback : null);
 }

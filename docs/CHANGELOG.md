@@ -18,6 +18,86 @@
 
 ---
 
+## v7.9.5.1（2026-10-24）
+
+四个目标，一句话概括：**预设要像当年，字体要能查到，第二遍要能选编码器。**
+
+### 1. 时代预设：18 个站点、按站点指定编码器、可自定义
+
+- **站点从 6 个扩到 18 个**：补上 `ku6_07`、`56_07`、`cctv06`、`acfun08`、
+  `bilibili09`（2000 年代）与 `bilibili11`、`youku11`、`iqiyi11`、`cctv12`、
+  `youtube11`、`bilibili14`、`youtube15`（2010 年代）。
+- **预设现在指名编码器**：`VideoCodec` / `AudioCodec` / `RecompressContainer`
+  三个字段，第二遍默认用站点当年的编码器（flv1 在 `.flv`、H.264 在 `.mp4`、
+  VP9 在 `.webm`）。同码率下编码器不同，画面根本不是一回事——这是本次最重要的
+  行为变化。
+- **`--era-modern`** 回到 v7.9.5 的行为（libx264 + AAC 的 mp4 观看版）；
+  `--era-native` 是默认，也是给脚本自证用的显式写法。**CLI 不从配置继承这个
+  偏好**（脚本必须可预期），CUI 菜单 14 的 `m` 才会记进配置。
+- **直播层兜底**：`--era bilibili09` 在不给 `--encoder` 时用 flv1 编码直播那一遍；
+  显式 `--encoder` 永远优先；构建里没有那个编码器时保留当前选择并打 note。
+- **`qq06` 的 15 fps 改成 25 fps**：腾讯当年的播放器是那批站点里唯一把帧率拉高的。
+- **自定义预设**（`config.json` 的 `CustomEras`）：CUI 菜单 14 的 `n`/`e`/`d`
+  向导，同名 id 覆盖内置行，读的时候会纠正坏编码器/写不通的容器，不会让程序
+  启动失败。CLI 的 `--era` 参数解析不再只认内置表。
+- 顺带：`EraPresets.All` 变成"自定义在前、内置在后"，`Find` 因此天然支持覆盖。
+
+### 2. 系统与硬件需求写成了文档
+
+- 新增 [`docs/requirements.md`](requirements.md)：操作系统（Windows 10 1809+ /
+  Linux x86_64 glibc ≥ 2.35 / 不支持 musl 与 32 位）、CPU（2 核起、4–8 核推荐）、
+  内存（2 GB 起、8 GB 推荐，附"一帧 1080p ≈ 3.1 MB × 缓冲 × 分片"的算法）、
+  磁盘（输出体积 3 倍）、终端、字体、权限、网络、实测环境与性能预期。
+- CUI 启动时的横幅会在**低于文档下限**时多打一行（核心数 / 内存 / 输出盘空间），
+  这是提示，不是拒绝运行。
+
+### 3. 字幕字体：读 ASS 的样式表、导入、替代
+
+- 新增 `PostProcess/SubtitleFonts`：解析 ASS/SSA 的 `[V4+ Styles]`（按 `Format:`
+  行定位 `Fontname` 列，列顺序变了也能读）与 `[Fonts]` 内的嵌入字体名。
+- **字体族名直接从字体文件的 `name` 表读**（TTF/OTF/TTC，含 TTC 里的多个 face），
+  所以 `msyh.ttc` 同时报 "Microsoft YaHei" 与 "微软雅黑"；匹配支持中英对照
+  （宋体↔SimSun、黑体↔SimHei、微软雅黑↔Microsoft YaHei…）与同族不同 face
+  （Microsoft YaHei / Microsoft YaHei UI），"随程序走"的字体优先于系统字体。
+- 新增 `--list-subtitle-fonts`（要哪些、有没有、在哪）、`--font-import`
+  （拷进程序 `fonts` 目录）、`--subtitle-font`（强制家族，写成
+  `force_style='FontName=…'`）、`--subtitle-font-dir`。CUI: 菜单 **17 → 5**。
+- 烧录前会打一行 `NOTE` 指出不在程序字体目录里的家族——缺字体**不阻止编码**
+  （libass 回退），但"字幕变成方块却说成功"从此有人提醒。
+- SRT/VTT 本来就不指定字体，那是"让用户自己选"的情形：`--subtitle-font` 或默认。
+
+### 4. 二次压缩支持更多编解码器
+
+- 新增 `PostProcess/RecompressCodecs`：视频 `libx264` / `libx265` /
+  `libvpx-vp9` / `libvpx`(VP8) / `libaom-av1` / `libsvtav1` / `flv` / `mpeg4` /
+  `mpeg2video` / `mpeg1video` / `mjpeg` / `wmv2` / `h263`，音频 `aac` /
+  `libmp3lame` / `libopus` / `libvorbis` / `ac3` / `flac` / `copy`。
+- 新旗标：`--recompress-codec`、`--recompress-quality`、`--recompress-audio-codec`、
+  `--recompress-audio-kbps`。**容器跟着编码器走**（VP9→`.webm`、x265→`.mp4`、
+  flv→`.flv`），写不通的组合在开跑前报错（退出码 2）。
+- `--recompress-args` 里的 `-c:v` 也会被识别：不指定容器时 `_web` 的扩展名按它推导。
+- 编码器不在当前 FFmpeg 构建里时直接说清楚，而不是跑到一半才失败。
+- CUI 菜单 15 新增 5/6/7（视频编码器 / 质量 / 音频编码器），改的是同一段片段
+  （保留用户写的 `-vf`），不会多出第二个真相来源。
+- 能力表缓存多存一份"这个构建有哪些视频编码器"（`Schema` 2，旧缓存自动失效）。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| 单测 Windows | **475 × {net10.0, net11.0}** 全绿（v7.9.5 是 449，新增 26 条） |
+| 单测 Linux | 见 release 说明（映射盘用例 Windows-only） |
+| e2e Windows | 见 release 说明（新增 9 条：原生编码器、站点自带编码器、VP9 容器推导、容器冲突、字体清单/强制/缺失提示） |
+| 实测产物 | `--era youku07` → `.flv` 里 flv1 352x264@15 320k；`--era-modern` → mp4 里 h264；`--recompress-codec libvpx-vp9` → `.webm` 里 vp9+opus；`--recompress-codec libx265 --recompress-audio-codec libopus` → mkv 里 hevc+opus |
+
+⚠ 行为变化：
+
+1. `--era <站点>` 的二次压缩产物**扩展名变了**：2000 年代站点是 `.flv`，
+   `youtube15` 是 `.webm`。需要原来的 mp4 就加 `--era-modern`。
+2. `--era <站点>` 在没给 `--encoder` 时会改变直播层编码器（这是需求）。
+3. `--recompress-container` 的默认值不再是 `mp4`，而是"由编码器决定"。
+   只有 `--recompress-args` 里带 `-c:v` 的写法才会改推导结果；不带就仍是 mp4。
+
 ## v7.9.5（2026-10-23）
 
 **主题：不再相信 `ffmpeg -h encoder` 的声明表。** v7.9.4 修的是 mpeg1video 一个

@@ -121,6 +121,27 @@ public static class Report
             Line(L.T("param.x264profile"), c.X264Profile.Length == 0 ? L.T("value.auto") : c.X264Profile);
             Line(L.T("param.x264level"), c.X264Level.Length == 0 ? L.T("value.auto") : c.X264Level);
         }
+        // v7.9.5.1: the preset and the second pass are part of what the run
+        // does, so they belong in the dump -- the preset especially, because it
+        // also picked the encoder printed above.
+        if (c.EraPreset is { Length: > 0 } era)
+        {
+            Line(L.T("report.era"),
+                PostProcess.EraPresets.Find(era) is { } preset
+                    ? $"{era} ({preset.Summary()}) {(c.EraNative ? "" : "modern")}".TrimEnd()
+                    : era);
+        }
+        if (c.Recompress.Args.Length > 0)
+        {
+            Line(L.T("report.recompress"),
+                $"{(c.Recompress.Enabled ? "on" : L.T("value.off"))} .{c.Recompress.Container} {c.Recompress.Args}");
+        }
+        if (c.Subtitles.Active)
+        {
+            Line(L.T("report.subtitles"),
+                $"{c.Subtitles.Mode} {string.Join(", ", c.Subtitles.Files.Select(Path.GetFileName))}"
+                + (c.Subtitles.FallbackFont is { Length: > 0 } font ? $" font={font}" : ""));
+        }
     }
 
     /// <summary>"4:3" / "16:9" / a rounded ratio, so a 16:9 master stored in a

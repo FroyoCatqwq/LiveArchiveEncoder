@@ -27,6 +27,18 @@ public enum SubtitleMode
 public sealed record SubtitleSettings(
     IReadOnlyList<string> Files, int? Stream, SubtitleMode Mode, string? Codec)
 {
+    /// <summary>
+    /// v7.9.5.1: extra directory libass looks in, on top of the program's own
+    /// <c>fonts</c> directory. Null means "the program's directory only".
+    /// </summary>
+    public string? FontDir { get; init; }
+
+    /// <summary>
+    /// v7.9.5.1: family forced over the one the file asks for. Used when the
+    /// file names a font nobody has, and for SRT/VTT, which name none.
+    /// </summary>
+    public string? FallbackFont { get; init; }
+
     public bool Active => Mode != SubtitleMode.Off && (Files.Count > 0 || Stream is not null);
 }
 
@@ -51,6 +63,12 @@ public sealed class SubtitlePlan : IDisposable
 
     public string? CopyCodec { get; init; }
 
+    /// <summary>v7.9.5.1: extra font directory for the burn filter.</summary>
+    public string? FontDir { get; init; }
+
+    /// <summary>v7.9.5.1: family forced over the file's own choice.</summary>
+    public string? FallbackFont { get; init; }
+
     /// <summary>Directory holding an extracted track; removed on dispose.</summary>
     public string? StageDir { get; init; }
 
@@ -62,9 +80,12 @@ public sealed class SubtitlePlan : IDisposable
         string what = BurnFiles.Count > 0
             ? string.Join(", ", BurnFiles.Select(f => Path.GetFileName(f)))
             : CopyStream is int i ? $"stream {i}" : (CopyFile is null ? "?" : Path.GetFileName(CopyFile));
-        return Mode == SubtitleMode.Burn
+        string text = Mode == SubtitleMode.Burn
             ? $"burning {what} into the picture"
             : $"carrying {what} as {CopyCodec}";
+        if (Mode == SubtitleMode.Burn && FallbackFont.HasText)
+            text += $" (font forced to {FallbackFont})";
+        return text;
     }
 
     public void Dispose()
@@ -140,7 +161,13 @@ public static class SubtitleTrack
                     throw new ArgumentException($"subtitle file not found: {file}");
                 RejectBitmap(CodecForFile(file), $"file '{Path.GetFileName(file)}'");
             }
-            return new SubtitlePlan { Mode = SubtitleMode.Burn, BurnFiles = settings.Files };
+            return new SubtitlePlan
+            {
+                Mode = SubtitleMode.Burn,
+                BurnFiles = settings.Files,
+                FontDir = settings.FontDir,
+                FallbackFont = settings.FallbackFont,
+            };
         }
 
         int index = settings.Stream!.Value;
@@ -171,6 +198,8 @@ public static class SubtitleTrack
         {
             Mode = SubtitleMode.Burn,
             BurnFiles = [staged],
+            FontDir = settings.FontDir,
+            FallbackFont = settings.FallbackFont,
             StageDir = stageDir,
         };
     }
@@ -261,11 +290,16 @@ public static class SubtitleTrack
     /// They go <em>last</em>, onto the scaled and padded frame: rendering first
     /// and scaling afterwards would blur the text, and cropping afterwards would
     /// cut it in half.
+    ///
+    /// v7.9.5.1: <paramref name="fontDir"/> points libass at the fonts a release
+    /// actually needs, and <paramref name="fallbackFont"/> forces a family over
+    /// the one the file names (or gives SRT/VTT a family they never had).
     /// </summary>
-    public static string AppendBurn(string vf, IEnumerable<string> files)
+    public static string AppendBurn(
+        string vf, IEnumerable<string> files, string? fontDir = null, string? fallbackFont = null)
     {
-        string dir = FontResolver.FontDirectory;
-        bool haveDir = !string.IsNullOrEmpty(dir) && Directory.Exists(dir);
+        string? dir = ResolveFontDirectory(fontDir);
+        string? forced = fallbackFont.HasText ? EscapeFilterValue(fallbackFont.Trim()) : null;
 
         var parts = new List<string>();
         foreach (string file in files)
@@ -273,12 +307,52 @@ public static class SubtitleTrack
             // Without fontsdir an ASS file names fonts the machine may not have
             // (a Chinese release asking for "Microsoft YaHei" on Linux renders
             // boxes); the resolver already knows where this tool's fonts live.
-            parts.Add(haveDir
-                ? $"subtitles={EscapeFilterPath(file)}:fontsdir={EscapeFilterPath(dir)}"
-                : $"subtitles={EscapeFilterPath(file)}");
+            var options = new System.Text.StringBuilder($"subtitles={EscapeFilterPath(file)}");
+            if (dir is not null) options.Append(":fontsdir=").Append(EscapeFilterPath(dir));
+            if (forced is not null)
+                options.Append(":force_style='FontName=").Append(forced).Append('\'');
+            parts.Add(options.ToString());
         }
         return parts.Count == 0 ? vf : (vf.Length > 0 ? $"{vf}," : "") + string.Join(",", parts);
     }
+
+    /// <summary>
+    /// The directory handed to <c>fontsdir</c>. The program's own directory wins
+    /// when it holds fonts -- those are the ones that travel with the tool -- and
+    /// the user's extra directory is the fallback. Null means "let fontconfig
+    /// answer", which is the old behaviour.
+    /// </summary>
+    public static string? ResolveFontDirectory(string? extraDir)
+    {
+        string program = FontResolver.FontDirectory;
+        if (HasFontFiles(program)) return program;
+        if (extraDir.HasText && HasFontFiles(extraDir)) return extraDir;
+        return Directory.Exists(program) ? program : null;
+    }
+
+    private static bool HasFontFiles(string dir)
+    {
+        try
+        {
+            return dir.HasText && Directory.Exists(dir)
+                && Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly)
+                    .Any(f => SubtitleFonts.Extensions.Contains(Path.GetExtension(f).ToLowerInvariant()));
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Make a value safe inside a filter argument. Only the characters FFmpeg's
+    /// filter parser treats specially are touched; a family name is plain text.
+    /// </summary>
+    private static string EscapeFilterValue(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+             .Replace(":", "\\:", StringComparison.Ordinal)
+             .Replace("'", "\\'", StringComparison.Ordinal)
+             .Replace(",", "\\,", StringComparison.Ordinal);
 
     /// <summary>
     /// Make a path safe inside a filter argument.

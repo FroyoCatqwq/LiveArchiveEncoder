@@ -169,3 +169,55 @@ def test_bad_mode_is_a_parse_error(exe):
     proc = run([str(exe), "--lang", "en", "--no-cui", "--subtitle-mode", "squash"])
     assert proc.returncode == 2
     assert "--subtitle-mode must be one of" in (proc.stdout + proc.stderr)
+
+
+# ---------------------------------------------------------------------------
+# v7.9.5.1: fonts
+# ---------------------------------------------------------------------------
+
+def test_the_fonts_a_file_asks_for_can_be_listed(exe):
+    """An ASS file names its fonts in [V4+ Styles]; this is that list."""
+    proc = run([str(exe), "--list-subtitle-fonts", "--subtitle", str(ASS),
+                "--lang", "en"], timeout=120)
+    assert proc.returncode == 0, proc.stderr[-300:]
+    assert "Arial" in proc.stdout, proc.stdout[-300:]
+
+
+def test_a_forced_font_reaches_the_filter_chain(exe, sub_media, workdir):
+    """--subtitle-font forces a family, which is what SRT needs (it names none).
+
+    The run prints its filter chain, so the assertion is on the command that was
+    actually built rather than on the pixels -- changing a font is a change of
+    glyphs, not of layout, and a pixel diff would only prove "something moved".
+    """
+    proc, dst = _encode(exe, workdir, "forced_font", harness.SRC,
+                        ["--encoder", "mpeg4", "--subtitle", str(ASS),
+                         "--subtitle-font", "SimHei"])
+
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+    assert "force_style='FontName=SimHei'" in proc.stdout, proc.stdout[-400:]
+    assert harness.video_summary(dst) is not None
+
+
+def test_a_font_nobody_has_is_reported_before_the_run(exe, workdir):
+    """A missing family is a note, not a refusal: the encode still happens."""
+    out = workdir("subs")
+    ass = out / "missing_font.ass"
+    ass.write_text(
+        "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize\n"
+        "Style: Default,NoSuchFontFamilyXYZ,20\n\n[Events]\n"
+        "Format: Layer, Start, End, Style, Name\n"
+        "Dialogue: 0,0:00:00.50,0:00:02.00,Default,,0\n",
+        encoding="utf-8")
+
+    dst = out / "missing_font.avi"
+    proc = run([str(exe), str(harness.SRC), str(dst), "--end", "00:00:03",
+                "--encoder", "mpeg4", "--subtitle", str(ass),
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=180)
+
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+    assert "NoSuchFontFamilyXYZ" in proc.stdout, proc.stdout[-400:]
+    assert harness.video_summary(dst) is not None

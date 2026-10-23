@@ -181,7 +181,8 @@ public static class RealtimeEncoder
                 o.AvailableSubtitleEncoders ?? profile.SubtitleEncoders,
                 o.FFmpeg, sourcePath)
             : null;
-        if (subs is { Mode: SubtitleMode.Burn }) vf = SubtitleTrack.AppendBurn(vf, subs.BurnFiles);
+        if (subs is { Mode: SubtitleMode.Burn })
+            vf = SubtitleTrack.AppendBurn(vf, subs.BurnFiles, subs.FontDir, subs.FallbackFont);
         int frameSize = PixelFormatUtil.RawFrameSize(width, height, transportFmt);
         int? targetSlots = duration is null ? null : (int)Math.Ceiling(duration.Value * o.Fps - 1e-9);
         string muxer = o.Encoder.FormatName;

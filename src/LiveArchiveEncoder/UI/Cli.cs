@@ -2,6 +2,7 @@ using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
+using LiveArchiveEncoder.PostProcess;
 
 namespace LiveArchiveEncoder.UI;
 
@@ -16,11 +17,22 @@ public static class Cli
         // recompress arguments in the menu and then runs the CLI), so the CLI has
         // to consult the same file the interactive shell writes.
         UserConfig stored = ConfigStore.Load();
+        // v7.9.5.1: the user's own era presets live in that file, so --era can
+        // name one of them. Done before the lookup below and before any listing.
+        EraPresets.Register(stored);
 
         // v7.9.5: the recompress pass on its own. No live encode, no encoder
         // discovery, no capability probe -- this path exists so an existing
         // file can be put through a site's transcode without re-recording it.
-        if (args.RecompressOnly) return RunRecompressOnly(args, ffmpeg);
+        if (args.RecompressOnly) return RunRecompressOnly(args, ffmpeg, caps);
+
+        // Native rendering is the default: a 2007 preset in H.264 is a cleaner
+        // picture than 2007 ever had. --era-modern asks for the viewing copy.
+        // Deliberately not read from the settings file -- the CLI has never
+        // taken its defaults from there, and a menu toggle from yesterday must
+        // not change what today's script produces. (`stored.EraNative` is the
+        // shell's memory, exposed as --era-native for a script that wants it.)
+        bool eraNative = !args.EraModern;
 
         // v7.9.5: every capability this run needs comes from the build profile.
         // Both lists used to be a separate `ffmpeg -encoders` launch each.
@@ -44,12 +56,27 @@ public static class Cli
             }
         }
 
-        // --encoder wins over the preset; the preset wins over the built-in default.
-        // v7.9.5: a site preset has no live encoder to offer, so it never
-        // replaces the one on the command line or the default.
-        string wantedEncoder = era is { Encoder: { Length: > 0 } presetEncoder } && !args.EncoderExplicit
-            ? presetEncoder
-            : args.Encoder;
+        // A preset's second pass is rendered with the codec that site actually
+        // served unless --era-modern asked for a viewing copy (v7.9.5.1). Said
+        // out loud: the picture difference between those two is the whole point.
+        if (era is not null && !args.Quiet)
+        {
+            Console.WriteLine(L.T(eraNative ? "note.eranative" : "note.eramodern",
+                era.Id, eraNative ? era.VideoCodec : "libx264",
+                eraNative ? era.NativeContainer : era.ModernContainer));
+        }
+
+        // --encoder wins over the preset; the preset wins over the built-in
+        // default. v7.9.5.1: a site preset names the codec that site served, so
+        // it does speak for the live encoder -- but only when the build has it.
+        string wantedEncoder = args.Encoder;
+        if (era is { Encoder: { Length: > 0 } presetEncoder } && !args.EncoderExplicit)
+        {
+            if (encoders.Any(e => string.Equals(e.Name, presetEncoder, StringComparison.OrdinalIgnoreCase)))
+                wantedEncoder = presetEncoder;
+            else
+                Console.WriteLine(L.T("note.eracodecmissing", era.Id, presetEncoder));
+        }
 
         EncoderInfo? encoder = encoders.FirstOrDefault(
             e => string.Equals(e.Name, wantedEncoder, StringComparison.OrdinalIgnoreCase));
@@ -260,8 +287,14 @@ public static class Cli
         }
 
         Config config;
+        // The second pass is resolved before the Config literal so a bad codec /
+        // container pair is reported as an argument error, not lost in a chain.
+        (RecompressSettings recompress, string? recompressError) =
+            ResolveRecompress(args, era, eraNative);
         try
         {
+            if (recompressError is not null) throw new ArgumentException(recompressError);
+
             string scaleAlgo = EncoderMath.CanonicalScaleAlgo(effectiveScaleAlgo);
             if (!availableScaleAlgorithms.Contains(scaleAlgo))
                 throw new ArgumentException($"scale algorithm '{scaleAlgo}' is not exposed by this FFmpeg build");
@@ -321,8 +354,12 @@ public static class Cli
                 FfmpegProxy = args.FfmpegProxy,
                 Play = args.Play,
                 PlayerPath = args.PlayerPath,
-                Recompress = ResolveRecompress(args, era),
+                Recompress = recompress,
                 EraPreset = era?.Id ?? (args.Era is null ? stored.EraPreset : null),
+                EraNative = eraNative,
+                // v7.9.5.1: the user's own presets travel with the run, so
+                // saving the settings file keeps them.
+                CustomEras = [.. EraPresets.Custom],
             };
             Validation.ValidateCommonConfig(config);
             if (config.EndTimeSeconds is not null && config.EndTimeSeconds <= config.StartTimeSeconds)
@@ -341,6 +378,20 @@ public static class Cli
             {
                 Console.Error.WriteLine($"ERROR: subtitle file not found: {file}");
                 return 2;
+            }
+        }
+
+        // v7.9.5.1: an ASS file names its fonts. Say which of them are not in
+        // the program's own directory, so "the subtitles are boxes" is answered
+        // before the run rather than after it. System fonts are not consulted
+        // here on purpose: the point is what travels with the tool.
+        if (args.SubtitleMode == "burn" && !args.Quiet)
+        {
+            foreach (FontLookup lookup in
+                     SubtitleFonts.Check(args.SubtitleFiles, args.SubtitleFontDir, includeSystem: false))
+            {
+                if (lookup.FoundAt is null)
+                    Console.WriteLine(L.T("note.fontmissing", lookup.Required, FontResolver.FontDirectory));
             }
         }
         }
@@ -405,7 +456,11 @@ public static class Cli
             AudioStream = config.AudioStream,
             Subtitles = new Encoding.SubtitleSettings(
                 args.SubtitleFiles, args.SubtitleStream,
-                Encoding.SubtitleTrack.ParseMode(args.SubtitleMode), args.SubtitleCodec),
+                Encoding.SubtitleTrack.ParseMode(args.SubtitleMode), args.SubtitleCodec)
+            {
+                FontDir = args.SubtitleFontDir,
+                FallbackFont = args.SubtitleFont,
+            },
             // Detected once here (and inherited by shards) instead of once per
             // shard: the copy path needs the build's own encoder list.
             AvailableSubtitleEncoders = args.SubtitleFiles.Count > 0 || args.SubtitleStream is not null
@@ -484,7 +539,7 @@ public static class Cli
     /// last year, or a file somebody sent you, can be "uploaded" without being
     /// recorded again first.
     /// </summary>
-    private static int RunRecompressOnly(CliOptions args, string ffmpeg)
+    private static int RunRecompressOnly(CliOptions args, string ffmpeg, FFmpeg.Capabilities caps)
     {
         if (string.IsNullOrEmpty(args.Input))
         {
@@ -509,20 +564,51 @@ public static class Cli
         PostProcess.EraPreset? era = args.Era is { Length: > 0 } eraId
             ? PostProcess.EraPresets.Find(eraId)
             : null;
-        RecompressSettings settings = ResolveRecompress(args, era);
+        if (args.Era is { Length: > 0 } && era is null)
+        {
+            Console.Error.WriteLine($"ERROR: unknown era preset '{args.Era}'; "
+                + $"choose one of {PostProcess.EraPresets.Ids}");
+            return 2;
+        }
+
+        bool eraNative = !args.EraModern;
+        (RecompressSettings settings, string? resolveError) = ResolveRecompress(args, era, eraNative);
+        if (resolveError is not null)
+        {
+            Console.Error.WriteLine($"ERROR: {L.T("post.args.bad", resolveError)}");
+            return 2;
+        }
+
         // Naming a fragment is the request; --no-recompress still wins, so a
         // script that turns the stage off keeps it off.
         if (!settings.Enabled)
         {
             Console.Error.WriteLine(
-                "ERROR: --recompress-only needs --recompress-args or --era (nothing to apply)");
+                "ERROR: --recompress-only needs --recompress-args, --recompress-codec or --era "
+                + "(nothing to apply)");
             return 2;
         }
 
-        (_, string? fragmentError) = PostProcess.PostArgs.Parse(settings.Args);
+        (List<string> tokens, string? fragmentError) = PostProcess.PostArgs.Parse(settings.Args);
         if (fragmentError is not null)
         {
             Console.Error.WriteLine($"ERROR: {L.T("post.args.bad", fragmentError)}");
+            return 2;
+        }
+
+        // The build has to have the encoder the fragment names, or the failure
+        // arrives as an FFmpeg message twenty seconds in. Only checked for codecs
+        // this tool knows by name; "copy" and anything newer are left alone.
+        if (RecompressCodecs.DetectVideoCodec(tokens) is { } video && !caps.VideoEncoders.Contains(video))
+        {
+            Console.Error.WriteLine($"ERROR: {L.T("rc.codecmissing", video)}");
+            return 2;
+        }
+        if (RecompressCodecs.DetectAudioCodec(tokens) is { } audio
+            && !string.Equals(audio, RecompressCodecs.CopyAudio, StringComparison.Ordinal)
+            && !caps.AudioEncoders.Contains(audio))
+        {
+            Console.Error.WriteLine($"ERROR: {L.T("rc.codecmissing", audio)}");
             return 2;
         }
 
@@ -567,21 +653,69 @@ public static class Cli
     /// today's output. The interactive shell keeps its own state; a CLI run
     /// writes exactly what it was given.
     /// </summary>
-    private static RecompressSettings ResolveRecompress(CliOptions args, PostProcess.EraPreset? era)
+    private static (RecompressSettings Settings, string? Error) ResolveRecompress(
+        CliOptions args, PostProcess.EraPreset? era, bool eraNative)
     {
         var rc = new RecompressSettings
         {
             Enabled = false,
-            Args = era?.RecompressArgs ?? "",
-            Container = era?.RecompressContainer ?? "mp4",
+            Args = era?.Fragment(eraNative) ?? "",
+            Container = era?.ContainerFor(eraNative) ?? "mp4",
         };
+
+        // v7.9.5.1: naming a codec is an alternative to writing a fragment, and
+        // the container follows from the pair when the user did not pick one.
+        if (args.RecompressCodec is { Length: > 0 } codecName)
+        {
+            SecondPassVideoCodec? codec = RecompressCodecs.FindVideo(codecName);
+            if (codec is null)
+                return (rc, $"unknown recompress codec '{codecName}'; known: {RecompressCodecs.VideoIdList}");
+
+            string audio = args.RecompressAudioCodec ?? RecompressCodecs.RecommendedAudio(codec.Name);
+            if (!RecompressCodecs.IsCopyAudio(audio) && RecompressCodecs.FindAudio(audio) is null)
+                return (rc, $"unknown audio codec '{audio}'; known: {RecompressCodecs.AudioIdList}, or copy");
+
+            rc.Args = string.Join(' ',
+                RecompressCodecs.VideoArgs(codec, args.RecompressQuality ?? codec.DefaultQuality),
+                RecompressCodecs.AudioArgs(audio, args.RecompressAudioKbps, null, null));
+            rc.Container = args.RecompressContainer
+                ?? RecompressCodecs.DefaultContainer(codec.Name, audio)
+                ?? codec.Containers[0];
+        }
 
         if (args.RecompressArgs is { Length: > 0 } a) rc.Args = a;
         if (args.RecompressContainer is { Length: > 0 } c) rc.Container = c;
 
+        // A pair the muxer cannot hold is a fact about FFmpeg, not a matter of
+        // taste: refuse it here, while there is nothing to undo. Only checked
+        // when the fragment names a codec this tool knows.
+        if (rc.Args.Length > 0)
+        {
+            (List<string> tokens, string? parseError) = PostProcess.PostArgs.Parse(rc.Args);
+            if (parseError is not null) return (rc, L.T("post.args.bad", parseError));
+
+            string? video = RecompressCodecs.DetectVideoCodec(tokens);
+            if (video is not null)
+            {
+                string? audio = RecompressCodecs.DetectAudioCodec(tokens);
+
+                // A hand-written fragment that names VP9 should not land in
+                // "clip_web.mp4": the container follows the codec unless the
+                // user pinned one.
+                if (args.RecompressContainer is not { Length: > 0 }
+                    && era is null && args.RecompressCodec is null)
+                {
+                    rc.Container = RecompressCodecs.DefaultContainer(video, audio) ?? rc.Container;
+                }
+
+                string? mismatch = RecompressCodecs.ValidateContainer(video, audio, rc.Container);
+                if (mismatch is not null) return (rc, L.T("rc.container.mismatch", mismatch));
+            }
+        }
+
         if (args.Recompress) rc.Enabled = true;
         if (args.NoRecompress) rc.Enabled = false;
-        return rc;
+        return (rc, null);
     }
 
     /// <summary>

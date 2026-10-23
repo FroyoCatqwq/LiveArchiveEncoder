@@ -221,7 +221,9 @@ public sealed class EraPresetTests
         {
             if (preset.Kind == EraKind.Site)
             {
-                await Assert.That(preset.Encoder).IsNull().Because(preset.Id);
+                // v7.9.5.1: a site names the codec it served but never a frame
+                // size: the preset reshapes the second pass, not the capture.
+                await Assert.That(preset.Encoder).IsNotEmpty().Because(preset.Id);
                 await Assert.That(preset.Width).IsNull().Because(preset.Id);
             }
             else
@@ -237,6 +239,30 @@ public sealed class EraPresetTests
             // usable with --recompress-only.
             await Assert.That(preset.RecompressArgs).IsNotEmpty().Because(preset.Id);
             await Assert.That(preset.RecompressContainer).IsNotEmpty().Because(preset.Id);
+        }
+    }
+
+    [Test]
+    public async Task BothRenderingModesPassTheOwnValidator()
+    {
+        // A preset that its own pipeline would reject would fail at encode time,
+        // which is exactly the failure the validator exists to move earlier.
+        foreach (EraPreset preset in EraPresets.All)
+        {
+            foreach (bool native in new[] { true, false })
+            {
+                (List<string> tokens, string? error) = PostArgs.Parse(preset.Fragment(native));
+                await Assert.That(error).IsNull().Because($"{preset.Id} native={native}: {error}");
+                await Assert.That(tokens).IsNotEmpty().Because(preset.Id);
+
+                // ... and the pair has to be one FFmpeg can actually mux. The
+                // modern rendering is libx264 + aac in MP4 by definition.
+                string video = native ? preset.VideoCodec : "libx264";
+                string audio = native ? preset.AudioCodec : "aac";
+                await Assert.That(RecompressCodecs.ValidateContainer(
+                        video, audio, preset.ContainerFor(native)))
+                    .IsNull().Because($"{preset.Id} native={native}");
+            }
         }
     }
 

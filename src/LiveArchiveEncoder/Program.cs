@@ -66,6 +66,46 @@ public static class Program
             return 0;
         }
 
+        // v7.9.5.1: fonts are local files, so both font actions run before any
+        // FFmpeg discovery -- importing a font must work on a box that has no
+        // FFmpeg at all yet.
+        if (cli.FontImport is { Length: > 0 } importPath)
+        {
+            (int copied, int skipped, string target) =
+                PostProcess.SubtitleFonts.Import([importPath]);
+            if (copied == 0 && skipped == 0)
+            {
+                Console.Error.WriteLine($"ERROR: {L.T("font.import.none", importPath)}");
+                return 2;
+            }
+            Console.WriteLine(L.T("font.import", copied, skipped, target));
+            return 0;
+        }
+
+        if (cli.ListSubtitleFonts)
+        {
+            if (cli.SubtitleFiles.Count == 0)
+            {
+                Console.Error.WriteLine("ERROR: --list-subtitle-fonts needs --subtitle FILE");
+                return 2;
+            }
+            Console.WriteLine(L.T("font.list.heading",
+                string.Join(", ", cli.SubtitleFiles.Select(Path.GetFileName))));
+            foreach (PostProcess.FontLookup lookup in
+                     PostProcess.SubtitleFonts.Check(cli.SubtitleFiles, cli.SubtitleFontDir))
+            {
+                if (lookup.FoundAt is null)
+                {
+                    Console.WriteLine(L.T("font.missing", lookup.Required));
+                    continue;
+                }
+                Console.WriteLine(L.T("font.found", lookup.Required,
+                    lookup.FoundAt, lookup.Portable ? L.T("font.portable") : ""));
+            }
+            Console.WriteLine(L.T("font.import.hint", PostProcess.FontResolver.FontDirectory));
+            return 0;
+        }
+
         // Toolchain management never needs a working FFmpeg, so it runs before
         // discovery -- otherwise a missing ffmpeg would make "install one"
         // impossible, which is exactly the situation it exists to fix.
@@ -134,13 +174,25 @@ public static class Program
             return 0;
         }
 
+        // v7.9.5.1: --era can name a preset the user wrote, which lives in the
+        // settings file -- so the id can only be judged after that file is read.
+        // It is still a usage error (exit 2), not "enter the menu and wait".
+        UserConfig storedConfig = ConfigStore.Load();
+        PostProcess.EraPresets.Register(storedConfig);
+        if (cli.Era is { Length: > 0 } eraId && PostProcess.EraPresets.Find(eraId) is null)
+        {
+            Console.Error.WriteLine($"ERROR: unknown era preset '{eraId}'; "
+                + $"choose one of {PostProcess.EraPresets.Ids}");
+            return 2;
+        }
+
         string ffmpeg;
         string ffprobe;
         bool btbn;
         FFmpeg.Capabilities caps;
 
         string? source = cli.FfmpegSource;
-        if (!source.HasText) source = ConfigStore.Load().FfmpegSource;
+        if (!source.HasText) source = storedConfig.FfmpegSource;
 
         try
         {

@@ -36,8 +36,11 @@
 | `…-linux-x64-aot.tar.gz` | Linux | NativeAOT 单文件，不需要运行时 |
 
 Linux 两个包解压即用（`tar xzf … && ./LiveArchiveEncoder`，可执行位已带上）。
-AOT 版在 Ubuntu 26.10 上链接，**要求目标机的 glibc 不低于构建机**；老发行版用 JIT 版
-更稳。两个版本都还需要 `PATH` 上有 FFmpeg/ffprobe，或让工具自己下一套（§7.10）。
+AOT 版在 Ubuntu 22.04.5 上链接（glibc 2.35），**要求目标机的 glibc 不低于构建机**；
+老发行版用 JIT 版更稳。两个版本都还需要 `PATH` 上有 FFmpeg/ffprobe，或让工具自己下一套（§7.10）。
+
+完整的操作系统 / CPU / 内存 / 磁盘 / 字体 / 权限要求，以及实测环境与性能预期，见
+[`docs/requirements.md`](requirements.md)。
 
 跨平台规则（写脚本时按这个来）：
 
@@ -212,6 +215,10 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--subtitle-stream` | 无 | **v7.9**：使用源内嵌的字幕轨（编号同上） |
 | `--subtitle-mode` | `burn` | **v7.9**：`burn` 把字幕渲染进画面（默认）/ `copy` 作为字幕轨封装进输出 / `off` |
 | `--subtitle-codec` | 按容器自动 | **v7.9**：copy 模式的字幕编码器，默认按容器从 `ffmpeg -encoders` 里挑 |
+| `--subtitle-font-dir` | 程序 `fonts` 目录 | **v7.9.5.1**：额外的字体目录（烧录字幕用） |
+| `--subtitle-font` | 无 | **v7.9.5.1**：强制使用某个字体族，覆盖字幕文件自己的设置（SRT/VTT 本来就不指定） |
+| `--font-import` | — | **v7.9.5.1**：把一个字体文件（或整个目录里的字体）拷进程序 `fonts` 目录后退出（见 §7.12） |
+| `--list-subtitle-fonts` | — | **v7.9.5.1**：列出字幕文件要哪些字体、本机有没有、在哪，然后退出 |
 | `--width` `--height` | `256` `192` | 输出分辨率（16:9 预设见 §7.15） |
 | `--container` | 编码器默认 | 容器切换（见 §7.14） |
 | `--fit` | `crop` | 画面适配：`crop` 裁切填满 / `fit` 完整画面＋补边 / `stretch` 拉伸变形（见 §7.15） |
@@ -234,9 +241,16 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--audio-mode` | `inline` | `inline` / `separate` / `auto`，见第 7 节 |
 | `--recompress` | 关 | 编码后按"网站转码"再压一遍（见 §7.12） |
 | `--recompress-args` | 空 | 那一步的 FFmpeg 中间参数段；`-i` 和输出由程序给 |
-| `--recompress-container` | `mp4` | 二次压缩产物的容器扩展名 |
+| `--recompress-container` | 由编码器决定 | 二次压缩产物的容器扩展名 |
+| `--recompress-codec` | 无 | **v7.9.5.1**：第二遍的视频编码器（libx265 / libvpx-vp9 / libsvtav1 / flv …），容器跟着它走 |
+| `--recompress-quality` | 编码器默认 | **v7.9.5.1**：`-crf`（x264/x265/vp9/av1）或 `-q:v`（MPEG 家族） |
+| `--recompress-audio-codec` | 按视频编码器推荐 | **v7.9.5.1**：`aac` / `libmp3lame` / `libopus` / `libvorbis` / `ac3` / `flac` / `copy` |
+| `--recompress-audio-kbps` | 编码器默认 | **v7.9.5.1**：第二遍音频码率 |
 | `--recompress-only` | 关 | **v7.9.5**：跳过直播编码，直接对已有文件做二次压缩（见 §7.12） |
 | `--no-recompress` | — | 关掉二次压缩（优先于上面两个） |
+| `--era ID` | 无 | **v7.6**：应用时代/站点预设（见 §7.12） |
+| `--era-modern` | 关 | **v7.9.5.1**：预设的第二遍用 libx264 + AAC 的 mp4，而不是站点当年的编码器 |
+| `--era-native` | 开 | **v7.9.5.1**：显式写"用站点自己的编码器"（默认行为，给脚本自证用） |
 | `--emit-args` / `--emit-args=FILE` | — | **v7.9.1**：把设置打印成等价命令行后退出；带 `=FILE` 时从一个配置文件读设置（见 §7.6） |
 | `--save-config` | — | **v7.9.1**：把这次运行的最终设置写成配置文件，不启动编码（见 §7.6） |
 | `--help` / `-h` | — | 打印用法后退出（退出码 0） |
@@ -281,8 +295,10 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
 11. Parallel shards   并行分片数，1＝关闭（见 §7.5）
 12. FFmpeg toolchain  切换/下载/删除 FFmpeg 构建（见 §7.10）
 13. Playback after run 编码完成后用什么播放（见 §7.11）
-14. Era preset        时代预设（5 个"时代" + 6 个"站点"，见 §7.12）
-15. Recompress        二次压缩；子菜单第 4 项可以直接处理一个已有文件（见 §7.12）
+14. Era preset        时代/站点预设（5 个"时代" + 18 个"站点" + 自定义，见 §7.12）；
+                      子菜单里 n/e/d 维护自定义预设、m 切"原生/现代"渲染
+15. Recompress        二次压缩；1 开关、2 参数段、3 容器、4 只压一个已有文件、
+                      5/6/7 第二遍的视频编码器 / 质量 / 音频编码器（见 §7.12）
 16. Streams           视频/音频流选择（见 §7.16）
 17. Subtitles         字幕：烧录 / 封装 / 关闭（见 §7.16）
 18. Command line      把当前设置打印成一条等价命令行（见 §7.6）
@@ -1136,32 +1152,66 @@ live 编码 → (14) 时代预设   ← 可选，把两层参数都填好
 | `mp4_10` | 2009–2012 | libx264 640x480@25，上限 900 kbps | crf 25，640x480@25 |
 | `hd14` | 2013–2016 | libx264 1280x720@30，上限 2500 kbps | crf 23，720p@30，立体声 96k |
 
-#### 站点预设（v7.9.5，只写第二遍）
+#### 站点预设（v7.9.5；v7.9.5.1 按站点指定编码器）
 
-2005–2009 每个门户的转码档位都不一样，所以这一段拆成六个**站点**预设。它们
-只填二次压缩层（分辨率 / 帧率 / 码率 / 音频），**不碰直播层的编码器** ——
-"优酷会怎么处理我的录像"说明不了录像本身是怎么采的。
+2005–2009 每个门户的转码档位都不一样，所以这一段拆成**站点**预设。它们
+只填二次压缩层（分辨率 / 帧率 / 码率 / 音频 / 容器），并**指名那个站点当年用的
+编码器**——320 kbps 的 H.264 和 320 kbps 的 Sorenson Spark 看起来完全是两回事，
+只说码率等于只说了一半。
 
-| id | 站点 | 第二遍 |
-| --- | --- | --- |
-| `sina06` | 新浪播客 2005–2008 | 320x240@12，200 kbps，22.05k 单声道 32k |
-| `sohu06` | 搜狐视频 2006–2009 | 320x240@15，240 kbps，22.05k 单声道 32k |
-| `qq06` | 腾讯 / QQ 视频 2006–2009 | 320x240@15，260 kbps，22.05k 单声道 32k |
-| `tudou06` | 土豆网 2005–2009 | 352x264@12，295 kbps（实测档位） |
-| `youku07` | 优酷 2007–2010 | 352x264@15，320 kbps，22.05k 单声道 32k |
-| `youtube07` | YouTube 2006–2008 | 320x240@15，200 kbps，22.05k 单声道 64k |
+**编码器怎么用**（v7.9.5.1）：
 
-```powershell
-# 直播层还是你选的 mpeg4/AVI，只有第二遍变成优酷 2007 档
-LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --era youku07 --recompress
+- 预设的编码器同时是**直播层的兜底**：`--era bilibili09`（没给 `--encoder`）
+  就用 flv1 编码直播那一遍；`--encoder` 显式给了就按你的来；
+- 第二遍默认用站点自己的编码器（`.flv` 里 flv1、`.webm` 里 VP9）；
+  加 `--era-modern` 改成 libx264 + AAC 的 mp4 观看版；
+- CUI 菜单 14 的 `m` 切换这个偏好，会记在配置里。
+
+| id | 站点 / 年代 | 第二遍（分辨率@fps，码率） | 编码器 → 容器 | 直播层兜底 |
+| --- | --- | --- | --- | --- |
+| `sina06` | 新浪播客 2005–2008 | 320x240@12，200 kbps | flv1 → `.flv` | flv |
+| `sohu06` | 搜狐视频 2006–2009 | 320x240@15，240 kbps | flv1 → `.flv` | flv |
+| `qq06` | 腾讯 / QQ 视频 2006–2009 | 320x240@**25**，260 kbps | flv1 → `.flv` | flv |
+| `tudou06` | 土豆网 2005–2009 | 352x264@12，295 kbps（实测） | flv1 → `.flv` | flv |
+| `youku07` | 优酷 2007–2010 | 352x264@15，320 kbps | flv1 → `.flv` | flv |
+| `ku6_07` | 酷6网 2007–2010 | 320x240@15，240 kbps | flv1 → `.flv` | flv |
+| `56_07` | 56网 2006–2010 | 320x240@15，220 kbps | flv1 → `.flv` | flv |
+| `cctv06` | 央视网 2006–2009 | 384x288@25，350 kbps | flv1 → `.flv` | flv |
+| `acfun08` | AcFun 2008–2011 | 320x240@15，260 kbps | flv1 → `.flv` | flv |
+| `bilibili09` | 哔哩哔哩 2009–2012 | 384x288@24，320 kbps | flv1 → `.flv` | flv |
+| `youtube07` | YouTube 2006–2008 | 320x240@15，200 kbps | flv1 → `.flv` | flv |
+| `bilibili11` | 哔哩哔哩 2011–2013 | 640x360@30，700 kbps | H.264 → `.mp4` | libx264 |
+| `youku11` | 优酷 2011–2013 | 640x360@25，800 kbps | H.264 → `.mp4` | libx264 |
+| `iqiyi11` | 爱奇艺 2011–2014 | 640x360@25，800 kbps | H.264 → `.mp4` | libx264 |
+| `cctv12` | 央视网 / CNTV 2010–2013 | 640x360@25，700 kbps | H.264 → `.mp4` | libx264 |
+| `youtube11` | YouTube 2011–2013 | 640x360@30，700 kbps | H.264 → `.mp4` | libx264 |
+| `bilibili14` | 哔哩哔哩 2014–2016 | 1280x720@30，1800 kbps | H.264 → `.mp4` | libx264 |
+| `youtube15` | YouTube 2014–2016 | 1280x720@30，1500 kbps | VP9 + Opus → `.webm` | libx264 |
+
+为什么 `qq06` 是 25 fps：腾讯当年的播放器是那批站点里唯一把帧率拉上去的，
+同样 320x240 / 260 kbps，帧率翻倍——画面更顺，单帧更糊，这就是 QQ 播客的样子。
+`cctv06` 的 25 fps 是另一个原因：PAL 广播电视素材，4:3、384x288。
+
+```bash
+# 直播层还是你选的 mpeg4/AVI，只有第二遍变成优酷 2007 档（flv1）
+LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --era youku07 --recompress --era-modern
+
+# 完全按 2009 年的 B 站来：直播编码器也换成 flv1，产物是 .flv
+LiveArchiveEncoder.exe src.mp4 out.flv --era bilibili09 --recompress
 ```
 
 依据见 [`era-presets.md`](era-presets.md#站点预设v795)。
 
-```powershell
-# 一条命令跑完"2007 年传优酷"：live 用 flv1，二次压缩参数自动填好
-LiveArchiveEncoder.exe src.mp4 out.flv --era flv07 --recompress
-```
+#### 自定义预设（v7.9.5.1）
+
+内置表只读，**你自己的预存放配置里**，升级不会和本地修改打架。同名 id 会覆盖内置行
+（这是"改一改优酷 2007"的方式），其余混在列表里（行首带 `*`）。
+
+- CUI：菜单 14 → `n` 新建 / `e` 编辑 / `d` 删除；向导逐项问（id、类型、年份、
+  第二遍尺寸 / 帧率 / 码率 / 编码器 / 容器、一句话描述；类型选 1 时再问直播层）。
+- 存储：`config.json` 的 `CustomEras` 数组；缺字段、坏编码器名、写不通的容器组合
+  都会在读取时被纠正成可用的值，而不是让程序启动失败。
+- CLI 里 `--era <你的id>` 直接可用（参数解析不再只认内置表）。
 
 `--era` 不碰你显式给的 `--encoder` / `--fps` / `--width` / `--height` / `--limit` /
 `--scale-algo` / `--audio-kbps` / `--audio-channels`：预设是兜底，不是覆盖。
@@ -1193,7 +1243,46 @@ LiveArchiveEncoder.exe src.mp4 out.rm --recompress --recompress-args ^
 其余随意——`-filter_complex`、多 `-map`、`-ss` 都是你的事。
 
 相关选项：`--recompress`（启用）、`--recompress-args "…"`（设参数并启用）、
-`--recompress-container EXT`（默认 mp4）、`--no-recompress`。
+`--recompress-container EXT`（默认由编码器决定）、`--recompress-codec NAME`、
+`--recompress-quality N`、`--recompress-audio-codec NAME`、`--recompress-audio-kbps N`、
+`--no-recompress`。
+
+#### 第二遍的编码器（v7.9.5.1）
+
+不想手写片段时，直接点名编码器；**容器跟着编码器走**，不会被硬塞进 mp4：
+
+```bash
+# HEVC + Opus，容器自动 .mkv
+LiveArchiveEncoder.exe clip.mkv --recompress-only --recompress-codec libx265 --recompress-audio-codec libopus
+
+# VP9 + Opus，容器自动 .webm（以前会被写进 mp4，然后播不了）
+LiveArchiveEncoder.exe clip.mkv --recompress-only --recompress-codec libvpx-vp9
+
+# 质量：x264/x265/vp9/av1 是 -crf，MPEG 家族是 -q:v
+LiveArchiveEncoder.exe clip.mkv --recompress-only --recompress-codec libx265 --recompress-quality 30
+```
+
+| 视频编码器 | 可写容器（第一个是默认） | 质量参数 |
+| --- | --- | --- |
+| `libx264` | mp4, mkv, mov, avi, flv | `-crf` |
+| `libx265` | mp4, mkv, mov（带 `-tag:v hvc1`） | `-crf` |
+| `libvpx-vp9` | webm, mkv | `-crf` + `-b:v 0` |
+| `libvpx`（VP8） | webm, mkv | `-crf` + `-b:v 1M` |
+| `libaom-av1` / `libsvtav1` | mkv, webm, mp4 | `-crf` |
+| `flv`（Sorenson Spark） | flv | `-q:v` |
+| `mpeg4` / `mpeg2video` / `mpeg1video` / `mjpeg` / `wmv2` / `h263` | 各自的容器 | `-q:v` |
+
+音频：`aac` / `libmp3lame` / `libopus` / `libvorbis` / `ac3` / `flac` / `copy`。
+`libopus` 与 `libvorbis` 只接受 webm / mkv / ogg；`copy` 原样搬运音轨。
+
+三条硬规则：
+
+1. **写不通的组合在开跑前就报错**（退出码 2），而不是二十秒后由 FFmpeg 抛一句
+   muxer 消息：`libvpx-vp9` + `mp4` 会被拒，并把可用容器列出来；
+2. `-c:v` 写在 `--recompress-args` 里也照样识别：`-c:v libvpx-vp9` 不指定容器时，
+   `_web` 的扩展名会自动变成 `.webm`；
+3. 编码器**不在当前 FFmpeg 构建里**时直接说清楚
+   （`this FFmpeg build has no 'x' encoder`），不会跑到一半才失败。
 
 ### 只跑二次压缩：`--recompress-only`（v7.9.5）
 
@@ -1256,6 +1345,35 @@ Linux   : ~/.local/share/LiveArchiveEncoder/fonts/
   ```
 - 目录位置可以用环境变量 `LAE_FONT_DIR` 改（CI 或无用户配置目录的环境用）。
   v7.9.1 之前写作 `LAE_WATERMARK_FONT_DIR`，旧名字仍然有效。
+
+#### 字体检查、导入与替代（v7.9.5.1）
+
+ASS 字幕在 `[V4+ Styles]` 的 `Fontname` 列里点名它要的字体（也可能把字体直接嵌在
+`[Fonts]` 段里）。程序现在会读这些名字——直接从字体文件的 `name` 表里读，所以
+`msyh.ttc` 会同时报出 "Microsoft YaHei" 和 "微软雅黑"，"宋体" 也能对上 `simsun.ttc`。
+
+```bash
+# 这个字幕要哪些字体？本机有没有？在哪个目录？
+LiveArchiveEncoder.exe --list-subtitle-fonts --subtitle movie.ass
+
+# 把字体拷进程序自己的 fonts 目录（文件或目录都行）
+LiveArchiveEncoder.exe --font-import "C:\Windows\Fonts\msyh.ttc"
+LiveArchiveEncoder.exe --font-import D:\fonts\cjk
+```
+
+处理规则：
+
+| 情况 | 行为 |
+| --- | --- |
+| 字体在 `fonts` 目录里 | 直接用（"随程序走"） |
+| 只在系统字体里 | 仍能渲染，但换台机器可能变成方块——`--list-subtitle-fonts` 会标出来 |
+| 谁都没有 | 烧录**照常进行**，libass 用回退字体；同时打一行 `NOTE` 说明缺哪个 |
+| SRT / VTT（不指定字体） | 用 `--subtitle-font 家族名` 自己选，或不动（libass 默认） |
+
+`--subtitle-font` 会被写成 `subtitles=...:force_style='FontName=…'`，覆盖整个文件里
+所有样式的字体——这是"字体缺失时先让它能看"的应急开关，不是逐样式编辑器。
+
+CUI 在菜单 **17 → 5**：列清单 / 导入 / 设替代字体。
 
 ### CLI 与配置的关系
 
