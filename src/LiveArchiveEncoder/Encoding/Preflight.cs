@@ -6,15 +6,26 @@ using LiveArchiveEncoder.FFmpeg;
 namespace LiveArchiveEncoder.Encoding;
 
 /// <summary>
-/// Audio half of a preflight trial. Only needed for containers that refuse to be
-/// written without an audio stream (AMV), where a video-only trial would fail
-/// for a reason unrelated to what the trial is actually checking.
+/// Audio half of a preflight trial.
+///
+/// v7.9.5: the trial always carries the real audio settings, not just for the
+/// containers that cannot be written without one. It used to be a second
+/// process launched in parallel with the video trial, which meant one more
+/// launch per run for information the same command line can produce: the audio
+/// encoder opens exactly the same way whether or not a video stream is beside
+/// it.
 /// </summary>
-public sealed record AudioTrial(string Encoder, int Channels, int? Rate, int BlockSize);
+public sealed record AudioTrial(string Encoder, int Channels, int? Rate, int BlockSize, int Kbps);
 
 /// <summary>
 /// Short real-chain trials executed before the realtime encode, so an invalid
 /// filter/codec/muxer combination fails in seconds instead of after a full pass.
+///
+/// v7.9.5: there is one trial, and it carries both streams. The audio encoder
+/// used to get a second FFmpeg process of its own, launched in parallel; the
+/// only thing that process could report was whether <c>-c:a</c> opens, which
+/// this trial answers too -- and answers on the command line the run will
+/// actually execute, rather than on an audio-only approximation of it.
 /// </summary>
 public static class Preflight
 {
@@ -70,13 +81,14 @@ public static class Preflight
             }
             else
             {
-                // Containers such as AMV only hold two streams, so the trial must
-                // mirror the real command and carry an audio track too.
+                // The trial mirrors the real command, audio included: the point
+                // is to open the same encoder/rate/channel combination the
+                // encode will, and to fail before a realtime pass starts.
                 cmd.AddRange(["-map", StreamSelection.AudioMap(0, audioStream), "-c:a", audio.Encoder]);
 
                 // ADPCM/DPCM/PCM have no rate control; -b:a is silently ignored.
-                if (!EncoderMath.AudioIgnoresBitrate(audio.Encoder))
-                    cmd.AddRange(["-b:a", "32k"]);
+                if (!EncoderMath.AudioIgnoresBitrate(audio.Encoder) && audio.Kbps > 0)
+                    cmd.AddRange(["-b:a", $"{audio.Kbps}k"]);
 
                 if (audio.BlockSize > 0)
                     cmd.AddRange(["-block_size:a", audio.BlockSize.ToString(CultureInfo.InvariantCulture)]);
@@ -110,45 +122,5 @@ public static class Preflight
         {
             try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort */ }
         }
-    }
-
-    public static void Audio(
-        string ffmpeg,
-        string sourcePath,
-        string audioEncoder,
-        int audioKbps,
-        int audioChannels,
-        int? audioRate,
-        double startSeconds,
-        int? audioStream = null)
-    {
-        var cmd = new List<string> { ffmpeg, "-hide_banner", "-loglevel", "error" };
-        cmd.AddRange(Remote.HttpSource.ReadArgs(sourcePath));
-        // Same reason as the video trial: a share read needs its timeout.
-        cmd.AddRange(Remote.Smb.RemoteReadArgs(sourcePath));
-        if (startSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(startSeconds)]);
-        cmd.AddRange(["-i", sourcePath, "-map", StreamSelection.AudioMap(0, audioStream), "-vn", "-t", "2"]);
-        cmd.AddRange(["-c:a", audioEncoder]);
-        if (!EncoderMath.AudioIgnoresBitrate(audioEncoder))
-            cmd.AddRange(["-b:a", $"{audioKbps}k"]);
-        cmd.AddRange([
-            "-ac", Math.Max(1, audioChannels).ToString(),
-        ]);
-        if (audioRate is not null && audioRate.Value != 0)
-            cmd.AddRange(["-ar", audioRate.Value.ToString()]);
-        cmd.AddRange(["-f", "null", "-"]);
-
-        CaptureResult result = ProcessRunner.Run(cmd, 120);
-        if (result.ExitCode == 0) return;
-
-        string detail = result.Stderr.Trim() is { Length: > 0 } d
-            ? d : "audio preflight failed without FFmpeg diagnostics";
-        if (audioEncoder == "roq_dpcm")
-        {
-            throw new InvalidOperationException(
-                "Audio preflight failed for roq_dpcm. This encoder requires 22050 Hz "
-                + $"and mono/stereo audio. FFmpeg said: {detail}");
-        }
-        throw new InvalidOperationException($"Audio preflight failed for {audioEncoder}: {detail}");
     }
 }

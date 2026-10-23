@@ -267,14 +267,18 @@ public static partial class FFmpegDiscovery
         return ("avi", "avi");
     }
 
-    public static List<EncoderInfo> DetectLegacyEncoders(string ffmpeg)
+    /// <summary>
+    /// The legacy/classic video encoders inside <c>ffmpeg -encoders</c> output.
+    ///
+    /// v7.9.5: split out of the process call so one <c>-encoders</c> run can
+    /// feed the video list, the audio list and the subtitle list at once --
+    /// this used to be two launches of the same command, one per list. The
+    /// launch itself now happens in <see cref="BuildProfileStore.Sweep"/>.
+    /// </summary>
+    public static List<EncoderInfo> ParseLegacyEncoders(string text)
     {
-        CaptureResult p = ProcessRunner.Run(ffmpeg, "-hide_banner", "-encoders");
-        if (p.ExitCode != 0)
-            throw new InvalidOperationException(p.Stderr.Trim() is { Length: > 0 } err ? err : "ffmpeg -encoders failed");
-
         var result = new List<EncoderInfo>();
-        foreach ((string name, string flags, string desc) in ParseVideoEncoders(p.Stdout))
+        foreach ((string name, string flags, string desc) in ParseVideoEncoders(text))
         {
             string? family = LegacyFamily(name, desc);
             if (family is null) continue;
@@ -293,18 +297,34 @@ public static partial class FFmpegDiscovery
         return [.. result.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)];
     }
 
-    public static HashSet<string> DetectAudioEncoders(string ffmpeg)
+    /// <summary>Audio encoder names inside <c>ffmpeg -encoders</c> output.</summary>
+    public static HashSet<string> ParseAudioEncoders(string text)
     {
-        CaptureResult p = ProcessRunner.Run(ffmpeg, "-hide_banner", "-encoders");
-        if (p.ExitCode != 0)
-            throw new InvalidOperationException(p.Stderr.Trim() is { Length: > 0 } err ? err : "ffmpeg -encoders failed");
-
         var found = new HashSet<string>(StringComparer.Ordinal);
-        foreach (string line in p.Stdout.Split('\n'))
+        foreach (string line in text.Split('\n'))
         {
             Match m = AudioEncoderLine().Match(line);
             if (m.Success) found.Add(m.Groups[1].Value);
         }
         return found;
     }
+
+    /// <summary>
+    /// Subtitle encoder names inside <c>ffmpeg -encoders</c> output. The name
+    /// has to be a word: the legend block (<c> S..... = Subtitle</c>) would
+    /// otherwise contribute an encoder called "=".
+    /// </summary>
+    public static HashSet<string> ParseSubtitleEncoders(string text)
+    {
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string line in text.Split('\n'))
+        {
+            Match m = SubtitleEncoderLine().Match(line);
+            if (m.Success) found.Add(m.Groups[1].Value);
+        }
+        return found;
+    }
+
+    [GeneratedRegex(@"^\s*S\.+\s+([A-Za-z0-9_]+)\s", RegexOptions.Multiline)]
+    private static partial Regex SubtitleEncoderLine();
 }

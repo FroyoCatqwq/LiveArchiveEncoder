@@ -34,10 +34,15 @@ public static class Report
                 Line(L.T("report.pixfmts"), pixText);
                 // v7.9.4: the usable list, not the declared one. mpeg1video
                 // declares 15 fps and then refuses it when the encoder opens.
+                // v7.9.5: rv10/rv20/roqvideo declare nothing because their
+                // container stores an integer -- say so instead of "(not
+                // declared)", which reads like the tool does not know.
                 List<double> rates = EncoderMath.UsableRates(c.Encoder.Caps);
                 string rateText = rates.Count > 0
                     ? string.Join(", ", rates.Take(16).Select(x => x.ToString("G6")))
-                    : L.T("value.notdeclared");
+                    : EncoderMath.UsesWholeFps(c.Encoder.Name)
+                        ? L.T("report.fpswhole")
+                        : L.T("value.notdeclared");
                 Line(L.T("report.fpssupport"), rateText);
             }
         }

@@ -83,26 +83,75 @@ public static class Constants
     /// keeps MP4, but AVI and Matroska become selectable where the combination
     /// actually muxes.
     ///
-    /// Deliberately not "everything in every container": MPEG-PS in Matroska and
-    /// RealVideo in AVI are the kind of pair that muxes and then fails to play.
-    ///
     /// v7.9: h261 / h263 / h263p join, because the raw .h261/.h263 streams carry
     /// no audio at all while the same codecs in AVI take an mp3 track fine
     /// (verified 2026-10-21 against the BtbN build: all three mux and probe back
     /// with a working audio stream).
+    ///
+    /// v7.9.5: re-measured against the whole legacy set with
+    /// <c>tools/capability_sweep.py</c>, which checks three things per pair --
+    /// the muxer accepts it, ffprobe reads the codec back under its own name,
+    /// and a decoded frame still has the right colour. That last check matters:
+    /// AVI packs an RV20 stream and reads it back as "rawvideo", the rm muxer
+    /// writes the RealVideo tag over whatever it was given, and Matroska/ASF
+    /// drop the palette of a pal8 codec (msrle: YAVG 123 in AVI, YAVG 16 in
+    /// both, measured 2026-10-23). Pairs that only *mux* are deliberately not
+    /// offered.
+    ///
+    /// The gain is Matroska (which holds nearly everything), MP4/MOV for
+    /// MPEG-1/2/4, and FLV for libx264. msrle keeps AVI and gains MOV, because
+    /// those are the two containers that carry a palette.
     /// </summary>
     public static readonly FrozenDictionary<string, (string Ext, string Format)[]> ContainerChoicesByEncoder =
         new Dictionary<string, (string Ext, string Format)[]>
         {
-            ["mpeg1video"] = [("mpg", "mpeg"), ("avi", "avi")],
-            ["mpeg2video"] = [("mpg", "mpeg"), ("avi", "avi")],
-            ["mpeg4"] = [("avi", "avi"), ("mp4", "mp4")],
-            ["libxvid"] = [("avi", "avi"), ("mp4", "mp4")],
-            ["libx264"] = [("mp4", "mp4"), ("avi", "avi"), ("mkv", "matroska")],
-            ["h261"] = [("h261", "h261"), ("avi", "avi")],
-            ["h263"] = [("h263", "h263"), ("avi", "avi")],
-            ["h263p"] = [("avi", "avi")],
+            ["mpeg1video"] = [("mpg", "mpeg"), ("avi", "avi"), ("mp4", "mp4"), ("mov", "mov"), ("mkv", "matroska")],
+            ["mpeg2video"] = [("mpg", "mpeg"), ("avi", "avi"), ("mp4", "mp4"), ("mov", "mov"), ("mkv", "matroska")],
+            ["mpeg4"] = [("avi", "avi"), ("mp4", "mp4"), ("mov", "mov"), ("mkv", "matroska")],
+            ["libxvid"] = [("avi", "avi"), ("mp4", "mp4"), ("mov", "mov"), ("mkv", "matroska")],
+            ["libx264"] = [("mp4", "mp4"), ("avi", "avi"), ("mkv", "matroska"), ("mov", "mov"), ("flv", "flv")],
+            ["h261"] = [("h261", "h261"), ("avi", "avi"), ("mkv", "matroska")],
+            ["h263"] = [("h263", "h263"), ("avi", "avi"), ("mkv", "matroska")],
+            ["h263p"] = [("avi", "avi"), ("mkv", "matroska")],
+            ["libtheora"] = [("ogv", "ogg"), ("mkv", "matroska"), ("avi", "avi")],
+            ["flv"] = [("flv", "flv"), ("avi", "avi"), ("mkv", "matroska")],
+            ["mjpeg"] = [("avi", "avi"), ("mkv", "matroska"), ("mov", "mov"), ("mp4", "mp4")],
+            ["msrle"] = [("avi", "avi"), ("mov", "mov")],
+            ["cinepak"] = [("avi", "avi"), ("mkv", "matroska")],
+            ["msmpeg4v2"] = [("avi", "avi"), ("mkv", "matroska")],
+            ["msvideo1"] = [("avi", "avi"), ("mkv", "matroska")],
+            ["asv1"] = [("avi", "avi"), ("mkv", "matroska")],
+            ["asv2"] = [("avi", "avi"), ("mkv", "matroska")],
+            ["cljr"] = [("avi", "avi"), ("mkv", "matroska")],
+            ["flashsv"] = [("flv", "flv"), ("avi", "avi"), ("mkv", "matroska")],
+            ["snow"] = [("avi", "avi"), ("mkv", "matroska")],
+            ["zmbv"] = [("avi", "avi"), ("mkv", "matroska")],
         }.ToFrozenDictionary();
+
+    /// <summary>
+    /// Containers that store an unknown VfW codec as a BITMAPINFOHEADER with no
+    /// palette in it. A pal8-only codec written to one of these decodes to a
+    /// black picture -- measured on msrle (2026-10-23): the same clip is YAVG
+    /// 123 in AVI and YAVG 16 in both Matroska and ASF.
+    ///
+    /// AVI and MOV are safe (the palette lives in the stream header). No entry
+    /// in <see cref="ContainerChoicesByEncoder"/> pairs a pal8-only encoder with
+    /// one of these; <c>PaletteContainerTests</c> keeps it that way.
+    /// </summary>
+    public static readonly FrozenSet<string> PaletteLossyFormats =
+        new HashSet<string> { "matroska", "asf" }.ToFrozenSet();
+
+    /// <summary>
+    /// Containers that store no frame rate at all: the file is a bare bitstream,
+    /// and a player assumes a default (ffprobe guesses 25 fps for .h261/.h263 and
+    /// reports nothing for .a64). Measured 2026-10-23 -- a 15 fps h261 written to
+    /// .h261 reads back as 25/1, while the same encode in AVI keeps 15.
+    ///
+    /// The picture is unaffected, so this is a note rather than an error; the
+    /// note names AVI as the container that keeps the rate.
+    /// </summary>
+    public static readonly FrozenSet<string> RateLessFormats =
+        new HashSet<string> { "h261", "h263", "a64" }.ToFrozenSet();
 
     /// <summary>
     /// How the source frame is made to fill the output frame.

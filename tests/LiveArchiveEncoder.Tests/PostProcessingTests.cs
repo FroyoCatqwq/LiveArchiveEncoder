@@ -212,15 +212,29 @@ public sealed class EraPresetTests
     }
 
     [Test]
-    public async Task EveryPresetCoversBothLayers()
+    public async Task EveryPresetCoversTheLayersItClaims()
     {
+        // v7.9.5: a preset now says which half of the pipeline it speaks for.
+        // An era owns both layers; a site owns the second one only, because
+        // "what Youku did to my upload" implies nothing about the capture.
         foreach (EraPreset preset in EraPresets.All)
         {
-            await Assert.That(preset.Encoder).IsNotEmpty().Because(preset.Id);
-            await Assert.That(preset.Width).IsPositive().Because(preset.Id);
-            await Assert.That(preset.Height).IsPositive().Because(preset.Id);
-            await Assert.That(preset.Fps).IsPositive().Because(preset.Id);
-            await Assert.That(preset.LimitKbps).IsPositive().Because(preset.Id);
+            if (preset.Kind == EraKind.Site)
+            {
+                await Assert.That(preset.Encoder).IsNull().Because(preset.Id);
+                await Assert.That(preset.Width).IsNull().Because(preset.Id);
+            }
+            else
+            {
+                await Assert.That(preset.Encoder).IsNotEmpty().Because(preset.Id);
+                await Assert.That(preset.Width).IsPositive().Because(preset.Id);
+                await Assert.That(preset.Height).IsPositive().Because(preset.Id);
+                await Assert.That(preset.Fps).IsPositive().Because(preset.Id);
+                await Assert.That(preset.LimitKbps).IsPositive().Because(preset.Id);
+            }
+
+            // Both kinds carry the recompress layer -- that is what makes them
+            // usable with --recompress-only.
             await Assert.That(preset.RecompressArgs).IsNotEmpty().Because(preset.Id);
             await Assert.That(preset.RecompressContainer).IsNotEmpty().Because(preset.Id);
         }
@@ -244,13 +258,21 @@ public sealed class EraPresetTests
     {
         // The point of the table: later eras are bigger and fatter. A regression
         // here means someone reordered the history.
-        for (int i = 1; i < EraPresets.All.Count; i++)
+        //
+        // v7.9.5: only the presets that own a live layer take part. A site preset
+        // (youku07 and friends) deliberately has no live layer -- it describes a
+        // second pass, so it has no frame size or ceiling to compare.
+        IReadOnlyList<EraPreset> eras = EraPresets.WithLiveLayer;
+        for (int i = 1; i < eras.Count; i++)
         {
-            EraPreset older = EraPresets.All[i - 1];
-            EraPreset newer = EraPresets.All[i];
+            EraPreset older = eras[i - 1];
+            EraPreset newer = eras[i];
 
-            await Assert.That(newer.Width * newer.Height).IsGreaterThan(older.Width * older.Height).Because($"{newer.Id} should have more pixels than {older.Id}");
-            await Assert.That(newer.LimitKbps).IsGreaterThan(older.LimitKbps).Because($"{newer.Id} should allow more bitrate than {older.Id}");
+            await Assert.That(newer.Width!.Value * newer.Height!.Value)
+                .IsGreaterThan(older.Width!.Value * older.Height!.Value)
+                .Because($"{newer.Id} should have more pixels than {older.Id}");
+            await Assert.That(newer.LimitKbps!.Value).IsGreaterThan(older.LimitKbps!.Value)
+                .Because($"{newer.Id} should allow more bitrate than {older.Id}");
         }
     }
 

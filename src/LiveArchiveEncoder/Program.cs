@@ -137,8 +137,7 @@ public static class Program
         string ffmpeg;
         string ffprobe;
         bool btbn;
-        HashSet<string> availableFilters;
-        HashSet<string> availableScaleAlgorithms;
+        FFmpeg.Capabilities caps;
 
         string? source = cli.FfmpegSource;
         if (!source.HasText) source = ConfigStore.Load().FfmpegSource;
@@ -148,10 +147,9 @@ public static class Program
             ffmpeg = FFmpegDiscovery.FindFFmpeg(cli.FFmpeg, source);
             btbn = FFmpegDiscovery.IsBtbn;
             ffprobe = FFmpegDiscovery.FindFFprobe(cli.FFprobe, ffmpeg);
-            availableFilters = FFmpegCapabilities.DetectVideoFilters(ffmpeg);
-            availableFilters = FFmpegCapabilities.VerifyNamedFilters(
-                ffmpeg, availableFilters, ["scale", .. Constants.DeinterlaceFilters]);
-            availableScaleAlgorithms = FFmpegCapabilities.DetectScaleAlgorithms(ffmpeg);
+            // v7.9.5: one cached sweep of the binary instead of six launches per
+            // run. The second run on a box pays nothing at all for this.
+            caps = FFmpeg.BuildProfileStore.For(ffmpeg);
         }
         catch (Exception exc) when (exc is FileNotFoundException or InvalidOperationException or TimeoutException)
         {
@@ -162,15 +160,13 @@ public static class Program
         // Completion needs the live encoder list, so it runs after discovery.
         if (cli.Completion is not null)
         {
-            Console.Out.Write(Completion.Generate(
-                cli.Completion,
-                FFmpegDiscovery.DetectLegacyEncoders(ffmpeg).Select(e => e.Name)));
+            Console.Out.Write(Completion.Generate(cli.Completion, caps.Encoders.Select(e => e.Name)));
             return 0;
         }
 
         if (cli.ListFilters)
         {
-            Report.PrintFilterList(ffmpeg, availableFilters, availableScaleAlgorithms);
+            Report.PrintFilterList(ffmpeg, caps.Filters, caps.ScaleAlgorithms);
             return 0;
         }
 
@@ -209,10 +205,17 @@ public static class Program
             return 2;
         }
 
+        // v7.9.5: same reasoning for the standalone recompress pass -- the menu
+        // would be a detour, and "it did nothing" is the worst answer.
+        if (string.IsNullOrEmpty(cli.Input) && cli.RecompressOnly)
+        {
+            Console.Error.WriteLine("ERROR: --recompress-only requires an input file");
+            return 2;
+        }
+
         if (string.IsNullOrEmpty(cli.Input) && !cli.NoCui)
         {
-            return Cui.Run(ffmpeg, ffprobe, btbn, availableFilters, availableScaleAlgorithms,
-                cli.Language, source);
+            return Cui.Run(ffmpeg, ffprobe, btbn, caps, cli.Language, source);
         }
 
         if (string.IsNullOrEmpty(cli.Input))
@@ -223,8 +226,7 @@ public static class Program
 
         try
         {
-            return Cli.Run(cli, ffmpeg, ffprobe, availableFilters, availableScaleAlgorithms,
-                Interrupt.BeginOperation());
+            return Cli.Run(cli, ffmpeg, ffprobe, caps, Interrupt.BeginOperation());
         }
         catch (OperationCanceledException)
         {

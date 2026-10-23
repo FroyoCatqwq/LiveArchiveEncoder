@@ -12,6 +12,17 @@ public static class EncoderMath
 
     public static (double Fps, bool Exact) ChooseBaseFps(double requested, EncoderCaps caps)
     {
+        // v7.9.5: RealMedia and RoQ store the rate as an integer in the file
+        // header, so a fractional request is silently retimed on write --
+        // measured (2026-10-23): rv20 at 23.976 probes back as 23/1, 29.97 as
+        // 29/1, 59.94 as 59/1, and roqvideo refuses those three outright.
+        // Rounding here means the run encodes at the rate the file will hold.
+        if (UsesWholeFps(caps.Name))
+        {
+            double whole = Math.Clamp(Math.Round(requested), 1.0, 120.0);
+            return (whole, Math.Abs(whole - requested) < 0.01);
+        }
+
         List<double> rates = UsableRates(caps);
         if (rates.Count == 0) return (requested, true);
 
@@ -22,6 +33,22 @@ public static class EncoderMath
         }
         return (nearest, Math.Abs(nearest - requested) < 0.01);
     }
+
+    /// <summary>
+    /// True for encoders whose container cannot express a fractional frame rate.
+    ///
+    /// v7.9.5, measured with <c>tools/capability_sweep.py</c>:
+    /// <list type="bullet">
+    /// <item>rv10/rv20 -- the RealMedia header has an integer fps field; 23.976
+    /// is written as 23.000, 29.97 as 29.000, 59.94 as 59.000;</item>
+    /// <item>roqvideo -- the RoQ header is worse: a fractional rate is refused
+    /// ("Error while opening encoder"), 23.976 / 29.97 / 59.94 all fail.</item>
+    /// </list>
+    /// Their <c>-h encoder</c> output declares no rate list at all, which is why
+    /// nothing snapped these before: an empty declared list means "no
+    /// constraint" to the generic path.
+    /// </summary>
+    public static bool UsesWholeFps(string name) => name is "rv10" or "rv20" or "roqvideo";
 
     /// <summary>
     /// The frame rates an encoder <b>really</b> accepts, as opposed to the ones
@@ -48,6 +75,10 @@ public static class EncoderMath
     {
         "amv" => [.. Constants.AmvFps],
         "mpeg1video" => [.. Constants.Mpeg1RealFps],
+        // The declared list (when a build prints one) can only be trusted up to
+        // the whole numbers, which is what the header can hold.
+        "rv10" or "rv20" or "roqvideo" =>
+            [.. caps.SupportedRates.Where(r => Math.Abs(r - Math.Round(r)) < 1e-6)],
         _ => caps.SupportedRates,
     };
 

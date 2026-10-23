@@ -36,50 +36,20 @@ public static partial class FFmpegCapabilities
     /// <summary>
     /// <c>ffmpeg -encoders</c> subtitle lines: <c> S..... ass    ASS (...)</c>.
     /// v7.9 goal 2 asked for subtitle support "以 ffmpeg -encoders 为准", so the
-    /// set is read from the binary in use rather than hard-coded. The name has
-    /// to be a word: the legend block (<c> S..... = Subtitle</c>) would
-    /// otherwise contribute an encoder called "=".
+    /// set is read from the binary in use rather than hard-coded.
+    ///
+    /// v7.9.5: the parser moved next to the video/audio ones in
+    /// <see cref="FFmpegDiscovery.ParseSubtitleEncoders"/>, so a single
+    /// <c>-encoders</c> run feeds all three lists.
     /// </summary>
-    [GeneratedRegex(@"^\s*S\.+\s+([A-Za-z0-9_]+)\s", RegexOptions.Multiline)]
-    private static partial Regex SubtitleEncoderLine();
-
-    /// <summary>
-    /// Every subtitle encoder this FFmpeg can write, or an empty set when the
-    /// build has none (a stripped-down build simply cannot carry a text track,
-    /// which the caller turns into "use --subtitle-mode burn").
-    /// </summary>
-    public static HashSet<string> DetectSubtitleEncoders(string ffmpeg)
-    {
-        CaptureResult p = ProcessRunner.Run([ffmpeg, "-hide_banner", "-encoders"], 30);
-        if (p.ExitCode != 0) return [];
-
-        var found = new HashSet<string>(StringComparer.Ordinal);
-        foreach (Match m in SubtitleEncoderLine().Matches(p.Stdout + "\n" + p.Stderr))
-            found.Add(m.Groups[1].Value);
-        return found;
-    }
 
     /// <summary>
     /// Parse the -filters registry. FFmpeg writes it to stdout, but builds/wrappers
     /// can redirect diagnostics to stderr, so both streams are inspected.
-    /// </summary>
-    public static HashSet<string> DetectVideoFilters(string ffmpeg)
-    {
-        CaptureResult p = ProcessRunner.Run(ffmpeg, "-hide_banner", "-filters");
-        if (p.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                (p.Stderr.Trim() is { Length: > 0 } ? p.Stderr : p.Stdout).Trim() is { Length: > 0 } msg
-                    ? msg : "ffmpeg -filters failed");
-        }
-
-        string text = p.Stdout + "\n" + p.Stderr;
-        return ParseFilterNames(text);
-    }
-
-    /// <summary>
-    /// Filter names inside <c>ffmpeg -filters</c> output. Split out from the
-    /// process call so the parsing is testable without running FFmpeg.
+    ///
+    /// v7.9.5: the process call lives in <see cref="BuildProfileStore.Sweep"/>
+    /// now; this half is kept because it is what makes the parsing testable
+    /// without running FFmpeg.
     /// </summary>
     public static HashSet<string> ParseFilterNames(string text)
     {
@@ -120,7 +90,15 @@ public static partial class FFmpegCapabilities
                 p.Stderr.Trim() is { Length: > 0 } err ? err : "ffmpeg -h filter=scale failed");
         }
 
-        string text = p.Stdout + "\n" + p.Stderr;
+        return ParseScaleAlgorithms(p.Stdout + "\n" + p.Stderr);
+    }
+
+    /// <summary>
+    /// Scaler kernels inside <c>ffmpeg -h filter=scale</c>. Split out from the
+    /// process call so the capability sweep can parse text it already has.
+    /// </summary>
+    public static HashSet<string> ParseScaleAlgorithms(string text)
+    {
         var found = new HashSet<string>(StringComparer.Ordinal);
         foreach (string canonical in Constants.ScaleAlgorithmAliases.Values.Distinct())
         {

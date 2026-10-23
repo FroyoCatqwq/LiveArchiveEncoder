@@ -413,7 +413,7 @@ public static class ParallelEncoder
         // straight to AVI and YAVG 16 (pure black) after one hop through .mkv.
         // Since every shard is staged in Matroska, such an encoder is a single
         // pass or nothing.
-        o.Encoder.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(o.FFmpeg, o.Encoder);
+        o.Encoder.Caps ??= FFmpeg.BuildProfileStore.For(o.FFmpeg).EncoderCaps(o.Encoder);
         if (PixelFormatUtil.CarriesPalette(
                 PixelFormatUtil.ChooseTransportPixFmt(sourcePixFmt, o.Encoder.Caps)))
         {

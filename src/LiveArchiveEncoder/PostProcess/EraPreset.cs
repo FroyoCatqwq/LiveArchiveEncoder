@@ -1,5 +1,23 @@
+using System.Globalization;
 using LiveArchiveEncoder.Core;
 namespace LiveArchiveEncoder.PostProcess;
+
+/// <summary>Which half of the pipeline a preset speaks for.</summary>
+public enum EraKind
+{
+    /// <summary>
+    /// A whole period: the live layer (encoder, size, rate, ceiling) plus the
+    /// damage a site would then have done. What v7.6 shipped.
+    /// </summary>
+    Era = 0,
+
+    /// <summary>
+    /// One site, recompress layer only (v7.9.5). A site's preset is a bitrate
+    /// profile -- resolution, frame rate, video and audio kbps -- and nothing
+    /// else, so it never fights the encoder the user picked for the live pass.
+    /// </summary>
+    Site = 1,
+}
 
 /// <summary>
 /// One "year" of online video: what the live capture would have produced, and
@@ -14,6 +32,11 @@ namespace LiveArchiveEncoder.PostProcess;
 /// applied on upload, which is what people actually remember about the
 /// era.</description></item>
 /// </list>
+///
+/// v7.9.5 adds <see cref="EraKind.Site"/> presets, which speak only for the
+/// second layer: 2005-2009 was a handful of sites with their own transcode
+/// ladders, and "make this look like Youku 2007" does not imply a particular
+/// live encoder.
 ///
 /// The numbers are not invented; see <c>docs/era-presets.md</c> for the sources.
 /// The short version:
@@ -37,31 +60,34 @@ public sealed class EraPreset
 {
     public required string Id { get; init; }
 
+    /// <summary>Era (both layers) or site (recompress layer only).</summary>
+    public EraKind Kind { get; init; } = EraKind.Era;
+
     /// <summary>First year the preset stands for, used only for listing order.</summary>
     public int YearFrom { get; init; }
     public int YearTo { get; init; }
 
-    // ---- live (first pass) ----
+    // ---- live (first pass); null on a site preset ----
 
     /// <summary>Legacy encoder name as FFmpeg spells it.</summary>
-    public required string Encoder { get; init; }
-    public int Width { get; init; }
-    public int Height { get; init; }
-    public double Fps { get; init; }
+    public string? Encoder { get; init; }
+    public int? Width { get; init; }
+    public int? Height { get; init; }
+    public double? Fps { get; init; }
 
     /// <summary>Bitrate ceiling; the adaptive ladder starts dropping fps above it.</summary>
-    public double LimitKbps { get; init; }
+    public double? LimitKbps { get; init; }
 
     /// <summary>
     /// Scaler kernel. Deliberately era-appropriate: the cheap nearest-neighbour
     /// scaler is what a Pentium-era encoder could afford, lanczos only shows up
     /// once CPUs are no longer the constraint.
     /// </summary>
-    public string ScaleAlgo { get; init; } = "neighbor";
+    public string? ScaleAlgo { get; init; }
 
     public string? AudioEncoder { get; init; }
-    public int AudioKbps { get; init; } = 32;
-    public int AudioChannels { get; init; } = 1;
+    public int? AudioKbps { get; init; }
+    public int? AudioChannels { get; init; }
     public int? AudioRate { get; init; }
 
     // ---- recompress (second pass) ----
@@ -78,30 +104,41 @@ public sealed class EraPreset
     /// <summary>Localisation key for the one-line description shown in menus.</summary>
     public required string NoteKey { get; init; }
 
+    /// <summary>True when this preset has a live layer to apply.</summary>
+    public bool HasLive => Kind == EraKind.Era && Width is not null;
+
     /// <summary>
     /// Apply just the live layer of this preset. The recompress layer is a
     /// separate stage with its own on/off switch, so picking an era does not
     /// silently turn it on.
+    ///
+    /// Returns false for a site preset, which has no live layer at all.
     /// </summary>
-    public void ApplyLive(Configuration.Config c)
+    public bool ApplyLive(Configuration.Config c)
     {
-        c.Width = Width;
-        c.Height = Height;
-        c.Fps = Fps;
-        c.Limit = LimitKbps;
-        c.Recover = LimitKbps * 0.75;
-        c.ScaleAlgo = ScaleAlgo;
-        c.AudioKbps = AudioKbps;
-        c.AudioChannels = AudioChannels;
+        if (!HasLive) return false;
+
+        c.Width = Width!.Value;
+        c.Height = Height ?? c.Height;
+        if (Fps is { } fps) c.Fps = fps;
+        if (LimitKbps is { } limit)
+        {
+            c.Limit = limit;
+            c.Recover = limit * 0.75;
+        }
+        if (ScaleAlgo is { Length: > 0 } scale) c.ScaleAlgo = scale;
+        if (AudioKbps is { } kbps) c.AudioKbps = kbps;
+        if (AudioChannels is { } channels) c.AudioChannels = channels;
         c.AudioRate = AudioRate;
         if (AudioEncoder is not null) c.AudioEncoder = AudioEncoder;
+        return true;
     }
 }
 
 /// <summary>
-/// The built-in eras. Read-only by design: users add or override entries in
-/// their own config file, they never edit this table, so an upgrade can add a
-/// row without fighting a local modification.
+/// The built-in eras and sites. Read-only by design: users add or override
+/// entries in their own config file, they never edit this table, so an upgrade
+/// can add a row without fighting a local modification.
 /// </summary>
 public static class EraPresets
 {
@@ -206,7 +243,49 @@ public static class EraPresets
                            + "-ac 2 -ar 44100 -b:a 96k",
             NoteKey = "era.hd14",
         },
+
+        // ---- v7.9.5: the sites themselves, recompress layer only ----
+        //
+        // 2005-2009 China was not one transcode ladder but six: every portal ran
+        // its own FLV settings, which is why the same upload looked different on
+        // Sina, Sohu, Tencent, Youku and Tudou. These presets reproduce the
+        // *second* pass at each site's nominal bitrate and never touch the live
+        // encoder, so "what Youku would have done to my recording" is one flag.
+        Site("sina06", 2005, 2008, 320, 240, 12, 200, 32, 22050, 1, "era.sina06"),
+        Site("sohu06", 2006, 2009, 320, 240, 15, 240, 32, 22050, 1, "era.sohu06"),
+        Site("qq06", 2006, 2009, 320, 240, 15, 260, 32, 22050, 1, "era.qq06"),
+        Site("tudou06", 2005, 2009, 352, 264, 12, 295, 32, 22050, 1, "era.tudou06"),
+        Site("youku07", 2007, 2010, 352, 264, 15, 320, 32, 22050, 1, "era.youku07"),
+        // YouTube's 2007 standard stream: 320x240, ~150-200 Kbps video, and the
+        // 22.05 kHz mono track at 64 Kbps everybody remembers.
+        Site("youtube07", 2006, 2008, 320, 240, 15, 200, 64, 22050, 1, "era.youtube07"),
     ];
+
+    /// <summary>
+    /// A site preset: the numbers are the site's transcode ladder, the fragment
+    /// is derived from them so the two can never drift apart.
+    ///
+    /// The recompressed file stays MP4/H.264 on purpose (see docs/era-presets.md):
+    /// the point is the bitrate and the resolution, and the result has to open in
+    /// a player that is not from 2007. `-b:v` rather than `-crf` because a site
+    /// targeted a bitrate, not a quality level.
+    /// </summary>
+    private static EraPreset Site(
+        string id, int from, int to, int width, int height, double fps,
+        int videoKbps, int audioKbps, int audioRate, int channels, string noteKey) => new()
+    {
+        Id = id,
+        Kind = EraKind.Site,
+        YearFrom = from,
+        YearTo = to,
+        RecompressArgs = string.Create(CultureInfo.InvariantCulture,
+            $"-vf scale={width}:{height}:flags=bicubic,fps={fps:G6} "
+            + $"-c:v libx264 -profile:v baseline -preset veryfast "
+            + $"-b:v {videoKbps}k -maxrate {videoKbps * 12 / 10}k -bufsize {videoKbps * 2}k "
+            + $"-ac {channels} -ar {audioRate} -c:a aac -b:a {audioKbps}k"),
+        RecompressContainer = "mp4",
+        NoteKey = noteKey,
+    };
 
     public static EraPreset? Find(string? id)
     {
@@ -214,6 +293,13 @@ public static class EraPresets
         return All.FirstOrDefault(
             p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
     }
+
+    /// <summary>Only the presets that can reshape the live pass.</summary>
+    public static IReadOnlyList<EraPreset> WithLiveLayer =>
+        [.. All.Where(p => p.HasLive)];
+
+    /// <summary>Only the site presets (recompress layer alone).</summary>
+    public static IReadOnlyList<EraPreset> Sites => [.. All.Where(p => p.Kind == EraKind.Site)];
 
     public static string Ids => string.Join(", ", All.Select(p => p.Id));
 }

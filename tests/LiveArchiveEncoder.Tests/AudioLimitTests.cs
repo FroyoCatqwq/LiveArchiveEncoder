@@ -197,9 +197,10 @@ public sealed class AudioLimitTests
     public async Task EveryEraPresetSurvivesTheTables()
     {
         // The presets are written for a period, not for a codec; the correction
-        // pass is what keeps them alive across containers.
+        // pass is what keeps them alive across containers. Site presets own no
+        // live audio settings (v7.9.5), so only the era rows take part.
         string[] containers = ["rm", "mpeg", "avi", "mp4", "flv", "asf", "ogg", "matroska"];
-        foreach (EraPreset era in EraPresets.All)
+        foreach (EraPreset era in EraPresets.WithLiveLayer)
         {
             foreach (string container in containers)
             {
@@ -208,8 +209,8 @@ public sealed class AudioLimitTests
                 if (codecs.Count == 0) continue;
                 string codec = codecs[0];
                 (int? rate, _, int kbps) = AudioCatalog.Effective(
-                    codec, era.AudioRate, era.AudioChannels, era.AudioKbps, container);
-                await Assert.That(AudioCatalog.Validate(codec, container, rate, era.AudioChannels, kbps)).IsNull().Because($"{era.Id} + {container} + {codec} should be correctable");
+                    codec, era.AudioRate, era.AudioChannels!.Value, era.AudioKbps!.Value, container);
+                await Assert.That(AudioCatalog.Validate(codec, container, rate, era.AudioChannels!.Value, kbps)).IsNull().Because($"{era.Id} + {container} + {codec} should be correctable");
             }
         }
     }

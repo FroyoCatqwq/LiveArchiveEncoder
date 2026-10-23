@@ -108,6 +108,22 @@ CASES = [
     ("container_h261_avi",  ["--encoder", "h261", "--container", "avi"],  "avi"),
     ("container_h263_avi",  ["--encoder", "h263", "--container", "avi"],  "avi"),
     ("container_h263p_avi", ["--encoder", "h263p", "--container", "avi"], "avi"),
+
+    # ---- v7.9.5: the containers the sweep proved are real ----
+    # Each pair was measured with tools/capability_sweep.py: the muxer takes it,
+    # ffprobe reads the codec back under its own name, and the picture keeps its
+    # colour. All of them were refused before this version.
+    ("container_m4v_mkv",     ["--encoder", "mpeg4", "--container", "mkv"],      "mkv"),
+    ("container_m1v_mp4",     ["--encoder", "mpeg1video", "--container", "mp4"], "mp4"),
+    ("container_x264_flv",    ["--encoder", "libx264", "--container", "flv"],    "flv"),
+    ("container_msrle_mov",   ["--encoder", "msrle", "--container", "mov"],      "mov"),
+    ("container_theora_mkv",  ["--encoder", "libtheora", "--container", "mkv"],  "mkv"),
+
+    # ---- v7.9.5: whole-number frame rates ----
+    # rv10/rv20 store an integer in the header (23.976 used to be written as
+    # 23.000) and roqvideo refuses a fractional rate outright.
+    ("rv20_fractional_fps", ["--encoder", "rv20", "--fps", "23.976"],    "rm"),
+    ("roq_fractional_fps",  ["--encoder", "roqvideo", "--fps", "29.97"], "roq"),
 ]
 
 # v7.6: files the post-processing stages leave next to the main product.
@@ -356,3 +372,131 @@ def test_parallel_flv_join_has_no_corrupt_frames(exe, src, workdir):
     info = harness.probe(dst) or {}
     duration = float((info.get("format") or {}).get("duration") or 0.0)
     assert 19.0 <= duration <= 21.0, f"joined duration {duration}"
+
+
+def test_fractional_rate_is_written_as_an_integer(exe, src, workdir):
+    """v7.9.5: RealMedia and RoQ store the frame rate as an integer.
+
+    Measured (2026-10-23) before the fix: rv20 at 23.976 probed back as 23/1,
+    29.97 as 29/1, 59.94 as 59/1 -- the run reported one rate and the file held
+    another. roqvideo was worse: it refused all three and the run died in
+    preflight. Neither encoder declares a rate list, so nothing snapped them.
+    """
+    out = workdir("options")
+
+    for name, encoder, requested, expected, ext in (
+            ("rate_rv20", "rv20", "23.976", 24.0, "rm"),
+            ("rate_rv20_2997", "rv20", "29.97", 30.0, "rm"),
+            ("rate_roq", "roqvideo", "29.97", 30.0, "roq")):
+        dst = out / f"{name}.{ext}"
+        proc = run([str(exe), str(src), str(dst), "--end", "00:00:04",
+                    "--encoder", encoder, "--fps", requested, "--ffmpeg-source", "path"],
+                   timeout=180)
+        assert proc.returncode == 0, (
+            f"{name}: exit={proc.returncode}: "
+            f"{(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+
+        info = harness.probe(dst) or {}
+        video = [s for s in info.get("streams", []) if s.get("codec_type") == "video"]
+        assert video, f"{name}: no video stream"
+        num, _, den = (video[0].get("r_frame_rate") or "0/1").partition("/")
+        rate = float(num) / float(den or 1)
+        assert rate == expected, f"{name}: file says {rate} fps, wanted {expected}"
+
+
+def test_a_site_preset_only_reshapes_the_second_pass(exe, src, workdir):
+    """v7.9.5: a site preset is a bitrate profile, not an encoder choice.
+
+    2005-2009 China was not one transcode ladder but six -- every portal ran its
+    own FLV settings. --era youku07 must therefore leave the live pass exactly
+    as the user configured it and rewrite only the recompress fragment.
+    """
+    out = workdir("options")
+    dst = out / "site_preset.avi"
+
+    proc = run([str(exe), str(src), str(dst), "--end", "00:00:04",
+                "--encoder", "mpeg4", "--era", "youku07", "--recompress",
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+
+    # The live product keeps the encoder and the extension the user asked for.
+    assert dst.exists(), "the live product is missing"
+    live = harness.video_summary(dst) or {}
+    assert live.get("codec") == "mpeg4", f"live pass changed codec: {live.get('codec')}"
+
+    # ... and the site product carries the site's numbers.
+    web = out / "site_preset_web.mp4"
+    assert web.exists() and web.stat().st_size > 0, "no site product"
+    info = harness.video_summary(web) or {}
+    assert (info.get("width"), info.get("height")) == (352, 264), info
+
+
+def test_recompress_only_needs_no_live_pass(exe, src, workdir):
+    """v7.9.5: the second pass can be applied to a file that already exists.
+
+    The stage used to sit behind a live encode, so "put this recording through
+    Youku's transcode" meant recording it again first.
+    """
+    import shutil
+
+    out = workdir("options")
+    existing = out / "already_made.mkv"
+    shutil.copyfile(src, existing)
+
+    proc = run([str(exe), str(existing), "--recompress-only", "--era", "youku07",
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:300]}")
+
+    web = out / "already_made_web.mp4"
+    assert web.exists() and web.stat().st_size > 0, "no recompressed product"
+    info = harness.video_summary(web) or {}
+    assert (info.get("width"), info.get("height")) == (352, 264), info
+
+    # The whole point: nothing was recorded, so no _live product may appear.
+    assert not list(out.glob("already_made_live.*")), "a live pass ran anyway"
+
+
+def test_recompress_only_refuses_a_nameless_run(exe, src, workdir):
+    """--recompress-only with nothing to apply is a usage error, not a no-op."""
+    proc = run([str(exe), str(src), "--recompress-only", "--no-recompress",
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=120)
+    assert proc.returncode == 2, f"rc={proc.returncode}"
+    assert "recompress-only" in (proc.stdout + proc.stderr)
+
+
+def test_capability_cache_is_written_once(exe, src, workdir):
+    """v7.9.5: the build profile is discovered once per FFmpeg binary.
+
+    Before the cache a single run launched `-encoders` twice, plus `-filters`,
+    `-h filter=scale`, `-h encoder=NAME` and `-version` -- six process starts
+    before a frame was decoded. Now the first run writes one file and every
+    later run reads it.
+    """
+    import os
+
+    out = workdir("options")
+    root = out / "caps-root"
+    env = {**os.environ, "LAE_CONFIG_DIR": str(root)}
+
+    first = run([str(exe), "--list-filters", "--ffmpeg-source", "path", "--lang", "en"],
+                env=env, timeout=180)
+    assert first.returncode == 0, first.stderr[-300:]
+
+    caches = sorted((root / "cache").glob("caps-*.json"))
+    assert len(caches) == 1, f"expected one cache file, got {caches}"
+    stamp = caches[0].stat().st_mtime_ns
+
+    second = run([str(exe), "--list-filters", "--ffmpeg-source", "path", "--lang", "en"],
+                 env=env, timeout=180)
+    assert second.returncode == 0, second.stderr[-300:]
+    assert second.stdout == first.stdout, "the cached answer differs from the live one"
+    assert caches[0].stat().st_mtime_ns == stamp, "the cache was rewritten -- it should have been reused"
+
+    # A forced rescan is the one path that is allowed to rewrite it.
+    LAE_NO_CACHE = {**env, "LAE_NO_CAPS_CACHE": "1"}
+    third = run([str(exe), "--list-filters", "--ffmpeg-source", "path", "--lang", "en"],
+                env=LAE_NO_CACHE, timeout=180)
+    assert third.returncode == 0, third.stderr[-300:]
+    assert third.stdout == first.stdout

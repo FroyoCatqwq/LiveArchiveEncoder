@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.4 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.5 (.NET 10 / .NET 11)",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -280,6 +280,8 @@ public static class L
         ["note.transportadjusted"] = "Adjusted output size for {0}: {1}x{2}",
         ["note.containerfromext"] = "NOTE: {0} writes {2} for this output; "
             + "the '{1}' extension selected it.",
+        ["note.rateless"] = "NOTE: the {0} container stores no frame rate (a player assumes "
+            + "one); use AVI if the {1} fps has to survive in the file.",
         ["note.splitunavailable"] = "\nNOTE: split audio pipeline unavailable ({0}); "
             + "falling back to single-process encoding.",
         ["note.splitmux"] = "NOTE: split audio pipeline unavailable ({0}); using single-process encoding.",
@@ -327,6 +329,7 @@ public static class L
         ["report.container"] = "Container",
         ["report.pixfmts"] = "Pixel formats",
         ["report.fpssupport"] = "FPS support",
+        ["report.fpswhole"] = "whole numbers only (the file stores an integer)",
         ["report.quality"] = "Quality",
         ["report.fps"] = "FPS",
         ["report.limit"] = "Limit",
@@ -461,6 +464,13 @@ public static class L
         ["rc.args.rejected"] = "Those arguments were rejected: {0}",
         ["rc.container.set"] = "Output container: {0}.",
         ["rc.hint"] = "Example: -vf \"scale=320:240,fps=15\" -c:v libx264 -crf 28 -ac 1 -b:a 32k",
+        ["rc.only.input"] = "Recompress only -- input : {0}",
+        ["rc.only.output"] = "Recompress only -- output: {0}",
+        ["rc.only.done"] = "Recompressed: {0}",
+        ["rc.only.fileprompt"] = "File to recompress (the live pass is skipped):\n> ",
+        ["rc.menu.only"] = "Recompress a file directly (no live encode)",
+        ["rc.siteapplied"] = "Applied site preset \"{0}\": the second pass now targets a {1} file; "
+            + "the live encoder is untouched.",
 
         ["era.menu"] = "Era preset",
         ["era.menu.pick"] = "Apply an era preset (sets the live pass and the recompress pass)",
@@ -476,11 +486,22 @@ public static class L
         ["era.flv07"] = "2005-2008 video sites: FLV / Sorenson Spark at 320x240, ~300 kbps",
         ["era.mp4_10"] = "2009-2012: H.264 in MP4 at 640x480, ~900 kbps",
         ["era.hd14"] = "2013-2016: 720p H.264, ~2.5 Mbps, stereo audio survives",
+        ["era.kind.era"] = "[era ]",
+        ["era.kind.site"] = "[site]",
+        // v7.9.5: the sites themselves. Each is the second pass only -- the
+        // numbers are that site's nominal transcode ladder, and the encoder for
+        // the live pass stays whatever the user chose.
+        ["era.sina06"] = "Sina podcast 2005-2008: 320x240, 12 fps, ~200 kbps mono 22 kHz",
+        ["era.sohu06"] = "Sohu video 2006-2009: 320x240, 15 fps, ~240 kbps mono 22 kHz",
+        ["era.qq06"] = "Tencent/QQ video 2006-2009: 320x240, 15 fps, ~260 kbps mono 22 kHz",
+        ["era.tudou06"] = "Tudou 2005-2009: 352x264, 12 fps, ~295 kbps (measured on a real download)",
+        ["era.youku07"] = "Youku 2007-2010: 352x264, 15 fps, ~320 kbps mono 22 kHz",
+        ["era.youtube07"] = "YouTube 2006-2008: 320x240, 15 fps, ~200 kbps, mono 22 kHz at 64 kbps",
     };
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.4 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.5 (.NET 10 / .NET 11)",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 
@@ -737,6 +758,8 @@ public static class L
         ["note.sizeadjusted"] = "已把 {0} 调整为受支持的输出尺寸：{1}x{2}",
         ["note.transportadjusted"] = "已按 {0} 调整输出尺寸：{1}x{2}",
         ["note.containerfromext"] = "注意：{0} 按输出扩展名 {1} 改用 {2} 容器。",
+        ["note.rateless"] = "注意：{0} 容器不保存帧率（播放器会自行假设一个）；"
+            + "要让 {1} fps 真的留在文件里，请用 AVI。",
         ["note.splitunavailable"] = "\n注意：分离音频通路不可用（{0}），回退为单进程编码。",
         ["note.splitmux"] = "注意：分离音频通路不可用（{0}），改用单进程编码。",
         ["note.subtitleinline"] = "注意：字幕以内嵌字幕轨方式承载，已跳过分离音频通路——合并时会丢失该轨。",
@@ -779,6 +802,7 @@ public static class L
         ["report.container"] = "容器",
         ["report.pixfmts"] = "像素格式",
         ["report.fpssupport"] = "FPS 支持",
+        ["report.fpswhole"] = "只接受整数（文件里存的是整数）",
         ["report.quality"] = "质量",
         ["report.fps"] = "FPS",
         ["report.limit"] = "码率上限",
@@ -912,6 +936,12 @@ public static class L
         ["rc.args.rejected"] = "这些参数被拒绝：{0}",
         ["rc.container.set"] = "输出容器：{0}。",
         ["rc.hint"] = "示例：-vf \"scale=320:240,fps=15\" -c:v libx264 -crf 28 -ac 1 -b:a 32k",
+        ["rc.only.input"] = "仅二次压缩 - 输入：{0}",
+        ["rc.only.output"] = "仅二次压缩 - 输出：{0}",
+        ["rc.only.done"] = "二次压缩完成：{0}",
+        ["rc.only.fileprompt"] = "要二次压缩的文件（跳过直播编码）：\n> ",
+        ["rc.menu.only"] = "直接二次压缩一个文件（不做直播编码）",
+        ["rc.siteapplied"] = "已应用站点预设“{0}”：二次压缩改为输出 {1}；直播编码器不变。",
 
         ["era.menu"] = "时代预设",
         ["era.menu.pick"] = "应用时代预设（同时设置直播编码与二次压缩）",
@@ -927,6 +957,14 @@ public static class L
         ["era.flv07"] = "2005-2008 视频网站：FLV / Sorenson Spark，320x240，约 300 kbps",
         ["era.mp4_10"] = "2009-2012：MP4 里的 H.264，640x480，约 900 kbps",
         ["era.hd14"] = "2013-2016：720p H.264，约 2.5 Mbps，立体声得以保留",
+        ["era.kind.era"] = "[时代]",
+        ["era.kind.site"] = "[站点]",
+        ["era.sina06"] = "新浪播客 2005-2008：320x240、12 fps、约 200 kbps，22 kHz 单声道",
+        ["era.sohu06"] = "搜狐视频 2006-2009：320x240、15 fps、约 240 kbps，22 kHz 单声道",
+        ["era.qq06"] = "腾讯/QQ 视频 2006-2009：320x240、15 fps、约 260 kbps，22 kHz 单声道",
+        ["era.tudou06"] = "土豆网 2005-2009：352x264、12 fps、约 295 kbps（对真实下载文件实测）",
+        ["era.youku07"] = "优酷 2007-2010：352x264、15 fps、约 320 kbps，22 kHz 单声道",
+        ["era.youtube07"] = "YouTube 2006-2008：320x240、15 fps、约 200 kbps，22 kHz 单声道 64 kbps",
     };
 
     public static string Lang { get; private set; } = English;

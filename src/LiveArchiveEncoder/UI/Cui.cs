@@ -12,12 +12,17 @@ public static class Cui
 {
     public static int Run(
         string ffmpeg, string ffprobe, bool btbn,
-        HashSet<string> availableFilters, HashSet<string> availableScaleAlgorithms,
+        FFmpeg.Capabilities caps,
         string? language = null, string? ffmpegSource = null)
     {
-        (string version, _, bool likelyGpl) = FFmpegDiscovery.BuildInfo(ffmpeg);
-        List<EncoderInfo> encoders = FFmpegDiscovery.DetectLegacyEncoders(ffmpeg);
-        HashSet<string> audioAvailable = FFmpegDiscovery.DetectAudioEncoders(ffmpeg);
+        // v7.9.5: all of this comes from one cached build profile instead of
+        // three launches (`-version`, `-encoders` twice). A second start of the
+        // shell does not touch FFmpeg at all before it prints the menu.
+        (string version, bool likelyGpl) = (caps.Version, caps.Gpl);
+        List<EncoderInfo> encoders = caps.Encoders;
+        HashSet<string> audioAvailable = caps.AudioEncoders;
+        HashSet<string> availableFilters = caps.Filters;
+        HashSet<string> availableScaleAlgorithms = caps.ScaleAlgorithms;
 
         // Restore the previous session before anything is printed, so the banner
         // itself is already in the language the user left behind.
@@ -147,7 +152,13 @@ public static class Cui
                 case "5":
                     try
                     {
-                        encoders = FFmpegDiscovery.DetectLegacyEncoders(ffmpeg);
+                        // v7.9.5: a rescan drops the cached build profile, so a
+                        // build replaced in place is picked up here too.
+                        caps = FFmpeg.BuildProfileStore.For(ffmpeg, refresh: true);
+                        encoders = caps.Encoders;
+                        audioAvailable = caps.AudioEncoders;
+                        availableFilters = caps.Filters;
+                        availableScaleAlgorithms = caps.ScaleAlgorithms;
                         Console.WriteLine(L.T("encoder.rescanok", encoders.Count));
                     }
                     catch (Exception exc) { Console.WriteLine($"{L.T("error.prefix")}{exc.Message}"); }
@@ -163,7 +174,7 @@ public static class Cui
                     Report.PrintConfig(c, ffmpeg, btbn, encoders.Count, availableFilters, availableScaleAlgorithms);
                     break;
                 case "9":
-                    StartEncoding(c, ffmpeg, ffprobe, btbn, encoders, audioAvailable,
+                    StartEncoding(c, ffmpeg, ffprobe, btbn, caps, encoders, audioAvailable,
                         availableFilters, availableScaleAlgorithms);
                     break;
                 case "10":
@@ -199,7 +210,7 @@ public static class Cui
                         c.FfmpegSource = newSource;
                         c.FfmpegProxy = newProxy;
                         Persist(c);
-                        RefreshToolchain(c, ref ffmpeg, ref ffprobe, ref btbn,
+                        RefreshToolchain(c, ref ffmpeg, ref ffprobe, ref btbn, ref caps,
                             ref encoders, ref audioAvailable,
                             ref availableFilters, ref availableScaleAlgorithms);
                         break;
@@ -213,7 +224,7 @@ public static class Cui
                     Persist(c);
                     break;
                 case "15":
-                    EditRecompress(c);
+                    EditRecompress(c, ffmpeg);
                     Persist(c);
                     break;
                 case "16":
@@ -596,6 +607,7 @@ public static class Cui
     /// </summary>
     private static void RefreshToolchain(
         Config c, ref string ffmpeg, ref string ffprobe, ref bool btbn,
+        ref FFmpeg.Capabilities caps,
         ref List<EncoderInfo> encoders, ref HashSet<string> audioAvailable,
         ref HashSet<string> availableFilters, ref HashSet<string> availableScaleAlgorithms)
     {
@@ -610,12 +622,13 @@ public static class Cui
             ffmpeg = FFmpegDiscovery.FindFFmpeg(null, c.FfmpegSource);
             btbn = FFmpegDiscovery.IsBtbn;
             ffprobe = FFmpegDiscovery.FindFFprobe(null, ffmpeg);
-            availableFilters = FFmpegCapabilities.DetectVideoFilters(ffmpeg);
-            availableFilters = FFmpegCapabilities.VerifyNamedFilters(
-                ffmpeg, availableFilters, ["scale", .. Constants.DeinterlaceFilters]);
-            availableScaleAlgorithms = FFmpegCapabilities.DetectScaleAlgorithms(ffmpeg);
-            encoders = FFmpegDiscovery.DetectLegacyEncoders(ffmpeg);
-            audioAvailable = FFmpegDiscovery.DetectAudioEncoders(ffmpeg);
+            // A different binary is a different profile; the cache is keyed by
+            // the binary itself, so this is a warm read when it was seen before.
+            caps = FFmpeg.BuildProfileStore.For(ffmpeg);
+            encoders = caps.Encoders;
+            audioAvailable = caps.AudioEncoders;
+            availableFilters = caps.Filters;
+            availableScaleAlgorithms = caps.ScaleAlgorithms;
 
             // The selected encoder may not exist in the new build; dropping it
             // beats starting an encode that is guaranteed to fail.
@@ -834,7 +847,9 @@ public static class Cui
 
         try
         {
-            audioAvailable = FFmpegDiscovery.DetectAudioEncoders(ffmpeg);
+            // v7.9.5: re-read the build profile (cached: this costs nothing
+            // after the first run) instead of launching `ffmpeg -encoders`.
+            audioAvailable = FFmpeg.BuildProfileStore.For(ffmpeg).AudioEncoders;
         }
         catch (Exception exc) when (exc is InvalidOperationException or TimeoutException)
         {
@@ -1461,7 +1476,8 @@ public static class Cui
     }
 
     private static void StartEncoding(
-        Config c, string ffmpeg, string ffprobe, bool btbn, List<EncoderInfo> encoders,
+        Config c, string ffmpeg, string ffprobe, bool btbn, FFmpeg.Capabilities caps,
+        List<EncoderInfo> encoders,
         HashSet<string> audioAvailable, HashSet<string> availableFilters,
         HashSet<string> availableScaleAlgorithms)
     {
@@ -1505,7 +1521,7 @@ public static class Cui
             return;
         }
 
-        c.Encoder.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, c.Encoder);
+        c.Encoder.Caps ??= caps.EncoderCaps(c.Encoder);
 
         // v7.9.4: the settings file can carry a rate this encoder never accepts
         // (mpeg1video + 15 fps), and the menu only re-checks when the encoder is
@@ -1520,6 +1536,10 @@ public static class Cui
             c.FpsLevels = EncoderMath.SelectLevels(c.Fps, c.FpsLevels);
             c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
         }
+        // Same fact the CLI reports: a bare .h261/.h263/.a64 bitstream keeps no
+        // frame rate, so the menu does not pretend the number travels with it.
+        if (Constants.RateLessFormats.Contains(c.Encoder.FormatName))
+            Console.WriteLine(L.T("note.rateless", c.Encoder.FormatName, $"{baseFps:G6}"));
 
         try
         {
@@ -1579,7 +1599,7 @@ public static class Cui
                 // Detected once here (and inherited by shards) instead of once
                 // per shard: the copy path needs the build's own encoder list.
                 AvailableSubtitleEncoders = c.Subtitles.Active
-                    ? FFmpeg.FFmpegCapabilities.DetectSubtitleEncoders(ffmpeg)
+                    ? caps.SubtitleEncoders
                     : null,
                 Hwaccel = c.Hwaccel,
                 Width = c.Width,
@@ -1683,7 +1703,12 @@ public static class Cui
     {
         Console.WriteLine(L.T("era.choose", PostProcess.EraPresets.Ids));
         foreach (PostProcess.EraPreset preset in PostProcess.EraPresets.All)
-            Console.WriteLine($"  {preset.Id,-14} {preset.YearFrom}-{preset.YearTo}  {L.T(preset.NoteKey)}");
+        {
+            // v7.9.5: a site preset only rewrites the recompress pass, so the
+            // list says which column of the table it belongs to.
+            string kind = preset.Kind == PostProcess.EraKind.Site ? L.T("era.kind.site") : L.T("era.kind.era");
+            Console.WriteLine($"  {preset.Id,-14} {preset.YearFrom}-{preset.YearTo}  {kind}  {L.T(preset.NoteKey)}");
+        }
 
         Console.Write(L.T("era.prompt", c.EraPreset ?? ""));
         string pick = (Console.ReadLine() ?? "").Trim();
@@ -1699,17 +1724,26 @@ public static class Cui
         // The preset writes the live layer straight into the config and pre-fills
         // the recompress arguments. It does not arm the recompress stage: that is
         // opt-in by design, and the menu is where a user turns it on.
-        chosen.ApplyLive(c);
+        bool live = chosen.ApplyLive(c);
         c.Recompress.Args = chosen.RecompressArgs;
         c.Recompress.Container = chosen.RecompressContainer;
         c.EraPreset = chosen.Id;
 
-        Console.WriteLine(L.T("era.applied", chosen.Id,
-            c.Width, c.Height, $"{c.Fps:G6}", $"{c.Limit:G6}"));
+        if (live)
+        {
+            Console.WriteLine(L.T("era.applied", chosen.Id,
+                c.Width, c.Height, $"{c.Fps:G6}", $"{c.Limit:G6}"));
+        }
+        else
+        {
+            // A site preset leaves the encoder alone and only sets the second
+            // pass, which is the whole point of "不限定编码器".
+            Console.WriteLine(L.T("rc.siteapplied", chosen.Id, c.Recompress.Container));
+        }
         Console.WriteLine(L.T("rc.hint"));
     }
 
-    private static void EditRecompress(Config c)
+    private static void EditRecompress(Config c, string ffmpeg)
     {
         while (true)
         {
@@ -1717,6 +1751,8 @@ public static class Cui
             Console.WriteLine($" 1. {L.Pad(L.T("rc.menu.enable"), 30)} = {(c.Recompress.Enabled ? "on" : L.T("value.off"))}");
             Console.WriteLine($" 2. {L.Pad(L.T("rc.menu.args"), 30)} = {(c.Recompress.Args.Length == 0 ? L.T("value.notselected") : c.Recompress.Args)}");
             Console.WriteLine($" 3. {L.Pad(L.T("rc.menu.container"), 30)} = {c.Recompress.Container}");
+            // v7.9.5: the stage no longer needs a live recording in front of it.
+            Console.WriteLine($" 4. {L.Pad(L.T("rc.menu.only"), 30)}");
             Console.WriteLine($" 0. {L.T("rc.menu.back")}");
             Console.Write(L.T("menu.select"));
 
@@ -1753,7 +1789,81 @@ public static class Cui
                         Console.WriteLine(L.T("rc.container.set", container));
                     }
                     break;
+                case "4":
+                    RecompressFile(c, ffmpeg);
+                    break;
             }
+        }
+    }
+
+    /// <summary>
+    /// v7.9.5: run the second pass on an existing file, with no live encode in
+    /// front of it. Same fragment, same validator, same output naming -- the
+    /// only difference is that the input is whatever the user names.
+    /// </summary>
+    private static void RecompressFile(Config c, string ffmpeg)
+    {
+        if (c.Recompress.Args.Length == 0)
+        {
+            Console.WriteLine(L.T("rc.args.empty"));
+            Console.WriteLine(L.T("rc.hint"));
+            return;
+        }
+
+        Console.Write(L.T("rc.only.fileprompt"));
+        string raw = (Console.ReadLine() ?? "").Trim().Trim('"');
+        if (raw.Length == 0) return;
+
+        var src = new FileInfo(raw);
+        if (!src.Exists)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("input.notfound")} {src.FullName}");
+            return;
+        }
+
+        (_, string? error) = PostProcess.PostArgs.Parse(c.Recompress.Args);
+        if (error is not null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.args.rejected", error)}");
+            return;
+        }
+
+        string output = PostProcess.Recompress.DeriveOutputPath(
+            src.FullName, c.Recompress.Container);
+        if (string.Equals(Path.GetFullPath(output), src.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(L.T("output.sameasinput"));
+            return;
+        }
+
+        var settings = new RecompressSettings
+        {
+            Enabled = true,
+            Args = c.Recompress.Args,
+            Container = c.Recompress.Container,
+        };
+
+        Console.WriteLine(L.T("rc.only.input", src.FullName));
+        Console.WriteLine(L.T("rc.only.output", output));
+        Console.Write(L.T("start.confirm"));
+        string confirm = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        if (confirm is not ("" or "y" or "yes")) return;
+
+        try
+        {
+            (bool ok, string? failure) =
+                PostProcess.Recompress.Apply(ffmpeg, src.FullName, output, settings);
+            if (!ok)
+            {
+                Console.WriteLine($"{L.T("error.prefix")}{L.T("post.failed", "recompress", failure ?? "")}");
+                Console.WriteLine(L.T("post.kept", src.FullName));
+                return;
+            }
+            Console.WriteLine(L.T("rc.only.done", output));
+        }
+        catch (Exception exc)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{exc.Message}");
         }
     }
 }

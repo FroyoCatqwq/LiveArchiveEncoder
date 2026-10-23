@@ -262,7 +262,8 @@ Two flags are additions rather than ports:
 | `--audio-mode inline\|separate\|auto` | audio routing; `inline` (default) is v6.3.3 behaviour, see below |
 | `--hwaccel NAME` | hardware decode; `off` (default), `auto`, or any method from `ffmpeg -hwaccels`. The method is probed by actually decoding one frame and falls back to software when it fails |
 | `--recompress`, `--recompress-args ARGS` | re-encode the result the way a video site would. You write the middle of the FFmpeg command (`-vf scale=320:240,fps=15 -c:v libx264 -crf 28 …`); the program owns `-i` and the output path, and the fragment is tokenised and vetted so a stray path cannot overwrite your source. Off by default |
-| `--era ID` | apply an era preset: one set of live + recompress settings per era of online video, 1997→2016 — dial-up RealVideo G2, early-ADSL RealMedia, the FLV/Youku/Tudou years, early H.264, 720p. Sources in `docs/era-presets.md` |
+| `--recompress-only` | run that pass on an existing file and stop — no live encode, no encoder discovery (`LiveArchiveEncoder clip.mkv --recompress-only --era youku07`) |
+| `--era ID` | apply an era preset: one set of live + recompress settings per era of online video, 1997→2016 — dial-up RealVideo G2, early-ADSL RealMedia, the FLV/Youku/Tudou years, early H.264, 720p. v7.9.5 adds six **site** presets (`sina06`, `sohu06`, `qq06`, `tudou06`, `youku07`, `youtube07`) that set the second pass only. Sources in `docs/era-presets.md` |
 | `--video-stream N`, `--audio-stream N` | v7.9: pick which track of a multi-stream source (a VOB's second audio language, an MKV's duplicate encode) to encode, by the absolute index ffprobe prints; `--list-streams` lists them. Wrong index or type is refused before the encode, with the inventory |
 | `--subtitle FILE`, `--subtitle-stream N` | v7.9: subtitles from a sidecar file (`.ass/.ssa/.srt/.vtt`, repeatable) or an embedded track. `--subtitle-mode burn` (default) renders them into the picture with libass and the tool's own font directory; `--subtitle-mode copy` muxes them as a real subtitle stream where the container has one, with the codec picked from what `ffmpeg -encoders` actually lists. Bitmap subtitles (dvdsub/dvbsub) can be carried but not burned |
 | HTTP/HTTPS input | v7.9, initial support: the input may be a progressive `http(s)://` direct link (archive.org `/download/…` style). Carries the `-reconnect` family and a 30 s socket timeout; seeking needs a Range-capable server. No auth/cookies/HLS |
@@ -305,7 +306,12 @@ full-project review — presets no longer override explicit flags, and a handful
 of crash paths are gone; v7.9.4 fixes three encoder defects (msrle's black
 picture, AVI being refused for mpeg1video/mpeg2video, and mpeg1video's fps
 check trusting a rate list the encoder itself rejects) plus the frame-rate
-header of sharded AVI products.
+header of sharded AVI products. v7.9.5 stops trusting `ffmpeg -h encoder`
+altogether: the whole legacy set was swept for real containers and real frame
+rates (`docs/capability-matrix.md`), six 2000s video sites join the era presets
+as bitrate profiles, the site pass can run on an existing file with
+`--recompress-only`, and the capability table is cached so a run launches 3
+processes instead of 8–10.
 
 ## Layout
 

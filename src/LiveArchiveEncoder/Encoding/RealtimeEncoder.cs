@@ -131,13 +131,16 @@ public static class RealtimeEncoder
                 + "source with audio.");
         }
 
-        o.Encoder.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(o.FFmpeg, o.Encoder);
+        // v7.9.5: the profile is cached per FFmpeg binary, so a direct call to
+        // the encoder (tests, API, a future front end) pays the same one-time
+        // cost the CLI and the shell do instead of probing per run.
+        FFmpeg.Capabilities profile = FFmpeg.BuildProfileStore.For(o.FFmpeg);
+        o.Encoder.Caps ??= profile.EncoderCaps(o.Encoder);
         EncoderCaps caps = o.Encoder.Caps;
 
-        HashSet<string> availableFilters =
-            o.AvailableFilters ?? FFmpegCapabilities.DetectVideoFilters(o.FFmpeg);
+        HashSet<string> availableFilters = o.AvailableFilters ?? profile.Filters;
         HashSet<string> availableScaleAlgorithms =
-            o.AvailableScaleAlgorithms ?? FFmpegCapabilities.DetectScaleAlgorithms(o.FFmpeg);
+            o.AvailableScaleAlgorithms ?? profile.ScaleAlgorithms;
 
         if (!availableFilters.Contains("scale"))
             throw new ArgumentException("Selected FFmpeg build does not provide the scale filter");
@@ -175,7 +178,7 @@ public static class RealtimeEncoder
         SubtitlePlan? subs = o.Subtitles?.Active == true
             ? SubtitleTrack.Plan(
                 source, o.Subtitles!, o.Encoder.FormatName, availableFilters,
-                o.AvailableSubtitleEncoders ?? FFmpegCapabilities.DetectSubtitleEncoders(o.FFmpeg),
+                o.AvailableSubtitleEncoders ?? profile.SubtitleEncoders,
                 o.FFmpeg, sourcePath)
             : null;
         if (subs is { Mode: SubtitleMode.Burn }) vf = SubtitleTrack.AppendBurn(vf, subs.BurnFiles);
@@ -192,10 +195,10 @@ public static class RealtimeEncoder
                 $"cannot write to {outDir.FullName}; check the share permissions");
         }
 
-        // Both preflights are independent one-shot FFmpeg runs purely meant to fail
-        // fast before the real encode. Running them side by side removes one more
-        // process startup from the critical path; either one throwing still aborts
-        // before any output is written, so the fail-fast guarantee is unchanged.
+        // One trial for the whole run: video, filters, muxer and -- when the
+        // source has audio -- the audio encoder on the same command line.
+        // v7.9.5: this used to be two processes racing each other, and the
+        // audio one only ever proved that `-c:a` opens.
         void RunVideoPreflight(string hwaccel)
         {
             Preflight.Video(
@@ -208,10 +211,11 @@ public static class RealtimeEncoder
                 x264Profile: o.Encoder.Name == "libx264" ? o.X264Profile : null,
                 x264Level: o.Encoder.Name == "libx264" ? o.X264Level : null,
                 hwaccel: hwaccel, startSeconds: o.StartSeconds,
-                audio: hasAudio && Constants.FormatsRequiringAudio.Contains(o.Encoder.FormatName)
+                audio: hasAudio && o.AudioEncoder is not null
                     ? new AudioTrial(
-                        o.AudioEncoder!, audioChannels, audioRate,
-                        o.Encoder.Name == "amv" ? EncoderMath.AmvAudioBlockSize(o.Fps) : 0)
+                        o.AudioEncoder, audioChannels, audioRate,
+                        o.Encoder.Name == "amv" ? EncoderMath.AmvAudioBlockSize(o.Fps) : 0,
+                        o.AudioKbps)
                     : null);
         }
 
@@ -224,33 +228,23 @@ public static class RealtimeEncoder
         string hwaccel = FFmpeg.Hwaccel.Resolve(o.Hwaccel, o.FFmpeg, sourcePath, say);
         o.Hwaccel = hwaccel;
 
-        Task videoPreflight = Task.Run(() =>
+        if (string.Equals(hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
         {
-            if (!string.Equals(hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    RunVideoPreflight(hwaccel);
-                    return;
-                }
-                catch (InvalidOperationException)
-                {
-                    o.Hwaccel = FFmpeg.Hwaccel.Off;
-                    say?.Invoke(L.T("note.hwaccelfallback", hwaccel));
-                }
-            }
             RunVideoPreflight(FFmpeg.Hwaccel.Off);
-        });
-
-        Task? audioPreflight = hasAudio && o.AudioEncoder is not null
-            ? Task.Run(() => Preflight.Audio(
-                ffmpeg: o.FFmpeg, sourcePath: sourcePath, audioEncoder: o.AudioEncoder!,
-                audioKbps: o.AudioKbps, audioChannels: audioChannels,
-                audioRate: audioRate, startSeconds: o.StartSeconds,
-                audioStream: o.AudioStream))
-            : null;
-
-        Task.WaitAll(audioPreflight is null ? [videoPreflight] : [videoPreflight, audioPreflight]);
+        }
+        else
+        {
+            try
+            {
+                RunVideoPreflight(hwaccel);
+            }
+            catch (InvalidOperationException)
+            {
+                o.Hwaccel = FFmpeg.Hwaccel.Off;
+                say?.Invoke(L.T("note.hwaccelfallback", hwaccel));
+                RunVideoPreflight(FFmpeg.Hwaccel.Off);
+            }
+        }
 
         List<string> decCmd = BuildDecoderCommand(o, sourcePath, vf, transportFmt, duration);
         List<string> encCmd = BuildEncoderCommand(

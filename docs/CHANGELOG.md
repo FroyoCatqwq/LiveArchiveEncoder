@@ -18,6 +18,139 @@
 
 ---
 
+## v7.9.5（2026-10-23）
+
+**主题：不再相信 `ffmpeg -h encoder` 的声明表。** v7.9.4 修的是 mpeg1video 一个
+坑，这一版把 35 个编码器 × 14 个容器 × 13 个帧率全部跑了一遍
+（`tools/capability_sweep.py`），把同类坑一次性扫干净；顺带补上 2000 年代六个
+视频站的二次压缩码率、让二次压缩可以脱开直播编码单独跑，并把每次运行的进程启动
+次数从 8–10 次压到 3 次。完整矩阵见 [`capability-matrix.md`](capability-matrix.md)。
+
+### ⚠ RealMedia / RoQ 的帧率是整数
+
+`--encoder rv20 --fps 23.976` 以前会"成功"：工具按 23.976 编码、报告里写 23.976，
+但 **RealMedia 头里的 fps 字段是整数**，文件里存的是 23.000。实测：
+23.976→23、29.97→29、59.94→59，三档全部被改写。`roqvideo` 更糟 —— 同一个字段，
+它直接拒编（`Error while opening encoder`），整个 run 死在前置检查。
+
+两个编码器都**没有声明帧率表**（`-h encoder=rv20` 只有一行像素格式），所以以前的
+"空列表 = 无约束"逻辑对它们等于没校验。现在 `EncoderMath.UsesWholeFps` 让这三者
+四舍五入到最近的整数（23.976→24、29.97→30、59.94→60），文件与报告从此一致。
+报告里"FPS 支持"一栏对它们显示"只接受整数"，而不是"（未声明）"。
+
+### ⚠ 容器表按实测重写
+
+`ContainerChoicesByEncoder` 原来是手写的"看起来合理"的清单。这次每一对都用三重
+校验量过：muxer 接受、`ffprobe` 用编码器自己的名字读回来、抽帧确认画面还在。
+只测第一条会得到假表 —— AVI 会把 RV20 存成 `rawvideo`、rm 会把 MPEG-4 的 tag 改成
+`rv20`、Matroska/ASF 会把 msrle 的调色板丢掉（同一段素材 AVI 里 YAVG 123，Matroska
+里 YAVG **16**）。
+
+新增可用的组合（此前一律报错）：
+
+| 编码器 | 新增 |
+| --- | --- |
+| mpeg1video / mpeg2video | **matroska、mov、mp4** |
+| mpeg4 / libxvid | **matroska、mov** |
+| libx264 | **matroska、mov、flv** |
+| libtheora | **matroska、avi** |
+| flv | **avi、matroska** |
+| mjpeg | **matroska、mov、mp4** |
+| h261 / h263 | **matroska** |
+| msrle | **mov**（avi 本来就有；Matroska/ASF 会黑屏，永久排除） |
+| cinepak / asv1 / asv2 / cljr / snow / zmbv / msmpeg4v2 / msvideo1 / flashsv | **matroska** |
+
+没进表的组合仍然是拒绝：`rv20 → avi`、`mpeg4 → rm`、`qtrle → avi` 这类"muxer 收下
+但存成别的东西"的搭配没有一条被放进来。
+
+### 无帧率的容器会说明（h261 / h263 / a64）
+
+原始 `.h261` / `.h263` / `.a64` 是裸码流，**文件里没有帧率字段**：15 fps 编出来的
+文件，ffprobe 一律读回 25/1（它对裸流的缺省猜测）。画面没问题，但"帧率随文件走"
+这件事不成立。工具现在会打印一条 note 并指出 AVI 是保留帧率的选择，CLI 与 CUI
+都有。
+
+### 站点预设：2000 年代六个视频站
+
+`--era` 除了五个"时代"，现在还有六个**站点**：`sina06`、`sohu06`、`qq06`、
+`tudou06`、`youku07`、`youtube07`。每个给的是那个站自己的转码档位 ——
+分辨率、帧率、视频码率、音频码率 —— 用 `-b:v`（站点是按码率转的，不是按 CRF），
+并且**不碰直播编码层**：站点说明不了你的素材是怎么录的，所以"不限定编码器"。
+
+```bash
+# 直播层还是 mpeg4/AVI，只有第二遍变成优酷 2007 档
+LiveArchiveEncoder in.mkv out.avi --encoder mpeg4 --era youku07 --recompress
+```
+
+依据与取值见 [`era-presets.md`](era-presets.md#站点预设v795)。
+
+### ⚠ 二次压缩可以单独跑
+
+以前 `--recompress` 只存在于一场直播编码之后，于是"把这个文件过一遍网站的转码"
+必须先重新录一遍。现在：
+
+```bash
+# 直接吃一个已存在的文件，输出 <name>_web.mp4
+LiveArchiveEncoder clip.mkv --recompress-only --era youku07
+# 自己给参数
+LiveArchiveEncoder clip.mkv --recompress-only \
+    --recompress-args "-vf scale=320:240,fps=15 -c:v libx264 -b:v 240k" \
+    --recompress-container flv
+```
+
+没有编码器探测、没有分片、没有预检：输入、片段、输出三件事，跑完就退出。
+CUI 里是菜单 **15 → 4**（"直接二次压缩一个文件"）。
+
+### ⚠ 每次运行的进程启动次数：8–10 → 3
+
+`ffmpeg` 每次启动约 **210 ms**（本机 10 次 `ffmpeg -version` 共 2.10 s）。以前一场
+单遍编码在解码第一帧之前就要起 8–10 个进程：`-encoders` 两次（视频、音频各一次）、
+`-filters`、`-h filter=scale`、`-h encoder=NAME`、`-version`、视频预检、音频预检。
+
+三处改动：
+
+1. **能力表落盘缓存**（`FFmpeg/BuildProfileStore.cs`）。这些答案只跟二进制有关，
+   与本次运行无关。"二进制身份" = 路径 + 大小 + mtime 的哈希，缓存写
+   `<配置目录>/cache/caps-<hash>.json`，一次 `-encoders` 同时喂视频/音频/字幕三个
+   列表。首次 4 次启动，之后 **0 次**。
+2. **预检合并成一次**。音频预检本来只证明 `-c:a` 能打开，而视频预检的命令行里加
+   一条 `-map 0:a:0 -c:a ...` 就能问同一个问题 —— 现在预检就是最终命令的缩样，
+   还顺带验了真实的码率/声道/采样率。
+3. 缓存坏了当没有：schema 版本不符、身份不匹配、JSON 损坏都退回"重新扫一遍"，
+   不会让运行失败。CUI 菜单 **5**（重新扫描编码器）会强制重建；
+   `LAE_NO_CAPS_CACHE=1` 对所有入口生效。
+
+实测（同一台机器、同一份 2 秒素材）：改动前 10 次启动，改动后**首次 8 次、
+之后 3 次** —— 剩下的三次正好是预检、解码、编码。
+
+### 顺手清掉的
+
+- `FFmpegCapabilities.DetectVideoFilters` / `DetectSubtitleEncoders` 与
+  `FFmpegDiscovery.DetectLegacyEncoders` / `DetectAudioEncoders`：都是"起进程再
+  解析"的薄包装，现在只剩解析那一半（`ParseFilterNames` / `ParseLegacyEncoders` /
+  `ParseAudioEncoders` / `ParseSubtitleEncoders`），进程调用集中在
+  `BuildProfileStore.Sweep` 一处。
+- `Preflight.Audio` 整个删掉（被合并的预检取代）。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| 单测 Windows | **449 × {net10.0, net11.0}** 全绿（v7.9.4 是 424；新增 25 条：整数帧率、容器表自洽、pal8 容器、缓存身份、站点预设、`--recompress-only`） |
+| 单测 Linux | 见 release 说明 |
+| e2e Windows | 见 release 说明（新增 15 条：五个新容器逐对出片、小数帧率落成整数、站点预设只改第二遍、独立二次压缩、缓存只写一次） |
+| 进程启动 | 单遍 10 → 首次 8 / 热 3（`ffmpeg` 进程计数实测） |
+| 实测产物 | `rv20 --fps 23.976` 文件里是 24/1；`roqvideo --fps 29.97` 是 30/1；`mpeg4 --container mkv`、`libx264 --container flv`、`msrle --container mov` 的 codec 与画面都对 |
+
+### 升级注意
+
+- 缓存文件在 `<配置目录>/cache/` 下，可以随手删；删了只是下次慢一点。
+- 站点预设只写二次压缩层：用它之后菜单 15 显示的参数是站点档位，**直播层仍是
+  你原来选的编码器**。
+- `--recompress-only` 不读设置文件里的输入输出，只认命令行给定的那个文件。
+
+---
+
 ## v7.9.4（2026-10-22）
 
 **主题：把三个报上来的编码缺陷修到底。** 一个是"能编码但画面全黑"，一个是"合法的

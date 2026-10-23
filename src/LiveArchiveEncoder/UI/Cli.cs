@@ -9,8 +9,7 @@ namespace LiveArchiveEncoder.UI;
 public static class Cli
 {
     public static int Run(
-        CliOptions args, string ffmpeg, string ffprobe,
-        HashSet<string> availableFilters, HashSet<string> availableScaleAlgorithms,
+        CliOptions args, string ffmpeg, string ffprobe, FFmpeg.Capabilities caps,
         CancellationToken cancellationToken = default)
     {
         // Loaded once: the post-processing stages are sticky (a user sets the
@@ -18,14 +17,17 @@ public static class Cli
         // to consult the same file the interactive shell writes.
         UserConfig stored = ConfigStore.Load();
 
-        // DetectLegacyEncoders and DetectAudioEncoders are independent `ffmpeg
-        // -encoders` runs. Overlap them so two process startups cost one.
-        Task<List<EncoderInfo>> encodersTask =
-            Task.Run(() => FFmpegDiscovery.DetectLegacyEncoders(ffmpeg), cancellationToken);
-        Task<HashSet<string>> audioEncodersTask =
-            Task.Run(() => FFmpegDiscovery.DetectAudioEncoders(ffmpeg), cancellationToken);
+        // v7.9.5: the recompress pass on its own. No live encode, no encoder
+        // discovery, no capability probe -- this path exists so an existing
+        // file can be put through a site's transcode without re-recording it.
+        if (args.RecompressOnly) return RunRecompressOnly(args, ffmpeg);
 
-        List<EncoderInfo> encoders = encodersTask.GetAwaiter().GetResult();
+        // v7.9.5: every capability this run needs comes from the build profile.
+        // Both lists used to be a separate `ffmpeg -encoders` launch each.
+        List<EncoderInfo> encoders = caps.Encoders;
+        HashSet<string> audioAvailable = caps.AudioEncoders;
+        HashSet<string> availableFilters = caps.Filters;
+        HashSet<string> availableScaleAlgorithms = caps.ScaleAlgorithms;
 
         // An era preset reshapes the live pass (encoder, frame size, rate,
         // bitrate ceiling) and pre-fills the recompress arguments. It never
@@ -43,7 +45,11 @@ public static class Cli
         }
 
         // --encoder wins over the preset; the preset wins over the built-in default.
-        string wantedEncoder = era is not null && !args.EncoderExplicit ? era.Encoder : args.Encoder;
+        // v7.9.5: a site preset has no live encoder to offer, so it never
+        // replaces the one on the command line or the default.
+        string wantedEncoder = era is { Encoder: { Length: > 0 } presetEncoder } && !args.EncoderExplicit
+            ? presetEncoder
+            : args.Encoder;
 
         EncoderInfo? encoder = encoders.FirstOrDefault(
             e => string.Equals(e.Name, wantedEncoder, StringComparison.OrdinalIgnoreCase));
@@ -53,7 +59,7 @@ public static class Cli
                 $"ERROR: {wantedEncoder} is not detected as a legacy/classic video encoder.");
             return 2;
         }
-        encoder.Caps = FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, encoder);
+        encoder.Caps = caps.EncoderCaps(encoder);
 
         // v7.8: the container is part of the encoder selection, so it is
         // applied before anything reads FormatName -- the output extension
@@ -70,7 +76,7 @@ public static class Cli
                 return 2;
             }
             encoder = retargeted;
-            encoder.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, encoder);
+            encoder.Caps ??= caps.EncoderCaps(encoder);
         }
 
         // v7.9: an HTTP(S) URL is an input too. It has no FileInfo and no
@@ -143,6 +149,12 @@ public static class Cli
         if (!fpsExact)
             Console.WriteLine(L.T("note.fpsunsupported", encoder.Name, $"{effectiveFps:G6}", $"{baseFps:G6}"));
 
+        // v7.9.5: .h261/.h263/.a64 are bare bitstreams -- no timestamps, so the
+        // rate the file was encoded at is not in the file. The picture is fine;
+        // saying nothing would leave the rate looking verified when it is not.
+        if (Constants.RateLessFormats.Contains(encoder.FormatName))
+            Console.WriteLine(L.T("note.rateless", encoder.FormatName, $"{baseFps:G6}"));
+
         (int width, int height, bool sizeExact) = EncoderMath.NormalizeDimensions(
             encoder.Name, effectiveWidth, effectiveHeight);
         if (!sizeExact)
@@ -180,7 +192,6 @@ public static class Cli
         }
         List<FpsRungSetting> levelKbps = EncoderMath.PruneRungs(levelRungs, levels);
 
-        HashSet<string> audioAvailable = audioEncodersTask.GetAwaiter().GetResult();
         string? audioEncoder = string.IsNullOrEmpty(args.AudioEncoder)
             ? EncoderMath.ChooseAudioEncoder(encoder.FormatName, audioAvailable)
             : args.AudioEncoder;
@@ -229,7 +240,10 @@ public static class Cli
 
         if (!audioRateExplicit) audioRate = AudioCatalog.NearestRate(audioEncoder, audioRate, encoder.FormatName);
         audioChannels = AudioCatalog.ClampChannels(audioEncoder, audioChannels);
-        if (era is not null) audioKbps = AudioCatalog.NearestKbps(audioEncoder, audioKbps, audioRate);
+        // "A preset's number is a suggestion" only applies when the preset
+        // actually supplied one: a site preset (v7.9.5) leaves the live audio
+        // alone, so the value here is the user's and must not be retuned.
+        if (era?.AudioKbps is not null) audioKbps = AudioCatalog.NearestKbps(audioEncoder, audioKbps, audioRate);
         string? audioError = AudioCatalog.Validate(
             audioEncoder, encoder.FormatName, audioRate, audioChannels, audioKbps);
         if (audioError is not null)
@@ -395,7 +409,7 @@ public static class Cli
             // Detected once here (and inherited by shards) instead of once per
             // shard: the copy path needs the build's own encoder list.
             AvailableSubtitleEncoders = args.SubtitleFiles.Count > 0 || args.SubtitleStream is not null
-                ? FFmpeg.FFmpegCapabilities.DetectSubtitleEncoders(ffmpeg)
+                ? caps.SubtitleEncoders
                 : null,
             Hwaccel = config.Hwaccel,
             Width = config.Width,
@@ -460,6 +474,85 @@ public static class Cli
             if (!played && playError is not null)
                 Console.Error.WriteLine($"ERROR: {playError}");
         }
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>--recompress-only</c>: put an existing file through the site pass and
+    /// stop. Nothing else in the program is involved -- no live encode, no
+    /// encoder choice, no shard planner -- which is the point: a recording made
+    /// last year, or a file somebody sent you, can be "uploaded" without being
+    /// recorded again first.
+    /// </summary>
+    private static int RunRecompressOnly(CliOptions args, string ffmpeg)
+    {
+        if (string.IsNullOrEmpty(args.Input))
+        {
+            Console.Error.WriteLine("ERROR: --recompress-only requires an input file");
+            return 2;
+        }
+        if (Remote.HttpSource.IsUrl(args.Input))
+        {
+            Console.Error.WriteLine(
+                "ERROR: --recompress-only works on a local file; download the URL first");
+            return 2;
+        }
+
+        var src = new FileInfo(args.Input);
+        if (!src.Exists)
+        {
+            Console.Error.WriteLine($"ERROR: input not found: {src.FullName}");
+            return 2;
+        }
+
+        // An era/site preset carries the fragment, so --era alone is enough.
+        PostProcess.EraPreset? era = args.Era is { Length: > 0 } eraId
+            ? PostProcess.EraPresets.Find(eraId)
+            : null;
+        RecompressSettings settings = ResolveRecompress(args, era);
+        // Naming a fragment is the request; --no-recompress still wins, so a
+        // script that turns the stage off keeps it off.
+        if (!settings.Enabled)
+        {
+            Console.Error.WriteLine(
+                "ERROR: --recompress-only needs --recompress-args or --era (nothing to apply)");
+            return 2;
+        }
+
+        (_, string? fragmentError) = PostProcess.PostArgs.Parse(settings.Args);
+        if (fragmentError is not null)
+        {
+            Console.Error.WriteLine($"ERROR: {L.T("post.args.bad", fragmentError)}");
+            return 2;
+        }
+
+        string container = settings.Container.Or("mp4").TrimStart('.').ToLowerInvariant();
+        var dst = string.IsNullOrEmpty(args.Output)
+            ? new FileInfo(PostProcess.Recompress.DeriveOutputPath(src.FullName, container))
+            : new FileInfo(args.Output);
+
+        if (string.Equals(Path.GetFullPath(dst.FullName), src.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine("ERROR: output must differ from input");
+            return 2;
+        }
+
+        if (!args.Quiet)
+        {
+            Console.WriteLine(L.T("rc.only.input", src.FullName));
+            Console.WriteLine(L.T("rc.only.output", dst.FullName));
+            Console.WriteLine($" {string.Join(' ', PostProcess.Recompress.BuildArgv(
+                ffmpeg, src.FullName, dst.FullName, settings).Argv)}");
+        }
+
+        (bool ok, string? error) = PostProcess.Recompress.Apply(ffmpeg, src.FullName, dst.FullName, settings);
+        if (!ok)
+        {
+            Console.Error.WriteLine($"ERROR: {L.T("post.failed", "recompress", error ?? "")}");
+            return 1;
+        }
+
+        if (!args.Quiet) Console.WriteLine(L.T("rc.only.done", dst.FullName));
         return 0;
     }
 

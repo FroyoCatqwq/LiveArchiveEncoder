@@ -232,6 +232,11 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--quiet` | 关 | 不打印进度横幅和结果摘要 |
 | `--no-cui` | 关 | 无输入参数时不进菜单，直接报错退出（给脚本用） |
 | `--audio-mode` | `inline` | `inline` / `separate` / `auto`，见第 7 节 |
+| `--recompress` | 关 | 编码后按"网站转码"再压一遍（见 §7.12） |
+| `--recompress-args` | 空 | 那一步的 FFmpeg 中间参数段；`-i` 和输出由程序给 |
+| `--recompress-container` | `mp4` | 二次压缩产物的容器扩展名 |
+| `--recompress-only` | 关 | **v7.9.5**：跳过直播编码，直接对已有文件做二次压缩（见 §7.12） |
+| `--no-recompress` | — | 关掉二次压缩（优先于上面两个） |
 | `--emit-args` / `--emit-args=FILE` | — | **v7.9.1**：把设置打印成等价命令行后退出；带 `=FILE` 时从一个配置文件读设置（见 §7.6） |
 | `--save-config` | — | **v7.9.1**：把这次运行的最终设置写成配置文件，不启动编码（见 §7.6） |
 | `--help` / `-h` | — | 打印用法后退出（退出码 0） |
@@ -267,7 +272,7 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
  2. Output file       留空＝自动命名 <原名>_live.<扩展名>
  3. Video encoder     从 FFmpeg 探测到的老式编码器列表里选
  4. Parameters        参数页（见下）
- 5. Rescan encoders   重新扫一遍视频编码器
+ 5. Rescan encoders   重新扫一遍编码器（v7.9.5：同时重建能力表缓存）
  6. Audio encoder     扫描音频编码器：只列出"当前视频编码器 + 容器"装得下的（见 §7.13）
  7. Show FFmpeg filters
  8. Show configuration
@@ -276,8 +281,8 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
 11. Parallel shards   并行分片数，1＝关闭（见 §7.5）
 12. FFmpeg toolchain  切换/下载/删除 FFmpeg 构建（见 §7.10）
 13. Playback after run 编码完成后用什么播放（见 §7.11）
-14. Era preset        时代预设（见 §7.12）
-15. Recompress        二次压缩（见 §7.12）
+14. Era preset        时代预设（5 个"时代" + 6 个"站点"，见 §7.12）
+15. Recompress        二次压缩；子菜单第 4 项可以直接处理一个已有文件（见 §7.12）
 16. Streams           视频/音频流选择（见 §7.16）
 17. Subtitles         字幕：烧录 / 封装 / 关闭（见 §7.16）
 18. Command line      把当前设置打印成一条等价命令行（见 §7.6）
@@ -324,32 +329,38 @@ mp2 会改成 32），20 只允许填当前容器装得下的编码器。
 
 ## 5. 编码器 → 容器 → 默认音频 对照表
 
-**输出扩展名必须和容器匹配**，否则直接报错退出（码 2）。
+**输出扩展名必须和容器匹配**，否则直接报错退出（码 2）。下表是**默认**容器；
+v7.8 起一部分编码器还能写别的容器（`--container` 指定，或者直接看输出扩展名），
+完整清单和实测依据见 [`capability-matrix.md`](capability-matrix.md)。
 
-| 编码器 | 容器 | 允许的扩展名 | 默认音频 |
-| --- | --- | --- | --- |
-| `rv10` `rv20` | rm | `.rm` `.rmvb` | `ac3` |
-| `mpeg1video` `mpeg2video` | mpeg | `.mpg` `.mpeg` `.mpe` `.vob` | `mp2` |
-| `mpeg4` `libxvid` `mjpeg` `h263p` | avi | `.avi` | `libmp3lame` |
-| `wmv1` `wmv2` | asf | `.asf` `.wmv` | `wmav2` |
-| `libx264` | mp4 | `.mp4` `.m4v` | `aac` |
-| `libtheora` | ogg | `.ogg` `.ogv` | `libvorbis` |
-| `flv` `flashsv` `flashsv2` | flv | `.flv` | `aac` |
-| `qtrle` `rpza` `smc` `svq1` | mov | `.mov` `.qt` | `aac` |
-| `amv` | amv | `.amv` | `adpcm_ima_amv` |
-| `roqvideo` | roq | `.roq` | `roq_dpcm` |
-| `h261` | h261 | `.h261` | **无音频** |
-| `h263` | h263 | `.h263` | **无音频** |
-| `a64multi` | a64 | `.a64` | **无音频** |
+| 编码器 | 默认容器 | 允许的扩展名 | 还能写（v7.9.5） | 默认音频 |
+| --- | --- | --- | --- | --- |
+| `rv10` `rv20` | rm | `.rm` `.rmvb` | — | `ac3` |
+| `mpeg1video` `mpeg2video` | mpeg | `.mpg` `.mpeg` `.mpe` `.vob` | avi, mp4, mov, mkv | `mp2` |
+| `mpeg4` `libxvid` | avi | `.avi` | mp4, mov, mkv | `libmp3lame` |
+| `mjpeg` `h263p` | avi | `.avi` | mov, mkv, mp4（仅 mjpeg） | `libmp3lame` |
+| `msrle` | avi | `.avi` | mov（**不能** mkv/asf：丢调色板） | `libmp3lame` |
+| `wmv1` `wmv2` | asf | `.asf` `.wmv` | avi, mkv, mov | `wmav2` |
+| `libx264` | mp4 | `.mp4` `.m4v` | avi, mkv, mov, flv | `aac` |
+| `libtheora` | ogg | `.ogg` `.ogv` | mkv, avi | `libvorbis` |
+| `flv` | flv | `.flv` | avi, mkv | `aac` |
+| `flashsv` `flashsv2` | flv | `.flv` | avi/mkv（仅 flashsv） | `aac` |
+| `qtrle` `rpza` `smc` `svq1` | mov | `.mov` `.qt` | avi/mkv（rpza、smc）；avi（svq1） | `aac` |
+| `amv` | amv | `.amv` | — | `adpcm_ima_amv` |
+| `roqvideo` | roq | `.roq` | — | `roq_dpcm` |
+| `h261` | h261 | `.h261` | avi, mkv | **无音频** |
+| `h263` | h263 | `.h263` | avi, mkv | **无音频** |
+| `a64multi` `a64multi5` | a64 | `.a64` | avi, mkv | **无音频** |
 
 ### 几个会咬人的约束
 
 * **RoQ**：宽高必须能被 16 整除。不满足会报
   `roqvideo requires width and height to be divisible by 16; got 250x190`。
-  另外 RoQ 视频不是 AVI 的 codec/container 组合，**别用 `.avi` 输出**。
+  RoQ 文件只能写 `.roq`；帧率只接受整数（见下）。
 * **`roq_dpcm`**：只接受 22050 Hz + 单/双声道。设了别的采样率会直接被拒：
   `roq_dpcm requires --audio-rate 22050 (or leave it unset for automatic correction)`。
-* **AMV**：帧率只能在 `10/14/15/18/21/25/30` 里选，音频固定 22050 Hz IMA-ADPCM。
+* **AMV**：音频固定 22050 Hz IMA-ADPCM，而且 `22050 % fps` 必须整除，所以
+  帧率真正可用的是 `5/10/14/15/18/21/25/30/50`（工具的表只列其中常见档位）。
 * **MPEG-1**：帧率只能落在 `23.976 / 24 / 25 / 29.97 / 30 / 50 / 59.94 / 60`
   这八个真正的 MPEG-1 frame_rate_code 上，请求别的值会被吸附到最接近的一个。
   `ffmpeg -h encoder=mpeg1video` 里列的 `5/10/12/15` 是 libmpeg3 的"非官方"
@@ -357,9 +368,17 @@ mp2 会改成 32），20 只允许填当前容器装得下的编码器。
   `MPEG-1/2 does not support 15/1 fps` —— 所以那份列表不算数，工具按八个合法值
   校验并吸附（v7.9.4）。**MPEG-2** 有 frame rate extension，`5/10/12/15/75`
   之类都真的能编，因此照旧用 FFmpeg 声明的列表。
+* **RealMedia（`rv10`/`rv20`）和 `roqvideo` 只接受整数帧率**（v7.9.5）：这族的
+  文件头里 fps 是整数，`--fps 23.976` 会被写成 23.000，roq 更是直接拒编。
+  现在三者都会四舍五入到最近的整数（23.976→24、29.97→30、59.94→60），报告的
+  "FPS 支持"一栏对它们显示"只接受整数"。
+* **原始 `.h261` / `.h263` / `.a64` 不存帧率**（v7.9.5）：裸码流里没有时间戳，
+  15 fps 编出来的文件 ffprobe 一律读回 25 fps。画面没问题，工具会打印一条 note；
+  要让帧率跟着文件走，用 `--container avi` 或 `.mkv`。
 * **调色板编码器（`msrle`）只能单遍编码**：它的传输格式是 `pal8`，而 Matroska
   暂存（分片拼装用）会丢调色板，产物会变成纯黑。`--parallel` 会被自动跳过分片
-  并在日志里说明（v7.9.4）。
+  并在日志里说明（v7.9.4）。同理它**不能**写 `.mkv` / `.asf`（这两个容器同样丢
+  调色板），只有 AVI 和 MOV 存得住。
 * **h261 / h263**：尺寸会被强制成标准档（h261：`176x144` 或 `352x288`）。
 * **h261 / h263 / a64**：容器不支持音频，自动输出纯视频。
 
@@ -577,12 +596,36 @@ LiveArchiveEncoder.exe src.mp4 out.roq --encoder roqvideo --parallel 4
 
 ### 固定开销花在哪
 
-| 阶段 | 耗时 |
-| --- | --- |
-| .NET 进程启动 | 0.34 s（NativeAOT 可压到 ~0.05 s） |
-| FFmpeg 能力探测（`-encoders` ×2、`-filters`、`-h filter=scale`、`-h encoder=X`） | ~0.9 s |
-| ffprobe 探测 | ~0.25 s（已由 3 次合并为 1 次） |
-| Preflight（Video + Audio） | ~0.2 s（已改为并发） |
+| 阶段 | v7.9.4 | v7.9.5 |
+| --- | --- | --- |
+| .NET 进程启动 | 0.34 s（NativeAOT 可压到 ~0.05 s） | 同左 |
+| FFmpeg 能力探测 | ~0.9 s（`-encoders` ×2、`-filters`、`-h filter=scale`、`-h encoder=X`、`-version`，共 6 次启动） | **首次 4 次，之后 0 次**（能力表落盘缓存，见下） |
+| ffprobe 探测 | ~0.25 s（已由 3 次合并为 1 次） | 同左 |
+| Preflight | ~0.2 s（Video + Audio 并发，但仍是 2 个进程） | ~0.1 s（**合并成 1 个进程**，且就是最终命令的缩样） |
+
+一次 `ffmpeg` 启动约 **210 ms**（本机 10 次 `ffmpeg -version` 共 2.10 s）是这些数字
+的来源。实测同一份 2 秒素材、同一个编码器：**改动前 10 次进程启动，改动后首次 8 次、
+之后 3 次** —— 剩下的三次正好是预检、解码、编码。
+
+### 能力表缓存（v7.9.5）
+
+`ffmpeg -encoders` / `-filters` / `-h filter=scale` / `-h encoder=NAME` / `-version`
+的答案只跟**这个二进制**有关，跟本次运行无关，所以第一次问完就存下来：
+
+```
+%LOCALAPPDATA%\LiveArchiveEncoder\cache\caps-<hash>.json      (Linux: ~/.local/share/…)
+```
+
+- `hash` = 二进制路径 + 大小 + mtime 的 SHA-256 前 16 位，换一个构建就是另一个文件，
+  两套能力永远不会串用（这一点在 v7.9.4 的三个 bug 里是根因）；
+- 一次 `-encoders` 同时喂视频 / 音频 / 字幕三个列表（以前是两次同样的命令）；
+- **首次 4 次启动，之后 0 次**；每个编码器的 `-h encoder=NAME` 也是首次用到时才采、
+  采完就存；
+- 缓存坏了当没有：schema 版本不符、身份不匹配、JSON 损坏 → 重新扫一遍，不会让
+  运行失败；
+- CUI 菜单 **5**（重新扫描编码器）会强制重建；环境变量 `LAE_NO_CAPS_CACHE=1`
+  对命令行同样生效（用来排查"我换了 ffmpeg 但工具还说旧能力"）；
+- 整个 `cache/` 目录可以随手删。
 
 想再快：用 `publish\aot\LiveArchiveEncoder.exe`（AOT 单文件）。
 
@@ -1093,6 +1136,28 @@ live 编码 → (14) 时代预设   ← 可选，把两层参数都填好
 | `mp4_10` | 2009–2012 | libx264 640x480@25，上限 900 kbps | crf 25，640x480@25 |
 | `hd14` | 2013–2016 | libx264 1280x720@30，上限 2500 kbps | crf 23，720p@30，立体声 96k |
 
+#### 站点预设（v7.9.5，只写第二遍）
+
+2005–2009 每个门户的转码档位都不一样，所以这一段拆成六个**站点**预设。它们
+只填二次压缩层（分辨率 / 帧率 / 码率 / 音频），**不碰直播层的编码器** ——
+"优酷会怎么处理我的录像"说明不了录像本身是怎么采的。
+
+| id | 站点 | 第二遍 |
+| --- | --- | --- |
+| `sina06` | 新浪播客 2005–2008 | 320x240@12，200 kbps，22.05k 单声道 32k |
+| `sohu06` | 搜狐视频 2006–2009 | 320x240@15，240 kbps，22.05k 单声道 32k |
+| `qq06` | 腾讯 / QQ 视频 2006–2009 | 320x240@15，260 kbps，22.05k 单声道 32k |
+| `tudou06` | 土豆网 2005–2009 | 352x264@12，295 kbps（实测档位） |
+| `youku07` | 优酷 2007–2010 | 352x264@15，320 kbps，22.05k 单声道 32k |
+| `youtube07` | YouTube 2006–2008 | 320x240@15，200 kbps，22.05k 单声道 64k |
+
+```powershell
+# 直播层还是你选的 mpeg4/AVI，只有第二遍变成优酷 2007 档
+LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --era youku07 --recompress
+```
+
+依据见 [`era-presets.md`](era-presets.md#站点预设v795)。
+
 ```powershell
 # 一条命令跑完"2007 年传优酷"：live 用 flv1，二次压缩参数自动填好
 LiveArchiveEncoder.exe src.mp4 out.flv --era flv07 --recompress
@@ -1129,6 +1194,34 @@ LiveArchiveEncoder.exe src.mp4 out.rm --recompress --recompress-args ^
 
 相关选项：`--recompress`（启用）、`--recompress-args "…"`（设参数并启用）、
 `--recompress-container EXT`（默认 mp4）、`--no-recompress`。
+
+### 只跑二次压缩：`--recompress-only`（v7.9.5）
+
+第二阶段本来只存在于一场直播编码之后，于是"把这个文件过一遍网站的转码"必须先
+重新录一遍。`--recompress-only` 把这一层拆出来：**没有直播编码、没有编码器探测、
+没有分片、没有预检**，输入 → 片段 → 输出，跑完退出。
+
+```powershell
+# 用站点预设（输出 clip_web.mp4，默认就在输入旁边）
+LiveArchiveEncoder.exe clip.mkv --recompress-only --era youku07
+
+# 自己给参数和容器
+LiveArchiveEncoder.exe clip.mkv --recompress-only --recompress-container flv ^
+  --recompress-args "-vf scale=320:240,fps=15 -c:v libx264 -profile:v baseline -b:v 240k"
+
+# 自己给输出路径
+LiveArchiveEncoder.exe clip.mkv D:\out\youku_version.mp4 --recompress-only --era youku07
+```
+
+- 输出默认是 `<输入名>_web.<容器>`，和直播产物同一套命名；
+- `-i` 和输出仍然由程序给，片段仍走同一套逐 token 校验；
+- `--no-recompress` 依旧优先，所以"关掉这一阶段"的脚本不会被 `--recompress-only`
+  重新打开；
+- 只处理本地文件（URL 请先下载），输入必须存在，输出不能等于输入。
+
+本机跑一次 2 秒片段只要一次 FFmpeg 启动 —— 这是它和"重新录一遍"的区别。
+
+CUI 里在菜单 **15 → 4**（"直接二次压缩一个文件"）。
 
 ### 字体目录（字幕烧录用）
 
@@ -1223,25 +1316,41 @@ ERROR: 'ac3' does not support 16000 Hz; supported sample rates: 32000, 44100, 48
 `rm` 只有 ac3/aac，`ogg` 只有 vorbis/opus/flac，`matroska` 最宽。表里没建模
 的编码器一律放行——宁可不检查，也不能误杀一个能用的编码器。
 
-## 7.14 容器切换（v7.8）
+## 7.14 容器切换（v7.8；v7.9.5 按实测重写）
 
 "编码器 → 容器"不再是一对一写死：
 
 | 编码器 | 可选容器（**加粗是默认**） |
 | --- | --- |
-| `mpeg1video` | **mpg**，avi |
-| `mpeg2video` | **mpg**，avi |
-| `mpeg4` | **avi**，mp4 |
-| `libxvid` | **avi**，mp4 |
-| `libx264` | **mp4**，avi，mkv |
-| 其它 | 保持原来的单一容器 |
+| `mpeg1video` `mpeg2video` | **mpg**，avi，mp4，mov，mkv |
+| `mpeg4` `libxvid` | **avi**，mp4，mov，mkv |
+| `libx264` | **mp4**，avi，mkv，mov，flv |
+| `libtheora` | **ogv**，mkv，avi |
+| `flv` | **flv**，avi，mkv |
+| `mjpeg` | **avi**，mkv，mov，mp4 |
+| `msrle` | **avi**，mov（**不能** mkv / asf，见下） |
+| `h261` `h263` | **h261/.h263**，avi，mkv |
+| `h263p` | **avi**，mkv |
+| `flashsv` | **flv**，avi，mkv |
+| `cinepak` `asv1` `asv2` `cljr` `snow` `zmbv` `msmpeg4v2` `msvideo1` | **avi**，mkv |
+| `rv10` `rv20` `roqvideo` `amv` `flashsv2` `qtrle` `smc` `svq1` `rpza` `wmv1` `wmv2` `a64multi` | 保持原来的单一容器（部分多一个 avi/mkv，见 §5） |
+
+v7.9.5 的这张表不是"看起来合理"手写的：每一对都用
+`tools/capability_sweep.py` 量过三道 —— muxer 接受、`ffprobe` 用编码器自己的
+名字读回来、抽帧确认画面还在。完整矩阵（含"能存但没人这么用"的组合）在
+[`capability-matrix.md`](capability-matrix.md)。
+
+只过第一道的组合全部**没有**放进来，因为它们会给你一个坏文件：
+`rv20 → avi`（存成 rawvideo）、`mpeg4 → rm`（tag 被改成 rv20）、
+`qtrle → avi`（同上）、`msrle → mkv/asf`（调色板丢失，画面纯黑）。
 
 ```bash
 # mpeg1video 写进 AVI：两条都行，第二条不用再点名容器
 LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg1video --container avi
 LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg1video
-# libx264 写进 Matroska
+# libx264 写进 Matroska / FLV
 LiveArchiveEncoder.exe src.mp4 out.mkv --encoder libx264 --container mkv
+LiveArchiveEncoder.exe src.mp4 out.flv --encoder libx264 --container flv
 ```
 
 `--container` 认封装器名也认扩展名（`mkv` 和 `matroska` 都行）。菜单在
@@ -1653,10 +1762,11 @@ PATH 里的 ffprobe，以及**Python 基线也要能用系统 FFmpeg**——Linu
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 424
-dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 424
-pytest  167 项（Windows 实测 165 通过 + 2 跳过）：
-  option_smoke      67（41 组参数 + 23 项参数检查 + 3 条专项回归：分片拼接、pal8 非黑、AVI 帧率头）
+dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 449
+dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 449
+pytest  179 项（Windows 实测 177 通过 + 2 跳过）：
+  option_smoke      79（48 组参数 + 23 项参数检查 + 8 条专项回归：分片拼接、pal8 非黑、
+                     AVI 帧率头、整数帧率、站点预设、独立二次压缩、能力缓存）
   feature_sweep     35（33 通过 + 2 跳过：a64multi / a64multi5 只有 muxer 没有 demuxer）
   compare_matrix    12
   error_paths       11

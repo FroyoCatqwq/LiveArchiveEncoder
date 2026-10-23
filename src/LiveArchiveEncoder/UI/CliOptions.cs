@@ -171,6 +171,12 @@ public sealed class CliOptions
     public string? RecompressContainer { get; init; }
     public bool NoRecompress { get; init; }
 
+    /// <summary>
+    /// v7.9.5: run the recompress pass <b>on its own</b>, against an existing
+    /// file. No live encode happens, so no video encoder is chosen or probed.
+    /// </summary>
+    public bool RecompressOnly { get; init; }
+
     /// <summary>Era preset id to apply; see <see cref="PostProcess.EraPresets"/>.</summary>
     public string? Era { get; init; }
 
@@ -272,6 +278,7 @@ public static class CliParser
         string? recompressArgs = null;
         string? recompressContainer = null;
         bool noRecompress = false;
+        bool recompressOnly = false;
         string? era = null;
         bool emitArgs = false;
         string? emitArgsFile = null;
@@ -579,6 +586,7 @@ public static class CliParser
                     recompressContainer = recompressContainer.TrimStart('.').ToLowerInvariant();
                     break;
                 case "--no-recompress": noRecompress = true; break;
+                case "--recompress-only": recompressOnly = true; break;
 
                 case "--era":
                     if (!TryValue(out era)) return (null, "--era requires a value");
@@ -686,10 +694,11 @@ public static class CliParser
             PlayerPath = playerPath,
             // --recompress-args arms the pass on its own: nobody writes out a
             // full argument list and then expects it not to run.
-            Recompress = recompress || recompressArgs is not null,
+            Recompress = recompress || recompressArgs is not null || recompressOnly,
             RecompressArgs = recompressArgs,
             RecompressContainer = recompressContainer,
             NoRecompress = noRecompress,
+            RecompressOnly = recompressOnly,
             Era = era,
             EmitArgs = emitArgs,
             EmitArgsFile = emitArgsFile,
@@ -771,6 +780,8 @@ public static class CliParser
             ("--recompress", "", "re-encode the result the way a video site would (default: off)"),
             ("--recompress-args", "ARGS", "FFmpeg arguments for that pass; -i and the output are supplied"),
             ("--recompress-container", "EXT", "container for the recompressed file (default: mp4)"),
+            ("--recompress-only", "", "skip the live encode and apply the recompress pass to an "
+                                    + "existing file, then exit"),
             ("--no-recompress", "", "disable the recompress stage"),
             ("--era", "ID", $"apply an era preset: {PostProcess.EraPresets.Ids}"),
             ("--emit-args[=FILE]", "", "print the command line equivalent to the settings, then exit "
