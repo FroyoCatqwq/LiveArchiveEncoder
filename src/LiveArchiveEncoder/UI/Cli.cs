@@ -249,9 +249,16 @@ public static class Cli
         }
         List<FpsRungSetting> levelKbps = EncoderMath.PruneRungs(levelRungs, levels);
 
-        string? audioEncoder = string.IsNullOrEmpty(args.AudioEncoder)
-            ? EncoderMath.ChooseAudioEncoder(encoder.FormatName, audioAvailable)
-            : args.AudioEncoder;
+        // v7.9.6.2: --audio-encoder wins, then the preset's own codec (a 2007
+        // portal took mp3, not whatever the container prefers), then the
+        // container's default. The preset value used to be ignored here even
+        // though the menu honoured it -- the two paths disagreed.
+        string? audioEncoder = args.AudioEncoder is { Length: > 0 } explicitAudio
+            ? explicitAudio
+            : era?.AudioEncoder is { Length: > 0 } eraAudio
+                && audioAvailable.Any(x => string.Equals(x, eraAudio, StringComparison.OrdinalIgnoreCase))
+                ? eraAudio
+                : EncoderMath.ChooseAudioEncoder(encoder.FormatName, audioAvailable);
         if (Constants.NoAudioFormats.Contains(encoder.FormatName)) audioEncoder = null;
         if (audioEncoder is not null && !audioAvailable.Contains(audioEncoder))
         {

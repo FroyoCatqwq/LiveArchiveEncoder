@@ -455,13 +455,22 @@ public static class EraPresets
     private static readonly Lock Gate = new();
 
     /// <summary>
-    /// A site preset: the numbers are the site's transcode ladder, the fragment
-    /// is derived from them so the two can never drift apart.
+    /// A site preset: the site's transcode ladder <b>and</b> the capture
+    /// settings of its period.
     ///
-    /// The live encoder is the one that site used (FLV-era portals: flv1;
-    /// H.264-era: libx264), because the codec is half of what "looks like
-    /// 2007" means. The frame size is left alone: a site says nothing about
-    /// how the recording was captured.
+    /// <para>v7.9.6.2: a site preset owns both layers. Until this version it
+    /// only filled the second pass and named the codec, on the theory that
+    /// "what Youku did to my upload" says nothing about how the upload was
+    /// captured. In practice that meant choosing <c>--era youku07</c> left the
+    /// user's frame size, frame rate, ceiling and ladder untouched -- the live
+    /// pass recorded a 640x480@25 H.264 master while the second pass claimed to
+    /// be 352x264@15, and the menu's parameter page (option 4) showed numbers
+    /// from neither. The capture side of a 2007 portal is exactly as
+    /// period-specific as its delivery side: 320x240, 12-15 fps, a few hundred
+    /// kbps, mp3 at 22.05 kHz. Both halves now come from the same row.</para>
+    ///
+    /// <para>The rule that an explicit flag still wins is unchanged: this is a
+    /// preset, so the CLI keeps treating every field as a fallback.</para>
     /// </summary>
     private static EraPreset Site(
         string id, int from, int to, int width, int height, double fps,
@@ -476,6 +485,23 @@ public static class EraPresets
         // ever *served* another codec (YouTube's VP9) still took H.264 uploads,
         // so the fallback is libx264 rather than the delivery codec.
         Encoder = videoCodec is "flv" or "libx264" ? videoCodec : "libx264",
+
+        // ---- live layer: the capture settings of the same period ----
+        Width = width,
+        Height = height,
+        Fps = fps,
+        FpsLevels = SiteLadder(fps),
+        LimitKbps = videoKbps,
+        // 2000s encoders could afford bicubic and nothing dearer; the 2010s ran
+        // lanczos once the CPU stopped being the constraint.
+        ScaleAlgo = from < 2010 ? "bicubic" : "lanczos",
+        // A FLV-era portal took an mp3 upload; the H.264 era took AAC (left to
+        // the container when null, which is what the 2010 rows want).
+        AudioEncoder = videoCodec == "flv" ? "libmp3lame" : null,
+        AudioKbps = audioKbps,
+        AudioChannels = channels,
+        AudioRate = audioRate,
+
         RcWidth = width,
         RcHeight = height,
         RcFps = fps,
@@ -490,6 +516,22 @@ public static class EraPresets
         AudioCodec = audioCodec,
         RecompressContainer = container,
         NoteKey = noteKey,
+    };
+
+    /// <summary>
+    /// The frame-rate ladder of a site at a given base rate.
+    ///
+    /// <para>Same reasoning as the era ladders: a site that served 15 fps must
+    /// not fall back onto 13/8/5/3, or the first step down drops clean out of
+    /// the period. The steps are the ones those portals actually used -- 12/10/8
+    /// for the 12 fps sites, 12/10/8/5 for 15, 20/15/10 above that.</para>
+    /// </summary>
+    private static double[] SiteLadder(double fps) => fps switch
+    {
+        <= 12 => [fps, 10, 8, 5],
+        <= 15 => [fps, 12, 10, 8, 5],
+        <= 25 => [fps, 20, 15, 10],
+        _ => [fps, 25, 20, 15],
     };
 
     /// <summary>

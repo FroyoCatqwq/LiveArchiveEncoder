@@ -197,10 +197,11 @@ public sealed class AudioLimitTests
     public async Task EveryEraPresetSurvivesTheTables()
     {
         // The presets are written for a period, not for a codec; the correction
-        // pass is what keeps them alive across containers. Site presets own no
-        // live audio settings (v7.9.5), so only the era rows take part.
+        // pass is what keeps them alive across containers. Only the era rows
+        // take part: they are the ones applied across every container, while a
+        // site row is pinned to the container that site actually served.
         string[] containers = ["rm", "mpeg", "avi", "mp4", "flv", "asf", "ogg", "matroska"];
-        foreach (EraPreset era in EraPresets.WithLiveLayer)
+        foreach (EraPreset era in EraPresets.All.Where(p => p.Kind == EraKind.Era))
         {
             foreach (string container in containers)
             {

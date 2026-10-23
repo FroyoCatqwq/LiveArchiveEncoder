@@ -441,12 +441,17 @@ def test_an_era_ladder_belongs_to_its_period(exe, src, workdir):
     assert "--fps-levels 30:2000:1500,24" in proc.stdout, proc.stdout[-300:]
 
 
-def test_a_site_preset_only_reshapes_the_second_pass(exe, src, workdir):
-    """v7.9.5: a site preset is a bitrate profile, not a re-shoot.
+def test_a_site_preset_reshapes_both_passes(exe, src, workdir):
+    """v7.9.6.2: choosing a 2007 portal rewrites the capture side too.
 
     2005-2009 China was not one transcode ladder but a dozen -- every portal ran
-    its own FLV settings. --era youku07 must therefore leave the live pass
-    exactly as the user configured it and rewrite only the recompress fragment.
+    its own FLV settings. Until v7.9.6.2 --era youku07 only rewrote the
+    recompress fragment, so the live pass recorded the user's 640x480@25 master
+    while the second pass claimed 352x264@15, and the menu's parameter page
+    (option 4) showed numbers from neither. The capture side of a portal is as
+    period-specific as its delivery side, so both come from the same row now.
+
+    An explicit flag still wins: --encoder mpeg4 keeps mpeg4 for the live pass.
     """
     out = workdir("options")
     dst = out / "site_preset.avi"
@@ -457,16 +462,35 @@ def test_a_site_preset_only_reshapes_the_second_pass(exe, src, workdir):
     assert proc.returncode == 0, (
         f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
 
-    # The live product keeps the encoder and the extension the user asked for.
+    # The user's explicit encoder wins; the preset's capture settings apply.
     assert dst.exists(), "the live product is missing"
     live = harness.video_summary(dst) or {}
     assert live.get("codec") == "mpeg4", f"live pass changed codec: {live.get('codec')}"
+    assert (live.get("width"), live.get("height")) == (352, 264), live
 
     # ... and the site product carries the site's numbers.
     web = out / "site_preset_web.mp4"
     assert web.exists() and web.stat().st_size > 0, "no site product"
     info = harness.video_summary(web) or {}
     assert (info.get("width"), info.get("height")) == (352, 264), info
+
+
+def test_an_explicit_flag_still_beats_a_site_preset(exe, src, workdir):
+    """A preset is a fallback, not an override (v7.9.3.1).
+
+    v7.9.6.2 gave site presets a live layer, so this is the case that would
+    regress first: --width/--fps/--limit must survive --era youku07.
+    """
+    out = workdir("options")
+    proc = run([str(exe), str(src), str(out / "site_override.mkv"), "--era", "youku07",
+                "--width", "320", "--height", "240", "--fps", "20", "--limit", "500",
+                "--end", "00:00:02", "--emit-args",
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=180)
+    assert proc.returncode == 0, proc.stderr[-300:]
+    line = proc.stdout.strip().splitlines()[-1]
+    assert "--width 320" in line and "--height 240" in line, line
+    assert "--fps 20" in line, line
+    assert "--limit 500" in line, line
 
 
 def test_a_site_preset_writes_the_codec_its_era_had(exe, src, workdir):

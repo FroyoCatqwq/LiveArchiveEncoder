@@ -214,26 +214,20 @@ public sealed class EraPresetTests
     [Test]
     public async Task EveryPresetCoversTheLayersItClaims()
     {
-        // v7.9.5: a preset now says which half of the pipeline it speaks for.
-        // An era owns both layers; a site owns the second one only, because
-        // "what Youku did to my upload" implies nothing about the capture.
+        // v7.9.6.2: every built-in preset owns both layers -- an era describes a
+        // period, a site describes one portal, and both say how the picture was
+        // captured as well as how it was served. What separates them is the
+        // container and the codec of the second pass, not the scope.
         foreach (EraPreset preset in EraPresets.All)
         {
-            if (preset.Kind == EraKind.Site)
-            {
-                // v7.9.5.1: a site names the codec it served but never a frame
-                // size: the preset reshapes the second pass, not the capture.
-                await Assert.That(preset.Encoder).IsNotEmpty().Because(preset.Id);
-                await Assert.That(preset.Width).IsNull().Because(preset.Id);
-            }
-            else
-            {
-                await Assert.That(preset.Encoder).IsNotEmpty().Because(preset.Id);
-                await Assert.That(preset.Width).IsPositive().Because(preset.Id);
-                await Assert.That(preset.Height).IsPositive().Because(preset.Id);
-                await Assert.That(preset.Fps).IsPositive().Because(preset.Id);
-                await Assert.That(preset.LimitKbps).IsPositive().Because(preset.Id);
-            }
+            await Assert.That(preset.Encoder).IsNotEmpty().Because(preset.Id);
+            await Assert.That(preset.Width).IsPositive().Because(preset.Id);
+            await Assert.That(preset.Height).IsPositive().Because(preset.Id);
+            await Assert.That(preset.Fps).IsPositive().Because(preset.Id);
+            await Assert.That(preset.LimitKbps).IsPositive().Because(preset.Id);
+            await Assert.That(preset.AudioKbps).IsPositive().Because(preset.Id);
+            await Assert.That(preset.AudioRate).IsPositive().Because(preset.Id);
+            await Assert.That(preset.AudioChannels).IsPositive().Because(preset.Id);
 
             // Both kinds carry the recompress layer -- that is what makes them
             // usable with --recompress-only.
@@ -285,10 +279,11 @@ public sealed class EraPresetTests
         // The point of the table: later eras are bigger and fatter. A regression
         // here means someone reordered the history.
         //
-        // v7.9.5: only the presets that own a live layer take part. A site preset
-        // (youku07 and friends) deliberately has no live layer -- it describes a
-        // second pass, so it has no frame size or ceiling to compare.
-        IReadOnlyList<EraPreset> eras = EraPresets.WithLiveLayer;
+        // The five era rows, in order. Site presets own a live layer since
+        // v7.9.6.2 as well, but they are a dozen parallel ladders of the same
+        // years (sina06 and sohu06 are both 320x240), so monotonicity only
+        // holds for the era table.
+        IReadOnlyList<EraPreset> eras = [.. EraPresets.All.Where(p => p.Kind == EraKind.Era)];
         for (int i = 1; i < eras.Count; i++)
         {
             EraPreset older = eras[i - 1];

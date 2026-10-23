@@ -204,19 +204,31 @@ public sealed class EncoderRateAndContainerTests
 /// <summary>
 /// v7.9.5 #2: the site presets. 2005-2009 China was not one transcode ladder but
 /// a dozen, and a site's preset is a bitrate profile plus the codec that site
-/// served (v7.9.5.1) -- it must not claim a live frame size, because "what Youku
-/// did to my upload" says nothing about how the upload was captured.
+/// served (v7.9.5.1).
+///
+/// v7.9.6.2: a site preset now owns the live layer too. Choosing
+/// <c>--era youku07</c> used to leave the capture side (frame size, rate,
+/// ceiling, ladder, audio) exactly as the user had it, so the live product and
+/// the second pass described two different machines -- and the menu's parameter
+/// page showed neither. The capture side of a 2007 portal is as
+/// period-specific as its delivery side, so both come from the same row now.
 /// </summary>
 public sealed class SitePresetTests
 {
     [Test]
-    public async Task EverySitePresetHasOnlyARecompressLayer()
+    public async Task EverySitePresetCarriesBothLayers()
     {
         foreach (EraPreset site in EraPresets.Sites)
         {
             await Assert.That(site.Kind).IsEqualTo(EraKind.Site).Because(site.Id);
-            await Assert.That(site.HasLive).IsFalse().Because(site.Id);
-            await Assert.That(site.LimitKbps).IsNull().Because(site.Id);
+            // v7.9.6.2: the live layer is part of the site's period.
+            await Assert.That(site.HasLive).IsTrue().Because(site.Id);
+            await Assert.That(site.Width).IsEqualTo(site.RcWidth).Because(site.Id);
+            await Assert.That(site.Height).IsEqualTo(site.RcHeight).Because(site.Id);
+            await Assert.That(site.Fps).IsEqualTo(site.RcFps).Because(site.Id);
+            await Assert.That(site.LimitKbps).IsEqualTo(site.RcVideoKbps).Because(site.Id);
+            await Assert.That(site.FpsLevels).IsNotNull().Because(site.Id);
+            await Assert.That(site.FpsLevels![0]).IsEqualTo(site.Fps!.Value).Because(site.Id);
             // v7.9.5.1: the preset names the site's codec (that is the encoder
             // the live pass adopts when nothing else was asked for).
             await Assert.That(site.Encoder).IsNotNull().Because(site.Id);
@@ -286,8 +298,12 @@ public sealed class SitePresetTests
     }
 
     [Test]
-    public async Task ASitePresetLeavesTheLiveConfigurationAlone()
+    public async Task ASitePresetReshapesTheLiveConfiguration()
     {
+        // v7.9.6.2: selecting a 2007 portal now rewrites the capture side too --
+        // frame size, rate, ladder and ceiling. The encoder is left alone by
+        // ApplyLive (ApplyEncoder owns that, and the CLI only takes it when the
+        // user named none).
         var config = new Config
         {
             Encoder = new EncoderInfo { Name = "mpeg4", Extension = "avi", FormatName = "avi" },
@@ -299,11 +315,13 @@ public sealed class SitePresetTests
 
         bool applied = EraPresets.Find("youku07")!.ApplyLive(config);
 
-        await Assert.That(applied).IsFalse();
-        await Assert.That(config.Width).IsEqualTo(640);
-        await Assert.That(config.Height).IsEqualTo(480);
-        await Assert.That(config.Fps).IsEqualTo(25.0);
-        await Assert.That(config.Limit).IsEqualTo(900.0);
+        await Assert.That(applied).IsTrue();
+        await Assert.That(config.Width).IsEqualTo(352);
+        await Assert.That(config.Height).IsEqualTo(264);
+        await Assert.That(config.Fps).IsEqualTo(15.0);
+        await Assert.That(config.Limit).IsEqualTo(320.0);
+        await Assert.That(config.FpsLevels).IsEquivalentTo(new[] { 15.0, 12.0, 10.0, 8.0, 5.0 });
+        await Assert.That(config.AudioRate).IsEqualTo(22050);
         await Assert.That(config.Encoder!.Name).IsEqualTo("mpeg4");
     }
 
@@ -336,15 +354,18 @@ public sealed class SitePresetTests
     [Test]
     public async Task TheEraPresetsStillHaveTheirLiveLayer()
     {
-        foreach (EraPreset era in EraPresets.WithLiveLayer)
+        foreach (EraPreset era in EraPresets.All.Where(p => p.Kind == EraKind.Era))
         {
-            await Assert.That(era.Kind).IsEqualTo(EraKind.Era).Because(era.Id);
             await Assert.That(era.Encoder).IsNotNull().Because(era.Id);
             await Assert.That(era.Width).IsNotNull().Because(era.Id);
             await Assert.That(era.Fps).IsNotNull().Because(era.Id);
             // Applied to a fresh config, a real era still writes the live layer.
             await Assert.That(era.ApplyLive(new Config())).IsTrue().Because(era.Id);
         }
+
+        // The same now holds for the site rows.
+        foreach (EraPreset site in EraPresets.Sites)
+            await Assert.That(site.ApplyLive(new Config())).IsTrue().Because(site.Id);
     }
 
     [Test]

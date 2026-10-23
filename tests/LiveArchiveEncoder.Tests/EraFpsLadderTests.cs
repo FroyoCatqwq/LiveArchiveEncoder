@@ -55,19 +55,23 @@ public sealed class EraFpsLadderTests
     }
 
     /// <summary>
-    /// A site preset describes the second pass only. It must not quietly move
-    /// the live capture's rate or ladder -- "the site says nothing about how the
-    /// recording was captured" is a documented promise, and
-    /// <c>test_a_site_preset_only_reshapes_the_second_pass</c> checks it from the
-    /// other side.
+    /// v7.9.6.2: a site preset owns the live layer, so it carries a ladder too.
+    ///
+    /// <para>The capture side of a 2007 portal is as period-specific as its
+    /// delivery side: selecting <c>--era tudou06</c> has to record 352x264 at
+    /// 12 fps, not leave the user's 640x480@25 master alone while the second
+    /// pass claims otherwise.</para>
     /// </summary>
     [Test]
-    public async Task ASitePresetHasNoLiveLadder()
+    public async Task EverySitePresetCarriesItsLadder()
     {
         foreach (EraPreset site in EraPresets.Sites)
         {
-            await Assert.That(site.HasLive).IsFalse().Because(site.Id);
-            await Assert.That(site.FpsLevels).IsNull().Because(site.Id);
+            await Assert.That(site.HasLive).IsTrue().Because(site.Id);
+            await Assert.That(site.FpsLevels).IsNotNull().Because(site.Id);
+            await Assert.That(site.FpsLevels![0]).IsEqualTo(site.Fps!.Value).Because(site.Id);
+            for (int i = 1; i < site.FpsLevels.Length; i++)
+                await Assert.That(site.FpsLevels[i]).IsLessThan(site.FpsLevels[i - 1]).Because(site.Id);
         }
     }
 
@@ -169,11 +173,15 @@ public sealed class EraFpsLadderTests
         await Assert.That(preset.FpsLevels).IsEquivalentTo(new[] { 15.0, 12.0, 8.0 });
     }
 
-    /// <summary>A site preset cannot carry a live ladder, even if a file says so.</summary>
+    /// <summary>
+    /// v7.9.6.2: a stored row's live layer is whatever the file gives, not what
+    /// its kind implies -- an older site row without a frame size still loads as
+    /// "second pass only", and one that names a frame size gets a live layer.
+    /// </summary>
     [Test]
-    public async Task ASiteRowInTheFileDropsTheLiveLadder()
+    public async Task ASiteRowKeepsTheLiveFieldsTheFileGives()
     {
-        EraPreset preset = EraConfigMap.FromConfig(new CustomEraConfig
+        EraPreset bare = EraConfigMap.FromConfig(new CustomEraConfig
         {
             Id = "my_site",
             Kind = "site",
@@ -183,7 +191,27 @@ public sealed class EraFpsLadderTests
             VideoCodec = "flv", AudioCodec = "libmp3lame", Container = "flv",
         })!;
 
-        await Assert.That(preset.FpsLevels).IsNull();
-        await Assert.That(preset.HasLive).IsFalse();
+        // No Width/Height in the file: no live layer, exactly as before.
+        await Assert.That(bare.HasLive).IsFalse();
+        await Assert.That(bare.FpsLevels).IsNotNull().Because("the ladder alone is harmless");
+
+        EraPreset full = EraConfigMap.FromConfig(new CustomEraConfig
+        {
+            Id = "my_site_live",
+            Kind = "site",
+            Encoder = "flv",
+            Width = 352, Height = 264,
+            Fps = 12,
+            FpsLevels = [12, 10, 8, 5],
+            RcWidth = 352, RcHeight = 264, RcFps = 12, RcVideoKbps = 295,
+            AudioKbps = 32, AudioRate = 22050, AudioChannels = 1,
+            VideoCodec = "flv", AudioCodec = "libmp3lame", Container = "flv",
+        })!;
+
+        await Assert.That(full.HasLive).IsTrue();
+        await Assert.That(full.FpsLevels).IsEquivalentTo(new[] { 12.0, 10.0, 8.0, 5.0 });
+        // A frame size without a ceiling means the site's own bitrate.
+        await Assert.That(full.LimitKbps).IsEqualTo(295.0);
+        await Assert.That(full.AudioRate).IsEqualTo(22050);
     }
 }

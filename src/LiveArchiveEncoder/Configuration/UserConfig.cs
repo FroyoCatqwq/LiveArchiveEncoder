@@ -616,6 +616,21 @@ public static class EraConfigMap
             ? c.Container.Or("mp4").Trim().TrimStart('.').ToLowerInvariant()
             : PostProcess.RecompressCodecs.DefaultContainer(videoCodec, audioCodec) ?? "mp4";
 
+        // v7.9.6.2: a live layer is whatever the file gives, not what the kind
+        // implies -- a site row may now carry one too (the built-in ones do,
+        // and a hand-written row should not be refused the same fields). An
+        // older file with no Width/Height therefore still loads as "second pass
+        // only", which is what it meant.
+        int? liveWidth = Positive(c.Width, 0);
+        int? liveHeight = Positive(c.Height, 0);
+        double? liveLimit = Positive(c.LimitKbps, 0);
+        if (liveWidth is not null && liveHeight is not null && liveLimit is null)
+        {
+            // A row that names a frame size but no ceiling meant the site's own
+            // video bitrate; that is what the built-in rows do.
+            liveLimit = Positive(c.RcVideoKbps, 0);
+        }
+
         return new PostProcess.EraPreset
         {
             Id = id,
@@ -624,21 +639,16 @@ public static class EraConfigMap
             YearFrom = Math.Clamp(c.YearFrom, 1990, 2100),
             YearTo = Math.Clamp(Math.Max(c.YearTo, c.YearFrom), 1990, 2100),
             Encoder = c.Encoder.HasText ? c.Encoder.Trim().ToLowerInvariant() : null,
-            // A site preset has no frame size: that is what makes it "second
-            // pass only". An era without one would be an era that does nothing.
-            Width = era ? Positive(c.Width, 0) : null,
-            Height = era ? Positive(c.Height, 0) : null,
-            Fps = era ? Positive(c.Fps, 0) : null,
-            // A ladder is only meaningful for an era (a site preset has no live
-            // layer) and only when it has at least two rungs; anything else is
-            // stored as "derive from Fps".
-            FpsLevels = era ? CleanLevels(c.FpsLevels) : null,
-            LimitKbps = era ? Positive(c.LimitKbps, 0) : null,
+            Width = liveWidth,
+            Height = liveHeight,
+            Fps = Positive(c.Fps, 0),
+            FpsLevels = CleanLevels(c.FpsLevels),
+            LimitKbps = liveLimit,
             ScaleAlgo = c.ScaleAlgo.HasText ? c.ScaleAlgo.Trim().ToLowerInvariant() : (era ? "bicubic" : null),
-            AudioEncoder = era && c.AudioEncoder.HasText ? c.AudioEncoder.Trim().ToLowerInvariant() : null,
-            AudioKbps = era ? Positive(c.AudioKbps, 0) : null,
-            AudioChannels = era ? Positive(c.AudioChannels, 0) : null,
-            AudioRate = era ? Positive(c.AudioRate, 0) : null,
+            AudioEncoder = c.AudioEncoder.HasText ? c.AudioEncoder.Trim().ToLowerInvariant() : null,
+            AudioKbps = Positive(c.AudioKbps, 0),
+            AudioChannels = Positive(c.AudioChannels, 0),
+            AudioRate = Positive(c.AudioRate, 0),
             RcWidth = Positive(c.RcWidth, 320) ?? 320,
             RcHeight = Positive(c.RcHeight, 240) ?? 240,
             RcFps = Positive(c.RcFps, 15) ?? 15,
