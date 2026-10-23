@@ -1,4 +1,4 @@
-# 实测能力矩阵（v7.9.5）
+# 实测能力矩阵（v7.9.6）
 
 `ffmpeg -h encoder=NAME` 声明的东西不一定是真的。这个项目已经因此栽过三次
 （v7.9.4 的 mpeg1video 帧率、pal8 帧长，v7.9.5 的 RealMedia 整数帧率）。所以
@@ -94,6 +94,45 @@ python tools/capability_sweep.py --json /tmp/capsweep.json
 猜测）：文件里根本没有帧率字段。画面没问题，只是帧率不随文件走 —— 工具会打印
 note，并建议改用 AVI。
 
+
+## 像素格式（v7.9.6）
+
+同一套思路的第三次应用：`--pix-fmt` 能写哪些格式，不由"FFmpeg 里有这个格式"决定，
+而由**帧长是否能算准**决定——编码器读的是裸 `rawvideo` 管道，一帧 `宽×高×每像素
+字节数`（调色板格式再加 1024），错一个字节画面就一帧一帧滑走。
+
+```bash
+python tools/pixfmt_sweep.py --json /tmp/pixfmt.json
+```
+
+每种格式写 3 帧 64×48 裸视频，除以帧数。86 种全部实测，结果表在
+`Core/PixelFormatCatalog.cs`，并由 `PixelFormatCatalogTests` 逐行钉住。
+
+实测抓到的两处旧错误：
+
+| 格式 | 旧表 | 实测 | 后果 |
+| --- | --- | --- | --- |
+| `yuv440p`（4:4:0） | 1.5 B/px | **2.0 B/px** | 每帧少读 1/2，管道错位；色度是全宽半高，不是 4:2:0 |
+| `yuv440p` 可整除约束 | (2, 2) | **(1, 2)** | 会多砍一列宽度 |
+
+位打包的 `monob` / `monow` 按**行字节对齐**算：65 像素宽是 9 字节/行（0.125 B/px
+只是整除时的巧合）。
+
+### 声明的格式 ≠ 写出的格式
+
+| 组合 | 结果 |
+| --- | --- |
+| `libx264` + `-pix_fmt gray` | 文件里是 `yuvj420p`（编码器把 gray 当输入接受，编码按 4:2:0 写） |
+| `libx264` + `-color_primaries bt2020 -color_trc smpte2084` | 文件里 `unknown`/`unknown` |
+| 同上 + `-x264-params colorprim=bt2020:transfer=smpte2084` | `bt2020`/`smpte2084`，真的写进去了 |
+| `mpeg4`/`mpeg2video` + 原色/传输特性 | 码流里没有这两个字段，Matroska 只落 Range 和矩阵 |
+
+因此：请求的像素格式在编码结束后用 ffprobe 读回核对，不一致打 note；libx264 的
+原色/传输特性同时走 `-x264-params`。
+
+支撑测试：`tests/e2e/test_picture_format.py`（7 条：pal8 非黑、10 位保持 10 位、
+色彩标记进码流、容器拒绝、无效格式 exit 2、`--list-pix-fmts` 标记、抖动只在该发时发）。
+
 ## 回归
 
 这些结论都有护栏，不是文档里的口头约定：
@@ -104,4 +143,8 @@ note，并建议改用 AVI。
 - `tests/LiveArchiveEncoder.Tests/PaletteAndRateTests.cs` —— pal8 帧长、mpeg1 的
   八个真帧率；
 - `tests/e2e/test_option_smoke.py` —— 新容器逐对出片、小数帧率落成整数、
-  msrle 非黑。
+  msrle 非黑；
+- `tests/LiveArchiveEncoder.Tests/PixelFormatCatalogTests.cs` —— 86 行帧长逐行对齐
+  实测值、4:4:0 的 2.0、位打包行对齐、调色板容器冲突、抖动只对低色深生效；
+- `tests/e2e/test_picture_format.py` —— pal8 非黑、10 位保持 10 位、色彩标记进
+  码流、丢调色板的容器被拒。

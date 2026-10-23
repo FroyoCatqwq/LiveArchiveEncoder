@@ -113,6 +113,29 @@ public sealed class CliOptions
     public string PadColor { get; init; } = "black";
     public bool NoCrop { get; init; }
     public string ScaleAlgo { get; init; } = "neighbor";
+
+    // ---- v7.9.6: picture format and colour ----
+
+    /// <summary>
+    /// Output pixel format (<c>pal8</c>, <c>gray</c>, <c>rgb24</c>,
+    /// <c>rgb555le</c>, <c>yuv420p10le</c>, ...). Null means "not given", which
+    /// keeps the automatic choice; the string "auto" is accepted and means the
+    /// same thing.
+    /// </summary>
+    public string? PixFmt { get; init; }
+
+    /// <summary>Colour tags written onto the output; null keeps the source's.</summary>
+    public string? ColorRange { get; init; }
+    public string? ColorSpace { get; init; }
+    public string? ColorPrimaries { get; init; }
+    public string? ColorTransfer { get; init; }
+
+    /// <summary>swscale dither for low-colour output; "auto" emits no flag.</summary>
+    public string Dither { get; init; } = "auto";
+
+    /// <summary>Print the pixel formats this build / the selected encoder accepts, then exit.</summary>
+    public bool ListPixFmts { get; init; }
+
     public string Deinterlace { get; init; } = "off";
     public string DeintMode { get; init; } = "send_frame";
     public string DeintParity { get; init; } = "auto";
@@ -294,6 +317,13 @@ public static class CliParser
         string padColor = "black";
         bool noCrop = false;
         string scaleAlgo = "neighbor";
+        string? pixFmt = null;
+        string? colorRange = null;
+        string? colorSpace = null;
+        string? colorPrimaries = null;
+        string? colorTransfer = null;
+        string dither = "auto";
+        bool listPixFmts = false;
         string deinterlace = "off";
         string deintMode = "send_frame";
         string deintParity = "auto";
@@ -538,6 +568,46 @@ public static class CliParser
                     if (!TryValue(out scaleAlgo)) return (null, "--scale-algo requires a value");
                     scaleAlgoExplicit = true;
                     break;
+
+                // ---- v7.9.6: picture format and colour ----
+                case "--pix-fmt" or "--pixfmt" or "--pixel-format":
+                    if (!TryValue(out string pixRaw)) return (null, "--pix-fmt requires a format name");
+                    pixFmt = pixRaw.Trim().ToLowerInvariant();
+                    // "auto" is the spelling of "no request" in the settings file,
+                    // so accept it here instead of reporting an unknown format.
+                    if (Core.PixelFormatCatalog.Normalise(pixFmt).Length == 0) pixFmt = null;
+                    break;
+                case "--color-range" or "--colour-range":
+                    if (!TryValue(out colorRange)) return (null, "--color-range requires a value");
+                    colorRange = colorRange.Trim().ToLowerInvariant();
+                    if (colorRange != "auto" && !Constants.ColorRanges.Contains(colorRange))
+                        return (null, $"--color-range must be one of {string.Join(", ", Constants.ColorRanges)}");
+                    break;
+                case "--colorspace" or "--color-space" or "--colour-space":
+                    if (!TryValue(out colorSpace)) return (null, "--colorspace requires a value");
+                    colorSpace = colorSpace.Trim().ToLowerInvariant();
+                    if (colorSpace != "auto" && !Constants.ColorSpaces.Contains(colorSpace))
+                        return (null, $"--colorspace must be one of {string.Join(", ", Constants.ColorSpaces)}");
+                    break;
+                case "--color-primaries" or "--colour-primaries":
+                    if (!TryValue(out colorPrimaries)) return (null, "--color-primaries requires a value");
+                    colorPrimaries = colorPrimaries.Trim().ToLowerInvariant();
+                    if (colorPrimaries != "auto" && !Constants.ColorPrimaries.Contains(colorPrimaries))
+                        return (null, $"--color-primaries must be one of {string.Join(", ", Constants.ColorPrimaries)}");
+                    break;
+                case "--color-trc" or "--color-transfer" or "--colour-trc":
+                    if (!TryValue(out colorTransfer)) return (null, "--color-trc requires a value");
+                    colorTransfer = colorTransfer.Trim().ToLowerInvariant();
+                    if (colorTransfer != "auto" && !Constants.ColorTransfers.Contains(colorTransfer))
+                        return (null, $"--color-trc must be one of {string.Join(", ", Constants.ColorTransfers)}");
+                    break;
+                case "--dither":
+                    if (!TryValue(out dither)) return (null, "--dither requires a value");
+                    dither = dither.Trim().ToLowerInvariant();
+                    if (!Constants.DitherModes.Contains(dither))
+                        return (null, $"--dither must be one of {string.Join(", ", Constants.DitherModes)}");
+                    break;
+                case "--list-pix-fmts" or "--list-pixel-formats": listPixFmts = true; break;
                 case "--deinterlace":
                     if (!TryValue(out deinterlace)) return (null, "--deinterlace requires a value");
                     deinterlace = deinterlace.ToLowerInvariant();
@@ -761,6 +831,13 @@ public static class CliParser
             PadColor = padColor,
             NoCrop = noCrop,
             ScaleAlgo = scaleAlgo,
+            PixFmt = pixFmt,
+            ColorRange = colorRange,
+            ColorSpace = colorSpace,
+            ColorPrimaries = colorPrimaries,
+            ColorTransfer = colorTransfer,
+            Dither = dither,
+            ListPixFmts = listPixFmts,
             Deinterlace = deinterlace,
             DeintMode = deintMode,
             DeintParity = deintParity,
@@ -863,6 +940,19 @@ public static class CliParser
             ("--pad-color", "COLOR", "bar colour for --fit, e.g. black or 0x808080 (default: black)"),
             ("--no-crop", "", "shorthand for --fit stretch"),
             ("--scale-algo, --scale-flags", "NAME", "scaler kernel; cubic is an alias for bicubic (default: neighbor)"),
+            ("--pix-fmt", "FORMAT", "output pixel format: pal8, gray, rgb24, rgb555le, rgb565le, "
+                                  + "rgb48le, yuv420p10le, yuv444p16le, ... (default: automatic, "
+                                  + "keep the source's). See --list-pix-fmts"),
+            ("--color-range", "RANGE", $"colour range tag: {string.Join(", ", Constants.ColorRanges)} "
+                                     + "(default: the source's)"),
+            ("--colorspace", "NAME", $"colour space tag: {string.Join(", ", Constants.ColorSpaces)} "
+                                   + "(default: the source's)"),
+            ("--color-primaries", "NAME", $"colour primaries tag: {string.Join(", ", Constants.ColorPrimaries)}"),
+            ("--color-trc", "NAME", $"transfer characteristics tag: {string.Join(", ", Constants.ColorTransfers)}"),
+            ("--dither", "MODE", $"swscale dither for low-colour output: {string.Join(", ", Constants.DitherModes)} "
+                               + "(default: auto)"),
+            ("--list-pix-fmts", "", "print every verified pixel format (and what the selected encoder "
+                                  + "accepts), then exit"),
             ("--deinterlace", "NAME", "off, yadif, bwdif, ... (default: off)"),
             ("--deint-mode", "MODE", "send_frame or send_field (default: send_frame)"),
             ("--deint-parity", "PAR", "auto, tff or bff (default: auto)"),

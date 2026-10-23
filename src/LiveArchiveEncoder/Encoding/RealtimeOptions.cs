@@ -72,6 +72,28 @@ public sealed class RealtimeOptions
     public string CropAnchor { get; init; } = "center";
     public string PadColor { get; init; } = "black";
     public string ScaleAlgo { get; init; } = "neighbor";
+
+    /// <summary>
+    /// v7.9.6: the format frames are encoded in. Null = automatic (keep the
+    /// source's own format when the encoder accepts it). See
+    /// <see cref="Core.PixelFormatUtil.ChooseTransportPixFmt"/>.
+    /// </summary>
+    public string? PixFmt { get; init; }
+
+    /// <summary>
+    /// v7.9.6: colour tags written onto the output, overriding what the source
+    /// declared. Null keeps the source's value; these never convert the picture.
+    /// </summary>
+    public string? ColorRange { get; init; }
+    public string? ColorSpace { get; init; }
+    public string? ColorPrimaries { get; init; }
+    public string? ColorTransfer { get; init; }
+
+    /// <summary>
+    /// v7.9.6: swscale dither for low-colour output. "auto" emits no flag.
+    /// </summary>
+    public string Dither { get; init; } = "auto";
+
     public string Deinterlace { get; init; } = "off";
     public string DeintMode { get; init; } = "send_frame";
     public string DeintParity { get; init; } = "auto";

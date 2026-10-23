@@ -222,6 +222,18 @@ public static class Program
             return 0;
         }
 
+        // v7.9.6: what can actually travel down the raw video pipe, with the
+        // selected encoder's own column. Handled before the CUI branch so it
+        // works without an input file.
+        if (cli.ListPixFmts)
+        {
+            Configuration.EncoderInfo? selected = caps.Encoders.FirstOrDefault(
+                e => string.Equals(e.Name, cli.Encoder, StringComparison.OrdinalIgnoreCase));
+            Report.PrintPixelFormats(selected?.Name,
+                selected is null ? null : caps.EncoderCaps(selected));
+            return 0;
+        }
+
         // v7.9: the indexes --video-stream/--audio-stream take are exactly the
         // numbers this prints, so the two halves cannot disagree.
         if (cli.ListStreams)

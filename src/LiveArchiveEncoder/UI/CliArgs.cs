@@ -79,6 +79,16 @@ public static class CliArgs
             argv.AddRange(["--pad-color", c.PadColor]);
         if (!string.Equals(c.ScaleAlgo, "neighbor", StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--scale-algo", c.ScaleAlgo]);
+        // v7.9.6: the picture format and colour tags are part of what the run
+        // produces -- without them the same line would encode 8-bit instead of
+        // 10-bit, or write the wrong colour tags.
+        if (c.PixFmt is { Length: > 0 } pixFmt) argv.AddRange(["--pix-fmt", pixFmt]);
+        if (c.ColorRange is { Length: > 0 } range) argv.AddRange(["--color-range", range]);
+        if (c.ColorSpace is { Length: > 0 } space) argv.AddRange(["--colorspace", space]);
+        if (c.ColorPrimaries is { Length: > 0 } primaries) argv.AddRange(["--color-primaries", primaries]);
+        if (c.ColorTransfer is { Length: > 0 } transfer) argv.AddRange(["--color-trc", transfer]);
+        if (!string.Equals(c.Dither, "auto", StringComparison.OrdinalIgnoreCase))
+            argv.AddRange(["--dither", c.Dither]);
         if (!string.Equals(c.Deinterlace, "off", StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--deinterlace", c.Deinterlace]);
         if (!string.Equals(c.DeintMode, "send_frame", StringComparison.OrdinalIgnoreCase))

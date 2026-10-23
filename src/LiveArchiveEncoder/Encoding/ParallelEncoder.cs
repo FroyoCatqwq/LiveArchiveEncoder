@@ -109,6 +109,10 @@ public static class ParallelEncoder
                             Encoder = staging,
                             Fps = o.Fps,
                             FpsLevels = o.FpsLevels,
+                            // v7.9.6: the shard options used to drop the pinned
+                            // per-rung thresholds, so --parallel silently fell
+                            // back to the derived ones.
+                            FpsLevelKbps = o.FpsLevelKbps,
                             Quality = o.Quality,
                             Threads = o.Threads,
                             LimitKbps = o.LimitKbps,
@@ -132,6 +136,12 @@ public static class ParallelEncoder
                             CropAnchor = o.CropAnchor,
                             PadColor = o.PadColor,
                             ScaleAlgo = o.ScaleAlgo,
+                            PixFmt = o.PixFmt,
+                            ColorRange = o.ColorRange,
+                            ColorSpace = o.ColorSpace,
+                            ColorPrimaries = o.ColorPrimaries,
+                            ColorTransfer = o.ColorTransfer,
+                            Dither = o.Dither,
                             Deinterlace = o.Deinterlace,
                             DeintMode = o.DeintMode,
                             DeintParity = o.DeintParity,
@@ -413,11 +423,15 @@ public static class ParallelEncoder
         // straight to AVI and YAVG 16 (pure black) after one hop through .mkv.
         // Since every shard is staged in Matroska, such an encoder is a single
         // pass or nothing.
+        //
+        // v7.9.6: the check has to ask the same question the run will, i.e. with
+        // the format the user pinned -- otherwise `--parallel 4 --pix-fmt pal8`
+        // slipped past it and produced black shards.
         o.Encoder.Caps ??= FFmpeg.BuildProfileStore.For(o.FFmpeg).EncoderCaps(o.Encoder);
-        if (PixelFormatUtil.CarriesPalette(
-                PixelFormatUtil.ChooseTransportPixFmt(sourcePixFmt, o.Encoder.Caps)))
+        string transport = PixelFormatUtil.ChooseTransportPixFmt(sourcePixFmt, o.Encoder.Caps, o.PixFmt);
+        if (PixelFormatUtil.CarriesPalette(transport))
         {
-            return $"{o.Encoder.Name} writes pal8 frames, and the Matroska staging pass "
+            return $"{o.Encoder.Name} writes {transport} frames, and the Matroska staging pass "
                    + "drops their palette (the picture would come out black)";
         }
         if (!Constants.ConcatSafeFormats.Contains(o.Encoder.FormatName))

@@ -23,6 +23,27 @@ public sealed class StreamInfo
 }
 
 /// <summary>
+/// v7.9.6: the colour metadata the user pinned, as opposed to what the source
+/// declared. A null field means "keep the source's value".
+/// </summary>
+public sealed record ColorOverride(string? Range, string? Space, string? Primaries, string? Transfer)
+{
+    public static readonly ColorOverride None = new(null, null, null, null);
+
+    public bool Any => Range is not null || Space is not null || Primaries is not null || Transfer is not null;
+
+    /// <summary>Build from loose option values; blanks and "source" mean "not set".</summary>
+    public static ColorOverride Parse(string? range, string? space, string? primaries, string? transfer) =>
+        new(Clean(range), Clean(space), Clean(primaries), Clean(transfer));
+
+    private static string? Clean(string? value)
+    {
+        string text = (value ?? "").Trim().ToLowerInvariant();
+        return text is "" or "auto" or "source" or "unknown" ? null : text;
+    }
+}
+
+/// <summary>
 /// One stream of the source, as ffprobe describes it.
 ///
 /// v7.9: a source may carry several video tracks (a VOB with an angle, an MKV
@@ -173,6 +194,35 @@ public sealed class Config
     /// <summary>Bar colour for "fit", e.g. black, white or 0xRRGGBB.</summary>
     public string PadColor { get; set; } = "black";
     public string ScaleAlgo { get; set; } = "neighbor";
+
+    /// <summary>
+    /// v7.9.6: the pixel format frames are encoded in -- <c>pal8</c>,
+    /// <c>gray</c>, <c>rgb24</c>, <c>rgb555le</c>, <c>yuv420p10le</c>, ...
+    /// Null (or "auto") keeps the v7.9.5 rule: the source's own format when the
+    /// encoder takes it. A request is honoured exactly or refused; it is never
+    /// silently replaced, because "I asked for 10-bit and got 8-bit" is only
+    /// visible if someone counts the bits.
+    /// </summary>
+    public string? PixFmt { get; set; }
+
+    /// <summary>
+    /// v7.9.6: colour metadata written onto the output. Null means "whatever the
+    /// source declared" (the v7.9.5 behaviour); a value overrides just that one
+    /// field. These are tags, not conversions -- the numbers go into the stream
+    /// header unchanged, so the values have to match what the picture is.
+    /// </summary>
+    public string? ColorRange { get; set; }
+    public string? ColorSpace { get; set; }
+    public string? ColorPrimaries { get; set; }
+    public string? ColorTransfer { get; set; }
+
+    /// <summary>
+    /// v7.9.6: swscale dither for the conversion into a low-colour output
+    /// (pal8, 5:5:5, 3:3:2, 8-bit grey). "auto" emits no flag and lets FFmpeg
+    /// choose, which is what every version before this one did.
+    /// </summary>
+    public string Dither { get; set; } = "auto";
+
     public string Deinterlace { get; set; } = "off";
     public string DeintMode { get; set; } = "send_frame";
     public string DeintParity { get; set; } = "auto";

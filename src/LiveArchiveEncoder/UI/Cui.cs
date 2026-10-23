@@ -103,6 +103,9 @@ public static class Cui
             // shelf of named settings files to switch between.
             Console.WriteLine($"18. {L.Pad(L.T("menu.showargs"), 22)}");
             Console.WriteLine($"19. {L.Pad(L.T("menu.profiles"), 22)} = {DescribeProfiles()}");
+            // v7.9.6: pixel format and colour tags -- what the picture is made
+            // of, rather than what it is compressed with.
+            Console.WriteLine($"20. {L.Pad(L.T("menu.pictureformat"), 22)} = {DescribePixFmt(c)}");
             Console.WriteLine($" 0. {L.T("menu.exit")}");
             Console.Write(L.T("menu.select"));
 
@@ -249,6 +252,10 @@ public static class Cui
                     // the same way every other menu item does.
                     if (ConfigFilesMenu(c, encoders)) Persist(c);
                     break;
+                case "20":
+                    EditPictureFormat(c);
+                    Persist(c);
+                    break;
                 default:
                     Console.WriteLine(L.T("menu.invalid"));
                     break;
@@ -269,6 +276,182 @@ public static class Cui
     private static string DescribeStreams(Config c) => L.T("stream.value",
         c.VideoStream?.ToString(CultureInfo.InvariantCulture) ?? L.T("stream.first"),
         c.AudioStream?.ToString(CultureInfo.InvariantCulture) ?? L.T("stream.first"));
+
+    /// <summary>
+    /// Menu summary of the picture format (v7.9.6): the pixel format, then only
+    /// the colour tags that were actually pinned, then the dither when it is not
+    /// the automatic choice. Nothing is printed for "everything is automatic",
+    /// which is the state almost every run is in.
+    /// </summary>
+    private static string DescribePixFmt(Config c)
+    {
+        var parts = new List<string>
+        {
+            PixelFormatCatalog.Normalise(c.PixFmt) is { Length: > 0 } name ? name : L.T("value.auto"),
+        };
+
+        ColorOverride colors = ColorOverride.Parse(c.ColorRange, c.ColorSpace, c.ColorPrimaries, c.ColorTransfer);
+        if (colors.Any)
+        {
+            parts.Add(string.Join(" ", new[]
+            {
+                colors.Range is null ? null : $"range={colors.Range}",
+                colors.Space is null ? null : $"space={colors.Space}",
+                colors.Primaries is null ? null : $"prim={colors.Primaries}",
+                colors.Transfer is null ? null : $"trc={colors.Transfer}",
+            }.Where(x => x is not null)));
+        }
+        if (!string.Equals(c.Dither, "auto", StringComparison.OrdinalIgnoreCase)) parts.Add(c.Dither);
+        return string.Join(" | ", parts);
+    }
+
+    /// <summary>
+    /// v7.9.6: pixel format, colour tags and dither.
+    ///
+    /// The format list is the encoder's own declared set intersected with the
+    /// measured transport table -- offering a format the encoder cannot take
+    /// would only fail at preflight, and offering one whose frame size this
+    /// build does not know would corrupt the pipe.
+    /// </summary>
+    private static void EditPictureFormat(Config c)
+    {
+        while (true)
+        {
+            Console.WriteLine($"\n== {L.T("pix.menu")} ==");
+            Console.WriteLine($" 1. {L.Pad(L.T("pix.menu.format"), 28)} = {DescribePixFmt(c)}");
+            Console.WriteLine($" 2. {L.Pad(L.T("pix.menu.range"), 28)} = {c.ColorRange ?? L.T("value.auto")}");
+            Console.WriteLine($" 3. {L.Pad(L.T("pix.menu.space"), 28)} = {c.ColorSpace ?? L.T("value.auto")}");
+            Console.WriteLine($" 4. {L.Pad(L.T("pix.menu.primaries"), 28)} = {c.ColorPrimaries ?? L.T("value.auto")}");
+            Console.WriteLine($" 5. {L.Pad(L.T("pix.menu.transfer"), 28)} = {c.ColorTransfer ?? L.T("value.auto")}");
+            Console.WriteLine($" 6. {L.Pad(L.T("pix.menu.dither"), 28)} = {c.Dither}");
+            Console.WriteLine($" 7. {L.Pad(L.T("pix.menu.list"), 28)}");
+            Console.WriteLine($" 0. {L.T("sub.menu.back")}");
+            Console.Write(L.T("menu.select"));
+
+            string pick = (Console.ReadLine() ?? "").Trim();
+            try
+            {
+                switch (pick)
+                {
+                    case "0": return;
+                    case "1": ChoosePixFmt(c); break;
+                    case "2": c.ColorRange = PickColorValue(L.T("pix.menu.range"), Constants.ColorRanges, c.ColorRange); break;
+                    case "3": c.ColorSpace = PickColorValue(L.T("pix.menu.space"), Constants.ColorSpaces, c.ColorSpace); break;
+                    case "4": c.ColorPrimaries = PickColorValue(L.T("pix.menu.primaries"), Constants.ColorPrimaries, c.ColorPrimaries); break;
+                    case "5": c.ColorTransfer = PickColorValue(L.T("pix.menu.transfer"), Constants.ColorTransfers, c.ColorTransfer); break;
+                    case "6":
+                        string dither = ReadRaw(L.T("pix.prompt.dither",
+                            string.Join(" / ", Constants.DitherModes), c.Dither)).ToLowerInvariant();
+                        if (dither.Length > 0)
+                        {
+                            if (!Constants.DitherModes.Contains(dither))
+                                throw new FormatException(L.T("pix.ditherbad", string.Join(", ", Constants.DitherModes)));
+                            c.Dither = dither;
+                        }
+                        break;
+                    case "7":
+                        Report.PrintPixelFormats(c.Encoder?.Name, c.Encoder?.Caps);
+                        break;
+                    default:
+                        Console.WriteLine(L.T("menu.invalid"));
+                        break;
+                }
+            }
+            catch (Exception exc) when (exc is FormatException or ArgumentException)
+            {
+                Console.WriteLine(L.T("param.badvalue", exc.Message));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Pick the transport pixel format. "a"/empty keeps the automatic choice;
+    /// a number picks from the offered list; anything else is taken as a name
+    /// and validated, so a typed format works without scrolling a long menu.
+    /// </summary>
+    private static void ChoosePixFmt(Config c)
+    {
+        List<string> offered = OfferedPixFmts(c);
+        Console.WriteLine($"\n{L.T("pix.list.heading")}");
+        Console.WriteLine($"  a. {L.T("value.auto")} -- {L.T("pix.list.autohint")}");
+        for (int i = 0; i < offered.Count; i++)
+        {
+            string detail = PixelFormatCatalog.TryGet(offered[i], out PixFmtInfo info) ? info.Describe() : "";
+            Console.WriteLine($" {i + 1,2}. {L.Pad(offered[i], 14)} {detail}");
+        }
+
+        string raw = ReadRaw(L.T("pix.prompt.format",
+            PixelFormatCatalog.Normalise(c.PixFmt) is { Length: > 0 } current ? current : L.T("value.auto")));
+        if (raw.Length == 0) return;
+        if (raw.ToLowerInvariant() is "a" or "auto") { c.PixFmt = null; return; }
+
+        string name;
+        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index))
+        {
+            if (index < 1 || index > offered.Count) throw new FormatException(L.T("pix.formatbad"));
+            name = offered[index - 1];
+        }
+        else
+        {
+            name = PixelFormatCatalog.Normalise(raw);
+        }
+
+        if (c.Encoder?.Caps is { } caps)
+        {
+            string? problem = PixelFormatCatalog.Validate(name, caps);
+            if (problem is not null) throw new FormatException(problem);
+        }
+        else if (!PixelFormatCatalog.TryGet(name, out _))
+        {
+            throw new FormatException(L.T("pix.formatbad"));
+        }
+
+        // Say it now rather than after a realtime pass: a palette format in a
+        // palette-lossy container decodes as a black picture.
+        string? conflict = PixelFormatUtil.PaletteContainerConflict(name, c.Encoder?.FormatName ?? "");
+        if (conflict is not null) throw new FormatException(conflict);
+
+        c.PixFmt = name;
+        Console.WriteLine(L.T("pix.formatset", name,
+            PixelFormatCatalog.TryGet(name, out PixFmtInfo chosen) ? chosen.Describe() : ""));
+    }
+
+    /// <summary>
+    /// Formats to offer: what this encoder declares, restricted to the measured
+    /// table; the common list when the encoder declares nothing.
+    /// </summary>
+    private static List<string> OfferedPixFmts(Config c)
+    {
+        if (c.Encoder?.Caps is { SupportedPixFmts.Count: > 0 } caps)
+        {
+            List<string> known = [.. caps.SupportedPixFmts
+                .Select(PixelFormatCatalog.Normalise)
+                .Where(name => PixelFormatCatalog.TryGet(name, out _))
+                .Distinct(StringComparer.OrdinalIgnoreCase)];
+            if (known.Count > 0) return known;
+        }
+        return [.. PixelFormatCatalog.Common];
+    }
+
+    /// <summary>
+    /// Prompt for one of a fixed list of colour tags, with "auto" to go back to
+    /// the source's own value. Accepts a number as well as the name.
+    /// </summary>
+    private static string? PickColorValue(string label, string[] allowed, string? current)
+    {
+        Console.WriteLine($"\n{label}: {string.Join(", ", allowed)}");
+        string raw = ReadRaw(L.T("pix.prompt.color", current ?? L.T("value.auto"))).ToLowerInvariant();
+        if (raw.Length == 0) return current;
+        if (raw is "a" or "auto" or "source") return null;
+
+        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index))
+        {
+            if (index < 1 || index > allowed.Length) throw new FormatException(L.T("pix.colorbad"));
+            return allowed[index - 1];
+        }
+        if (!allowed.Contains(raw)) throw new FormatException(L.T("pix.colorbad"));
+        return raw;
+    }
 
     /// <summary>
     /// v7.9: pick which video and audio track of a multi-stream source to use.
@@ -824,6 +1007,23 @@ public static class Cui
             c.Encoder = EncoderMath.ResolveContainer(chosen, c.Container) ?? chosen;
             EncoderInfo effective = c.Encoder;
 
+            // v7.9.6: a pixel format the new encoder cannot take would only fail
+            // at preflight, so it is dropped here and said out loud. The
+            // palette/container rule is re-checked too, because both sides of it
+            // may have changed.
+            if (c.PixFmt is { Length: > 0 } pinnedPix)
+            {
+                string? pixProblem = c.Encoder.Caps is { } newCaps
+                    ? PixelFormatCatalog.Validate(pinnedPix, newCaps)
+                    : null;
+                pixProblem ??= PixelFormatUtil.PaletteContainerConflict(pinnedPix, effective.FormatName);
+                if (pixProblem is not null)
+                {
+                    Console.WriteLine(L.T("encoder.pixdropped", pinnedPix, effective.Name));
+                    c.PixFmt = null;
+                }
+            }
+
             IReadOnlyList<(string Ext, string Format)> containers =
                 EncoderMath.AllowedContainers(effective);
             if (containers.Count > 1)
@@ -1048,6 +1248,10 @@ public static class Cui
             Row(29, L.T("param.cropanchor"), c.FitMode == "crop" ? c.CropAnchor : "-");
             Row(30, L.T("param.padcolor"), c.FitMode == "fit" ? c.PadColor : "-");
             Row(31, L.T("param.sizepreset"), L.T("param.sizepreset.hint"));
+            // v7.9.6: the pixel format lives in its own menu (there is a list to
+            // choose from), but it is a setting like any other, so the parameter
+            // screen says what it currently is.
+            Console.WriteLine($"    {L.T("param.pixhint")} = {DescribePixFmt(c)}");
             Console.WriteLine($"    {L.T("param.availdeint")}     = {string.Join(", ", deintOptions)}");
             Console.WriteLine($" 0. {L.T("param.back")}");
             Console.Write(L.T("param.select"));
@@ -1697,6 +1901,12 @@ public static class Cui
                 CropAnchor = c.CropAnchor,
                 PadColor = c.PadColor,
                 ScaleAlgo = c.ScaleAlgo,
+                PixFmt = c.PixFmt,
+                ColorRange = c.ColorRange,
+                ColorSpace = c.ColorSpace,
+                ColorPrimaries = c.ColorPrimaries,
+                ColorTransfer = c.ColorTransfer,
+                Dither = c.Dither,
                 Deinterlace = c.Deinterlace,
                 DeintMode = c.DeintMode,
                 DeintParity = c.DeintParity,
@@ -1719,6 +1929,9 @@ public static class Cui
             Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
             Console.WriteLine();
             Report.PrintResult(c.OutputPath.FullName, result);
+            // v7.9.6: verify a pinned format actually reached the file.
+            if (c.PixFmt is { Length: > 0 } pinnedPix)
+                Report.CheckOutputPixFmt(ffprobe, c.OutputPath, pinnedPix);
 
             // v7.6: the video-site recompress pass, after the live recording --
             // the site transcoded whatever it was given, so this is the only

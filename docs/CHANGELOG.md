@@ -18,6 +18,84 @@
 
 ---
 
+## v7.9.6（2026-10-24）
+
+两个目标：**画面能按指定的像素格式/色彩落盘**，以及**把项目再过一遍、修掉潜伏的
+缺陷**。第二个目标的结果不是"改了很多"，而是"改的每一处都能说出它是怎么被漏掉的"。
+
+### 1. 输出像素格式与色彩：`--pix-fmt` / `--color-*` / `--dither`
+
+以前"像素格式"是**推导**出来的：源是什么就用什么，源不行就取同家族里编码器接受的
+第一个。用户无法要求 `pal8`、`gray`、`rgb555le`、`yuv420p10le` 这类输出——而 8/16 位
+画面正是老录像归档里最容易被问到的一件事。
+
+- **`--pix-fmt FORMAT`**：输出像素格式。`pal8`（256 色索引）、`rgb8`（3:3:2）、
+  `rgb555le`/`rgb565le`（16 位色）、`rgb48le`、`gray`、`yuv420p10le`/`12le`/`16le`、
+  `yuv444p16le`、`nv12`、`p010le` …… 共 **86 种**，全部实测过帧长。
+  `auto`（默认）等于 v7.9.5 的自动推导，行为一字不改。
+- **请求要么被满足，要么被拒绝**。不接受"降级"：`--pix-fmt yuv420p10le` 给 mpeg4
+  （它只声明 yuv420p）会直接 exit 2 并列出它真正有的格式，而不是偷偷写 8 位。
+- **`--list-pix-fmts`**：把实测表按家族列出来，并用 `OK` / `---` 标出当前编码器
+  声明的那一列，不用试错。
+- **`--color-range` / `--colorspace` / `--color-primaries` / `--color-trc`**：覆盖
+  源文件的色彩标记（不转换画面）。不填就沿用源；填了就只覆盖那一项。
+- **`--dither MODE`**：`auto`（默认，不加参数）/ `none` / `bayer` / `ordered` /
+  `random` / `error_diffusion`。**只在目标格式真的会掉色时才发** `-sws_dither`
+  （pal8、5:5:5、5:6:5、3:3:2、1 位黑白、8 位灰度）；yuv420p 上这个参数什么也不做，
+  发了只会让日志说谎。
+- CUI 新增**主菜单 20「画面格式与色彩」**：像素格式（列出编码器接受的、也可直接
+  输入名字）、四项色彩标记、抖动、格式清单。换编码器时，新编码器吃不下当前格式
+  会**清掉并说明**，不会留到预检才炸。
+
+四件事只有实测才会发现，都写进了代码注释与测试：
+
+1. **`yuv440p` 的帧长一直算错**：旧表写 1.5 B/px，实测 **2.0**（4:4:0 的色度是全宽
+   半高）。它的可整除约束也被当成 4:2:0 的 2×2，实际只要高为偶数。历史代码从来
+   没有选中过 4:4:0，所以这个"每帧错 1/2"的缺陷一直躺着——`tools/pixfmt_sweep.py`
+   就是为这类事情写的：**86 种格式逐帧量一遍**，表里每一行都是量出来的。
+2. **调色板 + 丢调色板的容器，以前只在分片时拦**。v7.9.4 的规则写在 `ParallelEncoder`
+   里，于是 `--encoder zmbv --pix-fmt pal8 out.mkv` 这种**单遍**运行照样写出黑画面
+   （同一个片段 AVI 里 YAVG 123、Matroska 里 16）。现在这条规则在
+   `PixelFormatUtil.PaletteContainerConflict`，单遍/分片/CLI/CUI 都查。
+3. **libx264 收下 `-color_primaries`/`-color_trc` 但不写**：实测输出仍是
+   `primaries=unknown`，同样的值走 `-x264-params colorprim=…:transfer=…` 才进码流。
+   所以 libx264 现在两个都发（FFmpeg 与 x264 拼写不同的四个值做了翻译：
+   `gamma22→bt470m`、`gamma28→bt470bg`、`log→log100`、`log_sqrt→log316`）。
+4. **声明的格式不等于写出的格式**：`-c:v libx264 -pix_fmt gray` 出来是 yuvj420p。
+   编码结束后用 ffprobe 读回真实 `pix_fmt`，不一致就打一行 note（同 v7.9.5
+   "能力表只收三重校验"的做法）。
+
+### 2. 全项目复查：修掉的潜伏缺陷
+
+| 位置 | 缺陷 | 为什么一直没被发现 |
+|---|---|---|
+| `ParallelEncoder` 分片参数 | **没传 `FpsLevelKbps`**，用户钉的每档阈值被换成推导值 | 只在 `--parallel > 1` 时发生，且阈值只影响码率控制，产物照样能放 |
+| `RealtimeEncoder.RunSplitCore` | 同上，还漏了后来新增的字段 | 只在 `--audio-mode auto/separate` 时发生，默认 inline 走的是另一条路 |
+| `PixelFormatUtil.ChooseTransportPixFmt` | 源格式与声明表用**大小写敏感**比较 | FFmpeg 自己都打印小写；只有当配置/缓存里出现大写时才会把 10 位降成 8 位 |
+| `Constants.PixelFormatSize` | `yuv440p` = 1.5（应为 2.0） | 没有任何编码器/源在这个项目里用到 4:4:0 |
+| `PixelFormatUtil.NormalizeTransportDimensions` | 4:4:0 被当成 4:2:0，多砍了宽度 | 同上 |
+| `ParallelEncoder.BlockReason` | 调色板判断用的是**自动推导**的格式，忽略 `--pix-fmt` | v7.9.5 时还不能指定格式 |
+| `Validation` | 像素格式/色彩标记/抖动没有任何校验入口 | 这些设置是新加的 |
+
+`--quiet` 仍然只静音进度；格式不符的 note 与它同一开关（脚本要完全可预期时用
+`--quiet`，那是用户自己选择的沉默）。
+
+### 3. 验证
+
+| 项 | v7.9.5.1 | v7.9.6 |
+|---|---|---|
+| 单元测试（Windows） | 475 × {net10.0, net11.0} | **503 × {net10.0, net11.0}** |
+| e2e 收集 | 186 = 184 + 2 跳过 | **193 = 191 + 2 跳过**（a64 无 demuxer） |
+
+新增：`PixelFormatCatalogTests`（18 条，86 行帧长逐行对齐实测）、
+`PictureFormatConfigTests`（6 条）、`CliParserTests` 4 条、`CliArgsTests` 往返补
+五个字段、`tests/e2e/test_picture_format.py`（7 条）。
+
+不给 `--pix-fmt` 时行为与 v7.9.5.1 完全一致；配置文件新增六个可选键，老文件照常读，
+不认识的值在载入时被丢弃而不是带进编码。CUI 菜单编号新增 **20**，1–19 不变。
+
+---
+
 ## v7.9.5.1（2026-10-24）
 
 四个目标，一句话概括：**预设要像当年，字体要能查到，第二遍要能选编码器。**

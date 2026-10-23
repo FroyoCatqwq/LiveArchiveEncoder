@@ -99,6 +99,12 @@ public static class RealtimeEncoder
             DeintMode = o.DeintMode,
             DeintParity = o.DeintParity,
             DeintMarkedOnly = o.DeintMarkedOnly,
+            PixFmt = o.PixFmt,
+            ColorRange = o.ColorRange,
+            ColorSpace = o.ColorSpace,
+            ColorPrimaries = o.ColorPrimaries,
+            ColorTransfer = o.ColorTransfer,
+            Dither = o.Dither,
             Hwaccel = o.Hwaccel,
             X264Preset = string.IsNullOrEmpty(o.X264Preset) ? "medium" : o.X264Preset,
             X264Tune = o.X264Tune ?? "",
@@ -151,7 +157,16 @@ public static class RealtimeEncoder
         if (!availableScaleAlgorithms.Contains(scaleAlgo))
             throw new ArgumentException($"Scale algorithm '{scaleAlgo}' is not exposed by this FFmpeg build");
 
-        string transportFmt = PixelFormatUtil.ChooseTransportPixFmt(stream.PixFmt, caps);
+        // v7.9.6: an explicit --pix-fmt is honoured or refused here, before any
+        // process starts. The automatic choice is unchanged.
+        string transportFmt = PixelFormatUtil.ChooseTransportPixFmt(stream.PixFmt, caps, o.PixFmt);
+        // A palette format cannot survive a container that stores the codec
+        // header without it -- measured on msrle: YAVG 123 in AVI, YAVG 16 in
+        // Matroska and ASF (2026-10-23). v7.9.4 checked this only inside the
+        // shard planner, so a plain single pass still produced a black file.
+        if (PixelFormatUtil.PaletteContainerConflict(transportFmt, o.Encoder.FormatName) is { } paletteConflict)
+            throw new ArgumentException(paletteConflict);
+
         (int width, int height, bool sizeExact) =
             EncoderMath.NormalizeDimensions(o.Encoder.Name, o.Width, o.Height);
         (width, height, bool transportExact) =
@@ -217,7 +232,11 @@ public static class RealtimeEncoder
                         o.AudioEncoder, audioChannels, audioRate,
                         o.Encoder.Name == "amv" ? EncoderMath.AmvAudioBlockSize(o.Fps) : 0,
                         o.AudioKbps)
-                    : null);
+                    : null,
+                pixFmt: o.PixFmt.HasText ? transportFmt : null,
+                colors: ColorOverride.Parse(o.ColorRange, o.ColorSpace, o.ColorPrimaries, o.ColorTransfer),
+                dither: o.Dither,
+                transportFmt: transportFmt);
         }
 
         // A hardware method is only ever used after it has decoded a frame here,
@@ -255,7 +274,19 @@ public static class RealtimeEncoder
         {
             Console.WriteLine($"{L.T("run.encodercommand"),-17}: {o.Encoder.Name} -> {muxer} -> {dst.FullName}");
             Console.WriteLine($"{L.T("run.sourcepix"),-17}: {stream.PixFmt}");
-            Console.WriteLine($"{L.T("run.pipepix"),-17}: {transportFmt}");
+            Console.WriteLine($"{L.T("run.pipepix"),-17}: {transportFmt}"
+                + (o.PixFmt.HasText ? $" ({L.T("value.requested")})" : ""));
+            if (ArgsBuilder.DitherArgs(o.Dither, transportFmt).Count > 0)
+                Console.WriteLine($"{L.T("run.dither"),-17}: {o.Dither}");
+            ColorOverride colors = ColorOverride.Parse(
+                o.ColorRange, o.ColorSpace, o.ColorPrimaries, o.ColorTransfer);
+            if (colors.Any)
+            {
+                Console.WriteLine($"{L.T("run.color"),-17}: {string.Join(" ", ArgsBuilder.ColorArgs(stream, colors))}"
+                    + (o.Encoder.Name == "libx264"
+                        ? $" {string.Join(" ", ArgsBuilder.X264ColorArgs(colors))}"
+                        : ""));
+            }
             Console.WriteLine($"{L.T("run.outputsize"),-17}: {width}x{height}");
             Console.WriteLine(
                 $"{L.T("run.timerange"),-17}: {Timecode.Format(o.StartSeconds)} - {Timecode.Format(resolvedEnd)}"
@@ -400,6 +431,12 @@ public static class RealtimeEncoder
                 Encoder = o.Encoder,
                 Fps = o.Fps,
                 FpsLevels = o.FpsLevels,
+                // v7.9.6: this copy used to drop the per-rung thresholds, so a
+                // user who pinned "8:128:115" got the derived ones instead --
+                // only on this path (--audio-mode auto/separate), which is why
+                // no test noticed. Every field the video stage reads is now
+                // copied explicitly.
+                FpsLevelKbps = o.FpsLevelKbps,
                 Quality = o.Quality,
                 Threads = o.Threads,
                 LimitKbps = o.LimitKbps,
@@ -423,6 +460,12 @@ public static class RealtimeEncoder
                 CropAnchor = o.CropAnchor,
                 PadColor = o.PadColor,
                 ScaleAlgo = o.ScaleAlgo,
+                PixFmt = o.PixFmt,
+                ColorRange = o.ColorRange,
+                ColorSpace = o.ColorSpace,
+                ColorPrimaries = o.ColorPrimaries,
+                ColorTransfer = o.ColorTransfer,
+                Dither = o.Dither,
                 Deinterlace = o.Deinterlace,
                 DeintMode = o.DeintMode,
                 DeintParity = o.DeintParity,
@@ -509,6 +552,10 @@ public static class RealtimeEncoder
         RealtimeOptions o, string sourcePath, string vf, string transportFmt, double? duration)
     {
         var cmd = new List<string> { o.FFmpeg, "-hide_banner", "-loglevel", "error" };
+        // v7.9.6: swscale dither applies while the decoder converts the source
+        // into the transport format -- which is the only place a colour
+        // reduction happens. It is a global option, so it goes before -i.
+        cmd.AddRange(ArgsBuilder.DitherArgs(o.Dither, transportFmt));
         // Network resilience, per source: the reconnect family for a URL, the
         // rw_timeout for a share. On a local file these are noise, so both
         // helpers return nothing.
@@ -543,6 +590,8 @@ public static class RealtimeEncoder
             "-framerate", ArgsBuilder.FpsArg(o.Fps),
             "-i", "pipe:0",
         };
+        ColorOverride colors = ColorOverride.Parse(
+            o.ColorRange, o.ColorSpace, o.ColorPrimaries, o.ColorTransfer);
         // Input 0 is the pipe; every further input is numbered from here.
         int nextInput = 1;
 
@@ -579,12 +628,19 @@ public static class RealtimeEncoder
 
         cmd.AddRange(["-c:v", o.Encoder.Name]);
         cmd.AddRange(ArgsBuilder.VideoQualityArgs(o.Encoder.Name, o.Quality));
+        // v7.9.6: pin the format on the encoder side too when the user named
+        // one. The pipe already carries --pix_fmt, but without this the encoder
+        // is free to hand the muxer its own default (measured: libx264 given
+        // grey 4:0:0 writes yuvj420p), which is the kind of silent substitution
+        // this flag exists to prevent.
+        if (o.PixFmt.HasText) cmd.AddRange(["-pix_fmt", transportFmt]);
         if (o.Encoder.Name == "libx264")
         {
             cmd.AddRange(ArgsBuilder.X264Args(o.X264Preset, o.X264Tune, o.X264Profile, o.X264Level));
+            cmd.AddRange(ArgsBuilder.X264ColorArgs(colors));
         }
         cmd.AddRange(["-r", ArgsBuilder.FpsArg(o.Fps), "-fps_mode", "cfr"]);
-        cmd.AddRange(ArgsBuilder.ColorArgs(stream));
+        cmd.AddRange(ArgsBuilder.ColorArgs(stream, colors));
 
         if (hasAudio)
         {

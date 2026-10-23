@@ -226,6 +226,13 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--pad-color` | `black` | `fit` 时补边的颜色，FFmpeg 颜色名或 `0xRRGGBB` |
 | `--no-crop` | 默认裁剪 | 旧写法，等价于 `--fit stretch` |
 | `--scale-algo` / `--scale-flags` | `neighbor` | 缩放核；`cubic` 是 `bicubic` 的别名 |
+| `--pix-fmt` | `auto` | **v7.9.6**：输出像素格式（`pal8` / `rgb8` / `rgb555le` / `rgb565le` / `gray` / `rgb48le` / `yuv420p10le` …，见 §7.17）。`auto` ＝ 沿用源格式。请求要么被满足，要么 exit 2，不会静默降级 |
+| `--list-pix-fmts` | — | **v7.9.6**：列出 86 种实测过的像素格式，并用 `OK`/`---` 标出当前编码器声明的那一列，然后退出 |
+| `--color-range` | 跟随源 | **v7.9.6**：`tv` / `pc` / `mpeg` / `jpeg` / `unspecified` |
+| `--colorspace` | 跟随源 | **v7.9.6**：色彩空间标记（`bt709` / `bt470bg` / `smpte170m` / `bt2020nc` …） |
+| `--color-primaries` | 跟随源 | **v7.9.6**：原色标记（`bt709` / `bt470bg` / `bt2020` / `smpte431` …） |
+| `--color-trc` | 跟随源 | **v7.9.6**：传输特性标记（`bt709` / `srgb` 写作 `iec61966-2-1` / `smpte2084`（PQ） / `arib-std-b67`（HLG） …） |
+| `--dither` | `auto` | **v7.9.6**：降到低色深时的抖动（`auto` / `none` / `bayer` / `ordered` / `random` / `error_diffusion`），只在目标格式真的掉色时才发 |
 | `--deinterlace` | `off` | `bwdif` / `yadif` / `w3fdif` |
 | `--deint-mode` | `send_frame` | `send_frame` 或 `send_field` |
 | `--deint-parity` | `auto` | `auto` / `tff` / `bff` |
@@ -303,10 +310,11 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
 17. Subtitles         字幕：烧录 / 封装 / 关闭（见 §7.16）
 18. Command line      把当前设置打印成一条等价命令行（见 §7.6）
 19. Config files      命名配置档案：载入 / 另存 / 删除（见 §7.6）
+20. Picture format    像素格式 / 色彩标记 / 抖动（见 §7.17）
  0. Exit
 ```
 
-6 – 17 改完立即写进配置文件，下一次打开就是这次的值。18 是**只读**的（打印完就回菜单）；
+6 – 17 和 20 改完立即写进配置文件，下一次打开就是这次的值。18 是**只读**的（打印完就回菜单）；
 19 载入档案后会把结果写回配置，和其它项一样。
 
 **Turbo 已彻底移除**（v7.9）：菜单里没有，命令行 `--turbo` 直接报
@@ -333,6 +341,9 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
 28. container       29. crop anchor     30. bar colour      31. resolution presets
  0. Back
 ```
+
+参数页底部还会列一行当前**画面格式**（像素格式 + 已固定的色彩标记 + 抖动），
+改它走主菜单 20（那里有格式清单可挑）。
 
 每一项都是"回车＝保留当前值"。15、19 是开关，选中即翻转。`26` 可以填
 `end` / `none` / `eof` 表示"到源尾"。16/17/18 会按音频编码器的能力**自动纠正**
@@ -1690,6 +1701,114 @@ Repeated slots     : 21
 
 ---
 
+## 7.17 输出像素格式与色彩（v7.9.6）
+
+v7.9.5 以前，管道里的像素格式是**推导**出来的：源是什么就用什么，源不行就取同
+色度家族里编码器接受的第一个。这满足"不出错"，但不满足"我要 16 位色"或"我要 256 色
+索引"这类要求——而这恰恰是老录像归档里最常被问到的。
+
+### `--pix-fmt FORMAT`
+
+```
+# 256 色索引画（msrle 只吃 pal8，这里显式写出来）
+LiveArchiveEncoder in.mkv out.avi --encoder msrle --pix-fmt pal8 --dither bayer
+
+# 16 位色（5:6:5）
+LiveArchiveEncoder in.mkv out.avi --encoder zmbv --pix-fmt rgb565le
+
+# 10 位 4:2:0，HEVC 归档
+LiveArchiveEncoder in.mkv out.mkv --encoder libx264 --pix-fmt yuv420p10le
+
+# 灰度
+LiveArchiveEncoder in.mkv out.avi --encoder cinepak --pix-fmt gray
+```
+
+三个规则：
+
+1. **请求要么被满足，要么被拒绝。** 编码器声明里没有这个格式就 exit 2，并把编码器
+   真正支持的格式列出来——不会"好心"降级。静默降级是这一版最不想保留的行为：
+   `I asked for 10-bit and got 8-bit` 只有数位数的人才会发现。
+2. **写出的格式会被核对。** 编码结束后用 ffprobe 读回真实 `pix_fmt`，和请求不一致
+   就打一行 note。实测例子：`-c:v libx264 -pix_fmt gray` 的产物是 `yuvj420p`——
+   编码器把 gray 当输入接受，编码时却按 4:2:0 写。
+3. **调色板格式不能进丢调色板的容器。** `pal8` 只允许 AVI / MOV。Matroska 和 ASF
+   把未知 VfW 编码器存成不带调色板的 BITMAPINFOHEADER，同一个片段在 AVI 里 YAVG 123、
+   在 mkv 里 YAVG 16（纯黑）。这条以前只在分片时拦，现在单遍也拦。
+
+表里只有**实测过**的格式：LE 变体（`yuv420p10le` 等）在表内，BE 变体（`yuv420p10be`）
+不在——不是不支持，而是"每帧字节数没量过就不猜"。写成表外的名字会 exit 2 并列出认识的
+格式，不会按名字去推断帧长。
+
+`--pix-fmt` 只管**直播那一遍**。二次压缩是用户自己写参数段的，要保格式就在
+`--recompress-args` 里写 `-pix_fmt`。
+
+`--list-pix-fmts` 会按家族列出全部 86 种格式，`OK` 表示当前编码器声明支持：
+
+```
+$ LiveArchiveEncoder --list-pix-fmts --encoder msrle
+Verified pixel formats (raw video transport)
+Encoder msrle declares: pal8
+
+  pal8
+   OK  pal8         8-bit palette, 1 B/px + 1 KB palette
+```
+
+### 帧长是量出来的，不是算出来的
+
+编码器读的是裸 `rawvideo` 管道，一帧就是 `宽 × 高 × 每像素字节数`（调色板格式再加
+1024 字节）。这个数字错一个字节，画面就会一帧一帧地横向滑走——v7.9.4 的 msrle
+黑屏就是这么来的。
+
+所以 `Core/PixelFormatCatalog.cs` 里的表全部由 `tools/pixfmt_sweep.py` 实测生成：
+86 种格式，每种都真的写 3 帧 64×48 裸视频再除以帧数。v7.9.6 用它抓到两个潜伏错误：
+
+* `yuv440p`（4:4:0）被写成 1.5 B/px，实测是 **2.0**（色度全宽半高）；
+* 它的可整除约束被当成 4:2:0 的 2×2，实际只要高为偶数。
+
+历史版本从来没有选中过 4:4:0，所以"每帧少读一半"这个错误一直躺着。位打包的
+`monob`/`monow` 也按行字节对齐算（65 像素宽 = 9 字节/行）。
+
+### 色彩标记：`--color-range` / `--colorspace` / `--color-primaries` / `--color-trc`
+
+这四个是**写入流头的标记**，不转换画面。不填就沿用源；填了就覆盖那一项。
+
+| 值 | 说明 |
+| --- | --- |
+| `tv` / `pc` | 有限范围（16–235）/ 全范围（0–255） |
+| `bt709` / `bt470bg` / `smpte170m` / `bt2020nc` / `bt2020c` | 常见的色彩空间（矩阵） |
+| `bt709` / `bt470bg` / `bt2020` / `smpte431` / `smpte432` / `jedec-p22` | 原色 |
+| `bt709` / `iec61966-2-1`（sRGB）/ `smpte2084`（PQ）/ `arib-std-b67`（HLG） / `linear` | 传输特性 |
+
+两个实测事实：
+
+* **libx264 收下 `-color_primaries`/`-color_trc` 但不写**。同样的值走
+  `-x264-params colorprim=…:transfer=…:colmatrix=…` 才进码流（实测：前者产物
+  `primaries=unknown`，后者 `smpte2084/bt2020`）。程序对 libx264 两个都发，
+  并把 FFmpeg 与 x264 拼写不同的四个值自动翻译（`gamma22→bt470m`、
+  `gamma28→bt470bg`、`log→log100`、`log_sqrt→log316`）。
+* **别的老编码器根本没地方存原色/传输特性**。mpeg4 / mpeg2video 的码流里没有这两个
+  字段，Matroska 的 `Colour` 元素也只落 Range 和矩阵。这是 1990 年代码流的容量问题，
+  不是程序偷懒——写进去的只有容器能承载的部分。
+
+### `--dither`：降到低色深时的抖动
+
+`auto`（默认）不加任何参数，交给 swscale 自己挑；`none` 关掉；`bayer` / `ordered` /
+`random` / `error_diffusion` 走 `-sws_dither`。
+
+**只在目标格式真的会掉色时才发这个参数**：`pal8`、`rgb8`（3:3:2）、`rgb555`/`rgb565`、
+`monob`/`monow`、8 位 `gray`。`yuv420p` 上这个参数什么也不做，发了只会让日志说谎。
+
+实测（64×48 渐变源，4 帧）：四种模式产出的字节各不相同，`auto` 也不等于 `none`，
+所以默认值确实在抖动，不是关着的。
+
+### 菜单
+
+主菜单 **20「画面格式与色彩」**：像素格式（按编号选，或直接打名字）、四项色彩标记、
+抖动、格式清单。换了编码器之后，如果它吃不消当前格式，程序会清掉并说一句，而不是
+留到预检才失败。
+
+---
+
 ## 10. 排错
 
 | 报错 | 原因 | 怎么办 |
@@ -1709,6 +1828,9 @@ Repeated slots     : 21
 | 字幕烧录后**中文是方块** | ASS 点名的字体不在 `fonts` 目录里，libass 挑了拉丁字体顶上 | 往 `%LOCALAPPDATA%\LiveArchiveEncoder\fonts\`（Linux `~/.local/share/LiveArchiveEncoder/fonts/`）放一个中文字体（msyh.ttc / simhei.ttf / Noto*CJK）；目录可用 `LAE_FONT_DIR` 改。见 §7.12 |
 | `recompress` 报 `'-i' is not allowed here` / `looks like an output file name` | 参数段里写了输入或输出 | 参数段只写中间部分，`-i` 和输出路径由程序生成；见 §7.12 |
 | `--parallel 4` 给了却"没生效" | 输入在网络驱动器上（UNC / `smb://` / 映射盘 / CIFS 挂载） | 这是故意回退成单遍：分片读同一个网络文件会让画质在中间塌一段。把源拷到本地再分片，或接受单遍；见 §7.8 |
+| `pal8 frames cannot be stored in 'matroska'` | 调色板格式只能进 AVI / MOV：Matroska/ASF 存未知 VfW 编码器时不带调色板，画面会是纯黑 | 改用 `.avi` / `.mov`，或换一个不需要调色板的像素格式（`--pix-fmt yuv420p`）；见 §7.17 |
+| `encoder 'xxx' cannot take yuv420p10le` | 该编码器不声明这个像素格式 | `--list-pix-fmts --encoder xxx` 看它到底吃哪些；老编码器多数只吃 8 位 |
+| 请求了 `gray` 但文件报 `yuvj420p` | 编码器把 gray 当输入接受、编码时按 4:2:0 写（libx264 实测如此） | 这是 note 不是错误；要真的灰度就改用 `cinepak`/`qtrle` 这类原生 gray 编码器 |
 | 远程源录到一半**画质突然变糊** | 网络抖动，实时节拍落后 → 自适应控制器误判码率太高而连续降档 | 同上，这是实时工具对线路的诚实反应；换稳定链路或降到本地源 |
 
 ---

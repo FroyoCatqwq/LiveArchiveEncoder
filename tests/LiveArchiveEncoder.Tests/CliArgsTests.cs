@@ -45,6 +45,12 @@ public sealed class CliArgsTests
         CropAnchor = "left",
         PadColor = "0x404040",
         ScaleAlgo = "bicubic",
+        PixFmt = "yuv420p10le",
+        ColorRange = "tv",
+        ColorSpace = "bt709",
+        ColorPrimaries = "bt709",
+        ColorTransfer = "smpte2084",
+        Dither = "bayer",
         Deinterlace = "yadif",
         DeintMode = "send_field",
         DeintParity = "tff",
@@ -120,6 +126,13 @@ public sealed class CliArgsTests
         await Assert.That(opts.CropAnchor).IsEqualTo("left");
         await Assert.That(opts.PadColor).IsEqualTo("0x404040");
         await Assert.That(opts.ScaleAlgo).IsEqualTo("bicubic");
+        // v7.9.6: the picture format and colour tags survive the round trip.
+        await Assert.That(opts.PixFmt).IsEqualTo("yuv420p10le");
+        await Assert.That(opts.ColorRange).IsEqualTo("tv");
+        await Assert.That(opts.ColorSpace).IsEqualTo("bt709");
+        await Assert.That(opts.ColorPrimaries).IsEqualTo("bt709");
+        await Assert.That(opts.ColorTransfer).IsEqualTo("smpte2084");
+        await Assert.That(opts.Dither).IsEqualTo("bayer");
         await Assert.That(opts.Deinterlace).IsEqualTo("yadif");
         await Assert.That(opts.DeintMode).IsEqualTo("send_field");
         await Assert.That(opts.DeintParity).IsEqualTo("tff");

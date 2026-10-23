@@ -352,23 +352,67 @@ public static class Constants
 
     public static readonly string[] DeinterlaceFilters = ["bwdif", "yadif", "w3fdif"];
 
-    public static readonly FrozenDictionary<string, double> PixelFormatSize =
-        new Dictionary<string, double>
-        {
-            ["yuv420p"] = 3.0 / 2.0, ["yuv422p"] = 2.0, ["yuv444p"] = 3.0,
-            ["yuv411p"] = 3.0 / 2.0, ["yuv410p"] = 9.0 / 8.0, ["yuv440p"] = 3.0 / 2.0,
-            ["yuvj420p"] = 3.0 / 2.0, ["yuvj422p"] = 2.0, ["yuvj444p"] = 3.0,
-            ["yuvj411p"] = 3.0 / 2.0,
-            ["yuv420p10le"] = 3.0, ["yuv422p10le"] = 4.0, ["yuv444p10le"] = 6.0,
-            ["yuv420p12le"] = 3.0, ["yuv422p12le"] = 4.0, ["yuv444p12le"] = 6.0,
-            ["yuv420p16le"] = 3.0, ["yuv422p16le"] = 4.0, ["yuv444p16le"] = 6.0,
-            ["gray"] = 1.0, ["gray10le"] = 2.0, ["gray16le"] = 2.0,
-            ["rgb24"] = 3.0, ["bgr24"] = 3.0, ["rgba"] = 4.0, ["bgra"] = 4.0,
-            ["argb"] = 4.0, ["abgr"] = 4.0, ["rgb0"] = 4.0, ["bgr0"] = 4.0,
-            ["rgb555le"] = 2.0, ["rgb555be"] = 2.0, ["rgb565le"] = 2.0, ["rgb565be"] = 2.0,
-            ["rgb48le"] = 6.0, ["rgb48be"] = 6.0,
-            ["pal8"] = 1.0, ["rgb8"] = 1.0, ["bgr8"] = 1.0,
-        }.ToFrozenDictionary();
+    // ------------------------------------------------------------- v7.9.6 #1
+    // Colour handling. The pixel-format table itself lives in
+    // Core/PixelFormatCatalog.cs: it is measured data with per-format metadata,
+    // not a list of magic numbers, and keeping it in two places is how the old
+    // yuv440p entry stayed wrong for three releases.
+
+    /// <summary>
+    /// Accepted <c>-color_range</c> values. "unspecified" is included because a
+    /// source that declares nothing is not an error -- it means "assume the
+    /// codec default".
+    /// </summary>
+    public static readonly string[] ColorRanges = ["tv", "pc", "mpeg", "jpeg", "unspecified"];
+
+    /// <summary>
+    /// Accepted <c>-colorspace</c> values. These are FFmpeg's own names, not the
+    /// ITU numbers, because a name in the log is searchable and 6 is not.
+    /// </summary>
+    public static readonly string[] ColorSpaces =
+    [
+        "bt709", "fcc", "bt470bg", "smpte170m", "smpte240m", "ycgco",
+        "bt2020nc", "bt2020c", "smpte2085", "chroma-derived-nc",
+        "chroma-derived-c", "ictcp",
+    ];
+
+    /// <summary>Accepted <c>-color_primaries</c> values.</summary>
+    public static readonly string[] ColorPrimaries =
+    [
+        "bt709", "bt470m", "bt470bg", "smpte170m", "smpte240m", "film",
+        "bt2020", "smpte428", "smpte431", "smpte432", "jedec-p22", "ebu3213",
+    ];
+
+    /// <summary>
+    /// Accepted <c>-color_trc</c> values. <c>iec61966-2-1</c> is sRGB and
+    /// <c>smpte2084</c> is PQ; both keep their FFmpeg spelling so a copy-pasted
+    /// command line keeps working.
+    /// </summary>
+    public static readonly string[] ColorTransfers =
+    [
+        "bt709", "gamma22", "gamma28", "smpte170m", "smpte240m", "linear",
+        "log", "log_sqrt", "iec61966-2-4", "bt1361", "iec61966-2-1",
+        "bt2020-10", "bt2020-12", "smpte2084", "smpte428", "arib-std-b67",
+    ];
+
+    /// <summary>
+    /// Swscale dither modes, used when the picture is reduced to fewer colours
+    /// (pal8, rgb565, 8-bit grey). "auto" is swscale's own choice and emits no
+    /// flag at all; the rest are passed through <c>-sws_dither</c>.
+    ///
+    /// <para>This exists because pal8 output without dithering is not "8-bit
+    /// colour": it is the same 256 colours snapped from a 24-bit source with a
+    /// hard threshold, which bands gradients into visible steps. bayer is the
+    /// right default for an archival look, error_diffusion the best quality.</para>
+    /// </summary>
+    public static readonly string[] DitherModes =
+    [
+        "auto", "none", "bayer", "ordered", "random", "error_diffusion",
+    ];
+
+    /// <summary>Bayer is the default: cheap, stable, no temporal noise.</summary>
+    public const string DefaultDither = "bayer";
+
 
     public static string[] ScaleAlgorithms => [.. ScaleAlgorithmAliases.Keys];
 }

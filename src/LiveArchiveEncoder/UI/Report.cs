@@ -71,6 +71,22 @@ public static class Report
             _ => L.T("report.fit.crop", c.CropAnchor),
         });
         Line(L.T("report.scalealgo"), EncoderMath.CanonicalScaleAlgo(c.ScaleAlgo));
+        // v7.9.6: the picture format and the colour tags change what the file
+        // *is*, so they belong in the dump next to the codec and the size.
+        Line(L.T("report.pixfmt"), DescribeRequestedPixFmt(c));
+        if (ColorOverride.Parse(c.ColorRange, c.ColorSpace, c.ColorPrimaries, c.ColorTransfer) is { } colors
+            && colors.Any)
+        {
+            Line(L.T("report.color"), string.Join(" ", new[]
+            {
+                colors.Range is null ? null : $"range={colors.Range}",
+                colors.Space is null ? null : $"space={colors.Space}",
+                colors.Primaries is null ? null : $"primaries={colors.Primaries}",
+                colors.Transfer is null ? null : $"trc={colors.Transfer}",
+            }.Where(x => x is not null)));
+        }
+        if (!string.Equals(c.Dither, "auto", StringComparison.OrdinalIgnoreCase))
+            Line(L.T("report.dither"), c.Dither);
         Line(L.T("report.deinterlace"), c.Deinterlace);
         Line(L.T("report.deintmode"),
             L.T("report.deintparams", c.DeintMode, c.DeintParity, c.DeintMarkedOnly));
@@ -144,6 +160,19 @@ public static class Report
         }
     }
 
+    /// <summary>
+    /// "auto (keep the source's)" or "pal8 -- 8-bit palette, 1 B/px + 1 KB",
+    /// so the dump says what the format means, not just its name.
+    /// </summary>
+    private static string DescribeRequestedPixFmt(Configuration.Config c)
+    {
+        string name = PixelFormatCatalog.Normalise(c.PixFmt);
+        if (name.Length == 0) return L.T("value.auto");
+        return PixelFormatCatalog.TryGet(name, out PixFmtInfo info)
+            ? $"{info.Name} -- {info.Describe()}"
+            : name;
+    }
+
     /// <summary>"4:3" / "16:9" / a rounded ratio, so a 16:9 master stored in a
     /// 4:3 frame is obvious from the configuration dump.</summary>
     private static string AspectLabel(int width, int height)
@@ -166,6 +195,67 @@ public static class Report
         }
         Console.WriteLine($"\n{L.T("filters.scalers")}");
         Console.WriteLine(" " + string.Join(", ", availableScaleAlgorithms.OrderBy(x => x, StringComparer.Ordinal)));
+    }
+
+    /// <summary>
+    /// Print every verified pixel format, and mark the ones the selected encoder
+    /// declares (v7.9.6).
+    ///
+    /// The list is the measured table, not FFmpeg's -- a format can exist in the
+    /// build and still be unusable here, because this tool has to know its frame
+    /// size to read the pipe at all.
+    /// </summary>
+    public static void PrintPixelFormats(string? encoderName, Configuration.EncoderCaps? caps)
+    {
+        Console.WriteLine($"\n{L.T("pixfmt.heading")}");
+        if (encoderName is { Length: > 0 })
+        {
+            Console.WriteLine(L.T("pixfmt.encoder", encoderName,
+                caps is { SupportedPixFmts.Count: > 0 } declared
+                    ? string.Join(", ", declared.SupportedPixFmts)
+                    : L.T("value.notdeclared")));
+        }
+
+        foreach (IGrouping<string, PixFmtInfo> group in PixelFormatCatalog.Formats.Values
+                     .GroupBy(x => x.Family)
+                     .OrderBy(g => g.Key, StringComparer.Ordinal))
+        {
+            Console.WriteLine($"\n  {group.Key}");
+            foreach (PixFmtInfo info in group.OrderBy(x => x.BitDepth).ThenBy(x => x.Name, StringComparer.Ordinal))
+            {
+                bool accepted = caps is { SupportedPixFmts.Count: > 0 }
+                    && caps.SupportedPixFmts.Any(x => string.Equals(x, info.Name, StringComparison.OrdinalIgnoreCase));
+                string mark = caps is null || caps.SupportedPixFmts.Count == 0 ? "   " : accepted ? "OK " : "---";
+                Console.WriteLine($"   {mark} {info.Name,-12} {info.Describe()}");
+            }
+        }
+        Console.WriteLine($"\n{L.T("pixfmt.hint")}");
+    }
+
+    /// <summary>
+    /// Read the format the encoder actually wrote and say so when it is not the
+    /// one that was asked for.
+    ///
+    /// <para>This is the same "declared vs real" rule the capability matrix
+    /// follows. Measured 2026-10-24: <c>-c:v libx264 -pix_fmt gray</c> writes
+    /// yuvj420p -- the encoder lists grey as an input format and then encodes
+    /// 4:2:0 anyway. Without this check the only evidence would be a picture
+    /// that looks right, which is precisely the wrong evidence.</para>
+    /// </summary>
+    public static void CheckOutputPixFmt(string ffprobe, FileInfo output, string requested)
+    {
+        string wanted = PixelFormatCatalog.Normalise(requested);
+        if (wanted.Length == 0) return;
+
+        CaptureResult p = ProcessRunner.Run([
+            ffprobe, "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=pix_fmt", "-of", "default=nw=1:nk=1", output.FullName,
+        ], 30);
+        if (p.ExitCode != 0) return;
+
+        string actual = PixelFormatCatalog.Normalise(p.Stdout);
+        if (actual.Length == 0 || actual == wanted) return;
+        Console.WriteLine(L.T("note.pixfmtmismatch", wanted, actual));
     }
 
     public static void PrintResult(string outputPath, Encoding.EncodeResult result)

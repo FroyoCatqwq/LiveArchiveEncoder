@@ -335,4 +335,54 @@ public sealed class CliParserTests
     [Test]
     public async Task ScaleFlags_CountsAsAnExplicitScaleChoice() =>
         await Assert.That((await Parse("--scale-flags", "bicubic")).ScaleAlgoExplicit).IsTrue();
+
+    // ---- v7.9.6: pixel format, colour tags and dither ----
+
+    [Test]
+    public async Task PictureFlagsAreParsedAndNormalised()
+    {
+        CliOptions opts = await Parse("--pix-fmt", " PAL8 ", "--color-range", "PC",
+            "--colorspace", "BT709", "--color-primaries", "bt709",
+            "--color-trc", "smpte2084", "--dither", "BAYER");
+
+        await Assert.That(opts.PixFmt).IsEqualTo("pal8");
+        await Assert.That(opts.ColorRange).IsEqualTo("pc");
+        await Assert.That(opts.ColorSpace).IsEqualTo("bt709");
+        await Assert.That(opts.ColorPrimaries).IsEqualTo("bt709");
+        await Assert.That(opts.ColorTransfer).IsEqualTo("smpte2084");
+        await Assert.That(opts.Dither).IsEqualTo("bayer");
+    }
+
+    /// <summary>"auto" is how a settings file spells "no request", so the parser
+    /// must not treat it as an unknown format.</summary>
+    [Test]
+    public async Task AutoPixelFormatMeansNoRequest()
+    {
+        await Assert.That((await Parse("--pix-fmt", "auto")).PixFmt).IsNull();
+        await Assert.That((await Parse()).Dither).IsEqualTo("auto");
+    }
+
+    [Test]
+    public async Task UnsupportedPictureValuesAreRefusedAtParseTime()
+    {
+        await Assert.That(Error("--color-range", "studio")).Contains("--color-range");
+        await Assert.That(Error("--colorspace", "bt601")).Contains("--colorspace");
+        await Assert.That(Error("--color-primaries", "ntsc")).Contains("--color-primaries");
+        await Assert.That(Error("--color-trc", "pq")).Contains("--color-trc");
+        await Assert.That(Error("--dither", "floyd")).Contains("--dither");
+        // The format itself is checked against the encoder, not the parser, so
+        // the name is only lower-cased here -- an unknown one is reported with
+        // the encoder's own list when the run is resolved.
+        await Assert.That((await Parse("--pix-fmt", "yuv420p10be")).PixFmt).IsEqualTo("yuv420p10be");
+    }
+
+    [Test]
+    public async Task ListPixelFormatsIsABareSwitch()
+    {
+        await Assert.That((await Parse("--list-pix-fmts")).ListPixFmts).IsTrue();
+        // ... and must not swallow the next argument as its value.
+        CliOptions opts = await Parse("--list-pix-fmts", "clip.mkv");
+        await Assert.That(opts.ListPixFmts).IsTrue();
+        await Assert.That(opts.Input).IsEqualTo("clip.mkv");
+    }
 }

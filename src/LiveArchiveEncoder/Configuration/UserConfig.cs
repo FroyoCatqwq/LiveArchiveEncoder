@@ -27,7 +27,12 @@ internal sealed partial class UserConfigJsonContext : JsonSerializerContext;
 /// </summary>
 public sealed class UserConfig
 {
-    public const int CurrentVersion = 5;
+    /// <summary>
+    /// 6 = v7.9.6 (pixel format, colour tags, dither). Only informational: every
+    /// field added since v5 is optional, so an older file loads as-is and a
+    /// newer one is not refused -- the program never reads this number back.
+    /// </summary>
+    public const int CurrentVersion = 6;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -93,6 +98,22 @@ public sealed class UserConfig
     public bool? Crop43 { get; set; }
 
     public string ScaleAlgo { get; set; } = "neighbor";
+
+    /// <summary>
+    /// v7.9.6: output pixel format, null/"auto" for the automatic choice.
+    /// Absent from older files, which is fine -- null is the old behaviour.
+    /// </summary>
+    public string? PixFmt { get; set; }
+
+    /// <summary>v7.9.6: colour metadata overrides; null keeps the source's.</summary>
+    public string? ColorRange { get; set; }
+    public string? ColorSpace { get; set; }
+    public string? ColorPrimaries { get; set; }
+    public string? ColorTransfer { get; set; }
+
+    /// <summary>v7.9.6: swscale dither mode for low-colour output; "auto" = no flag.</summary>
+    public string Dither { get; set; } = "auto";
+
     public string Deinterlace { get; set; } = "off";
     public string DeintMode { get; set; } = "send_frame";
     public string DeintParity { get; set; } = "auto";
@@ -312,6 +333,12 @@ public static class ConfigStore
         CropAnchor = c.CropAnchor,
         PadColor = c.PadColor,
         ScaleAlgo = c.ScaleAlgo,
+        PixFmt = c.PixFmt,
+        ColorRange = c.ColorRange,
+        ColorSpace = c.ColorSpace,
+        ColorPrimaries = c.ColorPrimaries,
+        ColorTransfer = c.ColorTransfer,
+        Dither = c.Dither,
         Deinterlace = c.Deinterlace,
         DeintMode = c.DeintMode,
         DeintParity = c.DeintParity,
@@ -422,6 +449,19 @@ public static class ConfigStore
         // Migration: "crop 4:3 = no" meant no crop at all, i.e. a plain stretch.
         if (stored.Crop43 is false) c.FitMode = "stretch";
         c.ScaleAlgo = stored.ScaleAlgo.Or(c.ScaleAlgo);
+        // v7.9.6: a stored format that this build no longer knows is dropped
+        // rather than trusted -- an unknown transport format would only fail
+        // later, inside a frame-size calculation with no context.
+        c.PixFmt = Core.PixelFormatCatalog.TryGet(stored.PixFmt, out Core.PixFmtInfo pix)
+            ? pix.Name
+            : null;
+        c.ColorRange = SanitiseColor(stored.ColorRange, Constants.ColorRanges);
+        c.ColorSpace = SanitiseColor(stored.ColorSpace, Constants.ColorSpaces);
+        c.ColorPrimaries = SanitiseColor(stored.ColorPrimaries, Constants.ColorPrimaries);
+        c.ColorTransfer = SanitiseColor(stored.ColorTransfer, Constants.ColorTransfers);
+        c.Dither = Constants.DitherModes.Contains((stored.Dither ?? "").Trim().ToLowerInvariant())
+            ? stored.Dither!.Trim().ToLowerInvariant()
+            : "auto";
         c.Deinterlace = stored.Deinterlace.Or(c.Deinterlace);
         c.DeintMode = stored.DeintMode.Or(c.DeintMode);
         c.DeintParity = stored.DeintParity.Or(c.DeintParity);
@@ -473,6 +513,20 @@ public static class ConfigStore
             }
             PostProcess.EraPresets.SetCustom(c.CustomEras);
         }
+    }
+
+    /// <summary>
+    /// A stored colour value is only kept when it is one this build offers.
+    /// Anything else -- a typo, a value from a newer version, a null -- becomes
+    /// null, which means "keep what the source declared". That is the safe
+    /// direction: an unrecognised tag would otherwise reach FFmpeg and abort the
+    /// run long after the settings file was read.
+    /// </summary>
+    private static string? SanitiseColor(string? value, string[] allowed)
+    {
+        string name = (value ?? "").Trim().ToLowerInvariant();
+        if (name.Length == 0 || name == "auto" || name == "source") return null;
+        return allowed.Contains(name) ? name : null;
     }
 
     /// <summary>

@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.5.1 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.6 (.NET 10 / .NET 11)",
         ["env.heading"] = "System check",
         ["env.cores"] = "only {0} CPU core(s); the documented minimum is {1}",
         ["env.memory"] = "about {0} GB of memory; the documented minimum is {1} GB",
@@ -238,6 +238,42 @@ public static class L
         ["param.anchorbad"] = "choose one of {0}",
         ["param.padcolor"] = "bar colour",
         ["param.prompt.padcolor"] = "bar colour [{0}]: ",
+
+        // ---- v7.9.6: pixel format, colour tags and dither ----
+        ["param.pixhint"] = "picture format (menu 20)",
+        ["menu.pictureformat"] = "Picture format & colour",
+        ["pix.menu"] = "Picture format & colour",
+        ["pix.menu.format"] = "pixel format",
+        ["pix.menu.range"] = "colour range",
+        ["pix.menu.space"] = "colour space",
+        ["pix.menu.primaries"] = "colour primaries",
+        ["pix.menu.transfer"] = "transfer characteristics",
+        ["pix.menu.dither"] = "dither",
+        ["pix.menu.list"] = "list the formats this build can write",
+        ["pix.prompt.format"] = "format [{0}] (a = auto, number, or a name): ",
+        ["pix.prompt.dither"] = "dither [{0}] ({1}): ",
+        ["pix.prompt.color"] = "value [{0}] (a = follow the source): ",
+        ["pix.list.heading"] = "Formats this encoder accepts",
+        ["pix.list.autohint"] = "keep the source's own format",
+        ["pix.formatset"] = "Pixel format set to {0} ({1})",
+        ["pix.formatbad"] = "unknown or unsupported pixel format",
+        ["pix.colorbad"] = "choose a value from the list",
+        ["pix.ditherbad"] = "choose one of: {0}",
+        ["encoder.pixdropped"] = "Pixel format {0} is not available for {1}; falling back to the automatic choice.",
+        ["pixfmt.heading"] = "Verified pixel formats (raw video transport)",
+        ["pixfmt.encoder"] = "Encoder {0} declares: {1}",
+        ["pixfmt.hint"] = "OK = the selected encoder accepts it; --- = declared elsewhere only. "
+            + "Every row's frame size was measured with tools/pixfmt_sweep.py.",
+        ["note.pixfmtmismatch"] = "Note: asked for {0}, but the output file reports {1}. "
+            + "The encoder accepted the format on the pipe and wrote another one; "
+            + "the picture is still valid, only the colour layout differs.",
+        ["value.requested"] = "requested",
+        ["run.dither"] = "dither",
+        ["run.color"] = "colour tags",
+        ["report.pixfmt"] = "pixel format",
+        ["report.color"] = "colour tags",
+        ["report.dither"] = "dither",
+
         ["param.container"] = "container",
         ["param.sizepreset"] = "resolution presets",
         ["param.sizepreset.hint"] = "press 31 to pick",
@@ -595,7 +631,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.5.1 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.6 (.NET 10 / .NET 11)",
         ["env.heading"] = "系统检查",
         ["env.cores"] = "只有 {0} 个 CPU 核心；文档给出的下限是 {1}",
         ["env.memory"] = "内存约 {0} GB；文档给出的下限是 {1} GB",
@@ -809,6 +845,41 @@ public static class L
         ["param.anchorbad"] = "请选择其中之一：{0}",
         ["param.padcolor"] = "黑边颜色",
         ["param.prompt.padcolor"] = "黑边颜色 [{0}]：",
+
+        // ---- v7.9.6：像素格式、色彩标记与抖动 ----
+        ["param.pixhint"] = "画面格式（主菜单 20）",
+        ["menu.pictureformat"] = "画面格式与色彩",
+        ["pix.menu"] = "画面格式与色彩",
+        ["pix.menu.format"] = "像素格式",
+        ["pix.menu.range"] = "色彩范围",
+        ["pix.menu.space"] = "色彩空间",
+        ["pix.menu.primaries"] = "色彩原色",
+        ["pix.menu.transfer"] = "传输特性",
+        ["pix.menu.dither"] = "抖动",
+        ["pix.menu.list"] = "列出本构建可写的格式",
+        ["pix.prompt.format"] = "像素格式 [{0}]（a = 自动，可填编号或名称）：",
+        ["pix.prompt.dither"] = "抖动 [{0}]（{1}）：",
+        ["pix.prompt.color"] = "取值 [{0}]（a = 沿用源）：",
+        ["pix.list.heading"] = "当前编码器接受的格式",
+        ["pix.list.autohint"] = "沿用源文件自己的格式",
+        ["pix.formatset"] = "像素格式已设为 {0}（{1}）",
+        ["pix.formatbad"] = "未知或不受支持的像素格式",
+        ["pix.colorbad"] = "请从列表中选择一个取值",
+        ["pix.ditherbad"] = "请从以下选项中选择：{0}",
+        ["encoder.pixdropped"] = "编码器 {1} 不支持像素格式 {0}，已改为自动选择。",
+        ["pixfmt.heading"] = "已验证的像素格式（原始视频管道）",
+        ["pixfmt.encoder"] = "编码器 {0} 声明支持：{1}",
+        ["pixfmt.hint"] = "OK = 当前编码器接受；--- = 仅在其他编码器处声明。"
+            + "每一行的帧长都由 tools/pixfmt_sweep.py 实测得出。",
+        ["note.pixfmtmismatch"] = "注意：请求的是 {0}，但输出文件报的是 {1}。"
+            + "编码器在管道上接受了该格式，写出时却换成了别的；画面仍然可用，只是色彩布局不同。",
+        ["value.requested"] = "用户指定",
+        ["run.dither"] = "抖动",
+        ["run.color"] = "色彩标记",
+        ["report.pixfmt"] = "像素格式",
+        ["report.color"] = "色彩标记",
+        ["report.dither"] = "抖动",
+
         ["param.container"] = "容器",
         ["param.sizepreset"] = "分辨率预设",
         ["param.sizepreset.hint"] = "按 31 选择",

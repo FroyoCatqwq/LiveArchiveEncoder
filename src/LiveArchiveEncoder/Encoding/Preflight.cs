@@ -47,7 +47,11 @@ public static class Preflight
         double startSeconds,
         AudioTrial? audio = null,
         int? videoStream = null,
-        int? audioStream = null)
+        int? audioStream = null,
+        string? pixFmt = null,
+        Configuration.ColorOverride? colors = null,
+        string dither = "auto",
+        string? transportFmt = null)
     {
         string tempDir = Path.Combine(Path.GetTempPath(),
             "live_archive_preflight_" + Guid.NewGuid().ToString("N"));
@@ -56,6 +60,11 @@ public static class Preflight
         {
             string output = Path.Combine(tempDir, $"preflight.{encoder.Extension}");
             var cmd = new List<string> { ffmpeg, "-hide_banner", "-loglevel", "error" };
+            // v7.9.6: the dither mode is a global swscale option, so it has to be
+            // on the command line before any input -- and the trial has to carry
+            // it, or the trial would validate a slightly different conversion
+            // than the run performs.
+            cmd.AddRange(ArgsBuilder.DitherArgs(dither, transportFmt ?? stream.PixFmt));
             // v7.9: a URL source needs the reconnect family on this throwaway
             // read too, or a flaky connection fails the preflight and with it
             // an encode that would have survived.
@@ -98,12 +107,17 @@ public static class Preflight
                     cmd.AddRange(["-ar", audio.Rate.Value.ToString()]);
             }
             cmd.AddRange(ArgsBuilder.VideoQualityArgs(encoder.Name, quality));
+            // v7.9.6: an explicit request is also pinned on the encoder side, so
+            // the output really keeps it instead of being quietly retuned to the
+            // encoder's own default.
+            if (pixFmt.HasText) cmd.AddRange(["-pix_fmt", pixFmt]);
             cmd.AddRange(["-r", ArgsBuilder.FpsArg(fps)]);
             if (encoder.Name == "libx264")
             {
                 cmd.AddRange(ArgsBuilder.X264Args(x264Preset, x264Tune, x264Profile, x264Level));
+                cmd.AddRange(ArgsBuilder.X264ColorArgs(colors));
             }
-            cmd.AddRange(ArgsBuilder.ColorArgs(stream));
+            cmd.AddRange(ArgsBuilder.ColorArgs(stream, colors));
             cmd.AddRange(["-f", muxer, "-y", output]);
 
             CaptureResult result = ProcessRunner.Run(cmd, 120);

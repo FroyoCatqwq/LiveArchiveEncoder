@@ -176,6 +176,27 @@ public static class Cli
         if (!fpsExact)
             Console.WriteLine(L.T("note.fpsunsupported", encoder.Name, $"{effectiveFps:G6}", $"{baseFps:G6}"));
 
+        // v7.9.6: an explicit pixel format is checked against what this encoder
+        // declares, and against the container, before anything is probed or
+        // encoded. Both failures are argument errors (exit 2), not run failures:
+        // nothing has been written yet.
+        if (args.PixFmt is { Length: > 0 } rawPix)
+        {
+            string? pixError = PixelFormatCatalog.Validate(rawPix, encoder.Caps!);
+            if (pixError is not null)
+            {
+                Console.Error.WriteLine($"ERROR: {pixError}");
+                return 2;
+            }
+            string pixName = PixelFormatCatalog.Normalise(rawPix);
+            string? conflict = PixelFormatUtil.PaletteContainerConflict(pixName, encoder.FormatName);
+            if (conflict is not null)
+            {
+                Console.Error.WriteLine($"ERROR: {conflict}");
+                return 2;
+            }
+        }
+
         // v7.9.5: .h261/.h263/.a64 are bare bitstreams -- no timestamps, so the
         // rate the file was encoded at is not in the file. The picture is fine;
         // saying nothing would leave the rate looking verified when it is not.
@@ -334,6 +355,12 @@ public static class Cli
                 CropAnchor = args.CropAnchor,
                 PadColor = args.PadColor,
                 ScaleAlgo = scaleAlgo,
+                PixFmt = args.PixFmt,
+                ColorRange = args.ColorRange,
+                ColorSpace = args.ColorSpace,
+                ColorPrimaries = args.ColorPrimaries,
+                ColorTransfer = args.ColorTransfer,
+                Dither = args.Dither,
                 Deinterlace = deinterlace,
                 DeintMode = args.DeintMode,
                 DeintParity = args.DeintParity,
@@ -473,6 +500,12 @@ public static class Cli
             CropAnchor = config.CropAnchor,
             PadColor = config.PadColor,
             ScaleAlgo = config.ScaleAlgo,
+            PixFmt = config.PixFmt,
+            ColorRange = config.ColorRange,
+            ColorSpace = config.ColorSpace,
+            ColorPrimaries = config.ColorPrimaries,
+            ColorTransfer = config.ColorTransfer,
+            Dither = config.Dither,
             Deinterlace = config.Deinterlace,
             DeintMode = config.DeintMode,
             DeintParity = config.DeintParity,
@@ -492,6 +525,11 @@ public static class Cli
 
         Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
         if (!args.Quiet) Report.PrintResult(dst.FullName, result);
+
+        // v7.9.6: a declared pixel format is not a written one -- libx264 lists
+        // grey and then encodes 4:2:0. One ffprobe call settles it.
+        if (!args.Quiet && config.PixFmt is { Length: > 0 })
+            Report.CheckOutputPixFmt(ffprobe, dst, config.PixFmt);
 
         // ---- v7.6: the video-site recompress pass ----
         string finalPath = dst.FullName;

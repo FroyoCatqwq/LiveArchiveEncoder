@@ -276,6 +276,10 @@ Two flags are additions rather than ports:
 | HTTP/HTTPS input | v7.9, initial support: the input may be a progressive `http(s)://` direct link (archive.org `/download/…` style). Carries the `-reconnect` family and a 30 s socket timeout; seeking needs a Range-capable server. No auth/cookies/HLS |
 | `--emit-args`, `--emit-args=FILE` | v7.9.1: print the settings as one equivalent command line and exit. The bare form uses this run's resolved settings; `=FILE` reads settings without needing input/output or FFmpeg |
 | `--save-config FILE` | v7.9.1: write this run's resolved settings to a settings file and exit **without encoding** — the way to turn a working command line into something the menu restores |
+| `--pix-fmt FORMAT` | v7.9.6: write the picture in a chosen pixel format — `pal8` (256-colour indexed), `rgb8` (3:3:2), `rgb555le`/`rgb565le` (16-bit colour), `rgb48le`, `gray`, `yuv420p10le`/`12le`/`16le`, `nv12`, `p010le` … 86 formats, each with a measured frame size. A request is honoured exactly or refused with the encoder's own list; it is never silently downgraded (`docs/usage.md` §7.17) |
+| `--list-pix-fmts` | v7.9.6: print the measured format table, with `OK` against the ones the selected encoder declares |
+| `--color-range`, `--colorspace`, `--color-primaries`, `--color-trc` | v7.9.6: override the colour tags written onto the output (the picture itself is not converted). libx264 gets them through `-x264-params` as well, because this build ignores the plain flags and writes `unknown` |
+| `--dither MODE` | v7.9.6: swscale dither for a low-colour target — `auto` (default), `none`, `bayer`, `ordered`, `random`, `error_diffusion`. Only emitted where the conversion actually loses colour (pal8, 5:5:5, 5:6:5, 3:3:2, 1-bit, 8-bit grey) |
 
 ### Audio routing
 
@@ -324,7 +328,14 @@ FLV, H.264 in MP4, VP9 in WebM), plus user-written presets in the settings file;
 subtitle fonts are read out of the ASS style table, reported, importable and
 overridable; the second pass can name any of thirteen video and seven audio
 codecs and gets a container that matches; and `docs/requirements.md` documents
-what the machine needs.
+what the machine needs. v7.9.6 adds the other half of "what the picture is":
+`--pix-fmt` writes any of 86 measured pixel formats (pal8, 16-bit colour, 10/12/16-bit
+YUV, grey, alpha variants) and refuses a request it cannot honour instead of
+quietly downgrading it; colour tags can be overridden and are verified in the
+output rather than assumed from the command line; and a full-project review fixed
+seven latent defects — among them a 4:4:0 frame size that had been half wrong
+since the port, per-rung bitrate thresholds dropped by the shard path, and the
+palette/container rule that only applied when sharding.
 
 ## Layout
 

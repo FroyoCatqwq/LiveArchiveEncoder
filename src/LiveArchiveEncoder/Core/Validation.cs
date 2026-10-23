@@ -121,11 +121,69 @@ public static class Validation
         c.ScaleAlgo = EncoderMath.CanonicalScaleAlgo(c.ScaleAlgo);
         c.FitMode = EncoderMath.CanonicalFitMode(c.FitMode);
         c.CropAnchor = EncoderMath.CanonicalCropAnchor(c.CropAnchor);
+        ValidatePicture(c);
         if (c.Deinterlace != "off" && !Constants.DeinterlaceFilters.Contains(c.Deinterlace))
             throw new ArgumentException("unsupported deinterlace filter");
         if (c.DeintMode is not ("send_frame" or "send_field"))
             throw new ArgumentException("deinterlace mode must be send_frame or send_field");
         if (c.DeintParity is not ("auto" or "tff" or "bff"))
             throw new ArgumentException("deinterlace parity must be auto, tff, or bff");
+    }
+
+    /// <summary>
+    /// v7.9.6: the pixel format, the colour tags and the dither mode.
+    ///
+    /// These are checked here rather than only in the encoder because the
+    /// interactive shell calls this after every parameter edit and after loading
+    /// a settings file: a typo has to be refused at the point it is typed, not
+    /// twenty minutes into a realtime pass.
+    /// </summary>
+    public static void ValidatePicture(Config c)
+    {
+        string pixFmt = PixelFormatCatalog.Normalise(c.PixFmt);
+        if (pixFmt.Length > 0)
+        {
+            if (!PixelFormatCatalog.TryGet(pixFmt, out PixFmtInfo info))
+            {
+                throw new ArgumentException(
+                    $"unknown or unverified pixel format '{c.PixFmt}'; "
+                    + $"known ones include: {string.Join(", ", PixelFormatCatalog.Common)}");
+            }
+            if (c.Encoder?.Caps is { } caps
+                && PixelFormatCatalog.Validate(info.Name, caps) is { } problem)
+            {
+                throw new ArgumentException(problem);
+            }
+            if (c.Encoder is not null
+                && PixelFormatUtil.PaletteContainerConflict(info.Name, c.Encoder.FormatName) is { } conflict)
+            {
+                throw new ArgumentException(conflict);
+            }
+            c.PixFmt = info.Name;
+        }
+        else
+        {
+            c.PixFmt = null;
+        }
+
+        c.ColorRange = CheckColor(c.ColorRange, Constants.ColorRanges, "colour range");
+        c.ColorSpace = CheckColor(c.ColorSpace, Constants.ColorSpaces, "colour space");
+        c.ColorPrimaries = CheckColor(c.ColorPrimaries, Constants.ColorPrimaries, "colour primaries");
+        c.ColorTransfer = CheckColor(c.ColorTransfer, Constants.ColorTransfers, "transfer characteristics");
+
+        string dither = (c.Dither ?? "").Trim().ToLowerInvariant();
+        if (dither.Length == 0) dither = "auto";
+        if (!Constants.DitherModes.Contains(dither))
+            throw new ArgumentException($"dither must be one of {string.Join(", ", Constants.DitherModes)}");
+        c.Dither = dither;
+    }
+
+    private static string? CheckColor(string? value, string[] allowed, string name)
+    {
+        string text = (value ?? "").Trim().ToLowerInvariant();
+        if (text.Length == 0 || text is "auto" or "source" or "unknown") return null;
+        if (!allowed.Contains(text))
+            throw new ArgumentException($"{name} '{value}' is not one of {string.Join(", ", allowed)}");
+        return text;
     }
 }
