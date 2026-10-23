@@ -63,7 +63,7 @@ public static class Cli
         {
             Console.WriteLine(L.T(eraNative ? "note.eranative" : "note.eramodern",
                 era.Id, eraNative ? era.VideoCodec : "libx264",
-                eraNative ? era.NativeContainer : era.ModernContainer));
+                eraNative ? era.NativeContainer : EraPreset.ModernContainer));
         }
 
         // --encoder wins over the preset; the preset wins over the built-in

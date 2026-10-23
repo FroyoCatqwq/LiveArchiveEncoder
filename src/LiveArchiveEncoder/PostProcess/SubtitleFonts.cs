@@ -252,8 +252,11 @@ public static class SubtitleFonts
     public static string? DefaultFamily(string? extraDir = null)
     {
         IReadOnlyList<FontFace> installed = Installed(extraDir);
-        return installed.FirstOrDefault(f => f.Portable)?.Family
-            ?? installed.FirstOrDefault()?.Family;
+        foreach (FontFace face in installed)
+        {
+            if (face.Portable) return face.Family;
+        }
+        return installed.Count > 0 ? installed[0].Family : null;
     }
 
     /// <summary>

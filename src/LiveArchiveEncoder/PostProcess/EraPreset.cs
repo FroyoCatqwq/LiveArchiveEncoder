@@ -219,8 +219,11 @@ public sealed class EraPreset
     /// <summary>Container the native rendering lands in.</summary>
     public string NativeContainer => RecompressContainer;
 
-    /// <summary>Container the modern rendering lands in.</summary>
-    public string ModernContainer => "mp4";
+    /// <summary>
+    /// Container the modern rendering lands in. Constant by design: a "viewing
+    /// copy" is an MP4 with libx264 + AAC, and that is the whole point of it.
+    /// </summary>
+    public const string ModernContainer = "mp4";
 
     public string ContainerFor(bool native) => native ? NativeContainer : ModernContainer;
 
