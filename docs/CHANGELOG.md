@@ -137,8 +137,9 @@ CUI 里是菜单 **15 → 4**（"直接二次压缩一个文件"）。
 | 项 | 结果 |
 | --- | --- |
 | 单测 Windows | **449 × {net10.0, net11.0}** 全绿（v7.9.4 是 424；新增 25 条：整数帧率、容器表自洽、pal8 容器、缓存身份、站点预设、`--recompress-only`） |
-| 单测 Linux | 见 release 说明 |
-| e2e Windows | 见 release 说明（新增 15 条：五个新容器逐对出片、小数帧率落成整数、站点预设只改第二遍、独立二次压缩、缓存只写一次） |
+| 单测 Linux（cia1，Ubuntu 22.04 / glibc 2.35） | **448 × {net10.0, net11.0}** 全绿（少的 1 条是映射网络驱动器用例，Windows-only） |
+| e2e Windows | 179 = 177 通过 + 2 跳过（a64 无 demuxer）；398 s + 99 s |
+| e2e Linux | 179 = 177 通过 + 2 跳过；321 s + 209 s（2 核） |
 | 进程启动 | 单遍 10 → 首次 8 / 热 3（`ffmpeg` 进程计数实测） |
 | 实测产物 | `rv20 --fps 23.976` 文件里是 24/1；`roqvideo --fps 29.97` 是 30/1；`mpeg4 --container mkv`、`libx264 --container flv`、`msrle --container mov` 的 codec 与画面都对 |
 
