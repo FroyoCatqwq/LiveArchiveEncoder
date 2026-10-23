@@ -1791,8 +1791,16 @@ DOTNET="$HOME/dot" dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release 
 - `FontResolverTests` — `fonts` 目录 / `LAE_FONT_DIR` 环境变量契约（水印移除后
   只剩字幕烧录在用）
 - `RecompressTests` — 参数向量必须以输出收尾、坏片段不生成命令、失败只报错不抛
-- `EraPresetTests` — id 唯一、两层参数齐全、**预设自带的参数段能通过自家校验器**、
-  时代在像素数与码率上单调递增
+- `EraPresetTests` — id 唯一、两层参数齐全、**两种渲染（原生/现代）的参数段都能通过
+  自家校验器**、时代在像素数与码率上单调递增
+- `SitePresetTests`（v7.9.5.1）— 站点必须指名编码器与容器、FLV 时代的编码器就是 flv1、
+  `qq06` 的 25 fps、原生/现代只差编码器
+- `RecompressCodecTests`（v7.9.5.1）— 编码器目录的容器约束（VP9+Opus 不能进 mp4）、
+  容器由编码器对推导、质量参数按编码器选 `-crf`/`-q:v`、码率渲染丢掉 `-b:v 0`
+- `CustomEraTests`（v7.9.5.1）— 自定义预设的 JSON 往返、id 归一化、坏编码器/坏容器纠正、
+  同名覆盖内置行
+- `SubtitleFontTests`（v7.9.5.1）— ASS 样式表按列名定位、SRT 不指定字体、中英族名对照、
+  同族不同 face、`force_style` 拼装、字体文件 `name` 表解析（没有字体时自动跳过）
 - `PostProcessingConfigTests` — 二次压缩设置往返持久化、**v1 配置文件仍能读出
   且阶段默认关闭**、水印段不复存在
 
@@ -1880,25 +1888,27 @@ PATH 里的 ffprobe，以及**Python 基线也要能用系统 FFmpeg**——Linu
 全部通过会打出（Windows / Linux 略有差异）：
 
 ```
-dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 449
-dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 449
-pytest  179 项（Windows 实测 177 通过 + 2 跳过）：
-  option_smoke      79（48 组参数 + 23 项参数检查 + 8 条专项回归：分片拼接、pal8 非黑、
-                     AVI 帧率头、整数帧率、站点预设、独立二次压缩、能力缓存）
+dotnet test --solution LiveArchiveEncoder.V7.slnx                失败 0，通过 475
+dotnet test --solution LiveArchiveEncoder.V7.slnx -p:LaeTfm=net11.0   同样 475
+pytest  186 项（Windows 实测 184 通过 + 2 跳过）：
+  option_smoke      83（48 组参数 + 23 项参数检查 + 12 条专项回归：分片拼接、pal8 非黑、
+                     AVI 帧率头、整数帧率、站点预设、站点自带编码器、独立二次压缩、
+                     能力缓存、原生编码器落盘、编码器推容器、容器冲突拒绝）
   feature_sweep     35（33 通过 + 2 跳过：a64multi / a64multi5 只有 muxer 没有 demuxer）
   compare_matrix    12
   error_paths       11
   cui_smoke         13 个阶段（内含 40+ 项检查，Linux 多一条）
+  subtitles         10（含 v7.9.5.1 的字体清单 / 强制字体 / 缺失字体提示）
   stream_selection   9
-  subtitles          7
   http_source        7
   config_conversion  4（配置 ↔ 命令行往返）
   ab_duration        2（mpeg1video / wmv2 各 4 变体 × 4 runs 的中位数对比）
 ```
 
-Linux（cia1，Ubuntu 22.04.5 / glibc 2.35）上是 **448 = 448 通过 × 两个目标框架**
-（少的 1 条是映射网络驱动器用例，Windows-only），e2e 179 项同样 177 通过 + 2 跳过
-（2 核机器上两阶段 321 s + 209 s）。
+Linux（cia1，Ubuntu 22.04.5 / glibc 2.35）上是 **474 = 473 通过 + 1 跳过 × 两个目标框架**
+（少的 1 条是映射网络驱动器用例，Windows-only；跳过的 1 条是"读一个真实字体"，
+服务器上没装字体），e2e 同样 186 项 = 184 通过 + 2 跳过（2 核机器上两阶段
+317 s + 224 s）。
 
 v7.9.4 的数字：单测 Windows 424 × 两个目标框架、Linux 423 = 422 + 1 跳过，
 e2e 167（165 通过 + 2 跳过）。

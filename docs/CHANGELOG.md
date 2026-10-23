@@ -86,8 +86,9 @@
 | 项 | 结果 |
 | --- | --- |
 | 单测 Windows | **475 × {net10.0, net11.0}** 全绿（v7.9.5 是 449，新增 26 条） |
-| 单测 Linux | 见 release 说明（映射盘用例 Windows-only） |
-| e2e Windows | 见 release 说明（新增 9 条：原生编码器、站点自带编码器、VP9 容器推导、容器冲突、字体清单/强制/缺失提示） |
+| 单测 Linux | **474 = 473 通过 + 1 跳过 × 双 TFM**（映射盘用例 Windows-only；跳过的是读真实字体） |
+| e2e Windows | **186 = 184 通过 + 2 跳过**（新增 9 条：原生编码器、站点自带编码器、VP9 容器推导、容器冲突、字体清单/强制/缺失提示） |
+| e2e Linux | **186 = 184 通过 + 2 跳过**；两阶段 317 s + 224 s（2 核） |
 | 实测产物 | `--era youku07` → `.flv` 里 flv1 352x264@15 320k；`--era-modern` → mp4 里 h264；`--recompress-codec libvpx-vp9` → `.webm` 里 vp9+opus；`--recompress-codec libx265 --recompress-audio-codec libopus` → mkv 里 hevc+opus |
 
 ⚠ 行为变化：
