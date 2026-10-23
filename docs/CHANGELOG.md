@@ -78,7 +78,8 @@ LiveArchiveEncoder in.mkv out.avi --era youku07 --width 320 --height 240 --fps 2
 | 项 | v7.9.6.1 | v7.9.6.2 |
 |---|---|---|
 | 单元测试（Windows） | 512 × {net10.0, net11.0} | **512 × {net10.0, net11.0}**（断言改写，数量不变） |
-| e2e 收集 | 194 = 192 + 2 跳过 | **195 = 193 + 2 跳过** |
+| 单元测试（Linux cia1） | 511 = 510 + 1 跳过 | **511 = 510 + 1 跳过** × 双 TFM |
+| e2e 收集 | 194 = 192 + 2 跳过 | **195 = 193 + 2 跳过**，两平台一致（Windows 425s+141s，cia1 316s+236s） |
 
 新增 e2e `test_an_explicit_flag_still_beats_a_site_preset`；`test_a_site_preset_only_
 reshapes_the_second_pass` 改为 `test_a_site_preset_reshapes_both_passes`（断言直播
