@@ -1038,7 +1038,7 @@ public static class Cui
                 Console.WriteLine(L.T("encoder.fpsadjusted", chosen.Name, $"{c.Fps:G6}", $"{baseFps:G6}"));
                 c.Fps = baseFps;
             }
-            c.FpsLevels = EncoderMath.SelectLevels(c.Fps, null);
+            c.FpsLevels = EncoderMath.SelectLevels(c.Fps, Constants.DefaultFpsLevels);
             c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
             (c.Width, c.Height, bool sizeExact) = EncoderMath.NormalizeDimensions(chosen.Name, c.Width, c.Height);
             if (!sizeExact) Console.WriteLine(L.T("encoder.sizesdjusted", chosen.Name, c.Width, c.Height));
@@ -1273,7 +1273,7 @@ public static class Cui
                             c.Fps = fps;
                             if (!fpsExact) Console.WriteLine(L.T("param.fpsadjusted", $"{c.Fps:G6}"));
                         }
-                        c.FpsLevels = EncoderMath.SelectLevels(c.Fps, null);
+                        c.FpsLevels = EncoderMath.SelectLevels(c.Fps, Constants.DefaultFpsLevels);
                         // A rung above the new base rate cannot be reached, so
                         // its thresholds are dropped along with it.
                         c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
@@ -2102,6 +2102,37 @@ public static class Cui
     /// means "new"; an id that matches a built-in preset is allowed and produces
     /// an override, which is how a user changes history without a rebuild.
     /// </summary>
+    /// <summary>
+    /// Parse a comma/semicolon/space separated frame-rate ladder for a custom
+    /// preset (v7.9.6.1). Values above the base rate are dropped with a note --
+    /// the ladder only ever throttles downwards, so such a rung is unreachable.
+    /// Fewer than two usable rungs means "derive one from the base rate".
+    /// </summary>
+    private static double[]? ParseLevels(string raw, double baseFps)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        var values = new List<double>();
+        foreach (string token in raw.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+                || !double.IsFinite(value) || value <= 0)
+            {
+                Console.WriteLine(L.T("param.badvalue", token));
+                continue;
+            }
+            if (value > baseFps + 1e-9)
+            {
+                Console.WriteLine(L.T("era.custom.leveltoofast", $"{value:G6}", $"{baseFps:G6}"));
+                continue;
+            }
+            values.Add(Math.Round(value, 6));
+        }
+
+        List<double> ordered = [.. values.Distinct().OrderDescending()];
+        return ordered.Count > 1 ? [.. ordered] : null;
+    }
+
     private static void EditCustomEra(Config c, List<EncoderInfo> encoders, string? seedId)
     {
         PostProcess.EraPreset? existing = seedId is null
@@ -2197,6 +2228,7 @@ public static class Cui
         string? encoderName = null;
         int? liveWidth = null, liveHeight = null;
         double? liveFps = null, limit = null;
+        double[]? liveLevels = null;
         if (era)
         {
             Console.WriteLine(L.T("era.custom.live"));
@@ -2219,6 +2251,14 @@ public static class Cui
             liveWidth = lw;
             liveHeight = lh;
             liveFps = ReadDouble(L.T("era.custom.livefps", $"{existing?.Fps ?? 15:G6}"), existing?.Fps ?? 15);
+            // v7.9.6.1: the period's ladder, not the tool's default one. Empty
+            // means "derive from the base rate", which is what every preset
+            // written before this field did.
+            string ladderRaw = ReadRaw(L.T("era.custom.livelevels",
+                existing?.FpsLevels is { Length: > 0 } lv
+                    ? string.Join(",", lv.Select(x => x.ToString("G6", CultureInfo.InvariantCulture)))
+                    : L.T("value.auto"))).Trim();
+            liveLevels = ParseLevels(ladderRaw, liveFps ?? 15);
             limit = ReadDouble(L.T("era.custom.limit", $"{existing?.LimitKbps ?? 300:G6}"),
                 existing?.LimitKbps ?? 300);
         }
@@ -2234,6 +2274,7 @@ public static class Cui
             Width = liveWidth,
             Height = liveHeight,
             Fps = liveFps,
+            FpsLevels = liveLevels,
             LimitKbps = limit,
             ScaleAlgo = era ? existing?.ScaleAlgo ?? "bicubic" : null,
             AudioEncoder = era ? existing?.AudioEncoder : null,

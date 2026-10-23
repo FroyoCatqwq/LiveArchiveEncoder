@@ -197,6 +197,14 @@ public sealed class CustomEraConfig
     public int? Width { get; set; }
     public int? Height { get; set; }
     public double? Fps { get; set; }
+
+    /// <summary>
+    /// v7.9.6.1: the period's adaptive frame-rate ladder, highest first. Null
+    /// (absent from older files) means "derive one from <see cref="Fps"/>",
+    /// which is exactly the pre-v7.9.6.1 behaviour.
+    /// </summary>
+    public List<double>? FpsLevels { get; set; }
+
     public double? LimitKbps { get; set; }
     public string? ScaleAlgo { get; set; }
     public string? AudioEncoder { get; set; }
@@ -569,6 +577,7 @@ public static class EraConfigMap
         Width = p.Width,
         Height = p.Height,
         Fps = p.Fps,
+        FpsLevels = p.FpsLevels is { Length: > 0 } levels ? [.. levels] : null,
         LimitKbps = p.LimitKbps,
         ScaleAlgo = p.ScaleAlgo,
         AudioEncoder = p.AudioEncoder,
@@ -620,6 +629,10 @@ public static class EraConfigMap
             Width = era ? Positive(c.Width, 0) : null,
             Height = era ? Positive(c.Height, 0) : null,
             Fps = era ? Positive(c.Fps, 0) : null,
+            // A ladder is only meaningful for an era (a site preset has no live
+            // layer) and only when it has at least two rungs; anything else is
+            // stored as "derive from Fps".
+            FpsLevels = era ? CleanLevels(c.FpsLevels) : null,
             LimitKbps = era ? Positive(c.LimitKbps, 0) : null,
             ScaleAlgo = c.ScaleAlgo.HasText ? c.ScaleAlgo.Trim().ToLowerInvariant() : (era ? "bicubic" : null),
             AudioEncoder = era && c.AudioEncoder.HasText ? c.AudioEncoder.Trim().ToLowerInvariant() : null,
@@ -660,6 +673,34 @@ public static class EraConfigMap
 
     private static int Value(int? value, int fallback) =>
         value is { } v && v != 0 ? v : fallback;
+
+    /// <summary>
+    /// Sanitise a stored ladder: finite, positive, descending, at most eight
+    /// rungs. A hand-edited file can hold anything -- an unsorted list, a
+    /// duplicate, a negative value -- and a non-monotonic ladder only surfaces
+    /// later as an unreachable rung. Sorting is the forgiving reading of a file
+    /// that meant "these are my rungs, I typed them in a hurry".
+    /// </summary>
+    private static double[]? CleanLevels(List<double>? levels)
+    {
+        if (levels is null) return null;
+
+        var values = new List<double>();
+        foreach (double value in levels)
+        {
+            if (!double.IsFinite(value) || value <= 0 || value > 120) continue;
+            values.Add(Math.Round(value, 6));
+        }
+        values.Sort((a, b) => b.CompareTo(a));
+
+        var cleaned = new List<double>(values.Count);
+        foreach (double value in values)
+        {
+            if (cleaned.Count == 0 || value < cleaned[^1] - 1e-9) cleaned.Add(value);
+            if (cleaned.Count == 8) break;
+        }
+        return cleaned.Count > 1 ? [.. cleaned] : null;
+    }
 
     private static int? Positive(int? value, int fallback) =>
         value is { } v && v > 0 ? v : (fallback > 0 ? fallback : null);

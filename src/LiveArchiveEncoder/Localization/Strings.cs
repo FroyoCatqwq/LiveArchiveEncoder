@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.6 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.6.1 (.NET 10 / .NET 11)",
         ["env.heading"] = "System check",
         ["env.cores"] = "only {0} CPU core(s); the documented minimum is {1}",
         ["env.memory"] = "about {0} GB of memory; the documented minimum is {1} GB",
@@ -625,13 +625,15 @@ public static class L
         ["era.custom.note"] = "One-line description [{0}]: ",
         ["era.custom.live"] = "Live layer: encoder, frame size, fps, ceiling (blank = keep each)",
         ["era.custom.encoder"] = "Live encoder [{0}]: ",
+        ["era.custom.livelevels"] = "live FPS ladder [{0}] (comma separated, empty = derive from the base rate): ",
+        ["era.custom.leveltoofast"] = "{0} fps is above the base rate {1}; the ladder only steps down, so it was dropped.",
         ["era.custom.livefps"] = "Live fps [{0}]: ",
         ["era.custom.limit"] = "Live bitrate ceiling kbps [{0}]: ",
     };
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.6 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.6.1 (.NET 10 / .NET 11)",
         ["env.heading"] = "系统检查",
         ["env.cores"] = "只有 {0} 个 CPU 核心；文档给出的下限是 {1}",
         ["env.memory"] = "内存约 {0} GB；文档给出的下限是 {1} GB",
@@ -1219,6 +1221,8 @@ public static class L
         ["era.custom.live"] = "直播层：编码器、尺寸、帧率、码率上限（每项留空即保持）",
         ["era.custom.encoder"] = "直播编码器 [{0}]：",
         ["era.custom.livefps"] = "直播帧率 [{0}]：",
+        ["era.custom.livelevels"] = "直播帧率挡位 [{0}]（逗号分隔，留空 = 按基准帧率推导）：",
+        ["era.custom.leveltoofast"] = "{0} fps 高于基准帧率 {1}；阶梯只向下走，已忽略该挡。",
         ["era.custom.limit"] = "直播码率上限 kbps [{0}]：",
     };
 

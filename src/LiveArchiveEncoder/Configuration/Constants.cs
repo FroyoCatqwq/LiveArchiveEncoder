@@ -17,6 +17,16 @@ public static class Constants
     public const int DefaultHeight = 192;
     public const double DefaultFps = 13.0;
 
+    /// <summary>
+    /// The ladder a run starts from, highest first. Kept here because three
+    /// places need it and they used to disagree: the CLI default
+    /// (<c>--fps-levels 13,8,5,3</c>), the menu's "reset the ladder to the base
+    /// rate", and an era preset that names a base rate without naming rungs
+    /// (v7.9.6.1). The old menu path derived <c>[base, 8, 5, 3]</c> and silently
+    /// lost the 13 rung on any base above 13.
+    /// </summary>
+    public static readonly double[] DefaultFpsLevels = [DefaultFps, 8.0, 5.0, 3.0];
+
     public static readonly FrozenSet<string> VideoExtensions =
         new HashSet<string>
         {

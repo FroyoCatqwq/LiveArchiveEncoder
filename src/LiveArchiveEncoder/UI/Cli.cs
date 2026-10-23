@@ -211,8 +211,17 @@ public static class Cli
         // The ladder is written FPS[:drop kbps[:rise kbps]] per entry; a bare FPS
         // keeps the threshold derived from limit/recover, so the old
         // "--fps-levels 13,8,5,3" still means exactly what it always did.
-        (List<double> levelFps, List<FpsRungSetting> levelRungs, string? levelError) =
-            EncoderMath.ParseLevelSpec(args.FpsLevels);
+        //
+        // v7.9.6.1: an era preset carries the ladder of its period as well as
+        // its base rate. It is a fallback like every other preset value, so it
+        // only applies when the user typed neither --fps nor --fps-levels --
+        // pinning a base rate without pinning the rungs means "derive them from
+        // what I pinned", which is the behaviour scripts already rely on.
+        bool eraLadder = !args.FpsLevelsExplicit && !args.FpsExplicit
+            && era?.FpsLevels is { Length: > 1 };
+        (List<double> levelFps, List<FpsRungSetting> levelRungs, string? levelError) = eraLadder
+            ? ([.. era!.FpsLevels!], [], null)
+            : EncoderMath.ParseLevelSpec(args.FpsLevels);
         if (levelError is not null)
         {
             Console.Error.WriteLine($"ERROR: --fps-levels: {levelError}");

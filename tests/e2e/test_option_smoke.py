@@ -406,6 +406,41 @@ def test_fractional_rate_is_written_as_an_integer(exe, src, workdir):
         assert rate == expected, f"{name}: file says {rate} fps, wanted {expected}"
 
 
+def test_an_era_ladder_belongs_to_its_period(exe, src, workdir):
+    """v7.9.6.1: an era carries its frame-rate ladder, not just a base rate.
+
+    Before this, --era mp4_10 encoded at 25 fps and then reused the default
+    13/8/5/3 rungs: the first step down halved the frame rate, which no 2010
+    encoder did. --emit-args is the cheapest way to see what the run would do.
+    """
+    expected = {
+        "dialup98": "10,8,5,3",
+        "broadband03": "15,12,10,8,5",
+        "flv07": "15,12,10,8,5",
+        "mp4_10": "25,20,15,10",
+        "hd14": "30,25,20,15",
+    }
+    out = workdir("options")
+
+    for era, ladder in expected.items():
+        ext = "rm" if era in ("dialup98", "broadband03") else "mkv"
+        dst = out / f"ladder_{era}.{ext}"
+        proc = run([str(exe), str(src), str(dst), "--era", era, "--end", "00:00:02",
+                    "--emit-args", "--ffmpeg-source", "path", "--lang", "en"], timeout=180)
+        assert proc.returncode == 0, (
+            f"{era}: exit={proc.returncode}: "
+            f"{(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+        assert f"--fps-levels {ladder}" in proc.stdout, \
+            f"{era}: ladder missing from {proc.stdout.strip()[-300:]}"
+
+    # A ladder the user typed still wins: a preset is a fallback, not an override.
+    proc = run([str(exe), str(src), str(out / "ladder_override.mkv"), "--era", "hd14",
+                "--fps-levels", "30:2000:1500,24", "--end", "00:00:02",
+                "--emit-args", "--ffmpeg-source", "path", "--lang", "en"], timeout=180)
+    assert proc.returncode == 0, proc.stderr[-300:]
+    assert "--fps-levels 30:2000:1500,24" in proc.stdout, proc.stdout[-300:]
+
+
 def test_a_site_preset_only_reshapes_the_second_pass(exe, src, workdir):
     """v7.9.5: a site preset is a bitrate profile, not a re-shoot.
 

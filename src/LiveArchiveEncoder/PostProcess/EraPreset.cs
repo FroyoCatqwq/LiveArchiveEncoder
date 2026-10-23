@@ -68,6 +68,23 @@ public sealed class EraPreset
     public int? Height { get; init; }
     public double? Fps { get; init; }
 
+    /// <summary>
+    /// The adaptive frame-rate ladder this period actually ran, highest first.
+    ///
+    /// <para>A base rate on its own is not a preset: 25 fps with the tool's
+    /// default 13/8/5/3 ladder means the first step down throws away half the
+    /// frame rate, which is not what a 2010 encoder did. The ladder is part of
+    /// the period, so it lives here next to <see cref="Fps"/>.</para>
+    ///
+    /// <para>Null means "derive one from <see cref="Fps"/>" -- the old
+    /// behaviour, kept for presets that do not care and for settings files
+    /// written before this field existed. An explicit <c>--fps</c> or
+    /// <c>--fps-levels</c> still wins over all of it: a preset is a fallback,
+    /// not an override.</para>
+    /// </summary>
+    public double[]? FpsLevels { get; init; }
+
+
     /// <summary>Bitrate ceiling; the adaptive ladder starts dropping fps above it.</summary>
     public double? LimitKbps { get; init; }
 
@@ -139,6 +156,23 @@ public sealed class EraPreset
         c.Width = Width!.Value;
         c.Height = Height ?? c.Height;
         if (Fps is { } fps) c.Fps = fps;
+        // v7.9.6.1: the ladder follows the base rate. Without this, a 25 fps era
+        // kept the 13/8/5/3 rungs meant for the 13 fps default -- the first step
+        // down would have thrown away half the frame rate, which no period
+        // encoder did. Pinned thresholds are pruned to the rungs that survive.
+        if (FpsLevels is { Length: > 1 } levels)
+        {
+            c.FpsLevels = EncoderMath.SelectLevels(c.Fps, levels);
+            c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
+        }
+        else if (Fps is not null)
+        {
+            // No ladder in this preset (a hand-written one, or a file from
+            // before the field existed): keep the tool's default rungs and let
+            // the base rate decide which of them survive.
+            c.FpsLevels = EncoderMath.SelectLevels(c.Fps, Configuration.Constants.DefaultFpsLevels);
+            c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
+        }
         if (LimitKbps is { } limit)
         {
             c.Limit = limit;
@@ -233,8 +267,14 @@ public sealed class EraPreset
     /// Every value the two layers hold, in one line, for the report and the
     /// menu. Kept next to the fields so a new field cannot be forgotten here.
     /// </summary>
-    public string Summary() => string.Create(CultureInfo.InvariantCulture,
-        $"{RcWidth}x{RcHeight}@{RcFps:G6} {RcVideoKbps}k {VideoCodec}/{AudioCodec} .{RecompressContainer}");
+    public string Summary()
+    {
+        string ladder = FpsLevels is { Length: > 1 } levels
+            ? " [" + string.Join(",", levels.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) + "]"
+            : "";
+        return string.Create(CultureInfo.InvariantCulture,
+            $"{RcWidth}x{RcHeight}@{RcFps:G6} {RcVideoKbps}k {VideoCodec}/{AudioCodec} .{RecompressContainer}{ladder}");
+    }
 }
 
 /// <summary>
@@ -257,6 +297,11 @@ public static class EraPresets
             Encoder = "rv20",
             Width = 160, Height = 120,
             Fps = 10,
+            // RealVideo G2 on a 28.8K modem ran the ladder 10 -> 8 -> 5 -> 3.
+            // Below 5 fps the encoder stops pretending to be video, which is
+            // exactly what a 20 Kbps stream looked like; 3 stays because the
+            // original controller allowed a slideshow rather than a stall.
+            FpsLevels = [10, 8, 5, 3],
             LimitKbps = 45,
             ScaleAlgo = "neighbor",
             AudioEncoder = null,           // chosen per container
@@ -278,6 +323,10 @@ public static class EraPresets
             Encoder = "rv20",
             Width = 320, Height = 240,
             Fps = 15,
+            // Early-ADSL RealVideo: 15 fps base stepping 15 -> 12 -> 10 -> 8 -> 5.
+            // The 12 and 8 rungs matter: RV8/9 kept 12 fps usable at 150 Kbps,
+            // while a 15-to-8 jump would have looked like a broken player.
+            FpsLevels = [15, 12, 10, 8, 5],
             LimitKbps = 225,
             ScaleAlgo = "bicubic",
             AudioKbps = 24,
@@ -299,6 +348,10 @@ public static class EraPresets
             Encoder = "flv",
             Width = 352, Height = 264,
             Fps = 15,
+            // Sorenson Spark in FLV: 15 fps base, 15 -> 12 -> 10 -> 8 -> 5.
+            // Measured Tudou files sit at 11.8 fps, i.e. the 12 rung was the
+            // one the portals actually used when the uplink was short.
+            FpsLevels = [15, 12, 10, 8, 5],
             LimitKbps = 300,
             ScaleAlgo = "bicubic",
             AudioKbps = 32,
@@ -319,6 +372,10 @@ public static class EraPresets
             Encoder = "libx264",
             Width = 640, Height = 480,
             Fps = 25,
+            // 480p H.264: 25 fps base, dropping 25 -> 20 -> 15 -> 10. No 5 rung:
+            // by this period the ladder stopped before slideshow territory, and
+            // the encoder would rather spend bits than frames.
+            FpsLevels = [25, 20, 15, 10],
             LimitKbps = 900,
             ScaleAlgo = "lanczos",
             AudioKbps = 64,
@@ -338,6 +395,10 @@ public static class EraPresets
             Encoder = "libx264",
             Width = 1280, Height = 720,
             Fps = 30,
+            // 720p: 30 fps base, 30 -> 25 -> 20 -> 15. The steps are small on
+            // purpose -- dropping a 720p stream to 15 fps was already a visible
+            // defect, so no 10/5 rungs.
+            FpsLevels = [30, 25, 20, 15],
             LimitKbps = 2500,
             ScaleAlgo = "lanczos",
             AudioKbps = 96,
