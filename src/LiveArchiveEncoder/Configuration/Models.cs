@@ -287,6 +287,13 @@ public sealed class Config
     public bool EraNative { get; set; } = true;
 
     /// <summary>
+    /// v7.9.6.3: the frame shape a preset is captured in -- "source" (the
+    /// preset's own), "4:3" or "16:9". Null and "source" mean the same thing,
+    /// so a settings file from before the switch keeps its exact behaviour.
+    /// </summary>
+    public string? EraAspect { get; set; }
+
+    /// <summary>
     /// Presets the user wrote (v7.9.5.1). They live here rather than in the
     /// built-in table so an upgrade can add rows without fighting a local edit;
     /// a custom preset that reuses a built-in id replaces that row.

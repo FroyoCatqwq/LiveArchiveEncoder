@@ -149,12 +149,16 @@ public sealed class EraPreset
     /// Returns false when the preset has no frame size (a site preset): the
     /// caller still gets <see cref="Encoder"/> through <see cref="ApplyEncoder"/>.
     /// </summary>
-    public bool ApplyLive(Configuration.Config c)
+    public bool ApplyLive(Configuration.Config c, (int W, int H)? size = null)
     {
         if (!HasLive) return false;
 
-        c.Width = Width!.Value;
-        c.Height = Height ?? c.Height;
+        // v7.9.6.3: the caller may have resolved the same period at another
+        // frame shape (see EraAspects); the preset's own numbers stay the
+        // default so an absent switch behaves exactly as before.
+        (int width, int height) = size ?? (Width!.Value, Height!.Value);
+        c.Width = width;
+        c.Height = height;
         if (Fps is { } fps) c.Fps = fps;
         // v7.9.6.1: the ladder follows the base rate. Without this, a 25 fps era
         // kept the 13/8/5/3 rungs meant for the 13 fps default -- the first step
@@ -209,15 +213,16 @@ public sealed class EraPreset
     /// artefacts people remember); false renders the same resolution/bitrate
     /// with libx264 in MP4, which is what every version before v7.9.5.1 did.
     /// </summary>
-    public string Fragment(bool native)
+    public string Fragment(bool native, (int W, int H)? size = null)
     {
+        (int scaleW, int scaleH) = size ?? (RcWidth, RcHeight);
         string video = native
             ? NativeVideoArgs()
             : $"-c:v libx264 -profile:v {RcProfile} -preset veryfast -crf {RcCrf.ToString(CultureInfo.InvariantCulture)}";
 
         var parts = new List<string>
         {
-            $"-vf scale={RcWidth}:{RcHeight}:flags=bicubic,fps={RcFps.ToString("G6", CultureInfo.InvariantCulture)}",
+            $"-vf scale={scaleW}:{scaleH}:flags=bicubic,fps={RcFps.ToString("G6", CultureInfo.InvariantCulture)}",
             video,
         };
 
@@ -250,6 +255,13 @@ public sealed class EraPreset
     /// <summary>Same profile, rendered with libx264/aac so any player opens it.</summary>
     public string ModernRecompressArgs => Fragment(native: false);
 
+    /// <summary>
+    /// The fragment at a frame shape resolved by <see cref="EraAspects"/>
+    /// (v7.9.6.3): the second pass has to deliver the same shape the live pass
+    /// captured, or the artefact contradicts itself.
+    /// </summary>
+    public string RecompressArgsFor(bool native, (int W, int H)? size) => Fragment(native, size);
+
     /// <summary>Container the native rendering lands in.</summary>
     public string NativeContainer => RecompressContainer;
 
@@ -267,13 +279,14 @@ public sealed class EraPreset
     /// Every value the two layers hold, in one line, for the report and the
     /// menu. Kept next to the fields so a new field cannot be forgotten here.
     /// </summary>
-    public string Summary()
+    public string Summary((int W, int H)? size = null)
     {
         string ladder = FpsLevels is { Length: > 1 } levels
             ? " [" + string.Join(",", levels.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) + "]"
             : "";
+        (int w, int h) = size ?? (RcWidth, RcHeight);
         return string.Create(CultureInfo.InvariantCulture,
-            $"{RcWidth}x{RcHeight}@{RcFps:G6} {RcVideoKbps}k {VideoCodec}/{AudioCodec} .{RecompressContainer}{ladder}");
+            $"{w}x{h}@{RcFps:G6} {RcVideoKbps}k {VideoCodec}/{AudioCodec} .{RecompressContainer}{ladder}");
     }
 }
 
@@ -410,8 +423,32 @@ public static class EraPresets
             NoteKey = "era.hd14",
         },
 
-        // ---- the 2005-2009 portals: Sorenson Spark in FLV ----
+        // ---- the 2001-2004 portals: Windows Media in ASF ----
         //
+        // Before Flash took over, a Chinese portal streamed Windows Media (or
+        // RealMedia) through a player you installed once, and the "video site"
+        // had not happened yet: the news portals carried a 240p window at a few
+        // hundred kbps, 12-15 fps, WMA mono. v7.9.6.3 adds these because the
+        // table started at 2005 and a 2003 recording had nowhere to land.
+        //
+        // The numbers are period-typical rather than measured off one archived
+        // file -- MMS/RTSP streams were not crawled the way HTTP-hosted FLV was,
+        // so there is no download to point at. They sit inside the WMV8 encoder's
+        // own envelopes (320x240 or QCIF, 12-25 fps, MP@ML at this size).
+        //
+        // The live encoder is named explicitly: a 2003 portal ingested WMV8, so
+        // capturing with libx264 and delivering WMV8 would describe two machines.
+        Site("cctv03", 2003, 2006, 320, 240, 15, 250, 32, 22050, 1,
+            "wmv2", "wmav2", "asf", "era.cctv03", liveEncoder: "wmv2"),
+        Site("sina03", 2002, 2005, 320, 240, 12, 200, 24, 22050, 1,
+            "wmv2", "wmav2", "asf", "era.sina03", liveEncoder: "wmv2"),
+        Site("sohu03", 2003, 2005, 320, 240, 15, 220, 32, 22050, 1,
+            "wmv2", "wmav2", "asf", "era.sohu03", liveEncoder: "wmv2"),
+        // 网易's 2003 player was the small-window one: QCIF, not 240p.
+        Site("netease03", 2003, 2006, 176, 144, 12, 120, 24, 22050, 1,
+            "wmv2", "wmav2", "asf", "era.netease03", liveEncoder: "wmv2"),
+
+        // ---- the 2005-2009 portals: Sorenson Spark in FLV ----
         // 2005-2009 China was not one transcode ladder but a dozen: every portal
         // ran its own FLV settings, which is why the same upload looked
         // different on Sina, Sohu, Tencent, Youku, Tudou, 56 and Ku6. These are
@@ -475,7 +512,8 @@ public static class EraPresets
     private static EraPreset Site(
         string id, int from, int to, int width, int height, double fps,
         int videoKbps, int audioKbps, int audioRate, int channels,
-        string videoCodec, string audioCodec, string container, string noteKey) => new()
+        string videoCodec, string audioCodec, string container, string noteKey,
+        string? liveEncoder = null) => new()
     {
         Id = id,
         Kind = EraKind.Site,
@@ -483,8 +521,11 @@ public static class EraPresets
         YearTo = to,
         // The live pass adopts the codec the site ingested. A site that only
         // ever *served* another codec (YouTube's VP9) still took H.264 uploads,
-        // so the fallback is libx264 rather than the delivery codec.
-        Encoder = videoCodec is "flv" or "libx264" ? videoCodec : "libx264",
+        // so the fallback is libx264 rather than the delivery codec. A row that
+        // names its capture encoder explicitly (the Windows Media years) keeps
+        // that one: a 2003 portal did not ingest H.264.
+        Encoder = liveEncoder
+            ?? (videoCodec is "flv" or "libx264" ? videoCodec : "libx264"),
 
         // ---- live layer: the capture settings of the same period ----
         Width = width,
@@ -496,8 +537,14 @@ public static class EraPresets
         // lanczos once the CPU stopped being the constraint.
         ScaleAlgo = from < 2010 ? "bicubic" : "lanczos",
         // A FLV-era portal took an mp3 upload; the H.264 era took AAC (left to
-        // the container when null, which is what the 2010 rows want).
-        AudioEncoder = videoCodec == "flv" ? "libmp3lame" : null,
+        // the container when null, which is what the 2010 rows want). The
+        // Windows Media years took WMA.
+        AudioEncoder = videoCodec switch
+        {
+            "flv" => "libmp3lame",
+            "wmv2" => "wmav2",
+            _ => null,
+        },
         AudioKbps = audioKbps,
         AudioChannels = channels,
         AudioRate = audioRate,

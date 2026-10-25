@@ -194,19 +194,80 @@ public static class Program
         string? source = cli.FfmpegSource;
         if (!source.HasText) source = storedConfig.FfmpegSource;
 
+        static (string FFmpeg, string FFprobe, bool Btbn, FFmpeg.Capabilities Caps)
+            Discover(CliOptions cli, string? source)
+        {
+            string found = FFmpegDiscovery.FindFFmpeg(cli.FFmpeg, source);
+            bool isBtbn = FFmpegDiscovery.IsBtbn;
+            string probe = FFmpegDiscovery.FindFFprobe(cli.FFprobe, found);
+            return (found, probe, isBtbn, FFmpeg.BuildProfileStore.For(found));
+        }
+
         try
         {
-            ffmpeg = FFmpegDiscovery.FindFFmpeg(cli.FFmpeg, source);
-            btbn = FFmpegDiscovery.IsBtbn;
-            ffprobe = FFmpegDiscovery.FindFFprobe(cli.FFprobe, ffmpeg);
-            // v7.9.5: one cached sweep of the binary instead of six launches per
-            // run. The second run on a box pays nothing at all for this.
-            caps = FFmpeg.BuildProfileStore.For(ffmpeg);
+            (ffmpeg, ffprobe, btbn, caps) = Discover(cli, source);
         }
         catch (Exception exc) when (exc is FileNotFoundException or InvalidOperationException or TimeoutException)
         {
-            Console.Error.WriteLine($"ERROR: {exc.Message}");
-            return 2;
+            // v7.9.6.3: on a machine that has never had FFmpeg, "Cannot find
+            // ffmpeg; add FFmpeg/bin to PATH" is a dead end -- the tool can
+            // fetch its own copy, it just never asked. A wrong explicit path is
+            // still an error, and a redirected stdin cannot answer, so only the
+            // "nothing configured, somebody is watching" case prompts.
+            bool explicitPath = cli.FFmpeg.HasText || cli.FFprobe.HasText;
+            if (exc is not FileNotFoundException || explicitPath || !FirstRun.CanAsk()
+                || !FirstRun.OfferInstall())
+            {
+                Console.Error.WriteLine($"ERROR: {exc.Message}");
+                return 2;
+            }
+
+            // The install just wrote the source into the settings file; read it
+            // back rather than assume, then discover again against it.
+            source = ConfigStore.Load().FfmpegSource;
+            try
+            {
+                (ffmpeg, ffprobe, btbn, caps) = Discover(cli, source);
+            }
+            catch (Exception retry) when (retry is FileNotFoundException
+                                              or InvalidOperationException or TimeoutException)
+            {
+                Console.Error.WriteLine($"ERROR: {retry.Message}");
+                return 2;
+            }
+        }
+
+        // v7.9.6.3: measure the link behind a source and print the verdict that
+        // --parallel would use. Nothing is written and no encode starts, so it
+        // is safe to run against a production share.
+        if (cli.NetTest is { Length: > 0 } netTarget)
+        {
+            double required = cli.Limit;
+            try
+            {
+                // The source's own bitrate is what the encoder has to be fed at;
+                // the output ceiling is only the floor.
+                if (FFmpeg.Probe.Source(ffprobe, netTarget).BitRateKbps is { } sourceKbps)
+                    required = Math.Max(required, sourceKbps);
+            }
+            catch (Exception exc) when (exc is InvalidOperationException
+                                            or ArgumentException or TimeoutException)
+            {
+                Console.WriteLine(L.T("nettest.noprobe", exc.Message));
+            }
+
+            Console.WriteLine(L.T("nettest.heading", netTarget, required));
+            Remote.NetworkMeasurement? measured =
+                Remote.NetworkProbe.Measure(netTarget, required, cli.Iperf3Host);
+            if (measured is null)
+            {
+                Console.Error.WriteLine($"ERROR: {L.T("nettest.failed", netTarget)}");
+                return 1;
+            }
+            Console.WriteLine($"  {measured.Summary}");
+            Console.WriteLine(L.T(measured.Adequate ? "nettest.adequate" : "nettest.tooslow",
+                Remote.NetworkProbe.HeadroomFactor, Remote.NetworkProbe.JitterLimitPercent));
+            return measured.Adequate ? 0 : 1;
         }
 
         // Completion needs the live encoder list, so it runs after discovery.

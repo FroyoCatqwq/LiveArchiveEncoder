@@ -46,7 +46,7 @@ public static class ParallelEncoder
         (double? resolvedEnd, double? duration) =
             Timecode.ResolveRange(o.StartSeconds, o.EndSeconds, source.Duration);
 
-        string? blocked = BlockReason(o, duration, source.Video.PixFmt);
+        string? blocked = BlockReason(o, duration, source.Video.PixFmt, source.BitRateKbps);
         if (blocked is not null)
         {
             if (o.Verbose) Console.WriteLine(L.T("note.shardingskipped", blocked));
@@ -405,16 +405,64 @@ public static class ParallelEncoder
     public static EncoderInfo StagingEncoder(EncoderInfo encoder) =>
         encoder.WithContainer("mkv", "matroska");
 
+    /// <summary>
+    /// What the link has to sustain for the run to keep up: the source's own
+    /// bitrate, since the capture thread reads it at realtime pace, and never
+    /// less than the output ceiling (a source smaller than the ceiling is
+    /// re-encoded upwards, and that read still has to happen).
+    /// </summary>
+    private static double RequiredNetworkKbps(
+        RealtimeOptions o, double? duration, double? sourceKbps)
+    {
+        double floor = Math.Max(o.LimitKbps, 200.0);
+        if (sourceKbps is { } reported && reported > 0) return Math.Max(floor, reported);
+
+        // No bit_rate in the container (raw MPEG-PS and friends): size divided
+        // by duration is the same number by another route, and it only works
+        // for a path this machine can stat.
+        if (duration is > 0 && !Remote.HttpSource.IsUrl(o.SourcePath))
+        {
+            try
+            {
+                var file = new FileInfo(o.SourcePath);
+                if (file.Exists && file.Length > 0)
+                    return Math.Max(floor, file.Length * 8 / duration.Value / 1000.0);
+            }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                // Unreadable metadata is not a reason to fail the run.
+            }
+        }
+        return floor;
+    }
+
     /// <summary>Why sharding must not be used, or null when it is allowed.</summary>
-    private static string? BlockReason(RealtimeOptions o, double? duration, string sourcePixFmt)
+    private static string? BlockReason(
+        RealtimeOptions o, double? duration, string sourcePixFmt, double? sourceKbps)
     {
         if (o.Parallel <= 1) return null;
-        // v7.9.1: a network source is a single pass on purpose. Every shard
-        // opens its own decoder over the same link, and N concurrent readers
-        // on a connection that comes and goes is exactly the stall this
-        // avoids -- the shards then wait on each other instead of on work.
-        if (Remote.Smb.IsRemotePath(o.SourcePath))
-            return L.T("parallel.networkrefused");
+        // v7.9.6.3: a network source is measured, not assumed. Until this
+        // version every network path was a single pass on the theory that N
+        // readers on one link stall each other -- true of a congested Wi-Fi hop,
+        // wrong about a gigabit LAN, and the reason sharding was unusable on
+        // exactly the archives that need it (a NAS full of long recordings).
+        //
+        // What gets measured is the source itself, because that is the path the
+        // shards will actually read: an iperf3 number describes the link between
+        // two iperf3 endpoints and says nothing about a SMB server's own disk or
+        // its per-connection limits. iperf3 is offered as an extra reference
+        // when the user names a host, never as a substitute.
+        if (Remote.Smb.IsRemotePath(o.SourcePath) || Remote.HttpSource.IsUrl(o.SourcePath))
+        {
+            double required = RequiredNetworkKbps(o, duration, sourceKbps);
+            Remote.NetworkMeasurement? measured =
+                Remote.NetworkProbe.Measure(o.SourcePath, required, o.Iperf3Host);
+            if (measured is null)
+                return L.T("parallel.netmeasurefailed", required);
+            if (!measured.Adequate)
+                return L.T("parallel.nettooslow", measured.Summary);
+            if (o.Verbose) Console.WriteLine(L.T("parallel.netok", measured.Summary));
+        }
         if (duration is null) return "source duration is unknown";
         // v7.9.4: a palette codec cannot go through the Matroska staging pass.
         // Matroska stores an unknown VfW codec as V_MS/VFW/FOURCC with a

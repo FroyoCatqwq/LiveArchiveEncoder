@@ -248,6 +248,26 @@ public sealed class CliOptions
     /// <summary>Era preset id to apply; see <see cref="PostProcess.EraPresets"/>.</summary>
     public string? Era { get; init; }
 
+    /// <summary>
+    /// v7.9.6.3: the frame shape an era preset should be captured and delivered
+    /// in -- <c>source</c> (the preset's own), <c>4:3</c> or <c>16:9</c>. Only
+    /// shapes the selected encoder can actually encode are accepted; see
+    /// <see cref="PostProcess.EraAspects"/>.
+    /// </summary>
+    public string? EraAspect { get; init; }
+
+    /// <summary>
+    /// v7.9.6.3: measure the link to an input path (or URL) and print the
+    /// verdict that <c>--parallel</c> would use. No encode happens.
+    /// </summary>
+    public string? NetTest { get; init; }
+
+    /// <summary>
+    /// v7.9.6.3: measure the link with <c>iperf3</c> against this host instead
+    /// of by reading the source. Needs an iperf3 server on the other end.
+    /// </summary>
+    public string? Iperf3Host { get; init; }
+
     // ---- v7.9.1: settings-file conversion ----
 
     /// <summary>
@@ -365,6 +385,9 @@ public static class CliParser
         bool eraModern = false;
         bool eraNative = false;
         string? era = null;
+        string? eraAspect = null;
+        string? netTest = null;
+        string? iperf3Host = null;
         bool emitArgs = false;
         string? emitArgsFile = null;
         string? saveConfig = null;
@@ -761,6 +784,25 @@ public static class CliParser
                     // already registered.
                     break;
 
+                // v7.9.6.3: the shape a preset is captured and delivered in.
+                case "--era-aspect":
+                    if (!TryValue(out string aspectRaw)) return (null, "--era-aspect requires a value");
+                    if (!PostProcess.EraAspects.TryParse(aspectRaw, out PostProcess.EraAspect parsed))
+                        return (null, $"--era-aspect must be one of {string.Join(", ", PostProcess.EraAspects.Labels)}");
+                    eraAspect = PostProcess.EraAspects.Label(parsed);
+                    break;
+
+                // v7.9.6.3: network measurement, which is also what decides
+                // whether --parallel may be used over a share.
+                case "--net-test":
+                    if (!TryValue(out string netRaw)) return (null, "--net-test requires an input path or URL");
+                    netTest = netRaw;
+                    break;
+                case "--iperf3":
+                    if (!TryValue(out string iperfHost)) return (null, "--iperf3 requires a host[:port]");
+                    iperf3Host = iperfHost.Trim();
+                    break;
+
                 // v7.9.1: settings-file conversion. --emit-args deliberately
                 // does NOT swallow the next token -- "--emit-args in.rm" must
                 // keep in.rm as the input positional -- so the file only ever
@@ -884,6 +926,9 @@ public static class CliParser
             EraModern = eraModern,
             EraNative = eraNative,
             Era = era,
+            EraAspect = eraAspect,
+            NetTest = netTest,
+            Iperf3Host = iperf3Host,
             EmitArgs = emitArgs,
             EmitArgsFile = emitArgsFile,
             SaveConfig = saveConfig,
@@ -997,6 +1042,13 @@ public static class CliParser
             ("--era-modern", "", "render a preset's second pass with libx264 + AAC in MP4 "
                                + "instead of the codec that site used"),
             ("--era-native", "", "render a preset's second pass with the site's own codec (default)"),
+            ("--era-aspect", "4:3|16:9|source",
+                "capture and deliver a preset in this frame shape; only shapes the "
+                + "selected encoder can encode are accepted (default: source)"),
+            ("--net-test", "PATH|URL", "measure the link to a source and print the verdict "
+                                      + "--parallel would use, then exit"),
+            ("--iperf3", "HOST[:PORT]", "measure the link with iperf3 against that host "
+                                      + "instead of by reading the source"),
             ("--emit-args[=FILE]", "", "print the command line equivalent to the settings, then exit "
                                        + "(FILE = a settings file to read; bare = this run's resolved settings)"),
             ("--save-config", "FILE", "write this run's resolved settings to FILE and exit without encoding"),

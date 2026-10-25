@@ -12,19 +12,27 @@ LiveArchiveEncoder 自己不碰像素：解码与编码全部由 FFmpeg 子进�
 
 | 平台 | 支持情况 | 说明 |
 | --- | --- | --- |
-| Windows 10 1809+ / Windows 11 | **支持**，x64 | 发布 `win-x64`（JIT）与 `win-x64-aot`（单文件）两种产物 |
-| Linux x86_64 | **支持**，glibc ≥ **2.35** | 发布包在 Ubuntu 22.04.5 上构建，glibc 下限等于构建机 |
+| Windows 10 1809+ / Windows Server 2019+ / Windows 11 | **支持**，x64 | 发布 `win-x64`（JIT）与 `win-x64-aot`（单文件）两种产物 |
+| Linux x86_64 | **支持**，glibc ≥ **2.28** | JIT 产物吃 .NET 10 支持的全部发行版（AlmaLinux 8 / RHEL 8 起）；AOT 产物的下限等于构建机 |
 | Linux ARM64 / macOS | 未发布产物 | 源码可编译，但没有任何验证，不承诺可用 |
 | 32 位 Windows | 不支持 | 只发布 x64 |
 
+> **v7.9.6.3 把下限从"Windows 11 / glibc 2.35"降到 .NET 10 自己支持的水平**：下限不再
+> 由某一台开发机决定，而是由**测试机**决定，两台测试机就是下限——Windows Server 2019
+> （10.0.17763）与 AlmaLinux 8.10（glibc 2.28）。两者都跑过完整单测。
+
 Linux 的两种打包方式差别：
 
-- `linux-x64-aot.tar.gz`：原生单文件，**不需要安装 .NET**，但它是动态链接 glibc 的，
-  所以目标机 glibc 必须 ≥ 2.35（Ubuntu 22.04、Debian 12、RHEL 9 及更新版本都满足）。
+- `linux-x64-aot.tar.gz`：原生单文件，**不需要安装 .NET**，但它动态链接 glibc，
+  所以目标机 glibc 必须 ≥ **构建机**的版本（v7.9.6.3 起构建机是 AlmaLinux 8.10 / glibc 2.28，
+  因此该产物的下限就是 2.28）。更老的发行版走 JIT。
 - `linux-x64.tar.gz`：普通 JIT 产物，需要目标机有 **.NET 10 运行时**（或 11；
-  `RollForward=Major` 让它一份产物同时吃 10/11）。老发行版（glibc < 2.35）走这条路。
+  `RollForward=Major` 让它一份产物同时吃 10/11）。glibc 下限由 .NET 决定（2.28 起）。
 
 Alpine / musl **不支持**：AOT 产物没有 musl 版本。
+
+运行时会自检这两条（`Core/EnvCheck`）：Windows 比构建号、Linux 读
+`gnu_get_libc_version`，低于下限只**警告**不拒绝——慢机器照样能压出正确的文件。
 
 ## 2. CPU
 

@@ -109,6 +109,13 @@ public sealed class RealtimeOptions
     public bool Verbose { get; init; } = true;
 
     /// <summary>
+    /// v7.9.6.3: an iperf3 server to measure the *link* against, when the user
+    /// supplied one. Null means the link is measured by reading the source,
+    /// which is the measurement that matters for a share.
+    /// </summary>
+    public string? Iperf3Host { get; init; }
+
+    /// <summary>
     /// Progress sink for the shard pipeline: called with (slots emitted so far,
     /// target slot count or null) roughly every 0.2s. Only the parallel pipeline
     /// sets it -- a single pass already prints its own status line, and seven

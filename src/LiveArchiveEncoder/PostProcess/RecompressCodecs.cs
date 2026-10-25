@@ -85,6 +85,11 @@ public static class RecompressCodecs
         new("libvorbis", ["webm", "mkv", "ogg"], 96, []),
         new("ac3", ["mkv", "avi", "mp4", "mov"], 192, []),
         new("flac", ["mkv", "ogg"], 0, []),
+        // v7.9.6.3: the Windows Media pair the 2002-2004 portals served. Measured
+        // on 2026-10-25 with ffmpeg N-128013: wmv2 + wmav2 at 32 kbps / 22.05 kHz
+        // mono into .wmv probes back as codec_name wmv2 / wmav2 in an asf
+        // container, and AVI takes the same pair.
+        new("wmav2", ["asf", "avi"], 32, []),
     ];
 
     /// <summary>Audio encoders by name, plus the "leave the track alone" spelling.</summary>
@@ -115,6 +120,9 @@ public static class RecompressCodecs
     public static string RecommendedAudio(string videoCodec) => videoCodec.Trim().ToLowerInvariant() switch
     {
         "flv" or "h263" => "libmp3lame",
+        // WMV wants its own audio: mp3-in-ASF plays, but a 2003 .wmv whose audio
+        // codec is mp3 is not what the site served.
+        "wmv2" => "wmav2",
         "libvpx-vp9" or "libvpx" or "libaom-av1" or "libsvtav1" => "libopus",
         _ => "aac",
     };

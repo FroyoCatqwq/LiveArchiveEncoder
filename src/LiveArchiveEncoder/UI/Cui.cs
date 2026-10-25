@@ -68,14 +68,12 @@ public static class Cui
             Console.WriteLine($"{L.Pad(L.T("config.restored"), 17)}: "
                 + (stored.SavedAt is null ? L.T("value.yes") : $"{stored.SavedAt.Value.LocalDateTime:G}"));
         }
-        // v7.9.1: a remembered shard count belongs to whatever input it was
-        // chosen for. If that input is on a network drive, sharding is off for
-        // the run -- said here, at restore, rather than at encode time.
+        // v7.9.6.3: a remembered shard count belongs to whatever input it was
+        // chosen for, but a network input no longer cancels it here -- the
+        // encoder measures the link and decides, and zeroing the value at
+        // restore made the menu show a number the run would not use.
         if (c.Parallel > 1 && Remote.Smb.IsRemotePath(c.InputPath?.FullName))
-        {
-            c.Parallel = 1;
-            Console.WriteLine(L.T("parallel.networkoff"));
-        }
+            Console.WriteLine(L.T("parallel.netcheckhint"));
         while (true)
         {
             Console.WriteLine($"\n{L.T("menu.heading")}");
@@ -124,18 +122,11 @@ public static class Cui
                         c.InputPath = selected;
                         if (c.Encoder is not null && c.OutputIsAuto)
                             c.OutputPath = DefaultOutput(selected, c.Encoder);
-                        // v7.9.1: a network input is a single-pass encode by
-                        // default, and the user hears why here rather than
-                        // twenty minutes into a stalled run.
+                        // v7.9.6.3: a network input is measured when the run
+                        // starts; the menu says so instead of cancelling the
+                        // user's choice.
                         if (Remote.Smb.IsRemotePath(selected.FullName))
-                        {
                             Console.WriteLine(Remote.Smb.StabilityHint(selected.FullName));
-                            if (c.Parallel > 1)
-                            {
-                                c.Parallel = 1;
-                                Console.WriteLine(L.T("parallel.networkoff"));
-                            }
-                        }
                     }
                     break;
                 case "2":
@@ -199,13 +190,11 @@ public static class Cui
                         c.Parallel = Math.Clamp(c.Parallel, 1, Constants.MaxParallelShards);
                         Console.WriteLine(L.T("parallel.clamped", Constants.MaxParallelShards));
                     }
-                    // v7.9.1: the encoder refuses to shard a network source, so
-                    // the menu does not store a number the run would ignore.
+                    // v7.9.6.3: the encoder measures a network source before
+                    // using shards, so the menu keeps the number and says what
+                    // will happen rather than overwriting the choice.
                     if (c.Parallel > 1 && Remote.Smb.IsRemotePath(c.InputPath?.FullName))
-                    {
-                        c.Parallel = 1;
-                        Console.WriteLine(L.T("parallel.networkrefused"));
-                    }
+                        Console.WriteLine(L.T("parallel.netcheckhint"));
                     Console.WriteLine(c.Parallel > 1 ? L.T("parallel.set", c.Parallel) : L.T("parallel.off"));
                     Persist(c);
                     break;
@@ -2031,6 +2020,7 @@ public static class Cui
         Console.WriteLine($"  d. {L.T("era.menu.delete")}");
         Console.WriteLine($"  m. {L.T("era.menu.toggle")} = "
             + (c.EraNative ? L.T("era.native.on") : L.T("era.native.off")));
+        Console.WriteLine($"  a. {L.Pad(L.T("era.menu.aspect"), 26)} = {c.EraAspect ?? "source"}");
 
         Console.Write(L.T("era.prompt", c.EraPreset ?? ""));
         string pick = (Console.ReadLine() ?? "").Trim();
@@ -2045,6 +2035,13 @@ public static class Cui
                 c.EraNative = !c.EraNative;
                 Console.WriteLine(c.EraNative ? L.T("era.native.on") : L.T("era.native.off"));
                 return;
+            case "a":
+                // v7.9.6.3: cycles source -> 4:3 -> 16:9 -> source. The shape is
+                // only applied when the preset is next applied, because whether
+                // it is available depends on the encoder that preset selects.
+                c.EraAspect = NextAspect(c.EraAspect);
+                Console.WriteLine(L.T("era.aspect.set", c.EraAspect));
+                return;
         }
 
         PostProcess.EraPreset? chosen = PostProcess.EraPresets.Find(pick);
@@ -2056,6 +2053,15 @@ public static class Cui
 
         ApplyPreset(c, chosen, encoders, audioAvailable);
     }
+
+    /// <summary>source -> 4:3 -> 16:9 -> source (v7.9.6.3).</summary>
+    private static string NextAspect(string? current) =>
+        (current ?? "source").Trim().ToLowerInvariant() switch
+        {
+            "4:3" => "16:9",
+            "16:9" => "source",
+            _ => "4:3",
+        };
 
     /// <summary>Apply a preset to a live config; shared by the menu and the wizard.</summary>
     private static void ApplyPreset(
@@ -2075,7 +2081,27 @@ public static class Cui
         if (c.OutputIsAuto && c.InputPath is not null && c.Encoder is not null)
             c.OutputPath = DefaultOutput(c.InputPath, c.Encoder);
 
-        c.Recompress.Args = preset.Fragment(c.EraNative);
+        // v7.9.6.3: the frame shape, when one was picked. It is resolved against
+        // the encoder the preset just selected, because whether a shape exists
+        // at all is a property of that encoder (H.261/H.263 only do CIF).
+        (int W, int H)? size = null;
+        if (live && c.Encoder is not null
+            && PostProcess.EraAspects.TryParse(c.EraAspect, out PostProcess.EraAspect aspect)
+            && aspect != PostProcess.EraAspect.Source)
+        {
+            size = PostProcess.EraAspects.Resolve(preset, aspect, c.Encoder.Name, out string? why);
+            if (size is null)
+            {
+                Console.WriteLine(L.T("era.aspect.unsupported", PostProcess.EraAspects.Label(aspect), why ?? ""));
+            }
+            else
+            {
+                c.Width = size.Value.W;
+                c.Height = size.Value.H;
+            }
+        }
+
+        c.Recompress.Args = preset.RecompressArgsFor(c.EraNative, size);
         c.Recompress.Container = preset.ContainerFor(c.EraNative);
         c.EraPreset = preset.Id;
 

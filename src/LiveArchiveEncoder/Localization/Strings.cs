@@ -16,13 +16,18 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.6.2 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.6.3 (.NET 10 / .NET 11)",
         ["env.heading"] = "System check",
         ["env.cores"] = "only {0} CPU core(s); the documented minimum is {1}",
         ["env.memory"] = "about {0} GB of memory; the documented minimum is {1} GB",
         ["env.disk"] = "{0} GB free at the destination; the documented minimum is {1} GB "
             + "(a sharded run needs room for the shards as well)",
         ["env.doc"] = "Documented system and hardware requirements: docs/requirements.md",
+        ["env.os.windows"] = "Windows build {0}; the documented minimum is {1} "
+            + "(Windows Server 2019 / 10.0.17763)",
+        ["env.os.glibc"] = "glibc {0}; the documented minimum is {1} "
+            + "(AlmaLinux 8 / RHEL 8). The AOT archive is built against the "
+            + "release host's glibc -- take the JIT archive on anything older.",
         ["app.impairments"] = "Impairments",
         ["app.impairments.value"] = "handled separately by frame_damage.py",
 
@@ -72,6 +77,20 @@ public static class L
         ["parallel.networkrefused"] = "The input is on a network drive, so sharding stays off: "
             + "each shard would open its own reader over the same link, which is what stalls "
             + "a connection that comes and goes.",
+        ["parallel.netmeasurefailed"] = "The link to the source could not be measured, so sharding "
+            + "stays off ({0:F0} kbps would have to be sustained).",
+        ["parallel.nettooslow"] = "The link measured {0} -- not enough headroom, so sharding stays off.",
+        ["parallel.netok"] = "Link check: {0} -- sharding is safe.",
+        ["parallel.netcheckhint"] = "The input is on a network drive: the link is measured "
+            + "before sharding is used.",
+        ["nettest.heading"] = "Link measurement for {0} (the encode needs {1:F0} kbps):",
+        ["nettest.noprobe"] = "NOTE: could not read the source's bitrate ({0}); using the "
+            + "output ceiling instead.",
+        ["nettest.failed"] = "could not measure the link to {0}",
+        ["nettest.adequate"] = "Verdict: sharding is safe -- the link clears the {0:F1}x headroom, "
+            + "jitter stays under {1:F0}% and the first byte arrives promptly.",
+        ["nettest.tooslow"] = "Verdict: keep sharding off -- the link does not clear {0:F1}x headroom "
+            + "with jitter under {1:F0}%, so N readers would starve each other.",
         ["menu.exit"] = "Exit",
         ["menu.select"] = "Select: ",
         ["menu.invalid"] = "Invalid selection.",
@@ -348,6 +367,10 @@ public static class L
             + "a modern viewing copy, not the codec the site served.",
         ["note.eracodecmissing"] = "NOTE: preset \"{0}\" names the live encoder {1}, which this "
             + "FFmpeg build does not have; keeping the encoder already selected.",
+        ["note.eraaspect"] = "NOTE: preset \"{0}\" is captured at {1} ({2}) and the second pass "
+            + "delivers the same shape.",
+        ["note.eraaspectoverridden"] = "NOTE: --era-aspect is ignored because --width/--height was "
+            + "given explicitly.",
         ["note.fontmissing"] = "NOTE: the subtitle file asks for \"{0}\", which is not in {1}; "
             + "copy the font there (--font-import) or force another family with --subtitle-font.",
         ["note.rateless"] = "NOTE: the {0} container stores no frame rate (a player assumes "
@@ -509,6 +532,14 @@ public static class L
         ["tc.nogpl"] = "NOTE: this build does not report --enable-gpl, so GPL-only codecs "
             + "(libx264, libxvid, libtheora, ...) are missing.",
 
+        // First run: no FFmpeg at all, and somebody is at the keyboard.
+        ["firstrun.heading"] = "No FFmpeg found on this machine.",
+        ["firstrun.body"] = "This tool can download and keep its own copy, so nothing has to be "
+            + "installed system-wide. Pick a distribution to install now -- the choice is "
+            + "remembered and used from the next start on:",
+        ["firstrun.quit"] = "quit without installing",
+        ["firstrun.select"] = "choose [0]: ",
+
         ["play.prompt.mode"] = "Playback [off/ffplay/external] [{0}]: ",
         ["play.prompt.player"] = "External player [{0}] ('-' = system default): ",
         ["play.assoc"] = "system default",
@@ -581,6 +612,11 @@ public static class L
         // numbers are that site's nominal transcode ladder, and the encoder for
         // the live pass stays whatever the user chose.
         ["era.sina06"] = "Sina podcast 2005-2008: 320x240, 12 fps, ~200 kbps mono 22 kHz",
+        // v7.9.6.3: the Windows Media years, before the portals settled on Flash.
+        ["era.cctv03"] = "CCTV.com 2003-2006: 320x240, 15 fps, ~250 kbps WMA mono 22 kHz (.wmv)",
+        ["era.sina03"] = "Sina 2002-2005: 320x240, 12 fps, ~200 kbps WMA mono 22 kHz (.wmv)",
+        ["era.sohu03"] = "Sohu 2003-2005: 320x240, 15 fps, ~220 kbps WMA mono 22 kHz (.wmv)",
+        ["era.netease03"] = "NetEase 2003-2006: 176x144 (QCIF), 12 fps, ~120 kbps WMA mono 22 kHz (.wmv)",
         ["era.sohu06"] = "Sohu video 2006-2009: 320x240, 15 fps, ~240 kbps mono 22 kHz",
         ["era.qq06"] = "Tencent/QQ video 2006-2009: 320x240, 25 fps, ~260 kbps mono 22 kHz -- the one player that pushed the frame rate",
         ["era.tudou06"] = "Tudou 2005-2009: 352x264, 12 fps, ~295 kbps (measured on a real download)",
@@ -602,6 +638,10 @@ public static class L
         ["era.menu.edit"] = "Edit a custom preset",
         ["era.menu.delete"] = "Delete a custom preset",
         ["era.menu.toggle"] = "Toggle native / modern second pass",
+        ["era.menu.aspect"] = "Frame shape (source/4:3/16:9)",
+        ["era.aspect.set"] = "Frame shape: {0}.",
+        ["era.aspect.unsupported"] = "NOTE: {0} is not available for this encoder ({1}); "
+            + "keeping the preset's own frame size.",
         ["era.native.on"] = "Second pass uses the preset's own codec.",
         ["era.native.off"] = "Second pass uses libx264 + AAC (viewing copy).",
         ["era.custom.new"] = "New custom preset",
@@ -633,12 +673,15 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.6.2 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.6.3 (.NET 10 / .NET 11)",
         ["env.heading"] = "系统检查",
         ["env.cores"] = "只有 {0} 个 CPU 核心；文档给出的下限是 {1}",
         ["env.memory"] = "内存约 {0} GB；文档给出的下限是 {1} GB",
         ["env.disk"] = "输出所在盘剩余 {0} GB；文档给出的下限是 {1} GB（分片运行时还要放得分片）",
         ["env.doc"] = "系统与硬件需求见 docs/requirements.md",
+        ["env.os.windows"] = "Windows 版本 {0}；文档最低要求是 {1}（Windows Server 2019 / 10.0.17763）",
+        ["env.os.glibc"] = "glibc {0}；文档最低要求是 {1}（AlmaLinux 8 / RHEL 8）。"
+            + "AOT 产物是按发布机的 glibc 链接的，更老的系统请用 JIT 产物。",
         ["app.impairments"] = "损坏处理",
         ["app.impairments.value"] = "由 frame_damage.py 单独负责",
 
@@ -684,6 +727,16 @@ public static class L
         ["parallel.networkoff"] = "输入位于网络驱动器，并行分片已关闭。",
         ["parallel.networkrefused"] = "输入位于网络驱动器，并行分片保持关闭：每个分片都会独立读取同一条链路，"
             + "这正是网络时连时断时卡住的原因。",
+        ["parallel.netmeasurefailed"] = "无法测量到源的链路，并行分片保持关闭（需要维持 {0:F0} kbps）。",
+        ["parallel.nettooslow"] = "链路实测 {0}——余量不足，并行分片保持关闭。",
+        ["parallel.netok"] = "链路实测：{0}——可以并行分片。",
+        ["parallel.netcheckhint"] = "输入位于网络驱动器：运行时会先测量链路，再决定是否并行分片。",
+        ["nettest.heading"] = "{0} 的链路测量（编码需要 {1:F0} kbps）：",
+        ["nettest.noprobe"] = "注意：读不到源的码率（{0}），改用输出上限作为需求值。",
+        ["nettest.failed"] = "无法测量到 {0} 的链路",
+        ["nettest.adequate"] = "结论：可以并行分片——链路余量超过 {0:F1} 倍，抖动低于 {1:F0}%，首字节延迟正常。",
+        ["nettest.tooslow"] = "结论：保持单次编码——链路余量不足 {0:F1} 倍或抖动超过 {1:F0}%，"
+            + "多个读取者会互相饿死。",
         ["menu.exit"] = "退出",
         ["menu.select"] = "请选择: ",
         ["menu.invalid"] = "无效的选择。",
@@ -953,6 +1006,8 @@ public static class L
             + "加 --era-modern 可改成 H.264 观看版。",
         ["note.eramodern"] = "注意：预设“{0}”的第二遍用 {1} 写进 .{2} —— 现代观看版，不是站点当年用的编码器。",
         ["note.eracodecmissing"] = "注意：预设“{0}”指定的直播编码器 {1} 在当前 FFmpeg 构建里不存在，沿用已经选好的编码器。",
+        ["note.eraaspect"] = "注意：预设“{0}”按 {1}（{2}）采集，二次压缩输出同样画幅。",
+        ["note.eraaspectoverridden"] = "注意：已显式给出 --width/--height，--era-aspect 被忽略。",
         ["note.fontmissing"] = "注意：字幕文件要求字体“{0}”，但 {1} 里没有；把字体拷进去（--font-import），"
             + "或用 --subtitle-font 指定替代字体。",
         ["note.rateless"] = "注意：{0} 容器不保存帧率（播放器会自行假设一个）；"
@@ -1108,6 +1163,13 @@ public static class L
         ["tc.nogpl"] = "注意：该构建没有 --enable-gpl，因此只有 GPL 许可的编码器"
             + "（libx264、libxvid、libtheora 等）不可用。",
 
+        // 首次启动：机器上完全没有 FFmpeg，且有人在键盘前。
+        ["firstrun.heading"] = "这台机器上找不到 FFmpeg。",
+        ["firstrun.body"] = "本程序可以自行下载并保管一份，不需要在系统里安装。"
+            + "选一个现在安装即可——选择会被记住，下次启动直接使用：",
+        ["firstrun.quit"] = "不安装，退出",
+        ["firstrun.select"] = "请选择 [0]：",
+
         ["play.prompt.mode"] = "播放方式 [off/ffplay/external] [{0}]: ",
         ["play.prompt.player"] = "外部播放器 [{0}]（输入 - 表示用系统默认）: ",
         ["play.assoc"] = "系统默认",
@@ -1176,6 +1238,11 @@ public static class L
         ["era.kind.era"] = "[时代]",
         ["era.kind.site"] = "[站点]",
         ["era.sina06"] = "新浪播客 2005-2008：320x240、12 fps、约 200 kbps，22 kHz 单声道",
+        // v7.9.6.3：门户还在用 Windows Media 的那几年。
+        ["era.cctv03"] = "央视网 2003-2006：320x240、15 fps、约 250 kbps，WMA 22 kHz 单声道（.wmv）",
+        ["era.sina03"] = "新浪 2002-2005：320x240、12 fps、约 200 kbps，WMA 22 kHz 单声道（.wmv）",
+        ["era.sohu03"] = "搜狐 2003-2005：320x240、15 fps、约 220 kbps，WMA 22 kHz 单声道（.wmv）",
+        ["era.netease03"] = "网易 2003-2006：176x144（QCIF）、12 fps、约 120 kbps，WMA 22 kHz 单声道（.wmv）",
         ["era.sohu06"] = "搜狐视频 2006-2009：320x240、15 fps、约 240 kbps，22 kHz 单声道",
         ["era.qq06"] = "腾讯/QQ 视频 2006-2009：320x240、25 fps、约 260 kbps，22 kHz 单声道（当年唯一把帧率拉高的播放器）",
         ["era.tudou06"] = "土豆网 2005-2009：352x264、12 fps、约 295 kbps（对真实下载文件实测）",
@@ -1197,6 +1264,9 @@ public static class L
         ["era.menu.edit"] = "编辑自定义预设",
         ["era.menu.delete"] = "删除自定义预设",
         ["era.menu.toggle"] = "切换 原生 / 现代 第二遍",
+        ["era.menu.aspect"] = "画幅（source/4:3/16:9）",
+        ["era.aspect.set"] = "画幅已设为 {0}。",
+        ["era.aspect.unsupported"] = "注意：{0} 在当前编码器上不可用（{1}），沿用预设自带的画幅。",
         ["era.native.on"] = "第二遍使用预设自带的编码器。",
         ["era.native.off"] = "第二遍使用 libx264 + AAC（观看版）。",
         ["era.custom.new"] = "新建自定义预设",

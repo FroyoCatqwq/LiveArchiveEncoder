@@ -12,6 +12,12 @@ public sealed class SourceInfo
     public bool HasAudio { get; init; }
 
     /// <summary>
+    /// v7.9.6.3: container (or video stream) bitrate in kbps, when ffprobe
+    /// reports one. This is what a network read has to sustain.
+    /// </summary>
+    public double? BitRateKbps { get; init; }
+
+    /// <summary>
     /// v7.9: every stream of the source, in index order. <see cref="Video"/>
     /// is the first video stream unless the caller picked another one; this
     /// list is what makes that pick validatable and listable.
@@ -146,6 +152,7 @@ public static class Probe
                 Video = info,
                 Duration = duration,
                 HasAudio = hasAudio,
+                BitRateKbps = ReadBitRateKbps(root, v),
                 Streams = streams,
             };
         }
@@ -154,6 +161,30 @@ public static class Probe
         {
             throw new InvalidOperationException("ffprobe returned incomplete source information", exc);
         }
+    }
+
+    /// <summary>
+    /// Container bitrate, then the video stream's own -- the number a network
+    /// source has to be able to deliver (v7.9.6.3).
+    ///
+    /// <para>Used to judge whether a share may be read by several shards at
+    /// once. ffprobe reports <c>bit_rate</c> as a string of bits per second and
+    /// omits it entirely for some containers (raw MPEG-PS, for one), hence the
+    /// two-step lookup and the null.</para>
+    /// </summary>
+    private static double? ReadBitRateKbps(JsonElement root, JsonElement video)
+    {
+        static double? Of(JsonElement e)
+        {
+            if (!e.TryGetProperty("bit_rate", out JsonElement value)) return null;
+            if (!double.TryParse(value.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out double bps))
+                return null;
+            return double.IsFinite(bps) && bps > 0 ? bps / 1000.0 : null;
+        }
+
+        if (root.TryGetProperty("format", out JsonElement format) && Of(format) is { } container)
+            return container;
+        return Of(video);
     }
 
     /// <summary>

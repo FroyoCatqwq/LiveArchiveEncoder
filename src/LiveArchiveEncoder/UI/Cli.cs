@@ -117,18 +117,16 @@ public static class Cli
             return 2;
         }
 
-        // v7.9.1: a network drive is a single-pass encode on purpose. The hint
-        // prints for every network source (stability is the user's to manage);
-        // an explicit --parallel N is overridden rather than honoured, because
-        // N concurrent readers on one flaky link is the stall itself.
+        // v7.9.6.3: a network source is no longer forced to a single pass. The
+        // old rule ("N readers on one flaky link is the stall itself") is true
+        // of a congested Wi-Fi hop and wrong about a gigabit LAN, so the
+        // decision moved to the encoder, where the source duration and bitrate
+        // are known and the link can actually be measured (NetworkProbe). The
+        // stability hint stays: it is advice about the link, not a policy.
         string sourceForPolicy = urlInput ? args.Input! : src!.FullName;
         bool networkSource = Remote.Smb.IsRemotePath(sourceForPolicy);
-        if (networkSource)
-        {
-            Console.WriteLine(Remote.Smb.StabilityHint(sourceForPolicy));
-            if (args.Parallel > 1) Console.WriteLine(L.T("parallel.networkoff"));
-        }
-        int parallel = networkSource ? 1 : args.Parallel;
+        if (networkSource) Console.WriteLine(Remote.Smb.StabilityHint(sourceForPolicy));
+        int parallel = args.Parallel;
 
         FileInfo dst = !string.IsNullOrEmpty(args.Output)
             ? new FileInfo(args.Output)
@@ -157,14 +155,48 @@ public static class Cli
         try { Validation.ValidateOutputExtension(dst, encoder); }
         catch (ArgumentException exc) { Console.Error.WriteLine($"ERROR: {exc.Message}"); return 2; }
 
+        // v7.9.6.3: a preset captured at another frame shape. Resolved here --
+        // after the encoder is known -- because whether a shape is available is
+        // a fact about the encoder (H.261/H.263 only exist at CIF sizes), and
+        // asking FFmpeg to find that out twenty minutes into a run is not an
+        // error message, it is a wasted afternoon.
+        (int W, int H)? eraSize = null;
+        if (era is not null && PostProcess.EraAspects.TryParse(args.EraAspect, out PostProcess.EraAspect wantedAspect)
+            && wantedAspect != PostProcess.EraAspect.Source)
+        {
+            // An explicit --width/--height is a size the user typed; mixing one
+            // of those with a shape would produce a pair neither asked for, so
+            // the shape steps aside and says nothing (the flag is documented as
+            // a fallback, like every other preset value).
+            if (args.WidthExplicit || args.HeightExplicit)
+            {
+                if (!args.Quiet) Console.WriteLine(L.T("note.eraaspectoverridden"));
+            }
+            else
+            {
+                eraSize = PostProcess.EraAspects.Resolve(era, wantedAspect, encoder.Name, out string? aspectReason);
+                if (eraSize is null)
+                {
+                    Console.Error.WriteLine($"ERROR: --era-aspect {PostProcess.EraAspects.Label(wantedAspect)}: "
+                        + $"{aspectReason}");
+                    return 2;
+                }
+                if (!args.Quiet)
+                {
+                    Console.WriteLine(L.T("note.eraaspect", era.Id, PostProcess.EraAspects.Label(wantedAspect),
+                        $"{eraSize.Value.W}x{eraSize.Value.H}"));
+                }
+            }
+        }
+
         // Era values are the fallback, not an override: an explicit flag still
         // wins (v7.9.3.1 -- this used to read `era?.Fps ?? args.Fps`, and since
         // every one of those properties has a non-nullable default, the preset
         // won every time. The manual has always said the opposite: "预设是兜底，
         // 不是覆盖").
         double effectiveFps = args.FpsExplicit ? args.Fps : era?.Fps ?? args.Fps;
-        int effectiveWidth = args.WidthExplicit ? args.Width : era?.Width ?? args.Width;
-        int effectiveHeight = args.HeightExplicit ? args.Height : era?.Height ?? args.Height;
+        int effectiveWidth = args.WidthExplicit ? args.Width : eraSize?.W ?? era?.Width ?? args.Width;
+        int effectiveHeight = args.HeightExplicit ? args.Height : eraSize?.H ?? era?.Height ?? args.Height;
         double effectiveLimit = args.LimitExplicit ? args.Limit : era?.LimitKbps ?? args.Limit;
         string effectiveScaleAlgo = args.ScaleAlgoExplicit
             ? args.ScaleAlgo
@@ -327,7 +359,7 @@ public static class Cli
         // The second pass is resolved before the Config literal so a bad codec /
         // container pair is reported as an argument error, not lost in a chain.
         (RecompressSettings recompress, string? recompressError) =
-            ResolveRecompress(args, era, eraNative);
+            ResolveRecompress(args, era, eraNative, eraSize);
         try
         {
             if (recompressError is not null) throw new ArgumentException(recompressError);
@@ -386,9 +418,8 @@ public static class Cli
                 X264Tune = args.X264Tune,
                 X264Profile = args.X264Profile,
                 X264Level = args.X264Level,
-                // The effective count, not the flag: a network source forces a
-                // single pass, and the settings file must not remember a shard
-                // count the next run would have to undo again.
+                // The effective count, not the flag: the settings file must not
+                // remember a shard count the next run would have to undo again.
                 Parallel = parallel,
                 // --lang wins; without it the stored preference is preserved so a
                 // CLI run never silently resets the language chosen in the UI.
@@ -482,6 +513,10 @@ public static class Cli
             SourcePath = urlInput ? args.Input! : src!.FullName,
             DestinationPath = dst.FullName,
             Encoder = encoder,
+            // v7.9.6.3: an iperf3 server, when the user named one, is an extra
+            // link reference the encoder may quote alongside its own
+            // measurement of the share itself.
+            Iperf3Host = args.Iperf3Host,
             Fps = config.Fps,
             FpsLevels = levels,
             FpsLevelKbps = levelKbps,
@@ -626,7 +661,21 @@ public static class Cli
         }
 
         bool eraNative = !args.EraModern;
-        (RecompressSettings settings, string? resolveError) = ResolveRecompress(args, era, eraNative);
+        // The second pass is the only pass here, so the encoder whose limits
+        // matter is the one the preset delivers with.
+        (int W, int H)? eraSize = null;
+        if (era is not null && PostProcess.EraAspects.TryParse(args.EraAspect, out PostProcess.EraAspect aspect)
+            && aspect != PostProcess.EraAspect.Source)
+        {
+            eraSize = PostProcess.EraAspects.Resolve(era, aspect, era.VideoCodec, out string? reason);
+            if (eraSize is null)
+            {
+                Console.Error.WriteLine($"ERROR: --era-aspect {PostProcess.EraAspects.Label(aspect)}: {reason}");
+                return 2;
+            }
+        }
+
+        (RecompressSettings settings, string? resolveError) = ResolveRecompress(args, era, eraNative, eraSize);
         if (resolveError is not null)
         {
             Console.Error.WriteLine($"ERROR: {L.T("post.args.bad", resolveError)}");
@@ -708,12 +757,15 @@ public static class Cli
     /// writes exactly what it was given.
     /// </summary>
     private static (RecompressSettings Settings, string? Error) ResolveRecompress(
-        CliOptions args, PostProcess.EraPreset? era, bool eraNative)
+        CliOptions args, PostProcess.EraPreset? era, bool eraNative, (int W, int H)? eraSize = null)
     {
         var rc = new RecompressSettings
         {
             Enabled = false,
-            Args = era?.Fragment(eraNative) ?? "",
+            // v7.9.6.3: a preset at another frame shape has to deliver that
+            // shape too -- a "youku07 16:9" capture whose second pass wrote
+            // 352x264 would be describing two different recordings.
+            Args = era?.RecompressArgsFor(eraNative, eraSize) ?? "",
             Container = era?.ContainerFor(eraNative) ?? "mp4",
         };
 

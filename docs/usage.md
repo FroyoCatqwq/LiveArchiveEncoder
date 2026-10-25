@@ -65,6 +65,22 @@ AOT 版在 Ubuntu 22.04.5 上链接（glibc 2.35），**要求目标机的 glibc
 [BtbN GPL 构建](https://github.com/BtbN/FFmpeg-Builds/releases)；进交互式菜单时，
 启动横幅会显示 `BtbN default` 和 `GPL build` 两行，可以直接确认当前用的是哪一套。
 
+> **首次启动会问你装哪一套（v7.9.6.3）。** 机器上完全没有 FFmpeg 时，程序不再报
+> `Cannot find ffmpeg` 退出，而是列出本平台能自动下载的发行版（`btbn` / `gyan` /
+> `nonfree`，按平台过滤），选一个就装，装完继续这次运行，并把来源记进配置文件：
+>
+> ```
+> No FFmpeg found on this machine.
+>  1. btbn     BtbN / FFmpeg-Builds (win64 GPL, daily auto-build)
+>  2. gyan     gyan.dev (win64 full, git master build)
+>  3. nonfree  BnqDzj / FFmpeg-Builds-nonfree (win64 nonfree, daily auto-build)
+>  0. quit without installing
+> ```
+>
+> 只有在**有人在键盘前**（stdin/stdout 没被重定向）、且没有显式给 `--ffmpeg` /
+> `--ffprobe` 时才会问：脚本里猜一个发行版比失败更糟。脚本路线是
+> `--ffmpeg-download`（不带值＝`btbn`，见 §7.10）。
+
 > **注意发行版自带的 FFmpeg。** 很多 Linux 发行版为了许可证原因裁掉了 rv20、
 > roqvideo 等编码器，桌面版 Ubuntu 的 `ffmpeg` 也可能来自受限仓库。用
 > `--list-encoders` 确认，或者直接让本工具下载一份完整构建。
@@ -258,6 +274,9 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--era ID` | 无 | **v7.6**：应用时代/站点预设（见 §7.12） |
 | `--era-modern` | 关 | **v7.9.5.1**：预设的第二遍用 libx264 + AAC 的 mp4，而不是站点当年的编码器 |
 | `--era-native` | 开 | **v7.9.5.1**：显式写"用站点自己的编码器"（默认行为，给脚本自证用） |
+| `--era-aspect` | `source` | **v7.9.6.3**：预设的画幅 `source` / `4:3` / `16:9`，只给编码器真支持的尺寸（见 §7.12） |
+| `--net-test PATH\|URL` | — | **v7.9.6.3**：测量该源的链路并打印并行判定，不编码（见 §7.8.4） |
+| `--iperf3 HOST[:PORT]` | — | **v7.9.6.3**：用 iperf3 量链路本身作为参考；需对端有 iperf3 服务器 |
 | `--emit-args` / `--emit-args=FILE` | — | **v7.9.1**：把设置打印成等价命令行后退出；带 `=FILE` 时从一个配置文件读设置（见 §7.6） |
 | `--save-config` | — | **v7.9.1**：把这次运行的最终设置写成配置文件，不启动编码（见 §7.6） |
 | `--help` / `-h` | — | 打印用法后退出（退出码 0） |
@@ -546,9 +565,10 @@ LiveArchiveEncoder src.mp4 out.avi --encoder mpeg4 --fps 15 \
 并行分片在交互式菜单里是主菜单第 11 项 `Parallel shards`，改完立即写进配置
 （**默认关闭**）。命令行用 `--parallel N`（分片上限 8）。
 
-> **v7.9.1：远程源强制单遍。** 输入在 UNC 共享、`smb://`、Linux CIFS 挂载或
-> Windows 映射网络驱动器上时，`--parallel N`（N>1）会被忽略并打印原因——多个分片
-> 各自 seek 同一个网络文件，会把共享吞吐打满、让每段都掉帧。判定与提示见 §7.8。
+> **v7.9.6.3：远程源改为"测过才并行"，不再是"一律单遍"。** 输入在 UNC 共享、
+> `smb://`、Linux CIFS 挂载、Windows 映射网络驱动器或 `http(s)://` 上时，程序会先
+> **读源本身**测吞吐与抖动，够余量才真的分片；不够就退回单遍并打印实测数字。判定见
+> §7.8.4，单独测量用 `--net-test`。
 
 ### 前提：默认慢是**故意的**，不是性能问题
 
@@ -852,7 +872,7 @@ LiveArchiveEncoder /mnt/lae/record.mp4 /mnt/lae/out.rm --encoder rv20
 > 上会解出 0 帧**（fresh=0、0 字节、码率显示 48 kbps），而报错还被缓冲吃掉了。
 > 现在读取、写入、ffprobe 三处统一只加 `-rw_timeout`。
 
-### 映射网络驱动器与并行分片（v7.9.1）
+### 映射网络驱动器与并行分片（v7.9.1 强制单遍 → v7.9.6.3 实测判定）
 
 Windows 上把共享映射成盘符（`net use Z: \\nas\share`、资源管理器"映射网络驱动器"，
 Tailscale / SMB 网关也常常这么挂在 `Z:` 或 `Y:`）时，路径看起来是普通的
@@ -872,17 +892,70 @@ SMB share      : Z:\ -- mapped network drive (remote path)
 抖，取帧就落后于墙钟，自适应控制器会以为"码率太高"而连续降档；恢复之后又要花时间
 爬回来。结果是产物中间出现一段画质塌陷，而编码本身"成功"了。
 
-所以远程源（UNC / `smb://` / Linux CIFS 挂载 / 映射盘）下**并行分片强制为单遍**：
+#### 7.8.4 为什么 v7.9.6.3 不再一律单遍
 
-| 位置 | 行为 |
-| --- | --- |
-| CLI | 打印提示；`--parallel N`（N>1）被忽略并打印 `parallel.networkoff`，实际用 1 |
-| CUI 启动恢复 | 远程输入的配置里 `Parallel` 直接按 1 恢复 |
-| CUI 菜单 11 | 远程输入下拒绝 >1，提示原因 |
-| `ParallelEncoder` | 硬性回退：`BlockReason` 里再挡一次，不只靠 UI 层拦 |
+"多个分片各自 seek 同一个网络文件会把共享吞吐打满"——对一个拥塞的 Wi-Fi 跳点、一条
+跑满的百兆上行成立；对一个千兆 LAN、一个本地 NAS 不成立，而且代价正好落在最需要分片
+的场景上（NAS 里成堆的长录像，单遍要跑几小时）。所以 v7.9.6.3 把结论从"假设"换成
+"测量"：**开跑前先读一遍源本身**，条件够了就并行。
 
-分片本身没错，错的是**分段读同一个网络文件**：多路 seek + 多路解码会把共享的吞吐
-打满，而每段都以为自己是唯一的读者。本地盘没有这个问题（`--parallel` 在本地照常）。
+测量（`Remote/NetworkProbe`）做的是分片接下来要做的事：
+
+1. 在文件 10% / 37% / 63% / 90% 处各读 2 MiB（小文件自动缩到 512 KiB、减少采样数），
+   记每次的吞吐和首字节延迟；
+2. 中位数即吞吐，采样极差 ÷ 中位数即**抖动**；
+3. 需求码率取 `format.bit_rate`，没有就用 `体积 ÷ 时长`，再没有就用输出上限
+   （编码按实时速度读源，所以这就是链路必须持续供得上的量）。
+
+同时满足才允许分片：
+
+| 条件 | 阈值 | 为什么 |
+| --- | --- | --- |
+| 吞吐 | ≥ 需求 × **2.5** | 探针是突发读，比持续读乐观；2.5 倍才覆盖这个乐观 |
+| 抖动 | 极差 < 中位数 × **30%** | 抖动直接变成取帧延迟，控制器会误判码率 |
+| 首字节 | < **500 ms** | 首字节慢意味着每段 seek 都在等，分片省下的时间会被吃回去 |
+
+不满足就退回单遍，并把实测数字打出来：
+
+```
+NOTE: sharding skipped: The link measured 3.1 MB/s, 41% jitter, 180 ms (read, 4
+samples) for 4200 kbps needed => 5.9x headroom -- not enough headroom, so
+sharding stays off.
+```
+
+测不出（HTTP 服务器不支持 Range、共享读不了、权限不足）也退回单遍——**测不了就别冒险**，
+这和"默认关闭"不是一回事。
+
+想单看数字、不编码（可以对着生产共享跑）：
+
+```powershell
+LiveArchiveEncoder.exe --net-test \\nas\archive\record.mp4
+LiveArchiveEncoder.exe --net-test https://archive.org/download/.../clip.mp4
+```
+
+```
+Link measurement for \\nas\archive\record.mp4 (the encode needs 4200 kbps):
+  11.4 MB/s, 6% jitter, 3 ms (read, 4 samples) for 4200 kbps needed => 21.7x headroom
+Verdict: sharding is safe -- the link clears the 2.5x headroom, jitter stays under 30% ...
+```
+
+退出码 0 = 可以分片，1 = 不建议（或测不出）。
+
+#### iperf3 能做什么、不能做什么
+
+`--iperf3 HOST[:PORT]` 会用 `iperf3 -c HOST -t 3 -J` 的
+`sum_received.bits_per_second` 当**链路参考**。它有两个前提，缺一个就没意义：
+
+- **两端都要有 iperf3**，且对端开着 5201（或你指定的端口）；
+- 公共 iperf3 服务器只能当 **WAN 参考**——它量的是你和那台服务器之间的公网路径，
+  量不到你那台 NAS 的磁盘、SMB 每连接限速、网关的 NAT 转发。
+
+所以要判断"这台 NAS 能不能并行"，看的是读源那一步，不是 iperf3。iperf3 的用途是
+把"链路本身有多快"和"这个共享给我多少"分开：两者差距大，问题就在服务端而不是线路。
+
+> 同理，`tcping` 一类的工具量的是到 `host:port` 的 TCP 建连延迟，适合确认"对面还活着、
+> 延迟稳不稳"，但它不产生吞吐数字，替代不了上面的读源测量。
+
 
 > 已知遗留：低带宽下仍有极少数场景会卡住（实测样本
 > `REZero-Season2-OP-SingleTest-Subs.flv`，v7.9.1 未能复现）。真遇到时先用
@@ -1154,6 +1227,37 @@ live 编码 → (14) 时代预设   ← 可选，把两层参数都填好
 一代一套完整方案，同时填好 live 层和二次压缩层。**选预设不会自动打开二次压缩**
 ——那是你手动开的东西，预设只把参数填好。依据和出处见
 [`docs/era-presets.md`](era-presets.md)。
+
+#### 画幅：4:3 / 16:9（v7.9.6.3）
+
+`--era-aspect source|4:3|16:9`（默认 `source`＝预设自带的画幅；菜单里是时代子菜单的
+`a.` 项，循环切换）。规则是**保持采集宽度、只改高度**：
+
+| 预设原尺寸 | 4:3 | 16:9 |
+| --- | --- | --- |
+| 320x240 | 320x240 | 320x180 |
+| 352x264 | 352x264 | 352x198 |
+| 384x288 | 384x288 | 384x216 |
+| 640x480 | 640x480 | 640x360 |
+| 1280x720 | 1280x960 | 1280x720 |
+| 176x144 (QCIF) | 176x132 | 176x100 |
+
+保持宽度是因为宽度才是预设调好的横向细节；码率上限属于时代、不属于画幅，所以不动。
+二次压缩跟着同一个尺寸走——一次 16:9 的采集如果第二遍还写 352x264，说的就是两台机器。
+
+**只有编码器真能编的尺寸才给。** 不可用的请求在参数解析阶段就被拒绝（退出码 2），
+不是让 FFmpeg 在第一帧上失败：
+
+```bash
+# H.261/H.263 只存在于 CIF 尺寸，要 16:9 无解
+LiveArchiveEncoder.exe in.mp4 out.h263 --era flv07 --era-aspect 16:9 --encoder h263
+# ERROR: --era-aspect 16:9: h263 only exists at 128x96, 176x144, 352x288, 704x576, 1408x1152
+```
+
+约束表：H.261/H.263 只认 `Constants.SpecialSizes` 里的 CIF 尺寸；AMV 要 16 的倍数；
+rv10/rv20 上限 704x576；Sorenson Spark (flv) 上限 1280x720；其余一律要偶数。菜单里
+不支持时会打印原因并沿用预设自带画幅，不会写进一个编不出来的配置。
+
 
 | id | 年代 | live 层 | live 帧率挡位（v7.9.6.1） | 二次压缩 |
 | --- | --- | --- | --- | --- |

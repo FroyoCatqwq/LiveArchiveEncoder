@@ -239,11 +239,34 @@ public sealed class SitePresetTests
         await Assert.That(EraPresets.Sites.Select(s => s.Id))
             .IsEquivalentTo(new[]
             {
+                // v7.9.6.3: the Windows Media years.
+                "cctv03", "sina03", "sohu03", "netease03",
                 "sina06", "sohu06", "qq06", "tudou06", "youku07", "ku6_07", "56_07",
                 "cctv06", "acfun08", "bilibili09", "youtube07",
                 "bilibili11", "youku11", "iqiyi11", "cctv12", "youtube11",
                 "bilibili14", "youtube15",
             });
+    }
+
+    [Test]
+    public async Task TheWindowsMediaYearsIngestAndServeWmv()
+    {
+        // v7.9.6.3: a 2003 portal did not take an H.264 upload. The live layer,
+        // the delivery codec, the container and the audio codec all have to be
+        // the period's own -- otherwise "--era cctv03" claims to be 2003 while
+        // capturing something 2003 never saw.
+        foreach (string id in new[] { "cctv03", "sina03", "sohu03", "netease03" })
+        {
+            EraPreset site = EraPresets.Find(id)!;
+            await Assert.That(site.Encoder).IsEqualTo("wmv2").Because(id);
+            await Assert.That(site.VideoCodec).IsEqualTo("wmv2").Because(id);
+            await Assert.That(site.AudioCodec).IsEqualTo("wmav2").Because(id);
+            await Assert.That(site.AudioEncoder).IsEqualTo("wmav2").Because(id);
+            await Assert.That(site.RecompressContainer).IsEqualTo("asf").Because(id);
+            await Assert.That(site.RcFps).IsLessThanOrEqualTo(15.0).Because(id);
+            // 4:3 or QCIF, and never wider than a 2003 portal window.
+            await Assert.That(site.RcWidth).IsLessThanOrEqualTo(320).Because(id);
+        }
     }
 
     [Test]

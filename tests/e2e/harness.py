@@ -18,6 +18,7 @@ clips can be inspected; nothing here bulk-deletes anything.
 from __future__ import annotations
 
 import json
+import locale
 import os
 import re
 import subprocess
@@ -59,9 +60,61 @@ def scratch(name: str) -> Path:
     return base
 
 
+def console_encoding() -> str:
+    """The encoding this machine's console uses for text the tool prints.
+
+    .NET writes its console output in the console code page on Windows
+    (GetConsoleOutputCP), not in UTF-8: on a Simplified-Chinese Windows that is
+    cp936, so a UTF-8 decode of it produces U+FFFD for every Chinese menu row.
+    Linux consoles are UTF-8 and unaffected.
+    """
+    if os.name != "nt":
+        return "utf-8"
+    try:
+        import ctypes
+
+        cp = ctypes.windll.kernel32.GetConsoleOutputCP()
+        if cp:
+            return f"cp{cp}"
+    except Exception:                       # not a Windows API build; fall through
+        pass
+    return locale.getpreferredencoding(False)
+
+
+def decode_output(data: bytes) -> str:
+    """Decode a captured stream: UTF-8 when it is UTF-8, else the console's.
+
+    The tool prints UTF-8 when the console code page is 65001 and the console
+    code page otherwise, and a single suite has to cope with both -- including
+    a machine where the two differ between the JIT exe and the Python baseline.
+    Trying UTF-8 first is safe because a cp936 byte sequence is almost never
+    valid UTF-8, while the reverse (UTF-8 bytes read as cp936) is silent.
+    """
+    if not data:
+        return ""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for encoding in (console_encoding(), "utf-8"):
+        try:
+            return data.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def run(cmd: list[str], *, timeout: int = 300, **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout, **kw)
+    payload = kw.pop("input", None)
+    if isinstance(payload, str):
+        # The pipe is bytes now, so a caller's str has to be encoded the way
+        # the tool reads its stdin (UTF-8; menu keys are ASCII in practice).
+        payload = payload.encode("utf-8")
+    p = subprocess.run(cmd, capture_output=True, timeout=timeout,
+                       input=payload, **kw)
+    p.stdout = decode_output(p.stdout)
+    p.stderr = decode_output(p.stderr)
+    return p
 
 
 def probe(path: Path, *, count_frames: bool = False) -> dict | None:

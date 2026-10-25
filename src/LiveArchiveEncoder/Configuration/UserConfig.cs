@@ -163,6 +163,13 @@ public sealed class UserConfig
     public bool EraNative { get; set; } = true;
 
     /// <summary>
+    /// v7.9.6.3: frame shape for the applied preset -- "source", "4:3" or
+    /// "16:9". Null in a file written before the switch existed, which reads as
+    /// "source" and therefore reproduces the old output exactly.
+    /// </summary>
+    public string? EraAspect { get; set; }
+
+    /// <summary>
     /// v7.9.5.1: presets the user wrote. Null (absent from the file) means
     /// "leave whatever is loaded alone" -- loading a named profile that predates
     /// this field must not delete presets someone added in the meantime.
@@ -366,6 +373,7 @@ public static class ConfigStore
         Subtitles = CloneSubtitles(c.Subtitles),
         EraPreset = c.EraPreset,
         EraNative = c.EraNative,
+        EraAspect = c.EraAspect,
         CustomEras = [.. c.CustomEras.Select(EraConfigMap.ToConfig)],
     };
 
@@ -506,6 +514,7 @@ public static class ConfigStore
         if (stored.Subtitles is not null) c.Subtitles = CloneSubtitles(stored.Subtitles);
         c.EraPreset = stored.EraPreset;
         c.EraNative = stored.EraNative;
+        c.EraAspect = stored.EraAspect;
 
         // v7.9.5.1: the user's own presets become part of the live table here,
         // so every later `--era` lookup in this process sees them. A file that

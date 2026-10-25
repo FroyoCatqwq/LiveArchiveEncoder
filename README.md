@@ -272,6 +272,9 @@ Two flags are additions rather than ports:
 | `--era ID` | apply an era/site preset: one set of live + recompress settings per era of online video, 1997→2016 — dial-up RealVideo G2, early-ADSL RealMedia, the FLV years, early H.264, 720p. 18 **site** presets (`sina06`, `sohu06`, `qq06`, `tudou06`, `youku07`, `ku6_07`, `56_07`, `cctv06`, `acfun08`, `bilibili09`, `youtube07`, `bilibili11`, `youku11`, `iqiyi11`, `cctv12`, `youtube11`, `bilibili14`, `youtube15`) carry the codec that site served — Sorenson Spark in FLV, H.264 in MP4, VP9 in WebM — and use it for both passes unless you name an encoder. Since v7.9.6.2 a site preset fills the capture side as well (frame size, rate, ladder, ceiling, audio), so `--era youku07` records 352x264@15 at 320 kbps instead of transcoding a 2016 master with 2007 settings. Your own presets go in the settings file (`CustomEras`) and can override a built-in id. Sources in `docs/era-presets.md` |
 | era ladders (v7.9.6.1) | each era preset also carries the adaptive frame-rate ladder of its period (`mp4_10`: 25→20→15→10, `hd14`: 30→25→20→15), so a 25 fps preset no longer drops onto the tool's 13/8/5/3 default — an explicit `--fps` or `--fps-levels` still wins |
 | `--era-modern` / `--era-native` | render a preset's second pass with libx264 + AAC in MP4 instead of the site's own codec (the default), or say so explicitly |
+| `--era-aspect 4:3\|16:9\|source` | v7.9.6.3: capture and deliver a preset in the other frame shape. Keeps the capture width and changes the height (352x264 → 352x198, 1280x720 → 1280x960) and only offers a shape the encoder can actually encode — H.261/H.263 exist at CIF sizes only, AMV wants multiples of 16, everything else wants even sides; an impossible request is refused at parse time (exit 2) instead of failing on the first frame twenty minutes in |
+| `--net-test PATH\|URL` | v7.9.6.3: measure the link behind a source — throughput, jitter and first-byte latency, by reading the source the way the shards would — print the verdict `--parallel` would use, and exit (0 = shardable, 1 = not) |
+| `--iperf3 HOST[:PORT]` | v7.9.6.3: measure the link with `iperf3 -c HOST -J` as a *reference*. Both ends need iperf3 and an open port, and a public iperf3 server only stands in for the WAN path — it cannot see a NAS's own disk or per-connection limits, so reading the source stays the authoritative measurement |
 | `--video-stream N`, `--audio-stream N` | v7.9: pick which track of a multi-stream source (a VOB's second audio language, an MKV's duplicate encode) to encode, by the absolute index ffprobe prints; `--list-streams` lists them. Wrong index or type is refused before the encode, with the inventory |
 | `--subtitle FILE`, `--subtitle-stream N` | v7.9: subtitles from a sidecar file (`.ass/.ssa/.srt/.vtt`, repeatable) or an embedded track. `--subtitle-mode burn` (default) renders them into the picture with libass and the tool's own font directory; `--subtitle-mode copy` muxes them as a real subtitle stream where the container has one, with the codec picked from what `ffmpeg -encoders` actually lists. Bitmap subtitles (dvdsub/dvbsub) can be carried but not burned |
 | HTTP/HTTPS input | v7.9, initial support: the input may be a progressive `http(s)://` direct link (archive.org `/download/…` style). Carries the `-reconnect` family and a 30 s socket timeout; seeking needs a Range-capable server. No auth/cookies/HLS |
@@ -336,7 +339,14 @@ quietly downgrading it; colour tags can be overridden and are verified in the
 output rather than assumed from the command line; and a full-project review fixed
 seven latent defects — among them a 4:4:0 frame size that had been half wrong
 since the port, per-rung bitrate thresholds dropped by the shard path, and the
-palette/container rule that only applied when sharding.
+palette/container rule that only applied when sharding. v7.9.6.3 is the
+"first run and network sources" release: a machine with no FFmpeg is now asked
+which distribution to install instead of being told to add one to PATH; era
+presets can be captured in 4:3 or 16:9 as long as the encoder really encodes
+that frame; a network source is measured before it is sharded instead of being
+forced to a single pass; four Windows Media era presets cover 2002-2006; and
+the documented floor drops to what .NET 10 supports — Windows Server 2019 and
+glibc 2.28, i.e. the two machines CI runs on.
 
 ## Layout
 
