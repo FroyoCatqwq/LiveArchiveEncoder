@@ -136,6 +136,25 @@ CI 也随之调整：两台自建机（Windows Server 2019 + AlmaLinux 8）各�
 改成：先按 UTF-8 严格解码，失败再按 `GetConsoleOutputCP()` 拿到的代码页解码，最后才是
 替换字符兜底。于是 936、65001、UTF-8 的 Linux 三种控制台都读得对，不用再 `chcp 65001`。
 
+### 产物与验证
+
+四个产物，两头各一份 JIT/AOT：
+
+| 产物 | 大小 | 需要 | 构建机 |
+| --- | --- | --- | --- |
+| `…-win-x64.zip` | 318 KB | .NET 10 或 11 运行时 | Windows Server 2019 |
+| `…-win-x64-aot.zip` | 4.0 MB | 无（单 exe） | Windows Server 2019 + VS2022 / MSVC 14.44 |
+| `…-linux-x64.tar.gz` | 279 KB | .NET 10 或 11 运行时 | AlmaLinux 8.10 |
+| `…-linux-x64-aot.tar.gz` | 4.8 MB | 无（单文件） | AlmaLinux 8.10 + clang 24 快照 |
+
+AOT 产物是在**最低支持系统**上编的，不是在新机器上编完再声称兼容：Windows 侧
+9,193,472 字节的 exe 在 Server 2019 上编成并当场 `--help` 通过；Linux 侧 10,171,232
+字节，`objdump -T` 里最高的 glibc 符号是 `GLIBC_2.17`（构建机是 2.28，符号需求反而更低）。
+
+- 单测：521 例 → 520 过 / 1 跳过（跳过的是需要字体文件的用例）。
+- e2e：195 例 → 193 过 / 2 跳过（跳过的是 FFmpeg 没有 `.a64` 解复用器）。两个阶段
+  （独占计时 + 8 路并行）都绿，`test_cui_smoke` 在 cp936 控制台下不再假失败。
+
 ---
 
 ## v7.9.6.2（2026-10-24）
