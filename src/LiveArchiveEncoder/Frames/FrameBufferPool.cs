@@ -22,6 +22,9 @@ public sealed class FrameBufferPool
     private readonly int _readyCapacity;
     private int _readyHead;
     private int _readyCount;
+    // object, not System.Threading.Lock: this gate is used with Monitor.Pulse to
+    // wake the capture thread, and the Lock type has no Pulse -- passing one to
+    // Monitor.Pulse would box it and signal a monitor nobody holds (CS9216).
     private readonly object _sync = new();
 
     public int FrameSize { get; }

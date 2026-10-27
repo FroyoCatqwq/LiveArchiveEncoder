@@ -126,6 +126,11 @@ e2e 的 HTTP 分片用例就是这么卡满 300 秒超时失败的。用 v7.9.7 
 - `FileInfo.HasContent`（C# 14 扩展块）：`Refresh() + Exists && Length > 0` 原本在五处
   各写一遍，其中一处已经忘了 Refresh——`FileInfo` 缓存的是构造时的大小，对刚写出的
   文件永远是"不存在"。
+- 互斥量尽量换成 `System.Threading.Lock`：`lock` 语句在静态类型是 `Lock` 时直接编译成
+  `Lock.EnterScope()`（专用自旋路径、不进 Monitor 膨胀）。`FrameBufferPool` 的那把
+  **不能**换——它靠 `Monitor.Pulse` 唤醒采集线程，而 `Lock` 没有 `Pulse`；把 `Lock` 交给
+  `Monitor.Pulse` 会装箱并去 signal 一个没人持有的 monitor（编译器 CS9216 就是在说这个，
+  它是对的），所以那里保留 `object` 并写明了原因。
 - `SearchValues<char>` 替掉 `ContainsAny(' ', '\t', '"')`，命令行引号规则顺手补上
   cmd 的 `& | < > ^ ( ) ;`（`%` 和 `!` 在引号内仍会展开，这是 cmd 的限制，文档里写明）。
 - `ProcessRunner.Run` 新增取消令牌，顺带把 `args[0]` 的空集合情况变成明确异常。
