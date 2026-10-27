@@ -145,6 +145,19 @@ e2e 的 HTTP 分片用例就是这么卡满 300 秒超时失败的。用 v7.9.7 
 
 ---
 
+### 产物
+
+| 文件 | 大小 | 构建机 |
+| --- | --- | --- |
+| `LiveArchiveEncoder-v7.9.8-win-x64.zip` | 325,889 B | 本地 JIT |
+| `LiveArchiveEncoder-v7.9.8-win-x64-aot.zip` | 3,988,726 B（exe 9,211,904 B / 46 s） | Windows Server 2019 + MSVC 14.44 |
+| `LiveArchiveEncoder-v7.9.8-linux-x64.tar.gz` | 285,934 B | AlmaLinux 8.10 JIT |
+| `LiveArchiveEncoder-v7.9.8-linux-x64-aot.tar.gz` | 4,795,833 B（ELF 10,233,152 B / 49 s） | AlmaLinux 8.10 + copr clang 24 |
+
+Linux AOT 最高只要求 `GLIBC_2.17`。四个包都在最低系统上解包跑过一遍。
+
+---
+
 ## v7.9.7（2026-10-27）
 
 第五个补丁版，主题是**预设的数据从"我记得"变成"页面上写着"**。三件事：把扁平
