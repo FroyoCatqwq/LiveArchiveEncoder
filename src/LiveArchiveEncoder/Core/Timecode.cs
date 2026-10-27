@@ -9,6 +9,12 @@ public static partial class Timecode
     [GeneratedRegex(@"(?<hours>\d+):(?<minutes>\d{1,2}):(?<seconds>\d{1,2}(?:\.\d{1,3})?)")]
     private static partial Regex TimecodeRegex();
 
+    /// <summary>
+    /// Longest hour field accepted: ~11 years. Long enough for any recording,
+    /// short enough to reject a mistyped timestamp instead of silently wrapping.
+    /// </summary>
+    private const int MaxHours = 99_999;
+
     public static double Parse(string value)
     {
         Match m = TimecodeRegex().Match(value.Trim());
@@ -17,7 +23,17 @@ public static partial class Timecode
             throw new FormatException($"invalid timecode '{value}'; use HH:MM:SS or HH:MM:SS.mmm");
         }
 
-        int hours = int.Parse(m.Groups["hours"].Value, CultureInfo.InvariantCulture);
+        // The pattern accepts any number of hour digits, so int.Parse used to
+        // throw an OverflowException that no caller catches -- every call site
+        // handles FormatException only. Parse wide, then reject with the same
+        // exception they do handle.
+        if (!long.TryParse(m.Groups["hours"].Value, NumberStyles.None, CultureInfo.InvariantCulture,
+                out long hours) || hours > MaxHours)
+        {
+            throw new FormatException(
+                $"invalid timecode '{value}'; the hour field must be 0-{MaxHours}");
+        }
+
         int minutes = int.Parse(m.Groups["minutes"].Value, CultureInfo.InvariantCulture);
         double seconds = double.Parse(m.Groups["seconds"].Value, CultureInfo.InvariantCulture);
         if (minutes >= 60 || seconds is < 0 or >= 60)

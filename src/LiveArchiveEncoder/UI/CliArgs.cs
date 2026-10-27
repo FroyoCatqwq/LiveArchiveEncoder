@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text;
 using LiveArchiveEncoder.Configuration;
@@ -161,11 +162,24 @@ public static class CliArgs
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Characters that make a bare token un-reusable on a command line.
+    ///
+    /// Beyond the obvious whitespace and quotes, these are the cmd.exe
+    /// separators and grouping characters: a source called "clip &amp; take 2.avi"
+    /// used to be printed unquoted, and pasting the line back split it into two
+    /// commands. Quoting does <em>not</em> rescue <c>%</c> or <c>!</c> (cmd
+    /// expands them inside quotes too), so those remain the documented reason
+    /// this output is a convenience rather than a shell-safe serialisation.
+    /// </summary>
+    private static readonly SearchValues<char> NeedsQuoting =
+        SearchValues.Create([' ', '\t', '"', '&', '|', '<', '>', '^', '(', ')', ';']);
+
     /// <summary>Quote one token when it needs it.</summary>
     public static string Quote(string token)
     {
         if (token.Length == 0) return "\"\"";
-        bool needsQuotes = token.AsSpan().ContainsAny(' ', '\t', '"');
+        bool needsQuotes = token.AsSpan().ContainsAny(NeedsQuoting);
         return needsQuotes ? "\"" + token.Replace("\"", "\"\"") + "\"" : token;
     }
 

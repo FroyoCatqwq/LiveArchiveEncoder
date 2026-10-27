@@ -194,10 +194,14 @@ public static class Probe
     /// </summary>
     public static double? Duration(string ffprobe, FileInfo src)
     {
+        // The source timeout, not the 30 s default: a container that stores no
+        // per-stream duration makes ffprobe read the whole file, and over a slow
+        // share that is minutes -- a TimeoutException here used to fail an encode
+        // whose join had already succeeded.
         CaptureResult streamProbe = ProcessRunner.Run([
             ffprobe, "-v", "error", "-select_streams", "v:0",
             "-show_entries", "stream=duration", "-of", "default=nw=1:nk=1", src.FullName,
-        ]);
+        ], SourceTimeoutSeconds);
 
         if (streamProbe.ExitCode == 0
             && double.TryParse(streamProbe.Stdout.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
@@ -209,7 +213,7 @@ public static class Probe
         CaptureResult formatProbe = ProcessRunner.Run([
             ffprobe, "-v", "error", "-show_entries", "format=duration",
             "-of", "default=nw=1:nk=1", src.FullName,
-        ]);
+        ], SourceTimeoutSeconds);
         if (formatProbe.ExitCode != 0) return null;
 
         return double.TryParse(formatProbe.Stdout.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double formatValue)
@@ -229,10 +233,12 @@ public static class Probe
     /// </summary>
     public static int? VideoPacketCount(string ffprobe, FileInfo src)
     {
+        // -count_packets reads every packet in the file: on a large or remote
+        // file that is far beyond the 30 s default.
         CaptureResult p = ProcessRunner.Run([
             ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets",
             "-show_entries", "stream=nb_read_packets", "-of", "default=nw=1:nk=1", src.FullName,
-        ]);
+        ], SourceTimeoutSeconds);
         if (p.ExitCode != 0) return null;
         return int.TryParse(p.Stdout.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)
             && n > 0

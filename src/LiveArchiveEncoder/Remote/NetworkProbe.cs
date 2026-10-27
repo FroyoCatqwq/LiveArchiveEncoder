@@ -77,6 +77,27 @@ public static class NetworkProbe
     private const int MaxSamples = 4;
     private const int MinSampleBytes = 512 * 1024;
 
+    /// <summary>Wall-clock budget for the whole HTTP measurement (all samples).</summary>
+    private const int HttpBudgetSeconds = 15;
+
+    /// <summary>Rate samples for an HTTP source, on top of one warm-up read.</summary>
+    private const int RateSamples = 3;
+
+    /// <summary>
+    /// Shortest sample that can say anything about jitter.
+    ///
+    /// <para>A 512 KiB read that completes in two milliseconds is measured
+    /// better than the machine's own timer: the spread between two such samples
+    /// is noise, not link quality, and it routinely exceeded the 30% limit. On a
+    /// loopback that made a 300 MB/s link look too unstable to shard, so samples
+    /// below this floor contribute to the median throughput but not to the
+    /// jitter term.</para>
+    /// </summary>
+    private const double MinTimedSampleSeconds = 0.01;
+
+    /// <summary>One throughput reading: the rate, and how long it took to get.</summary>
+    private readonly record struct Sample(double MibPerSecond, double Seconds);
+
     private static readonly ConcurrentDictionary<string, NetworkMeasurement?> Cache = new();
 
     /// <summary>
@@ -110,10 +131,16 @@ public static class NetworkProbe
                 : FromFile(source, requiredKbps);
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
-                                       or NotSupportedException or ArgumentException)
+                                       or NotSupportedException or ArgumentException
+                                       or HttpRequestException or OperationCanceledException)
         {
             // A share that cannot be read at all is a fact worth reporting, but
             // not a crash: the single-pass run will produce the real error.
+            //
+            // HttpRequestException and the 20 s TaskCanceledException are the
+            // two ways an HTTP source fails here, and neither derives from
+            // IOException -- on a box behind a proxy that answers 502 this path
+            // never ran, so the gap only showed on a plain network.
             return null;
         }
     }
@@ -128,7 +155,7 @@ public static class NetworkProbe
 
         int sampleBytes = (int)Math.Min(SampleBytes, Math.Max(MinSampleBytes, length / 6));
         int wanted = (int)Math.Min(MaxSamples, Math.Max(1, length / sampleBytes));
-        var rates = new List<double>(wanted);
+        var rates = new List<Sample>(wanted);
         var latencies = new List<double>(wanted);
 
         using var stream = new FileStream(info.FullName, FileMode.Open, FileAccess.Read,
@@ -152,6 +179,10 @@ public static class NetworkProbe
             double firstMs = sw.Elapsed.TotalMilliseconds;
             if (first <= 0) break;
 
+            // Same split as the HTTP path: the first read is the latency, the
+            // rest is the rate, so a share's seek time cannot masquerade as
+            // jitter between samples.
+            sw.Restart();
             int total = first;
             while (total < sampleBytes)
             {
@@ -160,8 +191,8 @@ public static class NetworkProbe
                 total += read;
             }
             double seconds = sw.Elapsed.TotalSeconds;
-            if (seconds <= 0 || total <= 0) continue;
-            rates.Add(total / seconds / (1024 * 1024));
+            if (seconds <= 0 || total <= first) continue;
+            rates.Add(new Sample((total - first) / seconds / (1024 * 1024), seconds));
             latencies.Add(firstMs);
         }
 
@@ -171,39 +202,105 @@ public static class NetworkProbe
 
     private static NetworkMeasurement? FromHttp(string source, double requiredKbps)
     {
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        var rates = new List<double>();
-        var latencies = new List<double>();
-        var sw = new Stopwatch();
+        // Two things here are deliberate and were both learned the hard way.
+        //
+        // <b>The budget is a token, not HttpClient.Timeout.</b> With
+        // ResponseHeadersRead the client's own timeout stops applying the moment
+        // the headers are in, so a server that advertises a Content-Length and
+        // then stops sending -- or a link that stalls mid-body -- blocked the
+        // very first probe forever, before a single line of output. In a bug
+        // report that reads as "the program hangs on my NAS", with nothing to go
+        // on. Cancelling the token aborts the connection and the measurement
+        // degrades to "could not measure", which the caller already handles.
+        //
+        // <b>The sample size follows the file.</b> Asking for 2 MiB of an
+        // 800 KiB file gets one short read and then a 416 on the second sample,
+        // i.e. no verdict at all on exactly the small files a probe can measure
+        // fastest.
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(HttpBudgetSeconds));
+        using var handler = new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(10) };
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
 
-        for (int i = 0; i < 2; i++)
+        var rates = new List<Sample>(RateSamples);
+        var latencies = new List<double>(RateSamples + 1);
+        byte[] buffer = new byte[64 * 1024];
+        long? length = null;
+        int sampleBytes = SampleBytes;
+
+        for (int i = 0; i <= RateSamples; i++)
         {
+            // Sample 0 starts at byte 0 and is the warm-up: its timing is the
+            // latency a user feels, but its rate is not a rate sample. A cold
+            // connection spends the first reads in slow start, and letting that
+            // into the spread made a loopback look like 96% jitter -- a fast link
+            // voted too unstable to shard. The rest of the samples are spread
+            // across the file, because its head is what every server caches.
+            long start;
+            if (i == 0) start = 0;
+            else if (length is { } fileSize)
+                start = Math.Max(1, (long)(fileSize * (0.1 + 0.8 * (i - 1) / (RateSamples - 1.0))));
+            else break;                         // a server that hides its length gets one honest sample
+
+            long end = start + sampleBytes - 1;
+            if (length is { } knownSize && end > knownSize - 1) end = knownSize - 1;
+            if (end < start) break;
+
             using var request = new HttpRequestMessage(HttpMethod.Get, source);
-            long offset = (long)i * SampleBytes;
-            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(offset, offset + SampleBytes - 1);
-            sw.Restart();
-            using HttpResponseMessage response = client.Send(request, HttpCompletionOption.ResponseHeadersRead);
-            if (!response.IsSuccessStatusCode) return null;
-            using Stream body = response.Content.ReadAsStream();
-            byte[] buffer = new byte[64 * 1024];
-            int first = body.Read(buffer, 0, buffer.Length);
-            double firstMs = sw.Elapsed.TotalMilliseconds;
+            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(start, end);
+            var clock = Stopwatch.StartNew();
+            using HttpResponseMessage response =
+                client.Send(request, HttpCompletionOption.ResponseHeadersRead, budget.Token);
+            if (!response.IsSuccessStatusCode) break;
+
+            length ??= TotalLength(response);
+            if (length is { } known && i == 0)
+                sampleBytes = (int)Math.Clamp(known / 4, MinSampleBytes, SampleBytes);
+
+            using Stream body = response.Content.ReadAsStream(budget.Token);
+            int first = ReadInterruptibly(body, buffer, buffer.Length, budget.Token);
+            double firstMs = clock.Elapsed.TotalMilliseconds;
             if (first <= 0) break;
+
+            // Throughput is measured from the first byte on, not from the
+            // request: the connect and the response headers are the latency
+            // number, not part of the rate.
+            clock.Restart();
             int total = first;
-            while (total < SampleBytes)
+            while (total < sampleBytes)
             {
-                int read = body.Read(buffer, 0, Math.Min(buffer.Length, SampleBytes - total));
+                int read = ReadInterruptibly(
+                    body, buffer, Math.Min(buffer.Length, sampleBytes - total), budget.Token);
                 if (read <= 0) break;
                 total += read;
             }
-            double seconds = sw.Elapsed.TotalSeconds;
-            if (seconds <= 0) continue;
-            rates.Add(total / seconds / (1024 * 1024));
             latencies.Add(firstMs);
+            double seconds = clock.Elapsed.TotalSeconds;
+            if (i > 0 && seconds > 0 && total > first)
+                rates.Add(new Sample((total - first) / seconds / (1024 * 1024), seconds));
         }
 
         if (rates.Count == 0) return null;
         return Judge("read", rates, latencies, requiredKbps);
+    }
+
+    /// <summary>
+    /// One blocking read that <paramref name="token"/> can interrupt.
+    ///
+    /// <see cref="Stream.Read(Span{byte})"/> ignores cancellation, so a stalled
+    /// body would never come back; the async overload registers the token with
+    /// the connection and is waited on synchronously here (there is no
+    /// synchronization context in a console tool).
+    /// </summary>
+    private static int ReadInterruptibly(Stream stream, byte[] buffer, int count, CancellationToken token) =>
+        stream.ReadAsync(buffer.AsMemory(0, count), token).AsTask().GetAwaiter().GetResult();
+
+    /// <summary>Total size of the resource, as the response describes it.</summary>
+    private static long? TotalLength(HttpResponseMessage response)
+    {
+        // ContentLength is this range's length on a 206, and the whole resource
+        // on a 200 -- hence ContentRange first.
+        if (response.Content.Headers.ContentRange?.Length is { } whole) return whole;
+        return response.Content.Headers.ContentLength;
     }
 
     private static NetworkMeasurement? FromIperf3(string host, double requiredKbps)
@@ -235,9 +332,10 @@ public static class NetworkProbe
             if (bits <= 0) return null;
 
             double mib = bits / 8.0 / (1024 * 1024);
-            // iperf3 reports one aggregate number, so there is no spread to
-            // measure; treat it as a stable sample rather than inventing jitter.
-            return Judge("iperf3", [mib], [0.0], requiredKbps);
+            // iperf3 reports one aggregate number over three seconds, so there
+            // is no spread to measure; treat it as a stable sample rather than
+            // inventing jitter.
+            return Judge("iperf3", [new Sample(mib, 3.0)], [0.0], requiredKbps);
         }
         catch (JsonException)
         {
@@ -246,13 +344,21 @@ public static class NetworkProbe
     }
 
     private static NetworkMeasurement Judge(
-        string kind, List<double> rates, List<double> latencies, double requiredKbps)
+        string kind, List<Sample> samples, List<double> latencies, double requiredKbps)
     {
-        rates.Sort();
         latencies.Sort();
+        List<double> rates = [.. samples.Select(s => s.MibPerSecond).Order()];
         double median = rates[rates.Count / 2];
-        double spread = rates.Count > 1 ? rates[^1] - rates[0] : 0;
-        double jitter = median > 0 ? spread / median * 100.0 : 0;
+
+        // Jitter only from samples long enough to time -- see MinTimedSampleSeconds.
+        // One such sample means the spread is unknown, which is reported as 0
+        // rather than as a number the timer invented.
+        List<double> timed = [.. samples.Where(s => s.Seconds >= MinTimedSampleSeconds)
+                                        .Select(s => s.MibPerSecond).Order()];
+        double jitter = 0;
+        if (timed.Count > 1 && median > 0)
+            jitter = (timed[^1] - timed[0]) / median * 100.0;
+
         double firstByte = latencies[latencies.Count / 2];
 
         double neededMib = requiredKbps / 8000.0;       // kbps -> MiB/s

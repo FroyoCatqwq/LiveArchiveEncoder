@@ -427,7 +427,19 @@ public static class SubtitleTrack
             "-c:s", transcode ? "srt" : "copy", "-y", target,
         ]);
 
-        CaptureResult p = ProcessRunner.Run(cmd, Probe.SourceTimeoutSeconds);
+        CaptureResult p;
+        try
+        {
+            p = ProcessRunner.Run(cmd, Probe.SourceTimeoutSeconds);
+        }
+        catch
+        {
+            // A probe that times out (a remote source, a large file) must not
+            // leave the staging directory behind: the caller only gets to
+            // dispose a plan that was actually returned.
+            try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
+            throw;
+        }
         if (p.ExitCode != 0 || !File.Exists(target) || new FileInfo(target).Length == 0)
         {
             try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }

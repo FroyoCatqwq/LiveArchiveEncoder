@@ -301,14 +301,64 @@ public static class ConfigStore
         if (path is null || !File.Exists(path)) return null;
         try
         {
-            return JsonSerializer.Deserialize(
+            UserConfig? loaded = JsonSerializer.Deserialize(
                 File.ReadAllText(path), UserConfigJsonContext.Default.UserConfig);
+            if (loaded is not null) Normalise(loaded);
+            return loaded;
         }
         catch (Exception exc) when (exc is JsonException or IOException or UnauthorizedAccessException)
         {
             // A corrupt file must never keep the program from starting.
             return null;
         }
+    }
+
+    /// <summary>
+    /// Repair a snapshot that spelled a non-nullable member as <c>null</c>.
+    ///
+    /// <para>System.Text.Json takes <c>"FpsLevels": null</c> literally: the
+    /// property ends up null even though its type forbids it, and every reader
+    /// then dereferences it unguarded. Only <see cref="Apply"/> used to defend
+    /// itself, so the same file crashed whichever path did not go through Apply
+    /// -- <c>--emit-args=file.json</c> died with a NullReferenceException inside
+    /// <c>CliArgs.LadderSpec</c>.</para>
+    ///
+    /// <para>One repair at the read boundary means every caller sees the shape
+    /// the type promises, instead of each one re-checking.</para>
+    /// </summary>
+    private static void Normalise(UserConfig c)
+    {
+        // An empty ladder is not a ladder: the encoder always needs a current
+        // rung, so both "absent" and "blank" mean the built-in four.
+        c.FpsLevels = c.FpsLevels is { Count: > 0 } levels ? levels : [13.0, 8.0, 5.0, 3.0];
+        c.FpsLevelKbps = c.FpsLevelKbps is { } rungs ? [.. rungs.Where(r => r is not null)] : [];
+
+        // null and [] differ here on purpose: null means "the file predates the
+        // field, leave the presets already loaded alone", [] means "none".
+        c.CustomEras = c.CustomEras is { } eras ? [.. eras.Where(e => e is not null)] : null;
+
+        c.Recompress = CloneRecompress(c.Recompress ?? new RecompressSettings());
+        c.Subtitles = CloneSubtitles(c.Subtitles ?? new SubtitleConfig());
+
+        // The rest are strings with a documented default; null would reach an
+        // FFmpeg argument or a switch statement and become a null reference or
+        // a silent "no such option" further from the cause.
+        c.Dither = c.Dither.Or("auto");
+        c.Deinterlace = c.Deinterlace.Or("off");
+        c.DeintMode = c.DeintMode.Or("send_frame");
+        c.DeintParity = c.DeintParity.Or("auto");
+        c.Hwaccel = c.Hwaccel.Or("off");
+        c.X264Preset = c.X264Preset.Or("medium");
+        c.X264Tune = c.X264Tune.Or("");
+        c.X264Profile = c.X264Profile.Or("");
+        c.X264Level = c.X264Level.Or("");
+        c.FitMode = c.FitMode.Or("crop");
+        c.CropAnchor = c.CropAnchor.Or("center");
+        c.PadColor = c.PadColor.Or("black");
+        c.ScaleAlgo = c.ScaleAlgo.Or("neighbor");
+        c.Language = c.Language.Or("en");
+        c.FfmpegSource = c.FfmpegSource.Or(FFmpeg.FfmpegCatalog.DefaultId);
+        c.PlayMode = c.PlayMode.Or("off");
     }
 
     public static bool Save(UserConfig cfg, string? path = null)

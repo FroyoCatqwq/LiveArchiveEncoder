@@ -253,6 +253,13 @@ public static class Toolchain
     /// </summary>
     private const string BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
 
+    /// <summary>
+    /// How long a download may deliver nothing before it is abandoned. Generous
+    /// on purpose: it has to survive a slow CDN without aborting a healthy
+    /// transfer, while still ending a connection that has silently died.
+    /// </summary>
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
+
     /// <summary>aria2c when available, HttpClient otherwise.</summary>
     private static (bool Ok, string? Error) Download(
         string url, string destination, string? proxy, Action<string> log)
@@ -305,12 +312,24 @@ public static class Toolchain
     {
         try
         {
-            using var handler = new HttpClientHandler();
+            // SocketsHttpHandler, not HttpClientHandler: the latter is a thin
+            // wrapper that does not expose ConnectTimeout.
+            using var handler = new SocketsHttpHandler();
             if (proxy.HasText)
             {
-                handler.Proxy = new WebProxy(proxy);
+                // Validated rather than handed to WebProxy: a malformed value
+                // ("http://a b") throws UriFormatException, which is a
+                // FormatException -- neither this method's catch filter nor the
+                // caller's covers it, so a typo'd --proxy used to end the process
+                // with a stack trace instead of a message.
+                if (!Uri.TryCreate(proxy, UriKind.Absolute, out Uri? proxyUri))
+                    return (false, $"invalid proxy address '{proxy}'");
+                handler.Proxy = new WebProxy(proxyUri);
                 handler.UseProxy = true;
             }
+            // A host that never answers would otherwise wait for the OS
+            // connect timeout, which is minutes.
+            handler.ConnectTimeout = TimeSpan.FromSeconds(30);
 
             using var client = new HttpClient(handler, disposeHandler: true)
             {
@@ -337,9 +356,27 @@ public static class Toolchain
             var buffer = new byte[1024 * 1024];
             long written = 0;
             long nextReport = 0;
-            int read;
-            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            // Idle timeout rather than a total one: an archive download may
+            // legitimately take an hour, but a connection that stops delivering
+            // bytes must fail instead of blocking Read forever -- that is what a
+            // dropped link or a stalled proxy does, and Ctrl+C was the only exit.
+            using var idle = new CancellationTokenSource();
+            while (true)
             {
+                int read;
+                idle.CancelAfter(StallTimeout);
+                try
+                {
+                    read = stream.ReadAsync(buffer, idle.Token).AsTask().GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException)
+                {
+                    return (false,
+                        $"download stalled: no data for {StallTimeout.TotalSeconds:F0}s "
+                        + $"({written / (1024 * 1024)} MB received)");
+                }
+                if (read <= 0) break;
+
                 file.Write(buffer, 0, read);
                 written += read;
                 if (written >= nextReport)
@@ -354,7 +391,8 @@ public static class Toolchain
             return (true, null);
         }
         catch (Exception exc) when (exc is HttpRequestException or IOException
-                                        or TaskCanceledException or System.Net.Sockets.SocketException)
+                                        or TaskCanceledException or System.Net.Sockets.SocketException
+                                        or OperationCanceledException)
         {
             return (false, exc.Message);
         }

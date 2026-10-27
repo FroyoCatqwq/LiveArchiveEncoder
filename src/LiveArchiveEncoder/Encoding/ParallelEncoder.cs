@@ -57,6 +57,9 @@ public static class ParallelEncoder
         string stageDir = Path.Combine(
             Path.GetTempPath(), "lae_shards_" + Guid.NewGuid().ToString("N")[..12]);
         Directory.CreateDirectory(stageDir);
+        // The join lands in a ".part" sibling and is renamed onto the real name
+        // only once it has passed the checks below.
+        FileInfo part = Core.OutputFile.PartPath(dst);
 
         try
         {
@@ -196,7 +199,7 @@ public static class ParallelEncoder
             if (string.Equals(dst.Extension, ".mkv", StringComparison.OrdinalIgnoreCase))
             {
                 // The join already is the final container: no second pass.
-                File.Move(joinedPath, dst.FullName, overwrite: true);
+                File.Move(joinedPath, part.FullName, overwrite: true);
             }
             else
             {
@@ -219,7 +222,7 @@ public static class ParallelEncoder
                 ];
                 if (string.Equals(o.Encoder.FormatName, "avi", StringComparison.OrdinalIgnoreCase))
                     remuxArgs.AddRange(["-fps_mode", "passthrough", "-r", ArgsBuilder.FpsArg(o.Fps)]);
-                remuxArgs.AddRange(["-y", dst.FullName]);
+                remuxArgs.AddRange(["-y", part.FullName]);
 
                 CaptureResult remux = ProcessRunner.Run(remuxArgs, timeoutSeconds: Math.Max(120, (int)span * 2));
 
@@ -231,18 +234,22 @@ public static class ParallelEncoder
                 }
             }
 
-            dst.Refresh();
-            if (!dst.Exists || dst.Length == 0)
+            if (!part.HasContent)
                 throw new InvalidOperationException("shard join produced an empty file");
 
             // Safety net: the duration check alone would have caught the RoQ data
             // loss (a 10s result collapsing to 5.05s) had RoQ not been blocked.
-            double joined = Probe.Duration(o.FFprobe, dst) ?? 0.0;
+            //
+            // A duration ffprobe cannot report is not evidence of data loss: some
+            // containers simply do not store one. The packet count below still
+            // guards the picture, so "unmeasurable" skips this check instead of
+            // failing a join that worked.
+            double? joined = Probe.Duration(o.FFprobe, part);
             double tolerance = Math.Max(0.5, span * 0.02);
-            if (Math.Abs(joined - span) > tolerance)
+            if (joined is { } measured && Math.Abs(measured - span) > tolerance)
             {
                 throw new InvalidOperationException(
-                    $"shard join lost data: expected {span:F3}s, got {joined:F3}s "
+                    $"shard join lost data: expected {span:F3}s, got {measured:F3}s "
                     + $"(tolerance {tolerance:F3}s). Format '{o.Encoder.FormatName}' is not "
                     + "safe to concatenate; rerun without --parallel.");
             }
@@ -253,7 +260,7 @@ public static class ParallelEncoder
             // slot per 1/fps (a slot is fresh or repeated), so the joined file
             // must hold as many video packets as the shards produced slots.
             int expectedPackets = results.Sum(r => r.Slots);
-            if (Probe.VideoPacketCount(o.FFprobe, dst) is { } actualPackets
+            if (Probe.VideoPacketCount(o.FFprobe, part) is { } actualPackets
                 && expectedPackets > 0
                 && Math.Abs(actualPackets - expectedPackets) > Math.Max(4, expectedPackets / 50))
             {
@@ -263,13 +270,17 @@ public static class ParallelEncoder
                     + "is not safe to concatenate here; rerun without --parallel.");
             }
 
+            // Every check passed, so the part file can take the real name.
+            Core.OutputFile.Promote(part, dst);
+            double measuredDuration = joined ?? span;
+
             long totalBytes = dst.Length;
-            double avgTotalKbps = totalBytes * 8.0 / Math.Max(0.001, joined) / 1000.0;
+            double avgTotalKbps = totalBytes * 8.0 / Math.Max(0.001, measuredDuration) / 1000.0;
             bool hasAudio = results[0].HasAudio;
 
             return new EncodeResult
             {
-                Duration = joined,
+                Duration = measuredDuration,
                 StartTimeSeconds = o.StartSeconds,
                 EndTimeSeconds = resolvedEnd,
                 SourcePixFmt = results[0].SourcePixFmt,
@@ -286,6 +297,11 @@ public static class ParallelEncoder
                 Slots = results.Sum(r => r.Slots),
                 ElapsedSeconds = results.Max(r => r.ElapsedSeconds),
             };
+        }
+        catch
+        {
+            Core.OutputFile.Discard(part);
+            throw;
         }
         finally
         {
@@ -425,7 +441,7 @@ public static class ParallelEncoder
             try
             {
                 var file = new FileInfo(o.SourcePath);
-                if (file.Exists && file.Length > 0)
+                if (file.HasContent)
                     return Math.Max(floor, file.Length * 8 / duration.Value / 1000.0);
             }
             catch (Exception exc) when (exc is IOException or UnauthorizedAccessException or ArgumentException)

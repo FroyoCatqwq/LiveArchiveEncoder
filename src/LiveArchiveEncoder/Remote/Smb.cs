@@ -346,9 +346,16 @@ public static class Smb
             start.ArgumentList.Add("-NoProfile");
             start.ArgumentList.Add("-NonInteractive");
             start.ArgumentList.Add("-Command");
+            // The server and share go through the environment instead of being
+            // spliced into the script text: a share name may legally contain an
+            // apostrophe, which single-quoted PowerShell reads as the end of the
+            // string -- so "\\nas\bob's share\x.avi" produced a syntax error (and
+            // reported "not connected") and a crafted path could add commands.
+            start.Environment["LAE_SMB_SERVER"] = parts.Value.Server;
+            start.Environment["LAE_SMB_SHARE"] = parts.Value.Share;
             start.ArgumentList.Add(
-                $"$c = Get-SmbConnection -ServerName '{parts.Value.Server}' -ErrorAction SilentlyContinue "
-                + $"| Where-Object {{ $_.ShareName -eq '{parts.Value.Share}' }}; "
+                "$c = Get-SmbConnection -ServerName $env:LAE_SMB_SERVER -ErrorAction SilentlyContinue "
+                + "| Where-Object { $_.ShareName -eq $env:LAE_SMB_SHARE }; "
                 + "if ($c) { $c.Dialect } else { '' }");
 
             using Process? proc = Process.Start(start);

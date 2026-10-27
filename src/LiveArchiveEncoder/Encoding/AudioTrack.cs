@@ -136,13 +136,15 @@ public static class AudioTrack
     public static CaptureResult Encode(
         string ffmpeg, string sourcePath, string audioEncoder, int audioKbps,
         int audioChannels, int? audioRate, double startSeconds, double duration,
-        string outputPath, int timeoutSeconds, int? audioStream = null)
+        string outputPath, int timeoutSeconds, int? audioStream = null,
+        CancellationToken cancellationToken = default)
     {
         return ProcessRunner.Run(
             BuildEncodeCommand(ffmpeg, sourcePath, audioEncoder, audioKbps,
                 audioChannels, audioRate, startSeconds, duration, outputPath, audioStream),
             timeoutSeconds,
-            System.Diagnostics.ProcessPriorityClass.BelowNormal);
+            System.Diagnostics.ProcessPriorityClass.BelowNormal,
+            cancellationToken);
     }
 
     public static CaptureResult Mux(

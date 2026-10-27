@@ -46,6 +46,11 @@ public static class StreamSelection
             Duration = source.Duration,
             HasAudio = source.HasAudio,
             Streams = source.Streams,
+            // Container bitrate is a property of the file, not of the stream
+            // that was picked, so it has to survive the rebuild: dropping it
+            // made the network check fall back to the output ceiling and judge
+            // a 20 Mbit/s source as if it needed 800 kbit/s.
+            BitRateKbps = source.BitRateKbps,
         };
     }
 

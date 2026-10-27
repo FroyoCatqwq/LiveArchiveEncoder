@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -65,6 +66,13 @@ class _RangeHandler(BaseHTTPRequestHandler):
             if first:
                 start = int(first)
                 end = int(last) if last else size - 1
+                # RFC 9110 14.1.2: a last-byte-pos past the end is clamped, not
+                # honoured. Without this a client asking for 2 MiB of an 800 KiB
+                # file was promised a Content-Length it could never receive, and
+                # then hung waiting for the rest -- which is exactly the hang
+                # NetworkProbe's budget now protects against, but a server that
+                # speaks Range has no business creating it.
+                end = min(end, size - 1)
             elif last:  # suffix: the final `last` bytes
                 start = max(0, size - int(last))
             if start > end or start >= size:
@@ -130,6 +138,45 @@ def dead_port() -> str:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return f"http://127.0.0.1:{s.getsockname()[1]}"
+
+
+class _StallHandler(BaseHTTPRequestHandler):
+    """Advertise a body, send a taste, then go quiet -- the NAS that hangs.
+
+    This is not a contrived server: a share that promises Content-Length and
+    then stops sending is an ordinary way for a network source to misbehave,
+    and the client-side probe used to wait for the rest of the body forever.
+    """
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(200 * 1024 * 1024))
+        self.end_headers()
+        try:
+            self.wfile.write(b"\0" * 4096)
+            self.wfile.flush()
+            time.sleep(300)
+        except OSError:      # the client gave up, which is the point
+            pass
+
+
+@pytest.fixture(scope="module")
+def stalling_server():
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _StallHandler)
+    httpd.daemon_threads = True
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    httpd.shutdown()
+    httpd.server_close()
+    thread.join(timeout=5)
 
 
 def _encode(exe, workdir, name, url, extra, ext="avi"):
@@ -239,3 +286,25 @@ def test_http_connection_refused(exe, dead_port, workdir):
 
     assert proc.returncode != 0
     assert not dst.exists()
+
+
+def test_http_stalled_body_does_not_hang(exe, stalling_server, workdir):
+    """A server that stops mid-body must produce a verdict, not a hang.
+
+    The link probe behind `--parallel` used to block on the rest of an
+    advertised body forever: HttpClient.Timeout stops applying once the headers
+    are in (ResponseHeadersRead hands back a live stream), so there was nothing
+    left to give up. A run then sat in silence with no output at all until the
+    caller killed it. The probe now carries its own deadline, and the only
+    acceptable outcomes here are "measured, so no sharding" and "could not
+    measure" -- both fail the run fast and say so.
+    """
+    started = time.monotonic()
+    proc, dst = _encode(exe, workdir, "stall", f"{stalling_server}/stall.mp4",
+                        ["--encoder", "mpeg4", "--parallel", "3", "--end", "00:00:03"])
+    elapsed = time.monotonic() - started
+
+    # ffprobe's own -rw_timeout is 30 s, the probe budget 15 s, plus startup.
+    assert elapsed < 150, f"the run took {elapsed:.0f}s, i.e. it hung"
+    assert proc.returncode != 0, "a source that never delivers must fail"
+    assert not dst.exists(), "a failed run must not leave a product behind"

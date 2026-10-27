@@ -22,9 +22,17 @@ public static class ProcessRunner
     /// <see cref="ProcessPriorityClass.BelowNormal"/> so the parallel audio process
     /// cannot steal time from the realtime-paced capture loop.
     /// </param>
+    /// <param name="cancellationToken">
+    /// Kills the child when the run is abandoned. Without it a cancelled encode
+    /// left its FFmpeg working on a file nobody was going to keep -- and holding
+    /// the staging directory open, which made the cleanup that follows fail too.
+    /// </param>
     public static CaptureResult Run(IReadOnlyList<string> args, int timeoutSeconds = 30,
-                                    ProcessPriorityClass? priority = null)
+                                    ProcessPriorityClass? priority = null,
+                                    CancellationToken cancellationToken = default)
     {
+        if (args.Count == 0) throw new ArgumentException("no executable to run", nameof(args));
+
         var startInfo = new ProcessStartInfo
         {
             FileName = args[0],
@@ -50,11 +58,22 @@ public static class ProcessRunner
         Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync();
         Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
 
-        if (!proc.WaitForExit(timeoutSeconds * 1000))
+        // Wait in slices rather than one long call: neither a cancel nor the
+        // deadline can be observed while blocked inside WaitForExit(ms).
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        int budgetMs = timeoutSeconds * 1000;
+        while (!proc.WaitForExit(250))
         {
-            try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
-            proc.WaitForExit(5000);
-            throw new TimeoutException($"{Path.GetFileName(args[0])} did not finish within {timeoutSeconds}s");
+            if (cancellationToken.IsCancellationRequested)
+            {
+                Kill(proc);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            if (clock.ElapsedMilliseconds >= budgetMs)
+            {
+                Kill(proc);
+                throw new TimeoutException($"{Path.GetFileName(args[0])} did not finish within {timeoutSeconds}s");
+            }
         }
 
         return new CaptureResult
@@ -66,4 +85,11 @@ public static class ProcessRunner
     }
 
     public static CaptureResult Run(string exe, params string[] args) => Run([exe, .. args]);
+
+    /// <summary>Kill a child and everything it spawned, then give it a moment to die.</summary>
+    private static void Kill(Process proc)
+    {
+        try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+        try { proc.WaitForExit(5000); } catch { /* nothing left to wait for */ }
+    }
 }

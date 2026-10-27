@@ -249,27 +249,40 @@ public static class RealtimeEncoder
         string hwaccel = FFmpeg.Hwaccel.Resolve(o.Hwaccel, o.FFmpeg, sourcePath, say);
         o.Hwaccel = hwaccel;
 
-        if (string.Equals(hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
+        try
         {
-            RunVideoPreflight(FFmpeg.Hwaccel.Off);
-        }
-        else
-        {
-            try
+            if (string.Equals(hwaccel, FFmpeg.Hwaccel.Off, StringComparison.OrdinalIgnoreCase))
             {
-                RunVideoPreflight(hwaccel);
-            }
-            catch (InvalidOperationException)
-            {
-                o.Hwaccel = FFmpeg.Hwaccel.Off;
-                say?.Invoke(L.T("note.hwaccelfallback", hwaccel));
                 RunVideoPreflight(FFmpeg.Hwaccel.Off);
             }
+            else
+            {
+                try
+                {
+                    RunVideoPreflight(hwaccel);
+                }
+                catch (InvalidOperationException)
+                {
+                    o.Hwaccel = FFmpeg.Hwaccel.Off;
+                    say?.Invoke(L.T("note.hwaccelfallback", hwaccel));
+                    RunVideoPreflight(FFmpeg.Hwaccel.Off);
+                }
+            }
         }
-
+        catch
+        {
+            // A staged embedded track has to die here: the caller's finally only
+            // runs once Execute has started, and a refused encoder/muxer pair is
+            // exactly the case that never gets that far.
+            subs?.Dispose();
+            throw;
+        }
         List<string> decCmd = BuildDecoderCommand(o, sourcePath, vf, transportFmt, duration);
+        // The encoder writes a ".part" sibling; Promote puts it in place only
+        // once the run has actually succeeded.
+        FileInfo part = Core.OutputFile.PartPath(dst);
         List<string> encCmd = BuildEncoderCommand(
-            o, dst, transportFmt, width, height, hasAudio, audioRate, audioChannels, duration, stream, muxer, subs);
+            o, part, transportFmt, width, height, hasAudio, audioRate, audioChannels, duration, stream, muxer, subs);
 
         if (o.Verbose)
         {
@@ -300,24 +313,24 @@ public static class RealtimeEncoder
             if (smbOut is not null) Console.WriteLine(smbOut);
         }
 
-        if (subs is null)
-        {
-            return Execute(
-                o, dst, decCmd, encCmd, frameSize, targetSlots, duration, hasAudio,
-                stream.PixFmt, transportFmt, width, height, scaleAlgo, resolvedEnd, cancellationToken);
-        }
-
         // An embedded track was staged to a temp directory for the filter; it
-        // goes away whether the encode worked or not.
+        // goes away whether the encode worked or not, exactly like the part file.
         try
         {
-            return Execute(
-                o, dst, decCmd, encCmd, frameSize, targetSlots, duration, hasAudio,
+            EncodeResult result = Execute(
+                o, part, decCmd, encCmd, frameSize, targetSlots, duration, hasAudio,
                 stream.PixFmt, transportFmt, width, height, scaleAlgo, resolvedEnd, cancellationToken);
+            Core.OutputFile.Promote(part, dst);
+            return result;
+        }
+        catch
+        {
+            Core.OutputFile.Discard(part);
+            throw;
         }
         finally
         {
-            subs.Dispose();
+            subs?.Dispose();
         }
     }
 
@@ -409,6 +422,15 @@ public static class RealtimeEncoder
         Directory.CreateDirectory(stageDir);
         string videoOnly = Path.Combine(stageDir, $"video.{o.Encoder.Extension}");
         string audioOnly = Path.Combine(stageDir, $"audio.{AudioTrack.ContainerFor(o.AudioEncoder!)}");
+        FileInfo part = Core.OutputFile.PartPath(dst);
+
+        // The audio pass has to die with the run. If the video stage fails or the
+        // user cancels, an un-cancellable task used to keep its FFmpeg working
+        // for up to `audioTimeout` seconds, holding the staging directory open --
+        // so the cleanup below failed too and both the process and
+        // %TEMP%\live_archive_v7_* outlived the command.
+        using var audioStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task<CaptureResult>? audioTask = null;
 
         try
         {
@@ -417,11 +439,11 @@ public static class RealtimeEncoder
 
             // Stage 1 + 2 run concurrently: the audio encoder is not bound by the
             // realtime pacing that governs the video slot loop.
-            Task<CaptureResult> audioTask = Task.Run(
+            audioTask = Task.Run(
                 () => AudioTrack.Encode(o.FFmpeg, sourcePath, o.AudioEncoder!, audioKbps,
                     audioChannels, audioRate, o.StartSeconds, span, audioOnly, audioTimeout,
-                    o.AudioStream),
-                CancellationToken.None);
+                    o.AudioStream, audioStop.Token),
+                audioStop.Token);
 
             var videoOptions = new RealtimeOptions
             {
@@ -492,12 +514,12 @@ public static class RealtimeEncoder
                     $"audio encode failed (code {audio.ExitCode}): "
                     + (audio.Stderr.Trim() is { Length: > 0 } d ? d : "no FFmpeg diagnostic"));
             }
-            if (!File.Exists(audioOnly) || new FileInfo(audioOnly).Length == 0)
+            if (!new FileInfo(audioOnly).HasContent)
                 throw new InvalidOperationException("audio encode produced no usable output");
 
             // Stage 3: join. Both streams are copied, so this is a remux, not a re-encode.
             CaptureResult mux = AudioTrack.Mux(
-                o.FFmpeg, videoOnly, audioOnly, span, o.Encoder.FormatName, dst.FullName, audioTimeout);
+                o.FFmpeg, videoOnly, audioOnly, span, o.Encoder.FormatName, part.FullName, audioTimeout);
             if (mux.ExitCode != 0)
             {
                 throw new InvalidOperationException(
@@ -505,14 +527,12 @@ public static class RealtimeEncoder
                     + (mux.Stderr.Trim() is { Length: > 0 } d ? d : "no FFmpeg diagnostic"));
             }
 
-            dst.Refresh();
-            if (!dst.Exists || dst.Length == 0)
-                throw new InvalidOperationException("mux reported success but output file is empty");
-
             // File size alone is not proof of a correct mux: the RoQ muxer, for
             // example, happily writes an audio-only file with rc=0 and silently
-            // drops the copied video stream. Verify the streams actually landed.
-            VerifyMuxedOutput(o.FFprobe, dst, expectedAudio: true, expectedDuration: span);
+            // drops the copied video stream. Verify the streams actually landed
+            // -- on the part file, before it replaces anything.
+            VerifyMuxedOutput(o.FFprobe, part, expectedAudio: true, expectedDuration: span);
+            Core.OutputFile.Promote(part, dst);
 
             // The video-only pass measures the video bitrate directly; the final
             // file supplies the combined bitrate. This is more accurate than the
@@ -543,8 +563,21 @@ public static class RealtimeEncoder
                 ElapsedSeconds = video.ElapsedSeconds,
             };
         }
+        catch
+        {
+            Core.OutputFile.Discard(part);
+            throw;
+        }
         finally
         {
+            // Stop the audio pass before deleting the directory it writes into,
+            // and observe its outcome so a kill does not surface as an unobserved
+            // task exception on the finalizer thread.
+            audioStop.Cancel();
+            if (audioTask is not null)
+            {
+                try { audioTask.Wait(5000); } catch { /* cancelled: already handled */ }
+            }
             try { Directory.Delete(stageDir, recursive: true); } catch { /* best effort */ }
         }
     }
@@ -707,7 +740,6 @@ public static class RealtimeEncoder
         var decoderDiagnostics = new List<string>();
         Lock diagnosticsLock = new();
         long capturedSequence = 0;
-        string? decoderError = null;
 
         var decoderStart = new ProcessStartInfo
         {
@@ -842,13 +874,22 @@ public static class RealtimeEncoder
 
                 if (targetSlots is not null && slots >= targetSlots) break;
 
+                // A decoder that died has to be reported even when the capture
+                // thread has already noticed the closed pipe: that thread sets
+                // Done on its way out, so the old `&& !captureState.Done` guard
+                // made this check unreachable in exactly the case it exists for.
+                // A mid-stream failure (dropped HTTP source, bad sector) then
+                // let the loop fill the rest of the requested duration with the
+                // last decoded frame and report success on a frozen tail. This
+                // loop only kills the decoder after it ends, so a non-zero code
+                // here is always the decoder's own doing.
                 decoder.Refresh();
-                if (decoder.HasExited && decoder.ExitCode != 0 && !captureState.Done)
+                if (decoder.HasExited && decoder.ExitCode != 0)
                 {
                     List<string> tail = TailLines(decoderDiagnostics, 8);
-                    decoderError = $"decoder exited before capture reached EOF (code {decoder.ExitCode}); "
-                        + (tail.Count > 0 ? string.Join(" | ", tail) : "no decoder diagnostic");
-                    throw new InvalidOperationException(decoderError);
+                    throw new InvalidOperationException(
+                        $"decoder exited before the capture finished (code {decoder.ExitCode}); "
+                        + (tail.Count > 0 ? string.Join(" | ", tail) : "no decoder diagnostic"));
                 }
 
                 if (targetSlots is null && captureState.Done && pool.ReadyCount == 0) break;
@@ -1047,15 +1088,13 @@ public static class RealtimeEncoder
             cts.Cancel();
             try { Task.WaitAll([progressTask, decoderStderrTask], 3000); } catch { /* diagnostics only */ }
 
-            if (decoderError is not null) throw new InvalidOperationException(decoderError);
             // Non-zero decoder codes after our deliberate stop are expected; the
             // pipe was intentionally stopped after the output slots were produced.
             if (encRc != 0)
                 throw new InvalidOperationException(
                     $"encoder exited with code {encRc}; {JoinDiagnostics(monitor.TailDiagnostics(10))}");
 
-            dst.Refresh();
-            if (!dst.Exists || dst.Length == 0)
+            if (!dst.HasContent)
                 throw new InvalidOperationException("FFmpeg reported success but output file is empty");
 
             lock (diagnosticsLock)

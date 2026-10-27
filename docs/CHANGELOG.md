@@ -18,6 +18,128 @@
 
 ---
 
+## v7.9.8（2026-10-27）
+
+第六个补丁版，没有新功能：**把整份代码按"会不会在用户机器上出事"过了一遍**，
+修掉十五处缺陷，其中三处会毁数据、崩进程，或者把程序挂在那里不动。每条都先在当前
+代码上复现、再改。
+
+### 1. ⚠ 输出先写 `.part`，成功才改名
+
+**问题**：FFmpeg 带 `-y` 打开目标文件的那一刻就把它截断了。后果有两个，
+对一个归档工具都是致命的：
+
+- 重编码一个已有成片时失败 → 旧的好文件没了，硬盘上只剩半截；
+- 取消/失败留下的半截文件**看起来是完成的**，从文件管理器到后续 remux 都当它是成品。
+
+**改法**：编码写 `name.part.ext`（同目录、同扩展名，所以 FFmpeg/ffprobe 看到的
+格式判断完全不变），全部校验通过后 `File.Move(overwrite)` 改名到位；失败的路径
+删掉 `.part`。"归档"这个用途下，宁可留一个名字就写着"没完成"的文件。
+
+实测：20 秒的任务在第 5 秒被杀，原有 64,383 字节的成片**一字节没动**，半成品在
+`lae_keep.part.mp4` 里（332,912 字节）。改动覆盖三条写入路径：单进程、分离音频的
+mux、以及 `--parallel` 的 remux。
+
+### 2. 解码器中途死亡不再"补帧"成成功
+
+**问题**：`Execute` 里那句解码器死亡检查带着 `&& !captureState.Done`，而
+`Done` 正是采集线程在管道 EOF 时置位的——也就是说，这个检查在它唯一该起作用的
+场景里**永远不成立**。HTTP 源断流、坏扇区，解码器死在第 10 秒之后，主循环继续把
+最后一帧重复到时长跑满，编码器退出码 0，于是工具报告成功。产物后半段是定格的。
+
+**改法**：去掉那个条件——循环结束时才会主动杀解码器，所以循环内出现的非零退出码
+一定是解码器自己的问题。
+
+### 3. 取消/失败不再留下孤儿 FFmpeg 和临时目录
+
+**问题**：分离音频（`--audio-mode auto/separate`）起了一个 `CancellationToken.None`
+的音频任务。视频段一旦抛异常或取消，这个任务永远不被等待：它的 FFmpeg 继续跑到
+`audioTimeout`（时长 ×2 +120 秒），而 `finally` 去删一个正被写入的目录 → 删除失败，
+`%TEMP%\live_archive_v7_*` 连同半个音频文件永久留下。
+
+**改法**：`ProcessRunner.Run` 新增可选取消令牌（现在按 250 ms 一片等待，取消能及时
+被观察到）；音频任务用与运行绑定的 CTS，`finally` 先取消、等 5 秒、再删目录。
+
+### 4. 坏配置文件不再崩进程（`--emit-args`）
+
+**问题**：`"FpsLevels": null` 这种写法 System.Text.Json 会照单全收，而属性类型不允许
+null。此前只有 `ConfigStore.Apply` 自己兜底，于是走另一条路的 `--emit-args=file.json`
+直接在 `CliArgs.LadderSpec` 里抛 `NullReferenceException`，进程带堆栈退出。
+
+**改法**：在读取边界统一修一次（`ConfigStore.Normalise`）：集合、子对象、以及有默认值
+的字符串字段，null 一律回到默认。所有读者看到的就是类型承诺的形状。
+
+### 5. 链路探针会在服务器中途停发时永久挂住
+
+**问题**：`--parallel` 对网络源先测一次链路（`NetworkProbe.FromHttp`）。它用
+`HttpCompletionOption.ResponseHeadersRead` 拿到流，然后**同步**读满声明的 body。
+`HttpClient.Timeout` 在响应头收全的那一刻就失效了，剩下的读取没有任何上限——服务器
+声明的 `Content-Length` 只要多于它肯给的字节（半死的链路、掉线的 NAS、不规范的
+Range 实现），程序就停在那里等一次永远不会来的读完，而且**发生在任何输出之前**，
+用户看到的只是"双击之后什么都没有"。
+
+e2e 的 HTTP 分片用例就是这么卡满 300 秒超时失败的。用 v7.9.7 的二进制同样复现，
+所以不是本次改动引入的回归——它从 v7.9.6.3 引进这套测量起就在。
+
+**改法**（`Remote/NetworkProbe.cs`）：
+
+- 整个测量绑定一个 15 秒预算，每次读走 `ReadAsync` 把令牌注册到连接上——取消即断开，
+  测量退化成"测不出来"，而调用方本来就把这种情况当"不分片"处理；
+- 采样大小跟着文件走（`2 MiB`、`文件/4`、`512 KiB` 三者取中）：原来对 800 KiB 的
+  文件直接请求 2 MiB，第二刀必然 416，于是小文件永远只有一个样本；
+- 首次读只计入延迟、不计入速率，第一个样本作预热丢弃——冷连接的慢启动会把 loopback
+  测成 96% 抖动，把一个 300 MB/s 的链路判成"太不稳定，不许分片"；
+- 抖动只由**时长 ≥ 10 ms** 的样本计算。512 KiB 两毫秒读完时，计时噪声本身就超过 30%
+  的阈值：那不是链路质量，是秒表。
+
+**顺带修的测试基础设施**：e2e 自带的 Range 服务器不把 `last-byte-pos` 夹到文件末尾
+（RFC 9110 §14.1.2 要求夹）。于是它对 800 KiB 的文件答应 2 MiB 的 body、只发 800 KiB，
+然后挂在 keep-alive 上等下一个请求——客户端在等剩下的字节，服务端在等下一条请求，
+`curl` 一样挂。这不是产品缺陷，但它把一个用例变成了 300 秒的假失败。
+
+**新测试**：`test_http_stalled_body_does_not_hang`——一个声明 200 MiB、发 4 KiB、
+然后沉默 300 秒的服务器。旧代码永不返回；现在 48 秒内给出 `could not measure` 并以
+非零退出码结束。
+
+### 6. 其余十处
+
+| 位置 | 问题 | 触发条件 |
+| --- | --- | --- |
+| `Remote/NetworkProbe.cs` | catch 过滤器漏 `HttpRequestException` / `OperationCanceledException` | 无代理的机器上 `--net-test` 或 `--parallel` 访问坏 HTTP 源 → 未捕获异常 |
+| `FFmpeg/Toolchain.cs` | `new WebProxy("http://a b")` 抛 `UriFormatException`，两层 catch 都不含它 | `--proxy` 打错一个字 → 崩溃而不是报错 |
+| `FFmpeg/Toolchain.cs` | 下载用 `Timeout.InfiniteTimeSpan` + 阻塞 `Read` | 连接半死时永久挂起，只能 Ctrl+C |
+| `FFmpeg/Probe.cs` | `Duration` / `VideoPacketCount` 用 30 秒默认超时 | 慢共享上的大文件 → 已经成功的分片合并被判失败 |
+| `Encoding/ParallelEncoder.cs` | 时长测不出来当 0 秒 → 报"合并丢数据" | 容器不存 duration |
+| `Remote/Smb.cs` | server/share 直接拼进 PowerShell `-Command` | 共享名带 `'` → 语法错误；恶意路径可注入命令 |
+| `FFmpeg/BuildProfileStore.cs` | 缓存 JSON 合法但集合为 null → NRE 发生在 try 之外 | 手工改坏的缓存文件，每次启动都崩 |
+| `Core/Timecode.cs` | 小时字段任意长度，`int.Parse` 抛 `OverflowException`，而调用点只 catch `FormatException` | `--start-time 99999999999:00:00` |
+| `Encoding/StreamSelection.cs` | 重建 `SourceInfo` 时丢了 `BitRateKbps` | `--video-stream N` + 网络源 → 带宽判定按输出上限而不是源码率 |
+| `Encoding/SubtitleTrack.cs` | 暂存目录在探针超时、或预检失败时泄漏 | 内嵌字幕 + 编码器/封装组合被拒 |
+| `UI/CliArgs.cs` | `--emit-args` 只给空格和引号加引号 | 文件名含 `&` / `|` / `(` → 粘贴回 cmd 被拆成两条命令 |
+
+`--ffmpeg-download` 后跟一个拼错的发行版 id（如 `gyan-dev`）时，那个词会被当成输入
+文件、同时装上默认发行版——这个**没改**：`--ffmpeg-download in.mp4 out.mp4` 是合法
+用法（裸写＋位置参数），两者在语法上无法区分，改成报错会打断脚本。
+
+### 7. 语言层
+
+- `FileInfo.HasContent`（C# 14 扩展块）：`Refresh() + Exists && Length > 0` 原本在五处
+  各写一遍，其中一处已经忘了 Refresh——`FileInfo` 缓存的是构造时的大小，对刚写出的
+  文件永远是"不存在"。
+- `SearchValues<char>` 替掉 `ContainsAny(' ', '\t', '"')`，命令行引号规则顺手补上
+  cmd 的 `& | < > ^ ( ) ;`（`%` 和 `!` 在引号内仍会展开，这是 cmd 的限制，文档里写明）。
+- `ProcessRunner.Run` 新增取消令牌，顺带把 `args[0]` 的空集合情况变成明确异常。
+
+### 验证
+
+- 单测 547 例 → 546 过 / 1 跳过（需要字体文件的用例），0 警告 0 错误。
+- e2e 197 例两阶段全绿（独占 27 + 并行 170，2 跳过＝没有 .a64 解复用器；新增的"停发不
+  挂死"用例要 48 秒，因为它必须先让 ffprobe 的 30 秒 `-rw_timeout` 到期）。
+- 三条关键行为实测：坏配置不再崩、时间码溢出变成 `ERROR: ...` + 退出码 2、
+  停发的 HTTP 源 48 秒内报错退出；中断测试见第 1 条。
+
+---
+
 ## v7.9.7（2026-10-27）
 
 第五个补丁版，主题是**预设的数据从"我记得"变成"页面上写着"**。三件事：把扁平

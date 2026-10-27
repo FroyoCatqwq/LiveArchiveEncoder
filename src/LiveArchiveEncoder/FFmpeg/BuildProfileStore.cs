@@ -261,7 +261,23 @@ public static class BuildProfileStore
             if (!File.Exists(path)) return null;
             BuildProfile? profile = JsonSerializer.Deserialize(
                 File.ReadAllText(path), BuildProfileJsonContext.Default.BuildProfile);
-            return profile is { Schema: BuildProfile.SchemaVersion } && profile.Identity == identity
+            // Valid JSON is not the same as usable cache: System.Text.Json turns
+            // "Filters": null into a null member, and Capabilities would then
+            // throw a NullReferenceException *outside* this try. The cache exists
+            // to save four launches, so anything short of a complete profile is
+            // simply a miss.
+            return profile is not null
+                && profile.Schema == BuildProfile.SchemaVersion
+                && profile.Identity == identity
+                && profile.Encoders is not null
+                && profile.VideoEncoders is not null
+                && profile.AudioEncoders is not null
+                && profile.SubtitleEncoders is not null
+                && profile.Filters is not null
+                && profile.ScaleAlgorithms is not null
+                && profile.Caps is not null
+                && profile.Version is not null
+                && profile.Configuration is not null
                 ? profile
                 : null;
         }
