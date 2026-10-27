@@ -271,9 +271,9 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--recompress-args` | 空 | 那一步的 FFmpeg 中间参数段；`-i` 和输出由程序给。**v7.9.8.3** 可重复：第 N 个就是第 N 遍 |
 | `--recompress-container` | 由编码器决定 | 二次压缩产物的容器扩展名 |
 | `--recompress-codec` | 无 | **v7.9.5.1**：第二遍的视频编码器（libx265 / libvpx-vp9 / libsvtav1 / flv …），容器跟着它走 |
-| `--recompress-quality` | 编码器默认 | **v7.9.5.1**：`-crf`（x264/x265/vp9/av1）或 `-q:v`（MPEG 家族） |
-| `--recompress-audio-codec` | 按视频编码器推荐 | **v7.9.5.1**：`aac` / `libmp3lame` / `libopus` / `libvorbis` / `ac3` / `flac` / `copy` |
-| `--recompress-audio-kbps` | 编码器默认 | **v7.9.5.1**：第二遍音频码率 |
+| `--recompress-quality` | 编码器默认 | **v7.9.5.1**：`-crf`（x264/x265/vp9/av1）或 `-q:v`（MPEG 家族）。**v7.9.8.4** 可重复，按位置与 `--recompress-codec` 配对；只写一次覆盖整条链 |
+| `--recompress-audio-codec` | 按视频编码器推荐 | **v7.9.5.1**：`aac` / `libmp3lame` / `libopus` / `libvorbis` / `ac3` / `flac` / `copy`。**v7.9.8.4** 可重复 |
+| `--recompress-audio-kbps` | 编码器默认 | **v7.9.5.1**：第二遍音频码率。**v7.9.8.4** 可重复 |
 | `--recompress-only` | 关 | **v7.9.5**：跳过直播编码，直接对已有文件做二次压缩（见 §7.12） |
 | `--no-recompress` | — | 关掉二次压缩（优先于上面两个） |
 | `--era ID` | 无 | **v7.6 / v7.9.7**：应用预设，id 是 `site/year`（`youku/2007`、`bilibili/2012`、`generic/1998`）；旧 id 仍可用并提示已更名（见 §7.12） |
@@ -1415,6 +1415,28 @@ libx264 → auto）。
 
 ### 二次压缩（菜单 15）
 
+菜单 15 是这一层，八行（v7.9.8.4 加了第 8 行）：
+
+```
+ 1. 启用二次压缩                 on / off
+ 2. FFmpeg 参数                  第一遍的片段
+ 3. 输出容器                     第一遍的容器
+ 4. 直接二次压缩一个文件         不做直播编码，整条链跑在这个文件上
+ 5. 视频编码器                   改第 2 项里的 -c:v
+ 6. 质量                         改第 2 项里的 -crf / -q:v
+ 7. 音频编码器                   改第 2 项里的 -c:a
+ 8. 追加压缩遍数（链式）         第 2 遍起的链
+ 0. 返回
+```
+
+第 8 项进去列出现有的第 2..N 遍，一个提示框管三件事：**输入一段参数=追一遍**、
+**输入编号=删掉那一遍**、**输入 `-`=全部清空**。新增那遍的容器按它的编码器推导
+（`-c:v flv` 就是 `.flv`），和命令行的规则同一套。主菜单那行摘要会写成
+`on | 2 遍 | -c:v libx264 -crf 30`，链有多长一眼能看出来。
+
+第 4 项现在跑**整条链**并逐条打印 `1/2 -> …`、`2/2 -> …`；v7.9.8.3 及以前它只跑
+第一遍，把配好的后续几遍丢掉了。
+
 你只写 FFmpeg 命令的**中间参数段**，`-i <live产物>` 和输出路径由程序生成：
 
 ```powershell
@@ -1502,6 +1524,18 @@ LiveArchiveEncoder.exe clip.mkv --recompress-only ^
 - 遍数按 `--recompress-args` 与 `--recompress-codec` 里**多的那个**算；某一遍只给
   codec 也能跑，容器跟着编码器走。
 - 任一遍失败只报 `recompress 2/3` 并停在那里，直播产物与已经写好的前几遍都留着。
+- **质量与音频也按下标配对（v7.9.8.4）**：`--recompress-quality` /
+  `--recompress-audio-codec` / `--recompress-audio-kbps` 同样可以重复，第 N 个跟在
+  第 N 遍后面；只写一次仍旧覆盖整条链。这条不是可选项而是正确性：`26` 对 libx264
+  是合理的 CRF，对 MPEG 家族是离谱的量化器。
+
+```powershell
+# 两遍、两种刻度，各给各的质量
+LiveArchiveEncoder.exe clip.mkv --recompress-only ^
+  --recompress-codec libx264 --recompress-quality 26 ^
+  --recompress-codec flv      --recompress-quality 9
+# -> clip_web.mp4（-crf 26）  clip_web2.flv（-q:v 9）
+```
 
 ### 只跑二次压缩：`--recompress-only`（v7.9.5）
 
@@ -1826,6 +1860,18 @@ LiveArchiveEncoder.exe src.mp4 out.mkv --encoder libx264 --container mkv ^
 - 分离音频通路（`--audio-mode separate`）合并时会丢字幕轨，所以 copy 模式自动
   改走单进程并打 NOTE；burn 不受影响。
 - 缺文件、两处来源同时给、编号越界等都在编码开始前报错（CLI 缺文件是 rc=2）。
+- **时间轴跟着素材走，不跟着片段走（v7.9.8.4）**：`--start-time` 会让 `-ss` 把画面
+  重新基准到 00:00:00，而字幕文件里的时间戳仍是从素材开头算的。所以烧录时程序在
+  `subtitles` 前后各加一个 `setpts`，把滤镜的时间轴抬回素材时钟再抬回来——从
+  `00:22:45` 开始切时，22:45 之后的第一句才会在画面的第 0 秒出现。`--start-time 0`
+  时这条链一个字节都不变。
+
+```
+# 时间轴示例：字幕文件第 10-14 秒有一句，从 00:00:08 切 6 秒 →
+# 产物 2-6 秒处能看到这句（v7.9.8.3 及以前：整句不会出现）
+LiveArchiveEncoder.exe ep10.mkv op.mp4 --encoder libopenh264 --start-time 00:00:08 ^
+    --subtitle "ep10.sc.ass"
+```
 
 ### CUI 里的字幕（v7.9.1，菜单 17）
 

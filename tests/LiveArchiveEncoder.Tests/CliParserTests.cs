@@ -385,4 +385,37 @@ public sealed class CliParserTests
         await Assert.That(opts.ListPixFmts).IsTrue();
         await Assert.That(opts.Input).IsEqualTo("clip.mkv");
     }
+
+    // ------------------------------------------------------ recompress chain
+
+    /// <summary>
+    /// v7.9.8.4: everything that describes a pass is repeatable, so a chain can
+    /// be written hop by hop. The quality especially: one number cannot serve
+    /// two scales (26 is a sensible CRF and an absurd MPEG quantiser), which is
+    /// the same mistake v7.9.8.2 fixed inside the era presets.
+    /// </summary>
+    [Test]
+    public async Task RecompressFlags_ArePairedByPosition()
+    {
+        CliOptions options = await Parse("x.mp4", "--recompress",
+            "--recompress-codec", "libx264", "--recompress-quality", "26",
+            "--recompress-audio-codec", "aac", "--recompress-audio-kbps", "96",
+            "--recompress-codec", "flv", "--recompress-quality", "9");
+
+        await Assert.That(options.RecompressCodecs).IsEquivalentTo(new[] { "libx264", "flv" });
+        await Assert.That(options.RecompressQualities).IsEquivalentTo(new[] { 26, 9 });
+        await Assert.That(options.RecompressAudioCodecs).IsEquivalentTo(new[] { "aac" });
+        await Assert.That(options.RecompressAudioKbpsList).IsEquivalentTo(new[] { 96 });
+    }
+
+    [Test]
+    public async Task RecompressArgs_EachOccurrenceIsOneMorePass()
+    {
+        CliOptions options = await Parse("x.mp4", "--recompress",
+            "--recompress-args", "-c:v libx264 -crf 26",
+            "--recompress-args", "-c:v flv -q:v 9");
+
+        await Assert.That(options.RecompressArgs).IsEquivalentTo(
+            new[] { "-c:v libx264 -crf 26", "-c:v flv -q:v 9" });
+    }
 }

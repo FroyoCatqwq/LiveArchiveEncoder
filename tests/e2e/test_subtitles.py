@@ -17,6 +17,8 @@ burned frame was verified by eye to carry the text (see the session notes).
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 import harness
@@ -221,3 +223,99 @@ def test_a_font_nobody_has_is_reported_before_the_run(exe, workdir):
         f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
     assert "NoSuchFontFamilyXYZ" in proc.stdout, proc.stdout[-400:]
     assert harness.video_summary(dst) is not None
+
+
+# ---------------------------------------------------------------------------
+# v7.9.8.4: the burned text has to sit on the source's clock, not the clip's
+# ---------------------------------------------------------------------------
+
+def _grey_mean(path, seconds):
+    """Mean luma of one decoded frame, 0-255.
+
+    Binary output, so this goes through subprocess rather than harness.run
+    (which decodes its pipes as text).
+    """
+    proc = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", str(seconds), "-i", str(path),
+         "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+        capture_output=True, timeout=120)
+    assert proc.returncode == 0, f"cannot read a frame of {path}: {proc.stderr[-200:]}"
+    data = proc.stdout
+    assert data, f"no frame at {seconds}s in {path}"
+    return sum(data) / len(data)
+
+
+@pytest.fixture(scope="module")
+def marker_clip(tmp_path_factory):
+    """A black 20 s clip and a big-text .ass whose only line is 10-14 s.
+
+    Black on purpose: the burnt-in caption is then the only bright thing in the
+    frame, so mean luma answers "is a line on screen right now" without any OCR.
+    """
+    out = tmp_path_factory.mktemp("subclock")
+    src = out / "black.mp4"
+    make = subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "color=c=black:s=320x240:r=25:d=20",
+         "-c:v", "mpeg4", "-q:v", "3", str(src)],
+        capture_output=True, timeout=180)
+    assert make.returncode == 0, make.stderr[-300:]
+
+    ass = out / "marker.ass"
+    ass.write_text(
+        "[Script Info]\nScriptType: v4.00+\nPlayResX: 320\nPlayResY: 240\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, BorderStyle, Outline, Alignment\n"
+        "Style: Default,Arial,48,&H00FFFFFF,1,2,2\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:10.00,0:00:14.00,Default,,0,0,0,,MARKER\n",
+        encoding="utf-8")
+    return src, ass
+
+
+def test_a_burn_stays_on_the_source_clock(exe, workdir, marker_clip):
+    """A segment cut at 00:00:08 must show the 10-14 s line from 2 s in.
+
+    The bug this pins: `-ss` rebases the picture to 00:00:00 while the subtitle
+    file still counts from the beginning of the source, so the caption landed
+    eight seconds late -- on a real 22-minute start offset the whole track landed
+    outside the clip and nothing was ever drawn.
+    """
+    src, ass = marker_clip
+    dst = workdir("subs") / "clock_cut.avi"
+
+    proc = run([str(exe), str(src), str(dst),
+                "--start-time", "00:00:08", "--end", "00:00:14",
+                "--encoder", "mpeg4", "--subtitle", str(ass),
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+
+    # Output 1s = source 9s (line not started), output 4s = source 12s (inside).
+    quiet = _grey_mean(dst, 1.0)
+    lit = _grey_mean(dst, 4.0)
+    assert lit - quiet > 2.0, (
+        f"no caption at output 4s (source 12s): quiet={quiet:.2f} lit={lit:.2f} -- "
+        "the burn filter is on the clip's clock instead of the source's")
+
+
+def test_a_burn_without_a_start_offset_is_unchanged(exe, workdir, marker_clip):
+    """The same file from 00:00:00 still draws its line at 10-14 s.
+
+    The shift must not move a run that starts at the beginning -- that is the
+    case every earlier version got right.
+    """
+    src, ass = marker_clip
+    dst = workdir("subs") / "clock_full.avi"
+
+    proc = run([str(exe), str(src), str(dst), "--end", "00:00:16",
+                "--encoder", "mpeg4", "--subtitle", str(ass),
+                "--ffmpeg-source", "path", "--lang", "en"], timeout=300)
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+
+    early = _grey_mean(dst, 5.0)
+    inside = _grey_mean(dst, 12.0)
+    assert inside - early > 2.0, (
+        f"no caption at 12s: early={early:.2f} inside={inside:.2f}")

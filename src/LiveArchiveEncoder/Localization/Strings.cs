@@ -1,4 +1,4 @@
-﻿namespace LiveArchiveEncoder.Localization;
+namespace LiveArchiveEncoder.Localization;
 
 /// <summary>
 /// Two-language string table for everything a user actually reads.
@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.8.3 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.8.4 (.NET 10 / .NET 11)",
         ["env.heading"] = "System check",
         ["env.cores"] = "only {0} CPU core(s); the documented minimum is {1}",
         ["env.memory"] = "about {0} GB of memory; the documented minimum is {1} GB",
@@ -633,6 +633,7 @@ public static class L
         ["rc.only.codec"] = "Codec    : {0} / {1} in .{2}",
         ["rc.autoderived"] = "Second pass: {0} + {1} in .{2} (container chosen from the codec).",
         ["rc.menu.extra"] = "Further passes (chain)",
+        ["rc.chain"] = "{0} passes",
         ["rc.menu.extra.value"] = "{0} more",
         ["rc.extra.heading"] = "Further passes -- each one re-encodes the previous pass's output:",
         ["rc.extra.none"] = "  (none)",
@@ -729,7 +730,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.8.3 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.8.4 (.NET 10 / .NET 11)",
         ["env.heading"] = "系统检查",
         ["env.cores"] = "只有 {0} 个 CPU 核心；文档给出的下限是 {1}",
         ["env.memory"] = "内存约 {0} GB；文档给出的下限是 {1} GB",
@@ -1314,6 +1315,7 @@ public static class L
         ["rc.only.codec"] = "编码     : {0} / {1}，.{2}",
         ["rc.autoderived"] = "第二遍：{0} + {1} 写进 .{2}（容器按编码器推导）。",
         ["rc.menu.extra"] = "追加压缩遍数（链式）",
+        ["rc.chain"] = "{0} 遍",
         ["rc.menu.extra.value"] = "再加 {0} 遍",
         ["rc.extra.heading"] = "追加的压缩遍——每一遍都重新编码上一遍的产物：",
         ["rc.extra.none"] = "  （无）",

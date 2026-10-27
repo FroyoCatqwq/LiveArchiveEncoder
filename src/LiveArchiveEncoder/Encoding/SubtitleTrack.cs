@@ -340,6 +340,15 @@ public static class SubtitleTrack
     /// version produced: the text is rendered onto the scaled and padded frame,
     /// last, so it is neither scaled nor cropped with the picture.</para>
     ///
+    /// <para>v7.9.8.4: <paramref name="startSeconds"/> puts the burn filter back
+    /// on the source's clock. A run that starts at 00:22:45 hands FFmpeg an
+    /// input <c>-ss</c>, which rebases the picture to 00:00:00, while the
+    /// subtitle file still counts from the beginning of the source -- without
+    /// this the whole track lands 22 minutes late and no line is ever shown.
+    /// The offset is added in front of the filter and taken back after it, so
+    /// everything else in the graph (and <c>-t</c>) keeps the timestamps it
+    /// expects.</para>
+    ///
     /// <para>With a box (<c>--subtitle-aspect</c>) the text cannot live in that
     /// chain: libass paints into whatever frame it is given, so a 4:3 script on a
     /// 16:9 picture would either spread across the extra width or -- for a 16:9
@@ -351,14 +360,27 @@ public static class SubtitleTrack
     /// </summary>
     public static VideoFilter BurnInto(
         string chain, SubtitlePlan plan, int frameW, int frameH,
-        string transportFmt, string input)
+        string transportFmt, string input, double startSeconds = 0)
     {
-        string burn = AppendBurn("", plan.BurnFiles, plan.FontDir, plan.FallbackFont);
+        string burn = Shifted(
+            AppendBurn("", plan.BurnFiles, plan.FontDir, plan.FallbackFont), startSeconds);
         if (plan.BoxAspect is not { } aspect)
             return VideoFilter.Simple(chain.Length == 0 ? burn : $"{chain},{burn}");
 
         SubtitleBox box = SubtitleBox.Contain(frameW, frameH, aspect.Num, aspect.Den);
         return VideoFilter.Boxed(chain, burn, input, box, frameW, frameH, transportFmt);
+    }
+
+    /// <summary>
+    /// Move the burn filters onto the source's clock and put the segment's back
+    /// afterwards -- see <see cref="BurnInto"/>. Zero returns the string it was
+    /// given, so a run from 00:00:00 builds exactly the command it always did.
+    /// </summary>
+    public static string Shifted(string burn, double seconds)
+    {
+        if (seconds <= 0 || burn.Length == 0) return burn;
+        string offset = ArgsBuilder.FloatArg(seconds);
+        return $"setpts=PTS+{offset}/TB,{burn},setpts=PTS-{offset}/TB";
     }
 
     /// <summary>

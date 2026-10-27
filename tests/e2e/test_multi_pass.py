@@ -89,3 +89,30 @@ def test_a_single_pass_keeps_the_old_name(exe, workdir):
         f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:300]}")
     assert (out / "alone_web.mp4").is_file(), _names(out)
     assert not (out / "alone_web1.mp4").exists(), _names(out)
+
+
+def test_quality_is_paired_by_position(exe, workdir):
+    """v7.9.8.4: each named-codec hop gets its own quality.
+
+    One number cannot serve two scales -- 26 is a sensible CRF and an absurd
+    MPEG quantiser -- so the flag repeats and pairs by position. The run prints
+    the argv of every hop before it starts them, which is the assertion target:
+    a per-pass flag that silently collapsed to one value would show up here.
+    """
+    out = workdir("multipass")
+    src = out / "pair.mp4"
+    src.write_bytes(harness.SRC.read_bytes())
+
+    proc = run([str(exe), str(src), "--recompress-only",
+                "--recompress-codec", "libx264", "--recompress-quality", "26",
+                "--recompress-codec", "flv", "--recompress-quality", "9",
+                "--ffmpeg-source", "path"])
+
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:300]}")
+    hops = [line for line in proc.stdout.splitlines() if " -crf " in line or " -q:v " in line]
+    assert len(hops) == 2, f"expected two hops, got {hops}"
+    assert "-crf 26" in hops[0], hops[0]
+    assert "-q:v 9" in hops[1], hops[1]
+    assert (out / "pair_web.mp4").is_file(), _names(out)
+    assert (out / "pair_web2.flv").is_file(), _names(out)

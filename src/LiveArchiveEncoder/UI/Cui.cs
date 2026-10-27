@@ -48,6 +48,10 @@ public static partial class Cui
         L.SetLanguage(language ?? c.Language);
         c.Language = L.Lang;
 
+        // v7.9.8.4: from here on, a closed stdin exits through the same save
+        // path the "0" row uses (see Ask).
+        _onEof = () => Persist(c);
+
         Console.WriteLine($"\n{L.T("app.title")}");
         Console.WriteLine("============================");
         Console.WriteLine($"{L.Pad("FFmpeg", 17)}: {version}");
@@ -117,7 +121,7 @@ public static partial class Cui
             Console.WriteLine($" 0. {L.T("menu.exit")}");
             Console.Write(L.T("menu.select"));
 
-            string pick = (Console.ReadLine() ?? "").Trim();
+            string pick = Ask().Trim();
             if (pick == "0")
             {
                 Persist(c);
@@ -141,7 +145,7 @@ public static partial class Cui
                     break;
                 case "2":
                     Console.Write(L.T("output.prompt"));
-                    string rawOut = (Console.ReadLine() ?? "").Trim().Trim('"');
+                    string rawOut = Ask().Trim().Trim('"');
                     if (rawOut.Length > 0)
                     {
                         c.OutputPath = new FileInfo(rawOut);
@@ -189,7 +193,7 @@ public static partial class Cui
                     break;
                 case "10":
                     Console.Write(L.T("lang.prompt", c.Language));
-                    c.Language = L.SetLanguage((Console.ReadLine() ?? "").Trim());
+                    c.Language = L.SetLanguage(Ask().Trim());
                     Console.WriteLine(L.T("lang.switched", c.Language));
                     Persist(c);
                     break;
@@ -269,6 +273,35 @@ public static partial class Cui
         Console.WriteLine(L.T("config.savefailed", ConfigStore.DefaultPath));
     }
 
+    /// <summary>
+    /// Where the session has to go when stdin ends, installed by
+    /// <see cref="Run"/>. Until it is, <see cref="Ask"/> can only exit.
+    /// </summary>
+    private static Action? _onEof;
+
+    /// <summary>
+    /// <see cref="Console.ReadLine"/> that ends the session at end of input.
+    ///
+    /// <para>An interactive shell whose stdin is closed has nobody left to
+    /// answer, but every menu redraws on an empty line -- so the loops spun
+    /// instead of returning. Measured with a piped fragment that did not end in
+    /// <c>0</c>: 96 MB of menu text in a few seconds and the process never
+    /// exited. Ctrl+Z on Windows lands here too, and so does any driver script
+    /// whose last keystroke is missing.</para>
+    ///
+    /// <para>Ending is the honest answer: settings are saved exactly as the
+    /// "0" row saves them, then the process leaves with 0. Nothing is re-read
+    /// afterwards, so the sentinel return below is unreachable by construction.</para>
+    /// </summary>
+    private static string Ask()
+    {
+        string? line = Console.ReadLine();
+        if (line is not null) return line;
+        _onEof?.Invoke();
+        Environment.Exit(0);
+        return "";
+    }
+
     private static FileInfo DefaultOutput(FileInfo src, EncoderInfo encoder) =>
         new(Path.Combine(src.DirectoryName ?? ".", $"{Path.GetFileNameWithoutExtension(src.Name)}_live.{encoder.Extension}"));
 
@@ -328,7 +361,7 @@ public static partial class Cui
             Console.WriteLine($" 0. {L.T("sub.menu.back")}");
             Console.Write(L.T("menu.select"));
 
-            string pick = (Console.ReadLine() ?? "").Trim();
+            string pick = Ask().Trim();
             try
             {
                 switch (pick)
@@ -499,7 +532,7 @@ public static partial class Cui
         while (true)
         {
             Console.Write(L.T(promptKey, current?.ToString(CultureInfo.InvariantCulture) ?? L.T("stream.first")));
-            string raw = (Console.ReadLine() ?? "").Trim();
+            string raw = Ask().Trim();
             if (raw.Length == 0) return null;
 
             if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
@@ -573,14 +606,14 @@ public static partial class Cui
             }
 
             Console.Write(L.T("profile.pick"));
-            string pick = (Console.ReadLine() ?? "").Trim();
+            string pick = Ask().Trim();
             if (pick.Length == 0 || pick == "0") return changed;
 
             switch (pick)
             {
                 case "s":
                     Console.Write(L.T("profile.saveprompt"));
-                    FileInfo? saved = ConfigProfiles.SaveAs(c, (Console.ReadLine() ?? "").Trim());
+                    FileInfo? saved = ConfigProfiles.SaveAs(c, Ask().Trim());
                     Console.WriteLine(saved is null
                         ? L.T("profile.badname")
                         : L.T("profile.saved", saved.Name));
@@ -588,7 +621,7 @@ public static partial class Cui
 
                 case "p":
                     Console.Write(L.T("profile.pathprompt"));
-                    string raw = (Console.ReadLine() ?? "").Trim().Trim('"');
+                    string raw = Ask().Trim().Trim('"');
                     if (raw.Length == 0) break;
                     var external = new FileInfo(raw);
                     if (!external.Exists)
@@ -601,10 +634,10 @@ public static partial class Cui
 
                 case "d":
                     Console.Write(L.T("profile.deleteprompt"));
-                    if (!TryPick((Console.ReadLine() ?? "").Trim(), files, out FileInfo? victim))
+                    if (!TryPick(Ask().Trim(), files, out FileInfo? victim))
                         break;
                     Console.Write(L.T("profile.confirmdelete", victim!.Name));
-                    string yes = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+                    string yes = Ask().Trim().ToLowerInvariant();
                     if (yes is not ("y" or "yes")) break;
                     Console.WriteLine(ConfigProfiles.Delete(victim.Name)
                         ? L.T("profile.deleted", victim.Name)
@@ -676,7 +709,7 @@ public static partial class Cui
             Console.WriteLine($" 0. {L.T("sub.menu.back")}");
             Console.Write(L.T("menu.select"));
 
-            switch ((Console.ReadLine() ?? "").Trim())
+            switch (Ask().Trim())
             {
                 case "0": return;
                 case "1":
@@ -698,7 +731,7 @@ public static partial class Cui
                 case "2":
                     Console.WriteLine(L.T("sub.files.hint", string.Join(" ", Constants.SubtitleFileExtensions)));
                     Console.Write(L.T("sub.prompt.files"));
-                    string file = (Console.ReadLine() ?? "").Trim().Trim('"');
+                    string file = Ask().Trim().Trim('"');
                     if (file == "-")
                     {
                         s.Files = [];
@@ -743,7 +776,7 @@ public static partial class Cui
                     Console.WriteLine(LiveArchiveEncoder.Encoding.StreamSelection.Describe(source));
                     Console.Write(L.T("sub.prompt.stream",
                         s.Stream?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.none")));
-                    string rawIdx = (Console.ReadLine() ?? "").Trim();
+                    string rawIdx = Ask().Trim();
                     if (rawIdx.Length == 0)
                     {
                         s.Stream = null;
@@ -775,7 +808,7 @@ public static partial class Cui
                     if (preferred is not null)
                         Console.WriteLine(L.T("sub.codec.container", c.Encoder!.FormatName, preferred));
                     Console.Write(L.T("sub.prompt.codec", s.Codec ?? L.T("value.auto")));
-                    string codecRaw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+                    string codecRaw = Ask().Trim().ToLowerInvariant();
                     if (codecRaw == "-")
                     {
                         s.Codec = null;
@@ -824,7 +857,7 @@ public static partial class Cui
             Console.WriteLine($" 0. {L.T("sub.menu.back")}");
             Console.Write(L.T("menu.select"));
 
-            switch ((Console.ReadLine() ?? "").Trim())
+            switch (Ask().Trim())
             {
                 case "0": return;
                 case "1":
@@ -844,14 +877,14 @@ public static partial class Cui
                     break;
                 case "2":
                     Console.Write(L.T("sub.fonts.importprompt", FontResolver.FontDirectory));
-                    string path = (Console.ReadLine() ?? "").Trim().Trim('"');
+                    string path = Ask().Trim().Trim('"');
                     if (path.Length == 0) break;
                     (int copied, int skipped, string dir) = SubtitleFonts.Import([path]);
                     Console.WriteLine(L.T("sub.fonts.imported", copied, dir, skipped));
                     break;
                 case "3":
                     Console.Write(L.T("sub.fonts.fallback.prompt", s.FallbackFont ?? ""));
-                    string family = (Console.ReadLine() ?? "").Trim();
+                    string family = Ask().Trim();
                     if (family.Length == 0) break;
                     if (family == "-")
                     {
@@ -917,7 +950,7 @@ public static partial class Cui
     private static void EditPlayback(Config c, string ffmpeg)
     {
         Console.Write(L.T("play.prompt.mode", Player.ModeName(c.Play)));
-        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        string raw = Ask().Trim().ToLowerInvariant();
         if (raw.Length == 0) return;
 
         PlayMode mode = Player.ParseMode(raw);
@@ -931,7 +964,7 @@ public static partial class Cui
         if (mode == PlayMode.External)
         {
             Console.Write(L.T("play.prompt.player", c.PlayerPath ?? L.T("play.assoc")));
-            string entered = (Console.ReadLine() ?? "").Trim().Trim('"');
+            string entered = Ask().Trim().Trim('"');
             // "-" clears the player so playback falls back to the shell association.
             if (entered == "-") c.PlayerPath = null;
             else if (entered.Length > 0) c.PlayerPath = entered;
@@ -943,7 +976,7 @@ public static partial class Cui
     private static FileInfo? InputFileMenu()
     {
         Console.Write(L.T("input.prompt"));
-        string raw = (Console.ReadLine() ?? "").Trim().Trim('"');
+        string raw = Ask().Trim().Trim('"');
         if (raw.Length == 0) return null;
 
         var path = new FileInfo(raw);
@@ -968,7 +1001,7 @@ public static partial class Cui
             Console.WriteLine($" {i + 1,3}. {files[i].Name}");
 
         Console.Write(L.T("input.selectnumber"));
-        if (!int.TryParse((Console.ReadLine() ?? "").Trim(), out int idx))
+        if (!int.TryParse(Ask().Trim(), out int idx))
         {
             Console.WriteLine(L.T("input.invalid"));
             return null;
@@ -997,7 +1030,7 @@ public static partial class Cui
         }
 
         Console.Write(L.T("encoder.prompt"));
-        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        string raw = Ask().Trim().ToLowerInvariant();
         if (raw == "r") return;
 
         try
@@ -1164,7 +1197,7 @@ public static partial class Cui
         Console.WriteLine($" 0. {L.T("param.back")}");
         Console.Write(L.T("audio.prompt"));
 
-        string raw = (Console.ReadLine() ?? "").Trim();
+        string raw = Ask().Trim();
         if (raw.Length == 0 || raw == "0") return;
 
         // Every path below either assigns this or returns early, so there is no
@@ -1278,7 +1311,7 @@ public static partial class Cui
             Console.WriteLine($" 0. {L.T("param.back")}");
             Console.Write(L.T("param.select"));
 
-            string pick = (Console.ReadLine() ?? "").Trim();
+            string pick = Ask().Trim();
             try
             {
                 switch (pick)
@@ -1594,7 +1627,7 @@ public static partial class Cui
         }
         Console.Write(L.T("container.prompt"));
 
-        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        string raw = Ask().Trim().ToLowerInvariant();
         if (raw.Length == 0) return;
 
         string wanted = int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
@@ -1650,7 +1683,7 @@ public static partial class Cui
         Console.WriteLine(L.T("param.size.free"));
         Console.Write(L.T("param.size.prompt"));
 
-        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        string raw = Ask().Trim().ToLowerInvariant();
         if (raw.Length == 0) return;
 
         if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
@@ -1729,7 +1762,7 @@ public static partial class Cui
             Console.WriteLine($" 0. {L.T("param.back")}");
             Console.Write(L.T("param.rung.pick"));
 
-            string pick = (Console.ReadLine() ?? "").Trim();
+            string pick = Ask().Trim();
             if (pick == "0") return;
             if (!int.TryParse(pick, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index)
                 || index < 1 || index >= ladder.Count)
@@ -1772,7 +1805,7 @@ public static partial class Cui
     private static string ReadRaw(string prompt)
     {
         Console.Write(prompt);
-        return (Console.ReadLine() ?? "").Trim();
+        return Ask().Trim();
     }
 
     private static double ReadDouble(string prompt, double fallback)
@@ -1892,7 +1925,7 @@ public static partial class Cui
         }
 
         Console.Write(L.T("start.confirm"));
-        string confirm = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        string confirm = Ask().Trim().ToLowerInvariant();
         if (confirm is not ("" or "y" or "yes")) return;
 
         try
@@ -2007,7 +2040,7 @@ public static partial class Cui
             if (c.Play != PlayMode.Off)
             {
                 Console.Write(L.T("play.ask"));
-                string answer = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+                string answer = Ask().Trim().ToLowerInvariant();
                 if (answer is "" or "y" or "yes")
                 {
                     (bool played, string? playError) = Player.Launch(
@@ -2051,6 +2084,11 @@ public static partial class Cui
 
     private static string DescribeRecompress(Config c) =>
         (c.Recompress.Enabled ? "on" : L.T("value.off"))
+        // v7.9.8.4: a chain is one number plus the first pass; printing only the
+        // first fragment read as "one pass" no matter how many were set.
+        + (c.Recompress.Extra.Count > 0
+            ? $" | {L.T("rc.chain", c.Recompress.Stages().Count)}"
+            : "")
         + (c.Recompress.Args.Length > 0 ? $" | {c.Recompress.Args}" : "");
 
     /// <summary>
@@ -2090,7 +2128,7 @@ public static partial class Cui
             + (c.H264Impl ?? L.T("era.h264.auto")));
 
         Console.Write(L.T("era.prompt", c.EraPreset ?? ""));
-        string pick = (Console.ReadLine() ?? "").Trim();
+        string pick = Ask().Trim();
         if (pick.Length == 0) return;
 
         switch (pick.ToLowerInvariant())
@@ -2132,7 +2170,7 @@ public static partial class Cui
                     Console.WriteLine($"     {row.Note}");
                 }
                 Console.Write(L.T("era.pickyear", group.Site));
-                string yearPick = (Console.ReadLine() ?? "").Trim();
+                string yearPick = Ask().Trim();
                 if (yearPick.Length == 0) return;
                 chosen = int.TryParse(yearPick, out int index) && index >= 1 && index <= group.Rows.Count
                     ? group.Rows[index - 1]
@@ -2490,7 +2528,7 @@ public static partial class Cui
     private static string AskPresetId()
     {
         Console.Write(L.T("era.custom.ask"));
-        return (Console.ReadLine() ?? "").Trim();
+        return Ask().Trim();
     }
 
     private static void DeleteCustomEra(Config c)
@@ -2549,10 +2587,17 @@ public static partial class Cui
             Console.WriteLine($" 5. {L.Pad(L.T("rc.menu.codec"), 30)} = {video}");
             Console.WriteLine($" 6. {L.Pad(L.T("rc.menu.quality"), 30)} = {quality}");
             Console.WriteLine($" 7. {L.Pad(L.T("rc.menu.audio"), 30)} = {audio}");
+            // v7.9.8.4: the chain beyond the first pass. This is the menu row
+            // whose strings shipped in v7.9.8.3 with nothing wired to them, so a
+            // CUI user could not build a two-hop chain at all.
+            Console.WriteLine($" 8. {L.Pad(L.T("rc.menu.extra"), 30)} = "
+                + (c.Recompress.Extra.Count == 0
+                    ? L.T("value.none")
+                    : L.T("rc.menu.extra.value", c.Recompress.Extra.Count)));
             Console.WriteLine($" 0. {L.T("rc.menu.back")}");
             Console.Write(L.T("menu.select"));
 
-            switch ((Console.ReadLine() ?? "").Trim())
+            switch (Ask().Trim())
             {
                 case "0": return;
                 case "1":
@@ -2564,7 +2609,7 @@ public static partial class Cui
                 case "2":
                     Console.WriteLine(L.T("rc.hint"));
                     Console.Write(L.T("rc.prompt.args"));
-                    string fragment = (Console.ReadLine() ?? "").Trim();
+                    string fragment = Ask().Trim();
                     if (fragment.Length == 0) break;
 
                     (List<string> _, string? error) = PostProcess.PostArgs.Parse(fragment);
@@ -2578,7 +2623,7 @@ public static partial class Cui
                     break;
                 case "3":
                     Console.Write(L.T("rc.prompt.container", c.Recompress.Container));
-                    string container = (Console.ReadLine() ?? "").Trim().TrimStart('.').ToLowerInvariant();
+                    string container = Ask().Trim().TrimStart('.').ToLowerInvariant();
                     if (container.Length > 0)
                     {
                         c.Recompress.Container = container;
@@ -2597,6 +2642,9 @@ public static partial class Cui
                 case "7":
                     EditRecompressAudioCodec(c);
                     break;
+                case "8":
+                    EditRecompressExtra(c);
+                    break;
             }
         }
     }
@@ -2608,7 +2656,7 @@ public static partial class Cui
         Console.Write(L.T("rc.prompt.codec", PostProcess.RecompressCodecs.DetectVideoCodec(
             PostProcess.PostArgs.Tokenize(c.Recompress.Args)) ?? "libx264",
             PostProcess.RecompressCodecs.VideoIdList));
-        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        string raw = Ask().Trim().ToLowerInvariant();
         if (raw.Length == 0) return;
 
         SecondPassVideoCodec? codec = PostProcess.RecompressCodecs.FindVideo(raw);
@@ -2644,7 +2692,7 @@ public static partial class Cui
 
         Console.Write(L.T("rc.prompt.audio", current,
             PostProcess.RecompressCodecs.AudioIdList + ", copy"));
-        string raw = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        string raw = Ask().Trim().ToLowerInvariant();
         if (raw.Length == 0) return;
 
         if (!PostProcess.RecompressCodecs.IsCopyAudio(raw)
@@ -2667,6 +2715,91 @@ public static partial class Cui
         Console.WriteLine(L.T("rc.audio.set", raw));
     }
 
+    /// <summary>
+    /// The passes after the first one (v7.9.8.4).
+    ///
+    /// <para>A chain is the only way to describe what actually happened to a
+    /// recording that was published twice -- a 2007 portal first, then the 2011
+    /// one after it -- and each hop is a real transcode of the previous hop's
+    /// product. The rows live in <see cref="RecompressSettings.Extra"/>; the
+    /// first pass stays in <see cref="RecompressSettings.Args"/> so a settings
+    /// file written by any earlier version still loads.</para>
+    ///
+    /// <para>One prompt does everything: a fragment adds a pass, a number
+    /// removes that pass, <c>-</c> clears the list. Deleting by number rather
+    /// than only from the end, because a chain typed by hand usually has one
+    /// wrong row in the middle.</para>
+    /// </summary>
+    private static void EditRecompressExtra(Config c)
+    {
+        Console.WriteLine($"\n{L.T("rc.extra.heading")}");
+        List<RecompressPass> passes = c.Recompress.Extra;
+        if (passes.Count == 0)
+        {
+            Console.WriteLine(L.T("rc.extra.none"));
+        }
+        else
+        {
+            for (int i = 0; i < passes.Count; i++)
+            {
+                // 1-based and offset by the first pass: these are hop 2, 3, ...
+                Console.WriteLine($" {i + 1,2}. [{passes[i].Container}] {passes[i].Args}");
+            }
+        }
+        Console.WriteLine(L.T("rc.extra.hint"));
+        Console.Write(L.T("rc.extra.prompt"));
+        string raw = Ask().Trim();
+        if (raw.Length == 0) return;
+
+        if (raw == "-")
+        {
+            passes.Clear();
+            Console.WriteLine(L.T("rc.extra.cleared"));
+            return;
+        }
+
+        if (int.TryParse(raw, out int index))
+        {
+            if (index < 1 || index > passes.Count)
+            {
+                Console.WriteLine(L.T("rc.extra.bad"));
+                return;
+            }
+            passes.RemoveAt(index - 1);
+            Console.WriteLine(L.T("rc.extra.removed"));
+            return;
+        }
+
+        (List<string> tokens, string? error) = PostProcess.PostArgs.Parse(raw);
+        if (error is not null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.args.rejected", error)}");
+            return;
+        }
+
+        string? video = PostProcess.RecompressCodecs.DetectVideoCodec(tokens);
+        string? audio = PostProcess.RecompressCodecs.DetectAudioCodec(tokens);
+        // Same rule as the command line: this hop's container follows its codec,
+        // and the first pass's container is only the fallback when the fragment
+        // names no codec this tool knows.
+        string container = (video is not null
+                ? PostProcess.RecompressCodecs.DefaultContainer(video, audio)
+                : null)
+            ?? c.Recompress.Container;
+
+        string? mismatch = video is null
+            ? null
+            : PostProcess.RecompressCodecs.ValidateContainer(video, audio, container);
+        if (mismatch is not null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.container.mismatch", mismatch)}");
+            return;
+        }
+
+        passes.Add(new RecompressPass { Args = raw, Container = container });
+        Console.WriteLine(L.T("rc.extra.added", c.Recompress.Stages().Count));
+    }
+
     private static void EditRecompressQuality(Config c)
     {
         (List<string> tokens, _) = PostProcess.PostArgs.Parse(c.Recompress.Args);
@@ -2680,7 +2813,7 @@ public static partial class Cui
 
         string current = QualityOf(tokens);
         Console.Write(L.T("rc.prompt.quality", current.Length > 0 ? current : "auto", codec.QualityFlag));
-        string raw = (Console.ReadLine() ?? "").Trim();
+        string raw = Ask().Trim();
         if (raw.Length == 0) return;
         if (!int.TryParse(raw, out int quality) || quality < 1 || quality > 63)
         {
@@ -2736,7 +2869,11 @@ public static partial class Cui
     /// </summary>
     private static void RecompressFile(Config c, string ffmpeg)
     {
-        if (c.Recompress.Args.Length == 0)
+        // v7.9.8.4: the whole chain, not just the first pass. "Apply this to a
+        // file" used to drop the further passes on the floor, so a two-hop chain
+        // configured for the live path became a single hop here.
+        List<RecompressPass> stages = c.Recompress.Stages();
+        if (stages.Count == 0)
         {
             Console.WriteLine(L.T("rc.args.empty"));
             Console.WriteLine(L.T("rc.hint"));
@@ -2744,7 +2881,7 @@ public static partial class Cui
         }
 
         Console.Write(L.T("rc.only.fileprompt"));
-        string raw = (Console.ReadLine() ?? "").Trim().Trim('"');
+        string raw = Ask().Trim().Trim('"');
         if (raw.Length == 0) return;
 
         var src = new FileInfo(raw);
@@ -2754,49 +2891,62 @@ public static partial class Cui
             return;
         }
 
-        (_, string? error) = PostProcess.PostArgs.Parse(c.Recompress.Args);
-        if (error is not null)
+        foreach (RecompressPass stage in stages)
         {
-            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.args.rejected", error)}");
-            return;
+            (_, string? error) = PostProcess.PostArgs.Parse(stage.Args);
+            if (error is not null)
+            {
+                Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.args.rejected", error)}");
+                return;
+            }
         }
 
-        string output = PostProcess.Recompress.DeriveOutputPath(
-            src.FullName, c.Recompress.Container);
-        if (string.Equals(Path.GetFullPath(output), src.FullName, StringComparison.OrdinalIgnoreCase))
+        // Every hop is named from the input file, so the last one is the
+        // delivery and the earlier ones stay as the process artefacts they are.
+        var outputs = new List<string>();
+        for (int i = 0; i < stages.Count; i++)
+            outputs.Add(PostProcess.Recompress.DeriveOutputPath(
+                src.FullName, stages[i].Container, i + 1));
+
+        if (string.Equals(Path.GetFullPath(outputs[^1]), src.FullName, StringComparison.OrdinalIgnoreCase))
         {
             Console.WriteLine(L.T("output.sameasinput"));
             return;
         }
 
-        var settings = new RecompressSettings
-        {
-            Enabled = true,
-            Args = c.Recompress.Args,
-            Container = c.Recompress.Container,
-        };
-
         Console.WriteLine(L.T("rc.only.input", src.FullName));
-        Console.WriteLine(L.T("rc.only.output", output));
+        for (int i = 0; i < outputs.Count; i++)
+        {
+            Console.WriteLine(stages.Count > 1
+                ? $" {i + 1}/{outputs.Count} -> {outputs[i]}"
+                : L.T("rc.only.output", outputs[i]));
+        }
         Console.Write(L.T("start.confirm"));
-        string confirm = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        string confirm = Ask().Trim().ToLowerInvariant();
         if (confirm is not ("" or "y" or "yes")) return;
 
-        try
+        string input = src.FullName;
+        for (int i = 0; i < stages.Count; i++)
         {
-            (bool ok, string? failure) =
-                PostProcess.Recompress.Apply(ffmpeg, src.FullName, output, settings);
-            if (!ok)
+            try
             {
-                Console.WriteLine($"{L.T("error.prefix")}{L.T("post.failed", "recompress", failure ?? "")}");
-                Console.WriteLine(L.T("post.kept", src.FullName));
+                (bool ok, string? failure) =
+                    PostProcess.Recompress.Apply(ffmpeg, input, outputs[i], stages[i]);
+                if (!ok)
+                {
+                    string stage = stages.Count > 1 ? $"recompress {i + 1}/{stages.Count}" : "recompress";
+                    Console.WriteLine($"{L.T("error.prefix")}{L.T("post.failed", stage, failure ?? "")}");
+                    Console.WriteLine(L.T("post.kept", src.FullName));
+                    return;
+                }
+            }
+            catch (Exception exc)
+            {
+                Console.WriteLine($"{L.T("error.prefix")}{exc.Message}");
                 return;
             }
-            Console.WriteLine(L.T("rc.only.done", output));
+            input = outputs[i];
         }
-        catch (Exception exc)
-        {
-            Console.WriteLine($"{L.T("error.prefix")}{exc.Message}");
-        }
+        Console.WriteLine(L.T("rc.only.done", outputs[^1]));
     }
 }

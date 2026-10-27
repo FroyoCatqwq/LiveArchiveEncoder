@@ -61,7 +61,12 @@ public static class ToolchainConsole
             Console.WriteLine($" 0. {L.T("tc.menu.back")}");
             Console.Write(L.T("menu.select"));
 
-            switch ((Console.ReadLine() ?? "").Trim())
+            // Closed stdin means nobody is left to answer; without this the menu
+            // redraws forever (the shell's own Ask() handles the main menu).
+            string? pick = Console.ReadLine();
+            if (pick is null) return (sourceId, proxy, ghProxy);
+
+            switch (pick.Trim())
             {
                 case "0": return (sourceId, proxy, ghProxy);
                 case "1":

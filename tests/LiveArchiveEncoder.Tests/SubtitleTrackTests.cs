@@ -264,4 +264,60 @@ public sealed class SubtitleTrackTests
     [Test]
     public async Task ParseMode_UnknownMeansOff() =>
         await Assert.That(SubtitleTrack.ParseMode("squash")).IsEqualTo(SubtitleMode.Off);
+
+    // -------------------------------------------------------- timeline shift
+
+    /// <summary>
+    /// v7.9.8.4: a run that starts at 00:22:45 hands FFmpeg <c>-ss 1365</c>,
+    /// which rebases the picture to 00:00:00, while the subtitle file still
+    /// counts from the beginning of the source. Without the shift the whole
+    /// track lands 22 minutes late and no line is ever drawn -- which is exactly
+    /// what a user reported.
+    /// </summary>
+    [Test]
+    public async Task BurnInto_MovesTheBurnFilterOntoTheSourceClock()
+    {
+        var plan = new SubtitlePlan { Mode = SubtitleMode.Burn, BurnFiles = ["a.ass"] };
+
+        VideoFilter shifted = SubtitleTrack.BurnInto("scale=320:240", plan, 320, 240, "yuv420p", "0:v", 1365);
+
+        await Assert.That(shifted.Chain).StartsWith("scale=320:240,setpts=PTS+1365.000000/TB,subtitles=");
+        // The offset has to come back off: "-t <duration>" is measured on the
+        // timestamps that leave the chain, and leaving them 1365s ahead ends the
+        // run on its first frame.
+        await Assert.That(shifted.Chain).EndsWith(",setpts=PTS-1365.000000/TB");
+    }
+
+    [Test]
+    public async Task BurnInto_FromTheStartChangesNothing()
+    {
+        var plan = new SubtitlePlan { Mode = SubtitleMode.Burn, BurnFiles = ["a.ass"] };
+
+        VideoFilter plain = SubtitleTrack.BurnInto("scale=320:240", plan, 320, 240, "yuv420p", "0:v", 0);
+
+        await Assert.That(plain.Chain).StartsWith("scale=320:240,subtitles=");
+        await Assert.That(plain.Chain).DoesNotContain("setpts");
+    }
+
+    /// <summary>
+    /// The boxed form renders inside a cropped branch of a filtergraph; the
+    /// shift has to travel with the burn filter into that branch, or the text
+    /// silently keeps the segment's clock while the picture has the source's.
+    /// </summary>
+    [Test]
+    public async Task BurnInto_ShiftsInsideTheBoxGraphToo()
+    {
+        var plan = new SubtitlePlan
+        {
+            Mode = SubtitleMode.Burn,
+            BurnFiles = ["a.ass"],
+            BoxAspect = (4, 3),
+        };
+
+        VideoFilter filter = SubtitleTrack.BurnInto("scale=640:360", plan, 640, 360, "yuv420p", "0:v", 90);
+
+        await Assert.That(filter.IsGraph).IsTrue();
+        await Assert.That(filter.Graph).Contains("setpts=PTS+90.000000/TB,subtitles=");
+        await Assert.That(filter.Graph).Contains(",setpts=PTS-90.000000/TB");
+    }
 }

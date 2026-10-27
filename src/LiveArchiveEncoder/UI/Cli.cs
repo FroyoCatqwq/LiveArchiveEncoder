@@ -884,14 +884,16 @@ public static class Cli
                     return (rc, $"unknown recompress codec '{codecName}' (pass {i + 1}); "
                         + $"known: {RecompressCodecs.VideoIdList}");
 
-                string audio = args.RecompressAudioCodec ?? RecompressCodecs.RecommendedAudio(codec.Name);
+                string audio = At(args.RecompressAudioCodecs, i)
+                    ?? RecompressCodecs.RecommendedAudio(codec.Name);
                 if (!RecompressCodecs.IsCopyAudio(audio) && RecompressCodecs.FindAudio(audio) is null)
                     return (rc, $"unknown audio codec '{audio}' (pass {i + 1}); "
                         + $"known: {RecompressCodecs.AudioIdList}, or copy");
 
+                int kbps = At(args.RecompressAudioKbpsList, i) ?? 0;
                 fragment = string.Join(' ',
-                    RecompressCodecs.VideoArgs(codec, args.RecompressQuality ?? codec.DefaultQuality),
-                    RecompressCodecs.AudioArgs(audio, args.RecompressAudioKbps, null, null));
+                    RecompressCodecs.VideoArgs(codec, At(args.RecompressQualities, i) ?? codec.DefaultQuality),
+                    RecompressCodecs.AudioArgs(audio, kbps > 0 ? kbps : null, null, null));
                 container ??= RecompressCodecs.DefaultContainer(codec.Name, audio) ?? codec.Containers[0];
             }
 
@@ -928,6 +930,18 @@ public static class Cli
         if (args.NoRecompress) rc.Enabled = false;
         return (rc, null);
     }
+
+    /// <summary>
+    /// A per-pass flag's value: paired by position, and the last one written
+    /// covers every pass after it -- so a single <c>--recompress-quality</c>
+    /// keeps meaning "this quality for the whole chain", as it did before
+    /// v7.9.8.4.
+    /// </summary>
+    private static int? At(IReadOnlyList<int> values, int index) =>
+        values.Count == 0 ? null : values[Math.Min(index, values.Count - 1)];
+
+    private static string? At(IReadOnlyList<string> values, int index) =>
+        values.Count == 0 ? null : values[Math.Min(index, values.Count - 1)];
 
     /// <summary>
     /// Validate one pass and settle its container.

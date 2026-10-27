@@ -260,19 +260,26 @@ public sealed class CliOptions
     /// <summary>
     /// v7.9.5.1: pick a pass's video codec by name instead of writing a
     /// fragment. The container follows the codec when none was named.
-    /// Repeatable, paired by position; the quality and audio flags apply to
-    /// every pass named this way.
+    /// Repeatable, paired by position with the quality and audio flags.
     /// </summary>
     public IReadOnlyList<string> RecompressCodecs { get; init; } = [];
 
-    /// <summary>CRF / q:v for <see cref="RecompressCodec"/>; null = the codec's default.</summary>
-    public int? RecompressQuality { get; init; }
+    /// <summary>
+    /// CRF / q:v for the <see cref="RecompressCodecs"/> passes.
+    ///
+    /// <para>v7.9.8.4: paired by position, because the number is meaningless
+    /// across scales -- 26 is a sensible CRF for libx264 and an absurd quantiser
+    /// for the MPEG family, and a single value applied to a chain of both is the
+    /// same mistake v7.9.8.2 fixed inside the era presets. One value still
+    /// covers every pass, as it always did.</para>
+    /// </summary>
+    public IReadOnlyList<int> RecompressQualities { get; init; } = [];
 
-    /// <summary>Audio codec for the second pass (aac, libopus, libvorbis, copy, ...).</summary>
-    public string? RecompressAudioCodec { get; init; }
+    /// <summary>Audio codec per named-codec pass (aac, libopus, libvorbis, copy, ...).</summary>
+    public IReadOnlyList<string> RecompressAudioCodecs { get; init; } = [];
 
-    /// <summary>Audio bitrate for the second pass; null = the codec's default.</summary>
-    public int? RecompressAudioKbps { get; init; }
+    /// <summary>Audio bitrate per named-codec pass; 0 = the codec's default.</summary>
+    public IReadOnlyList<int> RecompressAudioKbpsList { get; init; } = [];
 
     /// <summary>
     /// v7.9.5.1: render an era/site preset with libx264 + AAC in MP4 instead of
@@ -441,9 +448,9 @@ public static class CliParser
         bool noRecompress = false;
         bool recompressOnly = false;
         var recompressCodecs = new List<string>();
-        int? recompressQuality = null;
-        string? recompressAudioCodec = null;
-        int? recompressAudioKbps = null;
+        var recompressQualities = new List<int>();
+        var recompressAudioCodecs = new List<string>();
+        var recompressAudioKbpsList = new List<int>();
         bool eraModern = false;
         bool eraNative = false;
         string? era = null;
@@ -867,18 +874,18 @@ public static class CliParser
                         return (null, "--recompress-quality requires an integer");
                     if (rcqValue < 1 || rcqValue > 63)
                         return (null, "--recompress-quality must be between 1 and 63");
-                    recompressQuality = rcqValue;
+                    recompressQualities.Add(rcqValue);
                     break;
                 case "--recompress-audio-codec":
-                    if (!TryValue(out recompressAudioCodec))
+                    if (!TryValue(out string rcacValue))
                         return (null, "--recompress-audio-codec requires a codec name");
-                    recompressAudioCodec = recompressAudioCodec.Trim().ToLowerInvariant();
+                    recompressAudioCodecs.Add(rcacValue.Trim().ToLowerInvariant());
                     break;
                 case "--recompress-audio-kbps":
                     if (!TryValue(out string rcabRaw) || !int.TryParse(rcabRaw, out int rcabValue)
                         || rcabValue < 0)
                         return (null, "--recompress-audio-kbps requires a non-negative integer");
-                    recompressAudioKbps = rcabValue;
+                    recompressAudioKbpsList.Add(rcabValue);
                     break;
                 case "--era-modern": eraModern = true; break;
                 case "--era-native": eraNative = true; break;
@@ -1051,9 +1058,9 @@ public static class CliParser
             NoRecompress = noRecompress,
             RecompressOnly = recompressOnly,
             RecompressCodecs = recompressCodecs,
-            RecompressQuality = recompressQuality,
-            RecompressAudioCodec = recompressAudioCodec,
-            RecompressAudioKbps = recompressAudioKbps,
+            RecompressQualities = recompressQualities,
+            RecompressAudioCodecs = recompressAudioCodecs,
+            RecompressAudioKbpsList = recompressAudioKbpsList,
             EraModern = eraModern,
             EraNative = eraNative,
             Era = era,
@@ -1178,12 +1185,16 @@ public static class CliParser
             ("--recompress", "", "re-encode the result the way a video site would (default: off)"),
             ("--recompress-args", "ARGS", "FFmpeg arguments for one pass; -i and the output are "
                                         + "supplied. Repeatable: each occurrence is one more "
-                                        + "transcode, applied to the previous one's output"),
+                                        + "transcode, applied to the previous one's output "
+                                        + "(e.g. -args '-c:v libx264 -crf 26' -args '-c:v flv -q:v 9' "
+                                        + "= two hops)"),
             ("--recompress-codec", "NAME", $"a pass's video codec instead of a fragment: {PostProcess.RecompressCodecs.VideoIdList}"
                                          + " (repeatable, paired by position with the fragments)"),
-            ("--recompress-quality", "N", "quality for --recompress-codec (CRF, or q:v for the MPEG family)"),
-            ("--recompress-audio-codec", "NAME", $"audio codec for --recompress-codec: {PostProcess.RecompressCodecs.AudioIdList}, or copy"),
-            ("--recompress-audio-kbps", "N", "audio bitrate for --recompress-codec (default: the codec's)"),
+            ("--recompress-quality", "N", "quality for the matching --recompress-codec (CRF, or q:v "
+                                        + "for the MPEG family; repeatable, one value covers the "
+                                        + "passes after it)"),
+            ("--recompress-audio-codec", "NAME", $"audio codec for --recompress-codec: {PostProcess.RecompressCodecs.AudioIdList}, or copy (repeatable)"),
+            ("--recompress-audio-kbps", "N", "audio bitrate for --recompress-codec (repeatable; default: the codec's)"),
             ("--recompress-container", "EXT", "container for a pass (repeatable, paired by position; "
                                             + "default: implied by the codec)"),
             ("--recompress-only", "", "skip the live encode and apply the recompress pass to an "

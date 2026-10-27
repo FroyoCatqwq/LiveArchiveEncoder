@@ -356,3 +356,29 @@ def test_run13_stored_avi_and_fps_are_corrected(exe, workdir):
         c.check("product has audio", (info.get("audio") or 0) >= 1, str(info))
     c.finish()
 
+
+
+def test_run14_recompress_chain(exe, cui_config):
+    """v7.9.8.4: the CUI builds a chain, not just one pass.
+
+    The menu row and its strings shipped in v7.9.8.3 with nothing wired to them,
+    so the shell offered no way to add a second hop at all -- the command line
+    could, the menu could not. The assertion is on the settings file: a fragment
+    typed here has to survive as pass 2, with the container its codec implies.
+    """
+    if cui_config.exists():
+        cui_config.unlink()
+    # 15 = recompress, 8 = further passes, the fragment, then back out twice.
+    p = harness.cui(exe, [], "15\n8\n-c:v flv -q:v 9\n0\n0\n")
+
+    c = Checks()
+    c.check("exit code 0", p.returncode == 0, f"rc={p.returncode}")
+    cfg = harness.read_config() or {}
+    rec = cfg.get("Recompress") or {}
+    extra = rec.get("Extra") or []
+    c.check("one further pass stored", len(extra) == 1, str(rec))
+    if extra:
+        c.check("fragment kept", extra[0].get("Args") == "-c:v flv -q:v 9", str(extra[0]))
+        c.check("container follows the codec", extra[0].get("Container") == "flv",
+                str(extra[0]))
+    c.finish()

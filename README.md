@@ -22,6 +22,15 @@ exactly what v6.3.3 would have produced.
 > `--subtitle-aspect 4:3|16:9`, which lays burned text out in a box of that shape
 > instead of stretching it across a picture of another one.
 
+> **v7.9.8.4:** a burned subtitle track now follows the **source's** clock, not
+> the segment's. `--start-time` makes FFmpeg rebase the picture to 00:00:00 while
+> the subtitle file still counts from the beginning of the source, so from
+> `00:22:45` the whole track landed 22 minutes late and no line was ever drawn;
+> the burn filter is now wrapped in `setpts=PTS±offset/TB`. Also: the CUI can
+> build a recompress **chain** (menu 15 → 8), `--recompress-quality` /
+> `-audio-codec` / `-audio-kbps` pair with the pass they follow, and the shell
+> exits instead of redrawing forever when stdin closes.
+
 Full user guide: [`docs/usage.md`](docs/usage.md); system and hardware requirements:
 [`docs/requirements.md`](docs/requirements.md). Version history, from Python
 v6.2.2 to the current release: [`docs/CHANGELOG.md`](docs/CHANGELOG.md). Where
@@ -274,7 +283,7 @@ Two flags are additions rather than ports:
 | `--hwaccel NAME` | hardware decode; `off` (default), `auto`, or any method from `ffmpeg -hwaccels`. The method is probed by actually decoding one frame and falls back to software when it fails |
 | `--recompress`, `--recompress-args ARGS` | re-encode the result the way a video site would. You write the middle of the FFmpeg command (`-vf scale=320:240,fps=15 -c:v libx264 -crf 28 …`); the program owns `-i` and the output path, and the fragment is tokenised and vetted so a stray path cannot overwrite your source. Off by default |
 | `--recompress-codec NAME` | pick the second pass's codec by name instead of writing a fragment — `libx264`, `libx265`, `libvpx-vp9`, `libvpx`, `libaom-av1`, `libsvtav1`, `flv`, `mpeg4`, `mpeg2video`, `mjpeg`, `wmv2`, `h263`. The container follows the codec (VP9 → `.webm`, x265 → `.mp4`), and a pair the muxer cannot hold is refused before anything runs |
-| `--recompress-quality N` | the codec's own knob: `-crf` for x264/x265/VP9/AV1, `-q:v` for the MPEG family |
+| `--recompress-quality N` | the codec's own knob: `-crf` for x264/x265/VP9/AV1, `-q:v` for the MPEG family. Repeatable since v7.9.8.4 — each value pairs with the `--recompress-codec` at the same position, because 26 is a sensible CRF and an absurd MPEG quantiser; a single value still covers the whole chain |
 | `--recompress-audio-codec NAME` | `aac`, `libmp3lame`, `libopus`, `libvorbis`, `ac3`, `flac` or `copy`, with the same container check |
 | `--subtitle-font FAMILY`, `--subtitle-font-dir DIR` | force a font family over the one an ASS file names (also gives SRT/VTT one, which they never specify), and add an extra font directory |
 | `--list-subtitle-fonts`, `--font-import PATH` | report the fonts a subtitle file asks for and whether this machine has them; copy font files into the program's own `fonts` directory |
@@ -286,8 +295,9 @@ Two flags are additions rather than ports:
 | `--era-modern` / `--era-native` | render a preset's second pass with libx264 + AAC in MP4 instead of the site's own codec (the default), or say so explicitly |
 | NNEDI3 deinterlacing (v7.9.8.3) | `--deinterlace nnedi` now has weights to go with it: `--nnedi-update` fetches `nnedi3_weights.bin` (13,574,928 B, znedi3 `r3.3`) into `%LOCALAPPDATA%\LiveArchiveEncoder\nnedi`, records tag/size/sha256, proves the blob by letting the filter initialise on it, and resumes an interrupted download. `--nnedi-status` prints what is installed, `--nnedi-weights PATH` uses a copy elsewhere. The filter cannot start without the file, so a missing one is refused before the preflight instead of FFmpeg's "Cannot open file" mid-run |
 | `--gh-proxy [URL]`, `--no-gh-proxy` (v7.9.8.3) | fetch GitHub downloads through a front (`https://gh-proxy.com/` by default). Measured 2026-10-27: `raw.githubusercontent.com` accepts the connection and then delivers nothing (0 bytes in 20 s), while the same URL through the front answers `206` with a correct `Content-Range`, so range/resume still works. Unset means "probe for 5 s and pick"; `off` is remembered in the settings file and stops the probing |
-| multi-pass recompress (v7.9.8.3) | `--recompress-args`, `--recompress-codec` and `--recompress-container` are repeatable: the Nth of each is the Nth transcode, each reading the previous hop's file (`clip_web.mp4` → `clip_web2.flv` → `clip_web3.rm`). A hop named by codec picks its own container, and a failed hop reports which one (`recompress 2/3`) without touching the live product |
+| multi-pass recompress (v7.9.8.3) | `--recompress-args`, `--recompress-codec` and `--recompress-container` are repeatable: the Nth of each is the Nth transcode, each reading the previous hop's file (`clip_web.mp4` → `clip_web2.flv` → `clip_web3.rm`). A hop named by codec picks its own container, and a failed hop reports which one (`recompress 2/3`) without touching the live product. The CUI builds the same chain since v7.9.8.4 (menu 15 → 8: type a fragment to add a pass, a number to drop it, `-` to clear), and "recompress a file directly" runs the whole chain instead of only the first hop |
 | `--subtitle-aspect 4:3\|16:9\|source` (v7.9.8.3) | lay burned text out in a box of that shape and composite it back onto the finished frame (`crop` + `subtitles` + `overlay`, same size and offset, no scaling). A 4:3 subtitle on a 16:9 picture keeps its 4:3 layout instead of being spread across the extra width; `source` is the old whole-frame behaviour |
+| burned subtitles follow the source clock (v7.9.8.4) | `--start-time` makes FFmpeg rebase the picture to 00:00:00 while the subtitle file still counts from the beginning of the source, so from `00:22:45` every line landed 22 minutes late — outside the clip, nothing drawn. The burn filter is now wrapped in `setpts=PTS±offset/TB` (and the offset taken back off, because `-t` is measured on the timestamps that leave the chain); a run from 00:00:00 builds exactly the command it always did |
 | `--era-aspect 4:3\|16:9\|source` | v7.9.6.3: capture and deliver a preset in the other frame shape. Keeps the capture width and changes the height (352x264 → 352x198, 1280x720 → 1280x960) and only offers a shape the encoder can actually encode — H.261/H.263 exist at CIF sizes only, AMV wants multiples of 16, everything else wants even sides; an impossible request is refused at parse time (exit 2) instead of failing on the first frame twenty minutes in |
 | `--net-test PATH\|URL` | v7.9.6.3: measure the link behind a source — throughput, jitter and first-byte latency, by reading the source the way the shards would — print the verdict `--parallel` would use, and exit (0 = shardable, 1 = not) |
 | `--iperf3 HOST[:PORT]` | v7.9.6.3: measure the link with `iperf3 -c HOST -J` as a *reference*. Both ends need iperf3 and an open port, and a public iperf3 server only stands in for the WAN path — it cannot see a NAS's own disk or per-connection limits, so reading the source stays the authoritative measurement |

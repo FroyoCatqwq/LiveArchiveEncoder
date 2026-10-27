@@ -209,9 +209,13 @@ public static class RealtimeEncoder
             : null;
         // v7.9.8.3: a declared subtitle shape turns the plain chain into a
         // filtergraph (crop + render + overlay); everything else stays -vf.
+        // v7.9.8.4: the start time goes in as well -- -ss rebases the picture to
+        // 00:00:00 while the subtitle file still counts from the source's
+        // beginning, so the burn filter has to be shifted onto the source's
+        // clock (see SubtitleTrack.Shifted).
         VideoFilter filter = subs is { Mode: SubtitleMode.Burn }
             ? SubtitleTrack.BurnInto(vf, subs, width, height, transportFmt,
-                StreamSelection.VideoMap(o.VideoStream))
+                StreamSelection.VideoMap(o.VideoStream), o.StartSeconds)
             : VideoFilter.Simple(vf);
         int frameSize = PixelFormatUtil.RawFrameSize(width, height, transportFmt);
         int? targetSlots = duration is null ? null : (int)Math.Ceiling(duration.Value * o.Fps - 1e-9);
