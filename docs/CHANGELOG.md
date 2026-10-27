@@ -79,6 +79,24 @@ auto）。
 
 - 单测 529 例 → 528 过 / 1 跳过（需要字体文件的用例），其中新增 6 条专测本次改动
   （别名全覆盖、`site/year` 形状、OpenH264 默认值、两种编码器的参数形态）。
+  两台 CI 服务器各自独立跑过：`lae-linux` 528 例、`lae-win` 529 例，都 0 失败。
+- e2e 195 例：两阶段全绿（第一阶段 27、第二阶段 167 过 / 2 跳过=无 `.a64` 解复用器）。
+  里面用到旧 id 的用例（`--era flv07`、`--era youku07`、`--era bilibili09`）一条没改
+  就通过了——别名表不是装饰。
+- OpenH264 端到端实测：`--era bilibili/2012` 输出 640x360 H.264，视频码率 694,738 bps
+  （目标 700k），mp4 容器，AAC 96k 立体声。
+
+### 产物
+
+| 文件 | 大小 | 需要 | 构建机 |
+| --- | --- | --- | --- |
+| `LiveArchiveEncoder-v7.9.7-win-x64.zip` | 322,808 B | .NET 10 或 11 运行时 | 本地，JIT |
+| `LiveArchiveEncoder-v7.9.7-win-x64-aot.zip` | 4,022,745 B（exe 9,261,568 B，62 秒） | 无 | Windows Server 2019 + VS2022 MSVC 14.44 |
+| `LiveArchiveEncoder-v7.9.7-linux-x64.tar.gz` | 283,552 B | .NET 10 或 11 运行时 | AlmaLinux 8.10，JIT |
+| `LiveArchiveEncoder-v7.9.7-linux-x64-aot.tar.gz` | 4,793,406 B（ELF 10,221,296 B，47 秒） | 无 | AlmaLinux 8.10 + copr clang 24 快照 |
+
+Linux AOT 的 `objdump -T` 最高只要 `GLIBC_2.17`，比文档写的 2.28 下限还宽松；四个包
+都在目标系统上跑过 `--help` / `--era`。
 
 ---
 
