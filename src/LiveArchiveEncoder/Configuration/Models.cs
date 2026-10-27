@@ -254,6 +254,20 @@ public sealed class Config
     /// <summary>Proxy used when downloading an FFmpeg build, e.g. http://127.0.0.1:10808.</summary>
     public string? FfmpegProxy { get; set; }
 
+    /// <summary>
+    /// v7.9.8.3: GitHub download front, e.g. <c>https://gh-proxy.com/</c>. Applies
+    /// to the FFmpeg distributions hosted on GitHub and to the NNEDI3 weights;
+    /// null means "fetch straight from GitHub". See
+    /// <see cref="FFmpeg.GitHubProxy"/>.
+    /// </summary>
+    public string? GhProxy { get; set; }
+
+    /// <summary>
+    /// v7.9.8.3: an NNEDI3 weights file to use instead of the managed one.
+    /// Null means "whatever <c>--nnedi-update</c> installed".
+    /// </summary>
+    public string? NnediWeights { get; set; }
+
     public PlayMode Play { get; set; } = PlayMode.Off;
 
     /// <summary>External player executable; empty means the shell file association.</summary>
@@ -345,8 +359,37 @@ public sealed class SubtitleConfig
     /// </summary>
     public string? FallbackFont { get; set; }
 
+    /// <summary>
+    /// v7.9.8.3: the shape the burned text is laid out in -- "source" (the whole
+    /// picture, the pre-v7.9.8.3 behaviour), "4:3" or "16:9". A subtitle made for
+    /// a 4:3 print stays a 4:3 subtitle on a 16:9 picture instead of being
+    /// re-spread across it, and a 16:9 subtitle on a 4:3 picture is scaled down
+    /// to fit instead of running off the edge.
+    /// </summary>
+    public string BoxAspect { get; set; } = "source";
+
     /// <summary>Same rule as <see cref="Encoding.SubtitleSettings.Active"/>.</summary>
     public bool Active => Mode != "off" && (Files.Count > 0 || Stream is not null);
+}
+
+/// <summary>
+/// One pass of the "upload to a video site" chain.
+///
+/// <para>v7.9.8.3: a recording can be published more than once -- a 2007 portal
+/// first, then the 2011 one after it -- and each hop is a real transcode, so the
+/// chain is a list rather than one fragment. The first pass keeps the
+/// <see cref="RecompressSettings.Args"/>/<see cref="RecompressSettings.Container"/>
+/// fields so a settings file written by any earlier version still loads.</para>
+/// </summary>
+public sealed class RecompressPass
+{
+    /// <summary>Everything between <c>-i</c> and the output path.</summary>
+    public string Args { get; set; } = "";
+
+    /// <summary>Container extension without the dot.</summary>
+    public string Container { get; set; } = "mp4";
+
+    public RecompressPass Clone() => new() { Args = Args, Container = Container };
 }
 
 /// <summary>
@@ -367,4 +410,27 @@ public sealed class RecompressSettings
 
     /// <summary>Container extension without the dot.</summary>
     public string Container { get; set; } = "mp4";
+
+    /// <summary>
+    /// v7.9.8.3: passes 2..N. Empty means the single pass every earlier version
+    /// had, so nothing about the old behaviour changes.
+    /// </summary>
+    public List<RecompressPass> Extra { get; set; } = [];
+
+    /// <summary>
+    /// The whole chain in order, first pass included. Passes with an empty
+    /// fragment are dropped: a settings file can always end up with a blank row,
+    /// and running FFmpeg with no arguments would just copy the file.
+    /// </summary>
+    public List<RecompressPass> Stages()
+    {
+        var stages = new List<RecompressPass>();
+        if (!string.IsNullOrWhiteSpace(Args))
+            stages.Add(new RecompressPass { Args = Args, Container = Container });
+        foreach (RecompressPass pass in Extra)
+        {
+            if (pass is not null && !string.IsNullOrWhiteSpace(pass.Args)) stages.Add(pass);
+        }
+        return stages;
+    }
 }

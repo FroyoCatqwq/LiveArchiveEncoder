@@ -135,9 +135,14 @@ public static class Toolchain
     /// Cloudflare interstitial): you download the file in a browser and hand the
     /// path over here. Everything is staged first, so a failed download or a
     /// missing extractor leaves the previous build intact.
+    ///
+    /// <paramref name="ghPrefix"/> is the optional GitHub front (v7.9.8.3); it
+    /// is applied to the catalogue URL, not to a local archive, and only to the
+    /// hosts <see cref="GitHubProxy.CanWrap"/> accepts.
     /// </summary>
     public static (bool Ok, string? Error) Install(
-        FfmpegDist dist, string? proxy, string? localArchive = null, Action<string>? log = null)
+        FfmpegDist dist, string? proxy, string? localArchive = null, Action<string>? log = null,
+        string? ghPrefix = null)
     {
         void Say(string line) => log?.Invoke(line);
 
@@ -181,7 +186,9 @@ public static class Toolchain
             }
             else
             {
-                string url = dist.Url!;
+                string url = GitHubProxy.Apply(dist.Url!, ghPrefix);
+                if (url.Length != dist.Url!.Length)
+                    Say($"Front  : {ghPrefix} (the request is fetched through it)");
                 Say($"URL    : {url}");
                 Say($"Target : {bin}");
 
@@ -260,6 +267,30 @@ public static class Toolchain
     /// </summary>
     private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// Download one file into place, with the same aria2c-then-HttpClient
+    /// behaviour the FFmpeg install uses (resume, retries, browser UA).
+    ///
+    /// <para>v7.9.8.3: shared with <see cref="Nnedi"/>, which needs a single
+    /// 13 MB file rather than an archive and would otherwise carry a second,
+    /// subtly different copy of the downloader.</para>
+    /// </summary>
+    public static (bool Ok, string? Error) DownloadFile(
+        string url, string destination, string? proxy, Action<string>? log = null)
+    {
+        try
+        {
+            string? dir = Path.GetDirectoryName(destination);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            return Download(url, destination, proxy, log ?? (_ => { }));
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                        or ArgumentException or NotSupportedException)
+        {
+            return (false, exc.Message);
+        }
+    }
+
     /// <summary>aria2c when available, HttpClient otherwise.</summary>
     private static (bool Ok, string? Error) Download(
         string url, string destination, string? proxy, Action<string> log)
@@ -285,10 +316,17 @@ public static class Toolchain
                 "--dir", Path.GetDirectoryName(destination)!,
                 "-o", Path.GetFileName(destination),
             };
-            if (proxy.HasText)
+            // aria2c is not a .NET process and does not inherit the system proxy
+            // HttpClient picks up on its own. Measured 2026-10-27: with no
+            // --proxy given, aria2c failed the TLS handshake to
+            // raw.githubusercontent.com while the very next single-connection
+            // HttpClient call downloaded the same file in 29 s. Handing aria2c
+            // what the runtime would use makes the two agree.
+            string? ariaProxy = proxy.HasText ? proxy : SystemProxy();
+            if (ariaProxy.HasText)
             {
                 args.Add("--all-proxy");
-                args.Add(proxy);
+                args.Add(ariaProxy);
             }
             args.Add(url);
 
@@ -305,6 +343,30 @@ public static class Toolchain
             ? "aria2c not found; downloading with a single connection."
             : "Falling back to a single-connection download.");
         return DownloadHttp(url, destination, proxy, log);
+    }
+
+    /// <summary>
+    /// The machine's proxy as the runtime sees it, or null. A PAC script that
+    /// resolves to nothing, and a direct connection, both come back null -- so
+    /// "no --proxy" still means "go direct" where direct works.
+    /// </summary>
+    private static string? SystemProxy()
+    {
+        try
+        {
+            IWebProxy system = HttpClient.DefaultProxy;
+            var target = new Uri("https://github.com");
+            if (system.IsBypassed(target)) return null;
+
+            Uri? address = system.GetProxy(target);
+            if (address is null || !address.IsAbsoluteUri) return null;
+            return address.ToString();
+        }
+        catch (Exception exc) when (exc is UriFormatException or InvalidOperationException
+                                        or PlatformNotSupportedException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static (bool Ok, string? Error) DownloadHttp(

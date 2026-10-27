@@ -12,6 +12,16 @@ exactly what v6.3.3 would have produced.
 > `archive/retired/`, so it can come back as a separate project). Subtitle
 > burning/copying, added in v7.9, covers the "put text on the picture" job.
 
+> **v7.9.8.3:** `--nnedi-update` fetches the NNEDI3 weights the `nnedi`
+> deinterlacer cannot start without (13,574,928 B from `sekrit-twc/znedi3`,
+> verified by letting the filter initialise on the blob), and `--gh-proxy` routes
+> GitHub downloads through a front — measured: `raw.githubusercontent.com`
+> delivers **nothing** to a mainland line (0 bytes in 20 s) while the same URL
+> through `gh-proxy.com` answers `206` with a correct `Content-Range`. Also new:
+> repeatable recompress passes (`_web` → `_web2` → `_web3`) and
+> `--subtitle-aspect 4:3|16:9`, which lays burned text out in a box of that shape
+> instead of stretching it across a picture of another one.
+
 Full user guide: [`docs/usage.md`](docs/usage.md); system and hardware requirements:
 [`docs/requirements.md`](docs/requirements.md). Version history, from Python
 v6.2.2 to the current release: [`docs/CHANGELOG.md`](docs/CHANGELOG.md). Where
@@ -274,6 +284,10 @@ Two flags are additions rather than ports:
 | era ladders (v7.9.6.1) | each preset also carries the adaptive frame-rate ladder of its period (`bilibili/2012`: 30→25→20→15, `cctv/2006`: 25→20→15→10), so a 25 fps preset no longer drops onto the tool's 13/8/5/3 default — an explicit `--fps` or `--fps-levels` still wins |
 | era capture pipeline (v7.9.8.2) | a row now states its **quality in both scales** (`q:v` for the period's own codec, CRF for the same picture on H.264 — `youku/2007`: q:v 11 / CRF 22) plus the averaging window, the frame queue and the deinterlacer of that year (3 s / 4 frames / `off` before 2006, 2 s / 6-8 / `yadif` after). Before this a preset never touched the quality, so an MPEG `q:v` was handed to x264 as `-crf`: 935 kbps into a 320 kbps ceiling, and the frame-rate ladder read that number and fell to its last rung. CRF encoders are additionally pinned to the ceiling with `-maxrate`/`-bufsize`. `--qv`, `--window`, `--buffer-frames` and `--deinterlace` still win over the preset |
 | `--era-modern` / `--era-native` | render a preset's second pass with libx264 + AAC in MP4 instead of the site's own codec (the default), or say so explicitly |
+| NNEDI3 deinterlacing (v7.9.8.3) | `--deinterlace nnedi` now has weights to go with it: `--nnedi-update` fetches `nnedi3_weights.bin` (13,574,928 B, znedi3 `r3.3`) into `%LOCALAPPDATA%\LiveArchiveEncoder\nnedi`, records tag/size/sha256, proves the blob by letting the filter initialise on it, and resumes an interrupted download. `--nnedi-status` prints what is installed, `--nnedi-weights PATH` uses a copy elsewhere. The filter cannot start without the file, so a missing one is refused before the preflight instead of FFmpeg's "Cannot open file" mid-run |
+| `--gh-proxy [URL]`, `--no-gh-proxy` (v7.9.8.3) | fetch GitHub downloads through a front (`https://gh-proxy.com/` by default). Measured 2026-10-27: `raw.githubusercontent.com` accepts the connection and then delivers nothing (0 bytes in 20 s), while the same URL through the front answers `206` with a correct `Content-Range`, so range/resume still works. Unset means "probe for 5 s and pick"; `off` is remembered in the settings file and stops the probing |
+| multi-pass recompress (v7.9.8.3) | `--recompress-args`, `--recompress-codec` and `--recompress-container` are repeatable: the Nth of each is the Nth transcode, each reading the previous hop's file (`clip_web.mp4` → `clip_web2.flv` → `clip_web3.rm`). A hop named by codec picks its own container, and a failed hop reports which one (`recompress 2/3`) without touching the live product |
+| `--subtitle-aspect 4:3\|16:9\|source` (v7.9.8.3) | lay burned text out in a box of that shape and composite it back onto the finished frame (`crop` + `subtitles` + `overlay`, same size and offset, no scaling). A 4:3 subtitle on a 16:9 picture keeps its 4:3 layout instead of being spread across the extra width; `source` is the old whole-frame behaviour |
 | `--era-aspect 4:3\|16:9\|source` | v7.9.6.3: capture and deliver a preset in the other frame shape. Keeps the capture width and changes the height (352x264 → 352x198, 1280x720 → 1280x960) and only offers a shape the encoder can actually encode — H.261/H.263 exist at CIF sizes only, AMV wants multiples of 16, everything else wants even sides; an impossible request is refused at parse time (exit 2) instead of failing on the first frame twenty minutes in |
 | `--net-test PATH\|URL` | v7.9.6.3: measure the link behind a source — throughput, jitter and first-byte latency, by reading the source the way the shards would — print the verdict `--parallel` would use, and exit (0 = shardable, 1 = not) |
 | `--iperf3 HOST[:PORT]` | v7.9.6.3: measure the link with `iperf3 -c HOST -J` as a *reference*. Both ends need iperf3 and an open port, and a public iperf3 server only stands in for the WAN path — it cannot see a NAS's own disk or per-connection limits, so reading the source stays the authoritative measurement |

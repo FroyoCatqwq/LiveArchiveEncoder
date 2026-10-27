@@ -101,6 +101,10 @@ public static class CliArgs
         // say off and used to emit this anyway).
         if (c.DeintMarkedOnly && !string.Equals(c.Deinterlace, "off", StringComparison.OrdinalIgnoreCase))
             argv.Add("--deint-marked-only");
+        // v7.9.8.3: which weights a run used is part of the run -- the same line
+        // on a machine with a different set would deinterlace with other numbers.
+        if (c.NnediWeights is { Length: > 0 } weights)
+            argv.AddRange(["--nnedi-weights", weights]);
         if (!string.Equals(c.Hwaccel, "off", StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--hwaccel", c.Hwaccel]);
         if (!string.Equals(c.X264Preset, "medium", StringComparison.OrdinalIgnoreCase))
@@ -115,6 +119,10 @@ public static class CliArgs
         if (!string.Equals(c.FfmpegSource, FFmpeg.FfmpegCatalog.DefaultId, StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--ffmpeg-source", c.FfmpegSource]);
         if (c.FfmpegProxy is { Length: > 0 } proxy) argv.AddRange(["--proxy", proxy]);
+        // v7.9.8.3: "off" is a remembered decision, not a default, so it has to
+        // travel with the line -- otherwise the copy would probe and pick a front
+        // the original was told not to use.
+        if (c.GhProxy is { Length: > 0 } front) argv.AddRange(["--gh-proxy", front]);
         if (!string.Equals(c.PlayMode, "off", StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--play", c.PlayMode]);
         if (c.PlayerPath is { Length: > 0 } player) argv.AddRange(["--player", player]);
@@ -122,9 +130,17 @@ public static class CliArgs
         if (c.Recompress.Enabled)
         {
             argv.Add("--recompress");
-            if (c.Recompress.Args is { Length: > 0 } rcArgs) argv.AddRange(["--recompress-args", rcArgs]);
-            if (!string.Equals(c.Recompress.Container, "mp4", StringComparison.OrdinalIgnoreCase))
-                argv.AddRange(["--recompress-container", c.Recompress.Container]);
+            // v7.9.8.3: one pair per pass. A chain pairs fragment/container/codec
+            // by position, so every hop has to carry its container -- silently
+            // omitting "mp4" on pass 2 would shift the pairing onto the wrong hop.
+            List<Configuration.RecompressPass> passes = c.Recompress.Stages();
+            bool chain = passes.Count > 1;
+            foreach (Configuration.RecompressPass pass in passes)
+            {
+                if (pass.Args is { Length: > 0 } fragment) argv.AddRange(["--recompress-args", fragment]);
+                if (chain || !string.Equals(pass.Container, "mp4", StringComparison.OrdinalIgnoreCase))
+                    argv.AddRange(["--recompress-container", pass.Container]);
+            }
         }
 
         // Subtitles: nothing is emitted for an inactive request, because
@@ -143,6 +159,10 @@ public static class CliArgs
                 argv.AddRange(["--subtitle-font-dir", fontDir]);
             if (c.Subtitles.FallbackFont is { Length: > 0 } font)
                 argv.AddRange(["--subtitle-font", font]);
+            // v7.9.8.3: the box ratio decides where the text is laid out, so a
+            // line that drops it renders the same file differently.
+            if (!string.Equals(c.Subtitles.BoxAspect, "source", StringComparison.OrdinalIgnoreCase))
+                argv.AddRange(["--subtitle-aspect", c.Subtitles.BoxAspect]);
         }
 
         return argv;

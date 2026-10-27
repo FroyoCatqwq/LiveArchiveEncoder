@@ -233,6 +233,7 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--subtitle-codec` | 按容器自动 | **v7.9**：copy 模式的字幕编码器，默认按容器从 `ffmpeg -encoders` 里挑 |
 | `--subtitle-font-dir` | 程序 `fonts` 目录 | **v7.9.5.1**：额外的字体目录（烧录字幕用） |
 | `--subtitle-font` | 无 | **v7.9.5.1**：强制使用某个字体族，覆盖字幕文件自己的设置（SRT/VTT 本来就不指定） |
+| `--subtitle-aspect` | `source` | **v7.9.8.3**：字幕按哪个画面比例排版 `source` / `4:3` / `16:9`（见 §7.16） |
 | `--font-import` | — | **v7.9.5.1**：把一个字体文件（或整个目录里的字体）拷进程序 `fonts` 目录后退出（见 §7.12） |
 | `--list-subtitle-fonts` | — | **v7.9.5.1**：列出字幕文件要哪些字体、本机有没有、在哪，然后退出 |
 | `--width` `--height` | `256` `192` | 输出分辨率（16:9 预设见 §7.15） |
@@ -249,10 +250,14 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--color-primaries` | 跟随源 | **v7.9.6**：原色标记（`bt709` / `bt470bg` / `bt2020` / `smpte431` …） |
 | `--color-trc` | 跟随源 | **v7.9.6**：传输特性标记（`bt709` / `srgb` 写作 `iec61966-2-1` / `smpte2084`（PQ） / `arib-std-b67`（HLG） …） |
 | `--dither` | `auto` | **v7.9.6**：降到低色深时的抖动（`auto` / `none` / `bayer` / `ordered` / `random` / `error_diffusion`），只在目标格式真的掉色时才发 |
-| `--deinterlace` | `off` | `bwdif` / `yadif` / `w3fdif` |
+| `--deinterlace` | `off` | `bwdif` / `yadif` / `w3fdif` / `nnedi`（**v7.9.8.3**，需要 NNEDI3 权重） |
 | `--deint-mode` | `send_frame` | `send_frame` 或 `send_field` |
 | `--deint-parity` | `auto` | `auto` / `tff` / `bff` |
 | `--deint-marked-only` | 关 | 只反交错被标记为 interlaced 的帧 |
+| `--nnedi-update` | — | **v7.9.8.3**：下载/更新 `nnedi` 滤镜要的 NNEDI3 权重，然后退出（见 §7.10） |
+| `--nnedi-status` | — | **v7.9.8.3**：打印已装权重的版本、大小、sha256、安装时间 |
+| `--nnedi-weights` | 已装的那份 | **v7.9.8.3**：用这个权重文件（或解压目录）代替受管安装 |
+| `--gh-proxy` / `--no-gh-proxy` | 自动探测 | **v7.9.8.3**：GitHub 下载走前沿（默认 `https://gh-proxy.com/`），`--no-gh-proxy` 表示不要并记住（见 §7.10） |
 | `--x264-preset` | `medium` | 仅 libx264 |
 | `--x264-tune` / `--x264-profile` / `--x264-level` | 空 | 仅 libx264，留空＝自动 |
 | `--hwaccel` | `off` | 硬件解码：`off` / `auto` / `ffmpeg -hwaccels` 里的任意名字（cuda、vaapi、qsv、d3d11va…）。**默认关闭**；开启前会真的解一帧验证驱动和显卡，验证不过就自动回退软件解码 |
@@ -263,7 +268,7 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--no-cui` | 关 | 无输入参数时不进菜单，直接报错退出（给脚本用） |
 | `--audio-mode` | `inline` | `inline` / `separate` / `auto`，见第 7 节 |
 | `--recompress` | 关 | 编码后按"网站转码"再压一遍（见 §7.12） |
-| `--recompress-args` | 空 | 那一步的 FFmpeg 中间参数段；`-i` 和输出由程序给 |
+| `--recompress-args` | 空 | 那一步的 FFmpeg 中间参数段；`-i` 和输出由程序给。**v7.9.8.3** 可重复：第 N 个就是第 N 遍 |
 | `--recompress-container` | 由编码器决定 | 二次压缩产物的容器扩展名 |
 | `--recompress-codec` | 无 | **v7.9.5.1**：第二遍的视频编码器（libx265 / libvpx-vp9 / libsvtav1 / flv …），容器跟着它走 |
 | `--recompress-quality` | 编码器默认 | **v7.9.5.1**：`-crf`（x264/x265/vp9/av1）或 `-q:v`（MPEG 家族） |
@@ -1156,6 +1161,51 @@ LiveArchiveEncoder.exe --ffmpeg-download avbuild --ffmpeg-archive C:\Downloads\x
 
 `--proxy` 可以省略；省略时会复用配置文件里记住的代理。
 
+### GitHub 下载前沿（`--gh-proxy`，v7.9.8.3）
+
+GitHub 的下载主机（`github.com`、`raw.githubusercontent.com`、`api.github.com`…）
+在国内常见的情况是**连接能建立、然后一个字节也不来**。下载器看到的是"请求还活着"，
+于是一直等一个不会来的 body——这就是"下载卡住"。
+
+`--gh-proxy` 把整条 URL 前面加一个前缀，让前沿在自己那边回源：
+
+```powershell
+LiveArchiveEncoder.exe --nnedi-update --gh-proxy                      # 默认 https://gh-proxy.com/
+LiveArchiveEncoder.exe --nnedi-update --gh-proxy https://gh.example/  # 自己的前缀
+LiveArchiveEncoder.exe --nnedi-update --no-gh-proxy                   # 明确不用，并记住
+```
+
+- 只包装 GitHub 那六个主机（`github.com`、`api.github.com`、
+  `raw.githubusercontent.com`、`objects.githubusercontent.com`、
+  `codeload.github.com`、`gist.githubusercontent.com`）；gyan.dev、SourceForge 和本地
+  镜像的 URL 原样发出。
+- 前缀是"加"不是"替换"，所以前沿回源时也支持 range：实测同一份权重经过前沿返回
+  `206` 与正确的 `Content-Range`（`bytes 0-1023/13574928`），断点续传照常。
+- **不写这个选项也行**：程序会先发一个 5 秒的 1 KB 探测，能直连就直连（海外机器
+  不多这一跳），连不上就自动用 `https://gh-proxy.com/` 并告诉你正在用它；传输中途
+  断掉会从零重试一次走前沿。这个自动选路同样作用于 `--ffmpeg-download` 的 GitHub 源。
+- `--gh-proxy off` 与 `--no-gh-proxy` 会把"不要前沿"写进配置（`"ghProxy": "off"`），
+  下次不再探测。只有**从没设置过**才允许自动选路——"没问过"和"明确不要"是两件事。
+
+### NNEDI3 权重（`--nnedi-update`，v7.9.8.3）
+
+`--deinterlace nnedi` 用的是 FFmpeg 的 `nnedi` 滤镜，而它必须有一个 13 MB 的
+`nnedi3_weights.bin` 才能启动（来自 sekrit-twc/znedi3 的发布物，不属于 FFmpeg）。
+
+```powershell
+LiveArchiveEncoder.exe --nnedi-update     # 下载/更新到 %LOCALAPPDATA%\LiveArchiveEncoder\nnedi
+LiveArchiveEncoder.exe --nnedi-status     # 已装的版本、大小、sha256、安装时间
+LiveArchiveEncoder.exe src.mkv out.mp4 --deinterlace nnedi --nnedi-weights D:\tools\znedi3
+```
+
+- 装好之后 `--deinterlace nnedi` 直接用；没有权重时会在预检**之前**提示去跑
+  `--nnedi-update`，而不是二十秒后给一句 FFmpeg 的 `Cannot open file`。
+- `--nnedi-weights` 可以直接指向 znedi3 解压出来的**目录**，程序自己找里面的
+  `nnedi3_weights.bin`。
+- 下载先落到 `.<名字>.part`，装之前让 FFmpeg 真的拿它初始化一帧（滤镜按固定偏移读
+  这个 blob，一个 13 MB 的 HTML 页同样"大小对"），过了再比 sha256 决定是否替换。
+  中断后重跑**接着下**，不会从头再来。
+
 ### 下载细节
 
 - **有 `aria2c` 就优先用它**，16 连接、断点续传、走代理；没有则退回 `HttpClient`
@@ -1433,6 +1483,26 @@ LiveArchiveEncoder.exe clip.mkv --recompress-only --recompress-codec libx265 --r
 3. 编码器**不在当前 FFmpeg 构建里**时直接说清楚
    （`this FFmpeg build has no 'x' encoder`），不会跑到一半才失败。
 
+#### 多遍压缩（v7.9.8.3）
+
+`--recompress-args` / `--recompress-codec` / `--recompress-container` 都可以**重复给**，
+第 N 次出现的三件套就是第 N 遍。每一遍读**上一遍的产物**，所以 N 遍就是 N 次真实
+转码——"上传到 2007 的门户、被人扒下来又传到 2011 的站点"，对文件做的就是这件事。
+
+```powershell
+LiveArchiveEncoder.exe clip.mkv --recompress-only ^
+  --recompress-args "-c:v flv -q:v 9" --recompress-container flv ^
+  --recompress-args "-c:v libx264 -crf 26" --recompress-container mp4
+# -> clip_web.flv   第一遍（flash 门户的编码）
+# -> clip_web2.mp4  第二遍（读第一遍的产物）
+```
+
+- 产物 `stem_web.ext`、`stem_web2.ext`、`stem_web3.ext`……**全部保留**：每一遍都是
+  过程里的真实文件，只有最后一个是交付物（`--play` 播的、报告里写的最终路径）。
+- 遍数按 `--recompress-args` 与 `--recompress-codec` 里**多的那个**算；某一遍只给
+  codec 也能跑，容器跟着编码器走。
+- 任一遍失败只报 `recompress 2/3` 并停在那里，直播产物与已经写好的前几遍都留着。
+
 ### 只跑二次压缩：`--recompress-only`（v7.9.5）
 
 第二阶段本来只存在于一场直播编码之后，于是"把这个文件过一遍网站的转码"必须先
@@ -1523,6 +1593,28 @@ LiveArchiveEncoder.exe --font-import D:\fonts\cjk
 所有样式的字体——这是"字体缺失时先让它能看"的应急开关，不是逐样式编辑器。
 
 CUI 在菜单 **17 → 5**：列清单 / 导入 / 设替代字体。
+
+### 字幕的画面比例：`--subtitle-aspect`（v7.9.8.3）
+
+libass 永远画在**交给它的那一帧**上，所以字幕文件的排版比例与交付画面不一致时，
+结果必然是错的：4:3 的字幕压进 16:9 画面会被横向摊开（或按更大的宽度算字号），
+16:9 的字幕压进 4:3 画面会直接跑出边界。
+
+`--subtitle-aspect 4:3|16:9|source` 的做法是把已完成的帧**裁出目标比例的正中一块**、
+在那里渲染字幕、再按相同偏移贴回：
+
+```powershell
+# 4:3 的老动画交付成 16:9 的站点尺寸：字幕仍按 4:3 排版
+LiveArchiveEncoder.exe ep01.mkv --encoder mpeg4 --size 640x360 ^
+  --subtitle ep01.sc.ass --subtitle-aspect 4:3
+```
+
+- 裁与贴都是同尺寸、同位置、不缩放，所以方框外的像素原样不动，方框内是这个比例
+  的帧本该有的排版。
+- 实测（352x264 源 → 640x360 交付）：4:3 字幕进 16:9 画面，墨迹 **144x27 未被拉伸**，
+  只是整体右移 106 px 居中；16:9 字幕进 4:3 画面，方框缩到 **556 宽**居中，不裁字。
+- `source`（默认）就是老行为：整帧渲染，命令里是 `-vf`，不产生 `-filter_complex`。
+
 
 ### CLI 与配置的关系
 

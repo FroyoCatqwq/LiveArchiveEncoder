@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.8.2 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder CUI v7.9.8.3 (.NET 10 / .NET 11)",
         ["env.heading"] = "System check",
         ["env.cores"] = "only {0} CPU core(s); the documented minimum is {1}",
         ["env.memory"] = "about {0} GB of memory; the documented minimum is {1} GB",
@@ -135,6 +135,16 @@ public static class L
         ["sub.stream.invalid"] = "No subtitle stream with that index; see the list above.",
         ["sub.copy.nocontainer"] = "Note: the '{0}' container cannot carry a subtitle stream; "
             + "copy mode will be refused at encode time -- burn is the mode that always works.",
+
+        // v7.9.8.3: the shape the burned text is laid out in.
+        ["sub.menu.aspect"] = "Layout shape (source / 4:3 / 16:9)",
+        ["sub.menu.aspect.value"] = "{0}",
+        ["sub.prompt.aspect"] = "Layout shape [source/4:3/16:9] [{0}]: ",
+        ["sub.aspect.set"] = "Subtitles are laid out in a {0} box.",
+        ["sub.aspect.source"] = "whole picture",
+        ["sub.aspect.bad"] = "Choose source, 4:3 or 16:9.",
+        ["sub.aspect.note"] = "The text is scaled and centred inside a box of that shape; the "
+            + "picture itself is untouched.",
         ["sub.codec.copyonly"] = "The codec only applies to copy mode.",
         ["sub.codec.container"] = "Codecs the '{0}' container can hold: {1}",
         ["sub.prompt.codec"] = "Copy-mode codec (blank = keep, '-' = automatic) [{0}]: ",
@@ -537,6 +547,33 @@ public static class L
         ["tc.nogpl"] = "NOTE: this build does not report --enable-gpl, so GPL-only codecs "
             + "(libx264, libxvid, libtheora, ...) are missing.",
 
+        // ---- v7.9.8.3: GitHub front and the NNEDI3 weights ----
+        ["tc.menu.ghproxy"] = "GitHub front (gh-proxy)",
+        ["tc.prompt.ghproxy"] = "GitHub front [https://gh-proxy.com/ or off] (blank = keep): ",
+        ["tc.ghproxyset"] = "GitHub front: {0}",
+        ["tc.ghproxyoff"] = "GitHub downloads go straight to github.com.",
+        ["tc.ghproxybad"] = "'{0}' is not a usable prefix: {1}",
+        ["tc.ghproxyauto"] = "(auto)",
+        ["tc.menu.nnedi"] = "NNEDI3 weights (nnedi filter)",
+        ["tc.prompt.nnedi"] = "u = download or update, blank = back: ",
+        ["nnedi.heading"] = "NNEDI3 weights: {0}",
+        ["nnedi.none"] = "not installed -- run --nnedi-update (sekrit-twc/znedi3)",
+        ["nnedi.release"] = "  release  : {0}",
+        ["nnedi.size"] = "  bytes    : {0:N0}",
+        ["nnedi.sha"] = "  sha256   : {0}...",
+        ["nnedi.when"] = "  installed: {0}",
+        ["nnedi.missing"] = "the nnedi deinterlacer needs its NNEDI3 weights file; "
+            + "run `LiveArchiveEncoder --nnedi-update` (or point --nnedi-weights at one)",
+        ["nnedi.inuse"] = "NNEDI3 weights: {0}",
+        ["nnedi.updok"] = "NNEDI3 weights {0} installed: {1}",
+        ["nnedi.updcurrent"] = "NNEDI3 weights are already the latest ({0}).",
+        ["nnedi.updfail"] = "could not install the NNEDI3 weights: {0}",
+        ["nnedi.buildnofilter"] = "Note: this FFmpeg build has no nnedi filter, so the "
+            + "deinterlacer cannot be selected with it.",
+        ["report.ghproxy"] = "GitHub front",
+        ["report.nnedi"] = "NNEDI3 weights",
+        ["report.nnedi.value"] = "{0} ({1})",
+
         // First run: no FFmpeg at all, and somebody is at the keyboard.
         ["firstrun.heading"] = "No FFmpeg found on this machine.",
         ["firstrun.body"] = "This tool can download and keep its own copy, so nothing has to be "
@@ -595,6 +632,17 @@ public static class L
         ["rc.audio.set"] = "Second-pass audio codec: {0}.",
         ["rc.only.codec"] = "Codec    : {0} / {1} in .{2}",
         ["rc.autoderived"] = "Second pass: {0} + {1} in .{2} (container chosen from the codec).",
+        ["rc.menu.extra"] = "Further passes (chain)",
+        ["rc.menu.extra.value"] = "{0} more",
+        ["rc.extra.heading"] = "Further passes -- each one re-encodes the previous pass's output:",
+        ["rc.extra.none"] = "  (none)",
+        ["rc.extra.prompt"] = "Add a pass, a number to remove it, '-' to clear all (blank = keep): ",
+        ["rc.extra.added"] = "Pass {0} added.",
+        ["rc.extra.removed"] = "Pass removed.",
+        ["rc.extra.cleared"] = "Further passes cleared.",
+        ["rc.extra.bad"] = "Enter a fragment, a number from the list, '-' or nothing.",
+        ["rc.extra.hint"] = "Container for an added pass follows its codec; the file is named "
+            + "_web2, _web3, ...",
 
         ["era.menu"] = "Era preset",
         ["era.menu.pick"] = "Apply an era preset (sets the live pass and the recompress pass)",
@@ -681,7 +729,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.8.2 (.NET 10 / .NET 11)",
+        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.8.3 (.NET 10 / .NET 11)",
         ["env.heading"] = "系统检查",
         ["env.cores"] = "只有 {0} 个 CPU 核心；文档给出的下限是 {1}",
         ["env.memory"] = "内存约 {0} GB；文档给出的下限是 {1} GB",
@@ -787,6 +835,15 @@ public static class L
         ["sub.stream.cleared"] = "不使用内嵌字幕流。",
         ["sub.stream.invalid"] = "该编号没有字幕流；请参照上面的列表。",
         ["sub.copy.nocontainer"] = "注意：'{0}' 容器无法承载字幕流，封装模式会在编码时被拒绝——烧录模式永远可用。",
+
+        // v7.9.8.3：烧录字幕的排版方框。
+        ["sub.menu.aspect"] = "排版比例（source / 4:3 / 16:9）",
+        ["sub.menu.aspect.value"] = "{0}",
+        ["sub.prompt.aspect"] = "排版比例 [source/4:3/16:9] [{0}]：",
+        ["sub.aspect.set"] = "字幕按 {0} 方框排版显示。",
+        ["sub.aspect.source"] = "整幅画面",
+        ["sub.aspect.bad"] = "请选择 source、4:3 或 16:9。",
+        ["sub.aspect.note"] = "文字在该比例的方框内缩放并居中，画面本身不动。",
         ["sub.codec.copyonly"] = "该编码器仅对封装模式生效。",
         ["sub.codec.container"] = "'{0}' 容器可承载的字幕编码器：{1}",
         ["sub.prompt.codec"] = "封装模式编码器（留空=不变，'-'=自动）[{0}]：",
@@ -1174,6 +1231,32 @@ public static class L
         ["tc.nogpl"] = "注意：该构建没有 --enable-gpl，因此只有 GPL 许可的编码器"
             + "（libx264、libxvid、libtheora 等）不可用。",
 
+        // ---- v7.9.8.3：GitHub 代理与 NNEDI3 权重 ----
+        ["tc.menu.ghproxy"] = "GitHub 代理（gh-proxy）",
+        ["tc.prompt.ghproxy"] = "GitHub 代理 [https://gh-proxy.com/ 或 off]（留空不变）：",
+        ["tc.ghproxyset"] = "GitHub 代理：{0}",
+        ["tc.ghproxyoff"] = "GitHub 下载直连 github.com。",
+        ["tc.ghproxybad"] = "“{0}”不是可用的前缀：{1}",
+        ["tc.ghproxyauto"] = "（自动）",
+        ["tc.menu.nnedi"] = "NNEDI3 权重（nnedi 滤镜）",
+        ["tc.prompt.nnedi"] = "u = 下载或更新，留空返回：",
+        ["nnedi.heading"] = "NNEDI3 权重：{0}",
+        ["nnedi.none"] = "未安装——请运行 --nnedi-update（sekrit-twc/znedi3）",
+        ["nnedi.release"] = "  版本     : {0}",
+        ["nnedi.size"] = "  字节数   : {0:N0}",
+        ["nnedi.sha"] = "  sha256   : {0}……",
+        ["nnedi.when"] = "  安装时间 : {0}",
+        ["nnedi.missing"] = "nnedi 反交错需要 NNEDI3 权重文件；请运行 "
+            + "`LiveArchiveEncoder --nnedi-update`（或用 --nnedi-weights 指定）",
+        ["nnedi.inuse"] = "NNEDI3 权重：{0}",
+        ["nnedi.updok"] = "已安装 NNEDI3 权重 {0}：{1}",
+        ["nnedi.updcurrent"] = "NNEDI3 权重已是最新（{0}）。",
+        ["nnedi.updfail"] = "无法安装 NNEDI3 权重：{0}",
+        ["nnedi.buildnofilter"] = "注意：该 FFmpeg 构建没有 nnedi 滤镜，无法用它做反交错。",
+        ["report.ghproxy"] = "GitHub 代理",
+        ["report.nnedi"] = "NNEDI3 权重",
+        ["report.nnedi.value"] = "{0}（{1}）",
+
         // 首次启动：机器上完全没有 FFmpeg，且有人在键盘前。
         ["firstrun.heading"] = "这台机器上找不到 FFmpeg。",
         ["firstrun.body"] = "本程序可以自行下载并保管一份，不需要在系统里安装。"
@@ -1230,6 +1313,16 @@ public static class L
         ["rc.audio.set"] = "第二遍音频编码器：{0}。",
         ["rc.only.codec"] = "编码     : {0} / {1}，.{2}",
         ["rc.autoderived"] = "第二遍：{0} + {1} 写进 .{2}（容器按编码器推导）。",
+        ["rc.menu.extra"] = "追加压缩遍数（链式）",
+        ["rc.menu.extra.value"] = "再加 {0} 遍",
+        ["rc.extra.heading"] = "追加的压缩遍——每一遍都重新编码上一遍的产物：",
+        ["rc.extra.none"] = "  （无）",
+        ["rc.extra.prompt"] = "输入参数=新增一遍，输入编号=删除该遍，'-'=全部清空（留空不变）：",
+        ["rc.extra.added"] = "已添加第 {0} 遍。",
+        ["rc.extra.removed"] = "已删除该遍。",
+        ["rc.extra.cleared"] = "已清空追加的遍。",
+        ["rc.extra.bad"] = "请输入参数、列表中的编号、'-' 或留空。",
+        ["rc.extra.hint"] = "新增一遍的容器按编码器推导；产物命名为 _web2、_web3 ……",
 
         ["era.menu"] = "时代预设",
         ["era.menu.pick"] = "应用时代预设（同时设置直播编码与二次压缩）",

@@ -184,15 +184,38 @@ public static class ArgsBuilder
         return ["-sws_dither", mode];
     }
 
+    /// <summary>
+    /// The deinterlacer's filter expression, or "" for <c>off</c>.
+    ///
+    /// <para>v7.9.8.3: <c>nnedi</c> is not shaped like the others. It has no
+    /// <c>mode</c> or <c>parity</c> option -- it takes <c>weights</c> (the
+    /// NNEDI3 neural network, a file, so this method needs its path) and
+    /// <c>field</c>, which is the nearest thing it has to a parity switch:
+    /// <c>af</c> trusts the bitstream's frame flags, <c>tf</c>/<c>bf</c> force a
+    /// polarity. <c>deint</c> keeps the same meaning as everywhere else.</para>
+    /// </summary>
     public static string DeinterlaceFilterExpr(
-        string filterName, string mode, string parity, bool markedOnly)
+        string filterName, string mode, string parity, bool markedOnly, string? nnediWeights = null)
     {
         if (filterName == "off") return "";
         if (!Constants.DeinterlaceFilters.Contains(filterName))
             throw new ArgumentException($"unsupported deinterlace filter: {filterName}");
 
-        string parityValue = parity is "auto" or "tff" or "bff" ? parity : "auto";
         string deintValue = markedOnly ? "interlaced" : "all";
+
+        if (filterName == "nnedi")
+        {
+            if (!nnediWeights.HasText)
+            {
+                throw new ArgumentException(
+                    "the nnedi filter needs its NNEDI3 weights file; run "
+                    + "`LiveArchiveEncoder --nnedi-update` (or pass --nnedi-weights PATH)");
+            }
+            string fieldValue = parity switch { "tff" => "tf", "bff" => "bf", _ => "af" };
+            return $"nnedi=weights={Core.FilterArgs.EscapePath(nnediWeights)}:field={fieldValue}:deint={deintValue}";
+        }
+
+        string parityValue = parity is "auto" or "tff" or "bff" ? parity : "auto";
         string modeValue = filterName == "w3fdif"
             ? mode == "send_field" ? "field" : "frame"
             : mode is "send_frame" or "send_field" ? mode : "send_frame";
@@ -222,13 +245,15 @@ public static class ArgsBuilder
         string deinterlace,
         string deintMode,
         string deintParity,
-        bool deintMarkedOnly)
+        bool deintMarkedOnly,
+        string? nnediWeights = null)
     {
         string mode = Core.EncoderMath.CanonicalFitMode(fitMode);
         var filters = new List<string>();
         if (mode == "crop") filters.Add(Core.EncoderMath.CropFilterExpr(outW, outH, cropAnchor));
 
-        string deintExpr = DeinterlaceFilterExpr(deinterlace, deintMode, deintParity, deintMarkedOnly);
+        string deintExpr = DeinterlaceFilterExpr(
+            deinterlace, deintMode, deintParity, deintMarkedOnly, nnediWeights);
         if (deintExpr.Length > 0) filters.Add(deintExpr);
 
         // FPS is applied after deinterlacing: in send_field/bob mode putting fps

@@ -18,6 +18,113 @@
 
 ---
 
+## v7.9.8.3（2026-10-27）
+
+第六个补丁号，四件事：**反交错补上 NNEDI3**、**GitHub 下载能走前沿**、**二次压缩
+变成多遍**、**字幕可以按 4:3 / 16:9 声明自己的画面**。
+
+前三件都来自同一类现实：这条链路的目标是"像当年的站点那样产出文件"，而当年的站点
+既不给你把 CDN 摆到国内，也不会只压你一遍；至于 NNEDI3，它是 2006 年以后做去隔行
+的事实标准，FFmpeg 的 `nnedi` 滤镜只是没有权重文件就不能启动。
+
+### 1. NNEDI3 权重（`--nnedi-update`）
+
+`--deinterlace nnedi` 以前只用得上别人装好的权重，现在自己管：
+
+- `--nnedi-update` 拉最新（`sekrit-twc/znedi3`，当前 `r3.3`，**13,574,928 字节**），
+  `--nnedi-status` 打已装的版本/大小/sha256/安装时间，`--nnedi-weights PATH`
+  指向别处的文件或整个解压目录。
+- 安装位置 `%LOCALAPPDATA%\LiveArchiveEncoder\nnedi`（Linux 是 `~/.local/share/...`），
+  旁边一份 `install.json` 记 tag、来源 URL、字节数、sha256、时间——"要不要更新"
+  因此不用每次哈希一个 13 MB 的文件。
+- **下载完不是"大小对了就算"**：`nnedi` 滤镜按固定偏移读这个 blob，13 MB 的 HTML
+  和 13 MB 的权重在大小上无法区分。装之前会让 FFmpeg 真的用
+  `nnedi=weights=...` 初始化一帧，装完再比 sha256 决定是否真的替换。
+- 没有权重时 `--deinterlace nnedi` 在预检**之前**报一句人话（"run `--nnedi-update`"），
+  不是二十秒后 FFmpeg 的 `Cannot open file`。
+
+### 2. GitHub 下载前沿（`--gh-proxy`）
+
+从国内直连 `raw.githubusercontent.com` 的实际情况（2026-10-27 实测）：**连接能建立，
+然后一个字节也不来**，curl 20 秒超时 0 字节。下载器看到的是"请求还活着"，于是整个
+stall 预算都耗在等一个不会来的 body 上——就是"下载卡住"。
+
+- `--gh-proxy [URL]`（裸写 = `https://gh-proxy.com/`，`off` = 不用）给
+  `github.com` / `api.github.com` / `raw.githubusercontent.com` /
+  `objects.githubusercontent.com` / `codeload.github.com` /
+  `gist.githubusercontent.com` **整条 URL 加前缀**，由前沿自己回源。不是设代理：
+  这个功能的用途正是"替代本地 VPN"，所以必须在没有代理的机器上也能用。
+- 同一份权重经前沿实测 **206 + 正确的 `Content-Range`**（`bytes 0-1023/13574928`），
+  所以断点续传照常；整包 13.5 MB 约 70 秒。
+- **没指定时自己判断**：先发一个 5 秒的 1 KB range 探测，通就直连（海外机器不会多
+  一跳），不通才用前沿并说明用了哪个。下载中途死掉还会从零重试一次走前沿——探测
+  通过而传输失败，正是"能连上但不给数据"的常态。
+- `--no-gh-proxy` 与 `--gh-proxy off` 会被**记住**（配置文件里存 `"off"`）。"从没问过"
+  （null）和"明确不要"（`off`）是两件事，前者才允许自动选路。
+- 同样的自动选路也用在 `--ffmpeg-download` 的 GitHub 源上；gyan.dev / SourceForge
+  不匹配任何前沿主机，URL 原样发出。
+
+### 3. ⚠ 多次压缩（第二遍之后）
+
+`Recompress` 从"一遍"变成"一条链"：`--recompress-args` / `--recompress-codec` /
+`--recompress-container` 都可以**重复给出**，第 N 次出现的三件套就是第 N 遍。
+
+```powershell
+# 先当 2007 年的门户压一遍（flv1），再当 2011 年的站点压一遍（H.264）
+LiveArchiveEncoder.exe clip.mkv --recompress-only `
+  --recompress-args "-c:v flv -q:v 9" --recompress-container flv `
+  --recompress-args "-c:v libx264 -crf 26" --recompress-container mp4
+```
+
+- 每一遍读**上一遍的产物**，所以 N 遍就是 N 次真实转码——这正是"上传到 2007 的
+  门户、被人扒下来又传到 2011 的站点"对文件做的事。
+- 产物名 `stem_web.ext`、`stem_web2.ext`、`stem_web3.ext`……**全部保留**：每一遍
+  都是过程里的真实文件，只有最后一个是交付物。
+- 失败只报第几遍失败并停在那里，直播产物一个字节都不动。
+- **每一遍都会按编码器推断容器**（审查时补的）。原来只有第一遍会推断，于是
+  `--recompress-args "-c:v flv -q:v 9"` 当第二遍时会被
+  `flv cannot be written to .mp4` 拒掉——容器在问编码器之前就已经填成 mp4 了。
+  现在"这一遍没给容器"就按编码器定，与第一遍同一套规则。
+
+### 4. ⚠ 字幕按 4:3 / 16:9 声明画面（`--subtitle-aspect`）
+
+libass 永远画在**交给它的那帧**上，所以 4:3 的字幕压进 16:9 画面时，要么横向摊开、
+要么以画面宽度算字号；反过来 16:9 的字幕进 4:3 画面就会跑出边界。
+
+`--subtitle-aspect 4:3|16:9|source` 改成"方框合成"：把已完成的帧裁成目标比例的正中
+一块，在那里渲染字幕，再按同样的偏移贴回。裁与贴都是同尺寸同位置、不缩放，所以
+方框外的像素原样不动，方框内则是这个比例的帧本该有的排版。
+
+实测（352x264 → 640x360 交付）：4:3 字幕进 16:9 画面，墨迹 **144x27 未被拉伸**，
+只是整体右移 106 px 居中；16:9 字幕进 4:3 画面，方框缩到 556 宽居中、不裁字。
+`source` 是默认值，也就是老行为（整帧渲染，无 `-filter_complex`）。
+
+### 5. 顺带修的
+
+- **aria2c 现在拿到系统代理**。它不会自己读系统代理，而回退用的 `HttpClient` 会：
+  实测同一台机器上，aria2c 直连 `raw.githubusercontent.com` 死在 TLS 握手，紧接着
+  单连 `HttpClient` 就把同一个文件下完了。给 aria2c 显式 `--all-proxy`，两条路才一致。
+- **权重下载可以续传**：暂存文件名从每次随机的 `.download.xxxxxxxx` 改成固定的
+  `.nnedi3_weights.bin.part`——随机名字让 aria2c 的 `-c` 完全失效，中断一次就白下
+  13 MB（实测清理出两个残留，7.6 MB）。失败会保留已下载部分并提示再跑一次续传。
+- **verbose 的"滤镜"行打印实际跑的那条**。v7.9.8.3 引入方框合成后，这一行还在打印
+  缩放链，把字幕滤镜整段藏了——e2e 的强制字体断言因此失败，是回归不是新问题。
+- **`--save-config` / `--emit-args` 不再丢字幕**。CLI 的字幕参数只进编码层的
+  `Recompress`/`SubtitleSettings`，从来没写回 `Config`，于是"等价命令行"里
+  `--subtitle` 与 `--subtitle-aspect` 都不见了（往返一次就少一次烧录）。现在转换
+  之前先把命令行上的字幕请求折进快照。
+- **`--emit-args` 会输出每一遍压缩**。第一遍之后的 `Extra` 以前根本不打印，一个三遍
+  的配置被写成一遍的命令行；另外多遍时每一遍都带 `--recompress-container`，因为
+  args/container/codec 是**按出现次序配对**的，漏一个 mp4 会把配对挪到下一遍。
+- **CUI 补上两个下载菜单**：工具链子菜单新增 `6. GitHub 前沿` 与 `7. NNEDI3 权重`
+  （显示版本/大小/sha256，`u` 下载或更新）。此前这两项只有命令行能到，交互界面
+  即使选了 `nnedi` 也拿不到权重——`--nnedi-weights` 也没传进 `RealtimeOptions`，
+  选它必然报错。顺带把字幕的 `排版画面`（4:3 / 16:9）接进了字幕菜单第 6 项。
+- 配置摘要（CUI 的"当前设置"与 `Report`）多打两行：GitHub 前沿与 NNEDI3 权重；
+  字幕行带上 `box=`，压缩行打印整条链而不是只有一遍。
+
+---
+
 ## v7.9.8.2（2026-10-27）
 
 第五个补丁号，一件事：**时代预设终于把直播画质、窗口、缓冲和反交错也一起说了**。

@@ -529,6 +529,25 @@ public static class Cli
         // the equivalent command line must not either.
         if (args.SaveConfig is { Length: > 0 } || args.EmitArgs)
         {
+            // v7.9.8.3: the subtitle request lives on the command line only -- the
+            // Config the encoder receives is assembled further down, so a settings
+            // file written here used to forget every --subtitle / --subtitle-aspect
+            // and the "equivalent command line" lost them too. Fold the flags into
+            // the snapshot before capturing it.
+            if (args.SubtitleFiles.Count > 0 || args.SubtitleStream is not null)
+            {
+                config.Subtitles = new Configuration.SubtitleConfig
+                {
+                    Mode = args.SubtitleMode,
+                    Files = [.. args.SubtitleFiles],
+                    Stream = args.SubtitleStream,
+                    Codec = args.SubtitleCodec,
+                    FontDir = args.SubtitleFontDir,
+                    FallbackFont = args.SubtitleFont,
+                    BoxAspect = args.SubtitleAspect ?? config.Subtitles.BoxAspect,
+                };
+            }
+
             UserConfig captured = ConfigStore.Capture(config);
             if (args.SaveConfig is { Length: > 0 } savePath)
             {
@@ -552,6 +571,21 @@ public static class Cli
         // invocation must never fail because the settings file could not be
         // written, so the result is ignored.
         ConfigStore.Save(ConfigStore.Capture(config));
+
+        // v7.9.8.3: nnedi needs a weights file, and "which file" is a question
+        // only this layer can answer (an explicit flag, then the settings file,
+        // then the managed install). Resolved once here so shards inherit it.
+        string? nnediWeights = null;
+        if (Constants.NeedsWeights(config.Deinterlace))
+        {
+            nnediWeights = FFmpeg.Nnedi.Resolve(args.NnediWeights ?? config.NnediWeights);
+            if (nnediWeights is null)
+            {
+                Console.Error.WriteLine($"ERROR: {L.T("nnedi.missing")}");
+                return 2;
+            }
+            if (!args.Quiet) Console.WriteLine(L.T("nnedi.inuse", nnediWeights));
+        }
 
         var options = new Encoding.RealtimeOptions
         {
@@ -585,6 +619,7 @@ public static class Cli
             {
                 FontDir = args.SubtitleFontDir,
                 FallbackFont = args.SubtitleFont,
+                BoxAspect = args.SubtitleAspect ?? config.Subtitles.BoxAspect,
             },
             // Detected once here (and inherited by shards) instead of once per
             // shard: the copy path needs the build's own encoder list.
@@ -605,6 +640,7 @@ public static class Cli
             ColorTransfer = config.ColorTransfer,
             Dither = config.Dither,
             Deinterlace = config.Deinterlace,
+            NnediWeights = nnediWeights,
             DeintMode = config.DeintMode,
             DeintParity = config.DeintParity,
             DeintMarkedOnly = config.DeintMarkedOnly,
@@ -639,13 +675,14 @@ public static class Cli
 
             if (!args.Quiet)
             {
-                if (post.RecompressRan && post.RecompressPath is { Length: > 0 } rc)
-                    Console.WriteLine(L.T("post.recompress", rc));
+                // v7.9.8.3: one line per hop; a chain's intermediate files are
+                // products in their own right and the user may want them.
+                foreach (string hop in post.Passes) Console.WriteLine(L.T("post.recompress", hop));
             }
 
             if (post.Failed)
             {
-                string stage = post.FailedStage!;
+                string stage = post.StageName;
                 string detail = post.RecompressError ?? "";
                 Console.Error.WriteLine($"ERROR: {L.T("post.failed", stage, detail)}");
                 // Say the live file survived: losing a long encode and then
@@ -730,9 +767,8 @@ public static class Cli
             return 2;
         }
 
-        // Naming a fragment is the request; --no-recompress still wins, so a
-        // script that turns the stage off keeps it off.
-        if (!settings.Enabled)
+        List<RecompressPass> stages = settings.Stages();
+        if (!settings.Enabled || stages.Count == 0)
         {
             Console.Error.WriteLine(
                 "ERROR: --recompress-only needs --recompress-args, --recompress-codec or --era "
@@ -740,34 +776,45 @@ public static class Cli
             return 2;
         }
 
-        (List<string> tokens, string? fragmentError) = PostProcess.PostArgs.Parse(settings.Args);
-        if (fragmentError is not null)
+        // The build has to have every encoder the chain names, or the failure
+        // arrives as an FFmpeg message twenty seconds into the last pass. Only
+        // checked for codecs this tool knows by name; "copy" and anything newer
+        // are left alone.
+        for (int i = 0; i < stages.Count; i++)
         {
-            Console.Error.WriteLine($"ERROR: {L.T("post.args.bad", fragmentError)}");
-            return 2;
+            (List<string> tokens, string? fragmentError) = PostProcess.PostArgs.Parse(stages[i].Args);
+            if (fragmentError is not null)
+            {
+                Console.Error.WriteLine($"ERROR: {L.T("post.args.bad", fragmentError)}");
+                return 2;
+            }
+            if (RecompressCodecs.DetectVideoCodec(tokens) is { } video && !caps.VideoEncoders.Contains(video))
+            {
+                Console.Error.WriteLine($"ERROR: {L.T("rc.codecmissing", video)}");
+                return 2;
+            }
+            if (RecompressCodecs.DetectAudioCodec(tokens) is { } audio
+                && !string.Equals(audio, RecompressCodecs.CopyAudio, StringComparison.Ordinal)
+                && !caps.AudioEncoders.Contains(audio))
+            {
+                Console.Error.WriteLine($"ERROR: {L.T("rc.codecmissing", audio)}");
+                return 2;
+            }
         }
 
-        // The build has to have the encoder the fragment names, or the failure
-        // arrives as an FFmpeg message twenty seconds in. Only checked for codecs
-        // this tool knows by name; "copy" and anything newer are left alone.
-        if (RecompressCodecs.DetectVideoCodec(tokens) is { } video && !caps.VideoEncoders.Contains(video))
+        // Every hop derives its own name except the last, which honours
+        // --output when one was given.
+        var outputs = new List<FileInfo>();
+        for (int i = 0; i < stages.Count; i++)
         {
-            Console.Error.WriteLine($"ERROR: {L.T("rc.codecmissing", video)}");
-            return 2;
-        }
-        if (RecompressCodecs.DetectAudioCodec(tokens) is { } audio
-            && !string.Equals(audio, RecompressCodecs.CopyAudio, StringComparison.Ordinal)
-            && !caps.AudioEncoders.Contains(audio))
-        {
-            Console.Error.WriteLine($"ERROR: {L.T("rc.codecmissing", audio)}");
-            return 2;
+            string container = stages[i].Container.Or("mp4").TrimStart('.').ToLowerInvariant();
+            bool last = i == stages.Count - 1;
+            outputs.Add(last && !string.IsNullOrEmpty(args.Output)
+                ? new FileInfo(args.Output)
+                : new FileInfo(PostProcess.Recompress.DeriveOutputPath(src.FullName, container, i + 1)));
         }
 
-        string container = settings.Container.Or("mp4").TrimStart('.').ToLowerInvariant();
-        var dst = string.IsNullOrEmpty(args.Output)
-            ? new FileInfo(PostProcess.Recompress.DeriveOutputPath(src.FullName, container))
-            : new FileInfo(args.Output);
-
+        FileInfo dst = outputs[^1];
         if (string.Equals(Path.GetFullPath(dst.FullName), src.FullName, StringComparison.OrdinalIgnoreCase))
         {
             Console.Error.WriteLine("ERROR: output must differ from input");
@@ -777,16 +824,26 @@ public static class Cli
         if (!args.Quiet)
         {
             Console.WriteLine(L.T("rc.only.input", src.FullName));
-            Console.WriteLine(L.T("rc.only.output", dst.FullName));
-            Console.WriteLine($" {string.Join(' ', PostProcess.Recompress.BuildArgv(
-                ffmpeg, src.FullName, dst.FullName, settings).Argv)}");
+            for (int i = 0; i < stages.Count; i++)
+            {
+                Console.WriteLine($" {string.Join(' ', PostProcess.Recompress.BuildArgv(
+                    ffmpeg, i == 0 ? src.FullName : outputs[i - 1].FullName,
+                    outputs[i].FullName, stages[i]).Argv)}");
+            }
         }
 
-        (bool ok, string? error) = PostProcess.Recompress.Apply(ffmpeg, src.FullName, dst.FullName, settings);
-        if (!ok)
+        string hopInput = src.FullName;
+        for (int i = 0; i < stages.Count; i++)
         {
-            Console.Error.WriteLine($"ERROR: {L.T("post.failed", "recompress", error ?? "")}");
-            return 1;
+            (bool ok, string? error) = PostProcess.Recompress.Apply(
+                ffmpeg, hopInput, outputs[i].FullName, stages[i]);
+            if (!ok)
+            {
+                string stage = stages.Count > 1 ? $"recompress {i + 1}/{stages.Count}" : "recompress";
+                Console.Error.WriteLine($"ERROR: {L.T("post.failed", stage, error ?? "")}");
+                return 1;
+            }
+            hopInput = outputs[i].FullName;
         }
 
         if (!args.Quiet) Console.WriteLine(L.T("rc.only.done", dst.FullName));
@@ -808,71 +865,103 @@ public static class Cli
         CliOptions args, PostProcess.EraPreset? era, bool eraNative, (int W, int H)? eraSize = null,
         string? h264Impl = null)
     {
-        var rc = new RecompressSettings
+        var rc = new RecompressSettings { Enabled = false };
+
+        // One entry per transcode, in the order written. Without any flags the
+        // chain is the single era pass (or a single blank mp4 pass that the
+        // Enabled flag keeps from running).
+        int count = Math.Max(1, Math.Max(args.RecompressArgs.Count, args.RecompressCodecs.Count));
+        for (int i = 0; i < count; i++)
         {
-            Enabled = false,
-            // v7.9.6.3: a preset at another frame shape has to deliver that
-            // shape too -- a "youku 2007 16:9" capture whose second pass wrote
-            // 352x264 would be describing two different recordings.
-            // v7.9.7: and with the H.264 encoder the run settled on, so a
-            // --h264 switch reaches the second pass as well.
-            Args = era?.RecompressArgsFor(eraNative, eraSize, h264Impl) ?? "",
-            Container = era?.ContainerFor(eraNative) ?? "mp4",
-        };
+            string? fragment = i < args.RecompressArgs.Count ? args.RecompressArgs[i] : null;
+            string? codecName = i < args.RecompressCodecs.Count ? args.RecompressCodecs[i] : null;
+            string? container = i < args.RecompressContainers.Count ? args.RecompressContainers[i] : null;
 
-        // v7.9.5.1: naming a codec is an alternative to writing a fragment, and
-        // the container follows from the pair when the user did not pick one.
-        if (args.RecompressCodec is { Length: > 0 } codecName)
-        {
-            SecondPassVideoCodec? codec = RecompressCodecs.FindVideo(codecName);
-            if (codec is null)
-                return (rc, $"unknown recompress codec '{codecName}'; known: {RecompressCodecs.VideoIdList}");
-
-            string audio = args.RecompressAudioCodec ?? RecompressCodecs.RecommendedAudio(codec.Name);
-            if (!RecompressCodecs.IsCopyAudio(audio) && RecompressCodecs.FindAudio(audio) is null)
-                return (rc, $"unknown audio codec '{audio}'; known: {RecompressCodecs.AudioIdList}, or copy");
-
-            rc.Args = string.Join(' ',
-                RecompressCodecs.VideoArgs(codec, args.RecompressQuality ?? codec.DefaultQuality),
-                RecompressCodecs.AudioArgs(audio, args.RecompressAudioKbps, null, null));
-            rc.Container = args.RecompressContainer
-                ?? RecompressCodecs.DefaultContainer(codec.Name, audio)
-                ?? codec.Containers[0];
-        }
-
-        if (args.RecompressArgs is { Length: > 0 } a) rc.Args = a;
-        if (args.RecompressContainer is { Length: > 0 } c) rc.Container = c;
-
-        // A pair the muxer cannot hold is a fact about FFmpeg, not a matter of
-        // taste: refuse it here, while there is nothing to undo. Only checked
-        // when the fragment names a codec this tool knows.
-        if (rc.Args.Length > 0)
-        {
-            (List<string> tokens, string? parseError) = PostProcess.PostArgs.Parse(rc.Args);
-            if (parseError is not null) return (rc, L.T("post.args.bad", parseError));
-
-            string? video = RecompressCodecs.DetectVideoCodec(tokens);
-            if (video is not null)
+            if (fragment is null && codecName is not null)
             {
-                string? audio = RecompressCodecs.DetectAudioCodec(tokens);
+                SecondPassVideoCodec? codec = RecompressCodecs.FindVideo(codecName);
+                if (codec is null)
+                    return (rc, $"unknown recompress codec '{codecName}' (pass {i + 1}); "
+                        + $"known: {RecompressCodecs.VideoIdList}");
 
-                // A hand-written fragment that names VP9 should not land in
-                // "clip_web.mp4": the container follows the codec unless the
-                // user pinned one.
-                if (args.RecompressContainer is not { Length: > 0 }
-                    && era is null && args.RecompressCodec is null)
-                {
-                    rc.Container = RecompressCodecs.DefaultContainer(video, audio) ?? rc.Container;
-                }
+                string audio = args.RecompressAudioCodec ?? RecompressCodecs.RecommendedAudio(codec.Name);
+                if (!RecompressCodecs.IsCopyAudio(audio) && RecompressCodecs.FindAudio(audio) is null)
+                    return (rc, $"unknown audio codec '{audio}' (pass {i + 1}); "
+                        + $"known: {RecompressCodecs.AudioIdList}, or copy");
 
-                string? mismatch = RecompressCodecs.ValidateContainer(video, audio, rc.Container);
-                if (mismatch is not null) return (rc, L.T("rc.container.mismatch", mismatch));
+                fragment = string.Join(' ',
+                    RecompressCodecs.VideoArgs(codec, args.RecompressQuality ?? codec.DefaultQuality),
+                    RecompressCodecs.AudioArgs(audio, args.RecompressAudioKbps, null, null));
+                container ??= RecompressCodecs.DefaultContainer(codec.Name, audio) ?? codec.Containers[0];
+            }
+
+            if (fragment is null)
+            {
+                if (i > 0)
+                    return (rc, $"pass {i + 1} has no arguments; give another --recompress-args "
+                        + "or --recompress-codec for it");
+                // Pass 1 with nothing typed: the era preset's own second pass, or
+                // an empty fragment that Enabled=false keeps from running.
+                fragment = era?.RecompressArgsFor(eraNative, eraSize, h264Impl) ?? "";
+                container ??= era?.ContainerFor(eraNative) ?? "mp4";
+            }
+
+            (RecompressPass pass, string? error) = BuildPass(
+                fragment, container, args, era, i == 0, codecName is not null,
+                containerPinned: i < args.RecompressContainers.Count);
+            if (error is not null) return (rc, count > 1 ? $"{error} (pass {i + 1})" : error);
+
+            if (i == 0)
+            {
+                rc.Args = pass.Args;
+                rc.Container = pass.Container;
+            }
+            else
+            {
+                rc.Extra.Add(pass);
             }
         }
 
+        // A pair the muxer cannot hold is a fact about FFmpeg, not a matter of
+        // taste; BuildPass already refused it, so only the enable flags are left.
         if (args.Recompress) rc.Enabled = true;
         if (args.NoRecompress) rc.Enabled = false;
         return (rc, null);
+    }
+
+    /// <summary>
+    /// Validate one pass and settle its container.
+    ///
+    /// <para>The container follows the codecs when the user did not pin one --
+    /// a hand-written fragment that names VP9 should not land in
+    /// <c>clip_web.mp4</c>. Only codecs this tool knows by name are checked;
+    /// <c>copy</c> and anything newer are left to FFmpeg.</para>
+    /// </summary>
+    private static (RecompressPass Pass, string? Error) BuildPass(
+        string fragment, string? container, CliOptions args,
+        PostProcess.EraPreset? era, bool firstPass, bool codecNamed, bool containerPinned)
+    {
+        var pass = new RecompressPass { Args = fragment, Container = container ?? "mp4" };
+        if (fragment.Trim().Length == 0) return (pass, null);
+
+        (List<string> tokens, string? parseError) = PostProcess.PostArgs.Parse(fragment);
+        if (parseError is not null) return (pass, L.T("post.args.bad", parseError));
+
+        if (RecompressCodecs.DetectVideoCodec(tokens) is not { } video) return (pass, null);
+        string? audio = RecompressCodecs.DetectAudioCodec(tokens);
+
+        // v7.9.8.3: every hop infers its container, not just the first one. A
+        // chain whose second pass is named by codec (`--recompress-codec flv`
+        // after a libx264 pass) used to be refused with "flv cannot be written to
+        // .mp4" simply because the container had defaulted before the codec was
+        // consulted. The era keeps the last word on pass 1: its container is part
+        // of the preset, not something to guess.
+        bool fromEra = firstPass && era is not null && !containerPinned && !codecNamed;
+        if (!containerPinned && !codecNamed && !fromEra)
+            pass.Container = RecompressCodecs.DefaultContainer(video, audio) ?? pass.Container;
+
+        string? mismatch = RecompressCodecs.ValidateContainer(video, audio, pass.Container);
+        return mismatch is not null ? (pass, L.T("rc.container.mismatch", mismatch)) : (pass, null);
     }
 
     /// <summary>
@@ -881,13 +970,20 @@ public static class Cli
     /// </summary>
     private static void ValidatePostProcessing(Config config)
     {
-        if (config.Recompress.Enabled)
-        {
-            (_, string? error) = PostProcess.PostArgs.Parse(config.Recompress.Args);
-            if (error is not null)
-                throw new ArgumentException(L.T("post.args.bad", error));
+        if (!config.Recompress.Enabled) return;
 
-            if (!config.Recompress.Container.HasText)
+        List<RecompressPass> stages = config.Recompress.Stages();
+        for (int i = 0; i < stages.Count; i++)
+        {
+            (_, string? error) = PostProcess.PostArgs.Parse(stages[i].Args);
+            if (error is not null)
+            {
+                throw new ArgumentException(stages.Count > 1
+                    ? L.T("post.args.bad", error) + $" (pass {i + 1})"
+                    : L.T("post.args.bad", error));
+            }
+
+            if (!stages[i].Container.HasText)
                 throw new ArgumentException(L.T("rc.args.empty"));
         }
     }

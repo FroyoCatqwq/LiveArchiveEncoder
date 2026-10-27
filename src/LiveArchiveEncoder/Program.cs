@@ -136,7 +136,15 @@ public static class Program
                     $"ERROR: unknown source '{cli.FfmpegDownload}'; choose one of {FFmpeg.FfmpegCatalog.Ids}");
                 return 2;
             }
-            string? proxy = cli.FfmpegProxy ?? ConfigStore.Load().FfmpegProxy;
+            UserConfig before = ConfigStore.Load();
+            string? proxy = cli.FfmpegProxy ?? before.FfmpegProxy;
+            // v7.9.8.3: the GitHub front, when one is configured or just typed.
+            (string? front, string? frontError) = ResolveFront(before, cli.GhProxy);
+            if (frontError is not null)
+            {
+                Console.Error.WriteLine($"ERROR: --gh-proxy: {frontError}");
+                return 2;
+            }
             Console.WriteLine($"{dist.Label}\n{dist.Homepage}");
 
             if (!dist.AutoDownload && cli.FfmpegArchive is null)
@@ -160,8 +168,14 @@ public static class Program
                 return 1;
             }
 
+            // Same rule as the NNEDI3 weights: when nobody said which route to
+            // take, ask the network instead of assuming. Detect only probes hosts
+            // a front can serve, so gyan.dev and SourceForge are untouched.
+            if (front is null && cli.FfmpegArchive is null && dist.Url is { Length: > 0 } githubUrl)
+                front = FFmpeg.GitHubProxy.Detect(githubUrl, proxy, Console.WriteLine);
+
             (bool installed, string? installError) =
-                FFmpeg.Toolchain.Install(dist, proxy, cli.FfmpegArchive, Console.WriteLine);
+                FFmpeg.Toolchain.Install(dist, proxy, cli.FfmpegArchive, Console.WriteLine, front);
             if (!installed)
             {
                 Console.Error.WriteLine($"ERROR: {installError}");
@@ -170,8 +184,69 @@ public static class Program
             UserConfig remembered = ConfigStore.Load();
             remembered.FfmpegSource = dist.Id;
             if (proxy is not null) remembered.FfmpegProxy = proxy;
+            if (cli.GhProxy is not null)
+                remembered.GhProxy = front.HasText ? front : FFmpeg.GitHubProxy.Off;
             ConfigStore.Save(remembered);
             return 0;
+        }
+
+        // v7.9.8.3: the NNEDI3 weights. Managed here rather than at encode time
+        // because it is a 13 MB download and an unasked-for one would be a
+        // surprise; --deinterlace nnedi says what to run if it is missing.
+        if (cli.NnediUpdate || cli.NnediStatus)
+        {
+            UserConfig nnediConfig = ConfigStore.Load();
+            (string? front, string? frontError) = ResolveFront(nnediConfig, cli.GhProxy);
+            if (frontError is not null)
+            {
+                Console.Error.WriteLine($"ERROR: --gh-proxy: {frontError}");
+                return 2;
+            }
+
+            if (cli.NnediStatus)
+            {
+                Console.WriteLine(L.T("nnedi.heading", FFmpeg.Nnedi.WeightsPath));
+                if (FFmpeg.Nnedi.Read() is not { } record)
+                {
+                    Console.WriteLine(L.T("nnedi.none"));
+                    return 1;
+                }
+                Console.WriteLine(L.T("nnedi.release", record.Release ?? "?"));
+                Console.WriteLine(L.T("nnedi.size", record.Bytes));
+                if (record.Sha256 is { Length: > 0 } sha)
+                    Console.WriteLine(L.T("nnedi.sha", sha[..16]));
+                if (record.InstalledAt is { Length: > 0 } when)
+                    Console.WriteLine(L.T("nnedi.when", when));
+                return 0;
+            }
+
+            string? verifier = TryFindFFmpeg(cli, nnediConfig.FfmpegSource);
+            // autoFront: only when the user said nothing about a front. Typing
+            // --gh-proxy or --no-gh-proxy is an answer, and a probe would
+            // override the second one.
+            (FFmpeg.Nnedi.Outcome outcome, string? updateError, string? release) =
+                FFmpeg.Nnedi.Update(verifier,
+                    cli.FfmpegProxy ?? nnediConfig.FfmpegProxy, front,
+                    autoFront: front is null, Console.WriteLine);
+
+            if (cli.GhProxy is not null)
+            {
+                nnediConfig.GhProxy = front.HasText ? front : FFmpeg.GitHubProxy.Off;
+                ConfigStore.Save(nnediConfig);
+            }
+
+            switch (outcome)
+            {
+                case FFmpeg.Nnedi.Outcome.Installed:
+                    Console.WriteLine(L.T("nnedi.updok", release ?? "?", FFmpeg.Nnedi.WeightsPath));
+                    return 0;
+                case FFmpeg.Nnedi.Outcome.AlreadyCurrent:
+                    Console.WriteLine(L.T("nnedi.updcurrent", release ?? "?"));
+                    return 0;
+                default:
+                    Console.Error.WriteLine($"ERROR: {L.T("nnedi.updfail", updateError ?? "")}");
+                    return 1;
+            }
         }
 
         // v7.9.5.1: --era can name a preset the user wrote, which lives in the
@@ -364,6 +439,46 @@ public static class Program
         {
             Console.Error.WriteLine($"ERROR: {exc.Message}");
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// The GitHub front in effect: the flag when it was given, otherwise the
+    /// settings file. An unparseable value is an error rather than a silent
+    /// fallback -- "it downloaded from GitHub anyway" is exactly the outcome the
+    /// switch exists to prevent.
+    ///
+    /// <para>Three answers, not two. Null means nobody has decided, which is what
+    /// lets a download probe the route and choose; the empty string means "no
+    /// front, and do not ask again" (stored as <see cref="FFmpeg.GitHubProxy.Off"/>).</para>
+    /// </summary>
+    private static (string? Prefix, string? Error) ResolveFront(
+        UserConfig stored, string? flagged)
+    {
+        string? raw = flagged ?? stored.GhProxy;
+        if (raw is null) return (null, null);
+        if (raw.Length == 0
+            || string.Equals(raw.Trim(), FFmpeg.GitHubProxy.Off, StringComparison.OrdinalIgnoreCase))
+        {
+            return ("", null);
+        }
+        return FFmpeg.GitHubProxy.Normalise(raw);
+    }
+
+    /// <summary>
+    /// The FFmpeg this machine would use, or null when there is none. Only used
+    /// to *verify* a download, so "no FFmpeg yet" is not an error.
+    /// </summary>
+    private static string? TryFindFFmpeg(CliOptions cli, string? source)
+    {
+        try
+        {
+            return FFmpegDiscovery.FindFFmpeg(cli.FFmpeg, source ?? cli.FfmpegSource);
+        }
+        catch (Exception exc) when (exc is FileNotFoundException or InvalidOperationException
+                                        or TimeoutException)
+        {
+            return null;
         }
     }
 }

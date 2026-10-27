@@ -117,6 +117,8 @@ FFmpeg 自己的编码器也有要求：`libx264` 在中低端 CPU 上跑 640x48
 | HTTP(S) 输入 | FFmpeg 构建需带 `http` 协议（标准 BtbN/Gyan 构建都有） |
 | SMB / UNC / 映射盘 | 由操作系统挂载；程序只做路径判定，并给读/写/探测都加 `-rw_timeout 30000000` |
 | 下载 FFmpeg | 需要访问 GitHub / gyan.dev / SourceForge；`--proxy` 可指定代理 |
+| 下载 NNEDI3 权重（`--nnedi-update`） | 只需访问 GitHub（`sekrit-twc/znedi3`），约 13.5 MB。大陆线路直连 `raw.githubusercontent.com` 实测**连上后不给数据**，用 `--gh-proxy` 或让它自动选路 |
+| GitHub 下载前沿（`--gh-proxy`） | 需要能访问前沿本身（默认 `gh-proxy.com`）；不设置代理也能用，这是它存在的目的 |
 
 网络源**强制单遍编码**：N 个分片各自打开同一个共享连接，是这个项目里最容易挂死的形态。
 

@@ -36,7 +36,7 @@ public static class Preflight
         double fps,
         int quality,
         int threads,
-        string vf,
+        VideoFilter vf,
         string muxer,
         StreamInfo stream,
         string? x264Preset,
@@ -83,8 +83,14 @@ public static class Preflight
             cmd.AddRange([
                 "-threads", Math.Max(1, threads).ToString(),
                 "-i", sourcePath,
-                "-map", StreamSelection.VideoMap(videoStream),
-                "-vf", vf,
+            ]);
+            // v7.9.8.3: the trial runs the filter the run will run, in whichever
+            // shape it has -- a subtitle box is a filtergraph, and a graph maps
+            // its own output.
+            if (!vf.IsGraph)
+                cmd.AddRange(["-map", StreamSelection.VideoMap(videoStream)]);
+            cmd.AddRange(vf.Args());
+            cmd.AddRange([
                 "-frames:v", "3",
                 "-c:v", encoder.Name,
             ]);

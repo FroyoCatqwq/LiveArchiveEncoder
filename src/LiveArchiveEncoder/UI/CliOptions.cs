@@ -105,9 +105,14 @@ public sealed class CliOptions
     public string? SubtitleFont { get; init; }
 
     /// <summary>
-    /// v7.9.5.1: copy font files into the program's <c>fonts</c> directory and
-    /// exit. Accepts a file or a directory.
+    /// v7.9.8.3: the shape burned subtitles are laid out in -- <c>source</c>
+    /// (the whole picture, the pre-v7.9.8.3 behaviour), <c>4:3</c> or
+    /// <c>16:9</c>. Defaults to the settings file.
     /// </summary>
+    public string? SubtitleAspect { get; init; }
+
+    /// <summary>v7.9.5.1: copy font files into the program's <c>fonts</c> directory and
+    /// exit. Accepts a file or a directory.</summary>
     public string? FontImport { get; init; }
 
     /// <summary>v7.9.5.1: print the fonts a subtitle file needs, then exit.</summary>
@@ -198,6 +203,23 @@ public sealed class CliOptions
     /// <summary>Proxy for FFmpeg downloads, e.g. http://127.0.0.1:10808.</summary>
     public string? FfmpegProxy { get; init; }
 
+    /// <summary>
+    /// v7.9.8.3: GitHub download front, e.g. <c>https://gh-proxy.com/</c>. Bare
+    /// <c>--gh-proxy</c> means that default; <c>--gh-proxy off</c> turns it back
+    /// off. Applies to FFmpeg distributions hosted on GitHub and to the NNEDI3
+    /// weights.
+    /// </summary>
+    public string? GhProxy { get; init; }
+
+    /// <summary>v7.9.8.3: fetch/refresh the NNEDI3 weights, then exit.</summary>
+    public bool NnediUpdate { get; init; }
+
+    /// <summary>v7.9.8.3: print what weights are installed, then exit.</summary>
+    public bool NnediStatus { get; init; }
+
+    /// <summary>v7.9.8.3: an explicit NNEDI3 weights file (or the folder holding it).</summary>
+    public string? NnediWeights { get; init; }
+
     /// <summary>When set, download and install that distribution, then exit.</summary>
     public string? FfmpegDownload { get; init; }
 
@@ -222,15 +244,26 @@ public sealed class CliOptions
 
     /// <summary>Arm the recompress pass, using the stored or given arguments.</summary>
     public bool Recompress { get; init; }
-    public string? RecompressArgs { get; init; }
-    public string? RecompressContainer { get; init; }
+
+    /// <summary>
+    /// v7.9.8.3: one fragment per pass. Repeatable -- a second
+    /// <c>--recompress-args</c> adds a second transcode rather than replacing
+    /// the first, which is what "uploaded to two sites in turn" needs. The first
+    /// entry is the pass every earlier version had.
+    /// </summary>
+    public IReadOnlyList<string> RecompressArgs { get; init; } = [];
+
+    /// <summary>Containers for the passes, paired by position with the fragments.</summary>
+    public IReadOnlyList<string> RecompressContainers { get; init; } = [];
     public bool NoRecompress { get; init; }
 
     /// <summary>
-    /// v7.9.5.1: pick the second pass's video codec by name instead of writing a
+    /// v7.9.5.1: pick a pass's video codec by name instead of writing a
     /// fragment. The container follows the codec when none was named.
+    /// Repeatable, paired by position; the quality and audio flags apply to
+    /// every pass named this way.
     /// </summary>
-    public string? RecompressCodec { get; init; }
+    public IReadOnlyList<string> RecompressCodecs { get; init; } = [];
 
     /// <summary>CRF / q:v for <see cref="RecompressCodec"/>; null = the codec's default.</summary>
     public int? RecompressQuality { get; init; }
@@ -351,6 +384,7 @@ public static class CliParser
         string? subtitleCodec = null;
         string? subtitleFontDir = null;
         string? subtitleFont = null;
+        string? subtitleAspect = null;
         string? fontImport = null;
         bool listSubtitleFonts = false;
         int width = 256;
@@ -389,8 +423,12 @@ public static class CliParser
         int parallel = 1;
         string? language = null;
         string? completion = null;
-        string ffmpegSource = FFmpeg.FfmpegCatalog.DefaultId;
+        string? ffmpegSource = FFmpeg.FfmpegCatalog.DefaultId;
         string? ffmpegProxy = null;
+        string? ghProxy = null;
+        bool nnediUpdate = false;
+        bool nnediStatus = false;
+        string? nnediWeights = null;
         string? ffmpegDownload = null;
         string? ffmpegArchive = null;
         string? ffmpegDelete = null;
@@ -398,11 +436,11 @@ public static class CliParser
         PlayMode play = PlayMode.Off;
         string? playerPath = null;
         bool recompress = false;
-        string? recompressArgs = null;
-        string? recompressContainer = null;
+        var recompressArgs = new List<string>();
+        var recompressContainers = new List<string>();
         bool noRecompress = false;
         bool recompressOnly = false;
-        string? recompressCodec = null;
+        var recompressCodecs = new List<string>();
         int? recompressQuality = null;
         string? recompressAudioCodec = null;
         int? recompressAudioKbps = null;
@@ -577,6 +615,17 @@ public static class CliParser
                     if (!TryValue(out string fontRaw)) return (null, "--subtitle-font requires a family name");
                     subtitleFont = fontRaw.Trim().Trim('"');
                     break;
+                // v7.9.8.3: the shape the text is laid out in.
+                case "--subtitle-aspect":
+                    if (!TryValue(out string subtitleAspectRaw))
+                        return (null, "--subtitle-aspect requires 4:3, 16:9 or source");
+                    subtitleAspect = subtitleAspectRaw.Trim().ToLowerInvariant().Replace('：', ':');
+                    if (!Constants.SubtitleAspects.Contains(subtitleAspect))
+                    {
+                        return (null, $"--subtitle-aspect must be one of "
+                            + $"{string.Join(", ", Constants.SubtitleAspects)}");
+                    }
+                    break;
                 case "--font-import":
                     if (!TryValue(out string importRaw)) return (null, "--font-import requires a file or directory");
                     fontImport = importRaw.Trim().Trim('"');
@@ -735,6 +784,31 @@ public static class CliParser
                 case "--proxy":
                     if (!TryValue(out ffmpegProxy)) return (null, "--proxy requires a value");
                     break;
+                // v7.9.8.3: the GitHub front. Bare means the documented default,
+                // so `--gh-proxy --quiet` must not eat --quiet; "off" and "-"
+                // turn it back off.
+                case "--gh-proxy":
+                    if (inlineValue is not null)
+                        ghProxy = NormaliseFront(inlineValue);
+                    else if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                        ghProxy = NormaliseFront(args[++i]);
+                    else
+                        ghProxy = FFmpeg.GitHubProxy.DefaultPrefix;
+                    break;
+                case "--no-gh-proxy":
+                    ghProxy = "";
+                    break;
+                case "--nnedi-update":
+                    nnediUpdate = true;
+                    break;
+                case "--nnedi-status":
+                    nnediStatus = true;
+                    break;
+                case "--nnedi-weights":
+                    if (!TryValue(out string weightsRaw))
+                        return (null, "--nnedi-weights requires a file path");
+                    nnediWeights = weightsRaw.Trim().Trim('"');
+                    break;
                 case "--play":
                     if (!TryValue(out string playRaw)) return (null, "--play requires a mode");
                     play = Player.ParseMode(playRaw);
@@ -769,18 +843,24 @@ public static class CliParser
 
                 // ---- v7.6: post-processing ----
                 case "--recompress": recompress = true; break;
+                // v7.9.8.3: repeatable. Each occurrence is one more transcode in
+                // the chain, in the order written.
                 case "--recompress-args":
-                    if (!TryValue(out recompressArgs)) return (null, "--recompress-args requires a value");
+                    if (!TryValue(out string recompressFragment))
+                        return (null, "--recompress-args requires a value");
+                    recompressArgs.Add(recompressFragment);
                     break;
                 case "--recompress-container":
-                    if (!TryValue(out recompressContainer)) return (null, "--recompress-container requires a value");
-                    recompressContainer = recompressContainer.TrimStart('.').ToLowerInvariant();
+                    if (!TryValue(out string recompressContainerValue))
+                        return (null, "--recompress-container requires a value");
+                    recompressContainers.Add(recompressContainerValue.TrimStart('.').ToLowerInvariant());
                     break;
                 case "--no-recompress": noRecompress = true; break;
                 case "--recompress-only": recompressOnly = true; break;
                 case "--recompress-codec":
-                    if (!TryValue(out recompressCodec)) return (null, "--recompress-codec requires a codec name");
-                    recompressCodec = recompressCodec.Trim().ToLowerInvariant();
+                    if (!TryValue(out string recompressCodecValue))
+                        return (null, "--recompress-codec requires a codec name");
+                    recompressCodecs.Add(recompressCodecValue.Trim().ToLowerInvariant());
                     break;
                 case "--recompress-quality":
                     if (!TryValue(out string rcqRaw) || !int.TryParse(rcqRaw, out int rcqValue))
@@ -909,6 +989,7 @@ public static class CliParser
             SubtitleCodec = subtitleCodec,
             SubtitleFontDir = subtitleFontDir,
             SubtitleFont = subtitleFont,
+            SubtitleAspect = subtitleAspect,
             FontImport = fontImport,
             ListSubtitleFonts = listSubtitleFonts,
             Width = width,
@@ -951,6 +1032,10 @@ public static class CliParser
             Completion = completion,
             FfmpegSource = ffmpegSource,
             FfmpegProxy = ffmpegProxy,
+            GhProxy = ghProxy,
+            NnediUpdate = nnediUpdate,
+            NnediStatus = nnediStatus,
+            NnediWeights = nnediWeights,
             FfmpegDownload = ffmpegDownload,
             FfmpegArchive = ffmpegArchive,
             FfmpegDelete = ffmpegDelete,
@@ -959,13 +1044,13 @@ public static class CliParser
             PlayerPath = playerPath,
             // --recompress-args arms the pass on its own: nobody writes out a
             // full argument list and then expects it not to run.
-            Recompress = recompress || recompressArgs is not null || recompressOnly
-                || recompressCodec is not null,
+            Recompress = recompress || recompressArgs.Count > 0 || recompressOnly
+                || recompressCodecs.Count > 0,
             RecompressArgs = recompressArgs,
-            RecompressContainer = recompressContainer,
+            RecompressContainers = recompressContainers,
             NoRecompress = noRecompress,
             RecompressOnly = recompressOnly,
-            RecompressCodec = recompressCodec,
+            RecompressCodecs = recompressCodecs,
             RecompressQuality = recompressQuality,
             RecompressAudioCodec = recompressAudioCodec,
             RecompressAudioKbps = recompressAudioKbps,
@@ -1019,6 +1104,10 @@ public static class CliParser
                                          + "the program's own fonts directory)"),
             ("--subtitle-font", "FAMILY", "force this font family over the one the file names "
                                         + "(also gives SRT/VTT a font, which they never specify)"),
+            ("--subtitle-aspect", "4:3|16:9|source",
+                "lay burned text out in a box of this shape, centred: a 4:3 subtitle on a 16:9 "
+                + "picture is neither stretched nor re-spread, and a 16:9 one on a 4:3 picture "
+                + "is scaled down to fit (default: source = the whole picture)"),
             ("--font-import", "PATH", "copy a font file (or every font in a directory) into the "
                                     + "program's fonts directory, then exit"),
             ("--list-subtitle-fonts", "", "print the fonts a subtitle file needs, whether they are "
@@ -1046,7 +1135,8 @@ public static class CliParser
                                + "(default: auto)"),
             ("--list-pix-fmts", "", "print every verified pixel format (and what the selected encoder "
                                   + "accepts), then exit"),
-            ("--deinterlace", "NAME", "off, yadif, bwdif, ... (default: off)"),
+            ("--deinterlace", "NAME", $"off, {string.Join(", ", Constants.DeinterlaceFilters)} "
+                                    + "(default: off); nnedi needs --nnedi-update first"),
             ("--deint-mode", "MODE", "send_frame or send_field (default: send_frame)"),
             ("--deint-parity", "PAR", "auto, tff or bff (default: auto)"),
             ("--deint-marked-only", "", "only deinterlace frames flagged interlaced"),
@@ -1073,15 +1163,29 @@ public static class CliParser
             ("--ffmpeg-delete", "ID", "delete an installed distribution, then exit"),
             ("--ffmpeg-list", "", "list the installed distributions, then exit"),
             ("--proxy", "URL", "proxy for FFmpeg downloads, e.g. http://127.0.0.1:10808"),
+            ("--gh-proxy", "[URL]", $"fetch GitHub downloads through a front, e.g. "
+                                  + $"{FFmpeg.GitHubProxy.DefaultPrefix} (bare = that default, "
+                                  + "off = direct, remembered); applies to FFmpeg builds on GitHub "
+                                  + "and to the NNEDI3 weights. Left unset, a GitHub that cannot be "
+                                  + "reached is detected and the front is used for that download"),
+            ("--no-gh-proxy", "", "never route GitHub downloads through a front, and remember it"),
+            ("--nnedi-update", "", "download or refresh the NNEDI3 weights the nnedi filter "
+                                 + "needs (sekrit-twc/znedi3), then exit"),
+            ("--nnedi-status", "", "print the installed NNEDI3 weights, then exit"),
+            ("--nnedi-weights", "PATH", "use this weights file (or folder) instead of the installed one"),
             ("--play", "MODE", "after encoding: off, ffplay or external (default: off)"),
             ("--player", "PATH", "external player executable (default: system file association)"),
             ("--recompress", "", "re-encode the result the way a video site would (default: off)"),
-            ("--recompress-args", "ARGS", "FFmpeg arguments for that pass; -i and the output are supplied"),
-            ("--recompress-codec", "NAME", $"second-pass video codec instead of a fragment: {PostProcess.RecompressCodecs.VideoIdList}"),
+            ("--recompress-args", "ARGS", "FFmpeg arguments for one pass; -i and the output are "
+                                        + "supplied. Repeatable: each occurrence is one more "
+                                        + "transcode, applied to the previous one's output"),
+            ("--recompress-codec", "NAME", $"a pass's video codec instead of a fragment: {PostProcess.RecompressCodecs.VideoIdList}"
+                                         + " (repeatable, paired by position with the fragments)"),
             ("--recompress-quality", "N", "quality for --recompress-codec (CRF, or q:v for the MPEG family)"),
-            ("--recompress-audio-codec", "NAME", $"second-pass audio codec: {PostProcess.RecompressCodecs.AudioIdList}, or copy"),
-            ("--recompress-audio-kbps", "N", "second-pass audio bitrate (default: the codec's)"),
-            ("--recompress-container", "EXT", "container for the recompressed file (default: implied by the codec)"),
+            ("--recompress-audio-codec", "NAME", $"audio codec for --recompress-codec: {PostProcess.RecompressCodecs.AudioIdList}, or copy"),
+            ("--recompress-audio-kbps", "N", "audio bitrate for --recompress-codec (default: the codec's)"),
+            ("--recompress-container", "EXT", "container for a pass (repeatable, paired by position; "
+                                            + "default: implied by the codec)"),
             ("--recompress-only", "", "skip the live encode and apply the recompress pass to an "
                                     + "existing file, then exit"),
             ("--no-recompress", "", "disable the recompress stage"),
@@ -1126,4 +1230,17 @@ public static class CliParser
     private static bool TryDouble(string text, out double value) =>
         double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
         && double.IsFinite(value);
+
+    /// <summary>
+    /// A <c>--gh-proxy</c> value: "" for off, the normalised prefix otherwise.
+    /// An unparseable URL is passed through unchanged so that <c>Cli.Run</c> can
+    /// refuse it with a message instead of the download failing 40 MB in.
+    /// </summary>
+    private static string NormaliseFront(string value)
+    {
+        string text = value.Trim();
+        if (text is "" or "-" or "off" or "none" or "no") return "";
+        if (text is "on" or "yes" or "default") return FFmpeg.GitHubProxy.DefaultPrefix;
+        return FFmpeg.GitHubProxy.Normalise(text).Prefix ?? text;
+    }
 }

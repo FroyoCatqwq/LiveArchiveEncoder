@@ -95,7 +95,9 @@ public sealed class RecompressOnlyTests
         await Assert.That(error).IsNull();
         await Assert.That(options!.RecompressOnly).IsTrue();
         await Assert.That(options.Era).IsEqualTo("youku07");
-        await Assert.That(options.RecompressArgs).IsNull();
+        // v7.9.8.3 made the fragment repeatable, so "none given" is an empty
+        // list rather than null -- one entry per pass.
+        await Assert.That(options.RecompressArgs).IsEmpty();
     }
 
     [Test]

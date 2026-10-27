@@ -183,9 +183,20 @@ public static class RealtimeEncoder
             if (roqDimensionWarning is not null) Console.WriteLine($"WARNING: {roqDimensionWarning}");
         }
 
+        // v7.9.8.3: nnedi cannot start without its weights. Checked here, before
+        // the preflight, so the failure is a sentence rather than FFmpeg's
+        // "Cannot open file" twenty seconds into a real-time pass.
+        if (Constants.NeedsWeights(o.Deinterlace) && !o.NnediWeights.HasText)
+        {
+            throw new ArgumentException(
+                "the nnedi deinterlacer needs its NNEDI3 weights file; run "
+                + "`LiveArchiveEncoder --nnedi-update`, or point --nnedi-weights at one");
+        }
+
         string vf = ArgsBuilder.BuildFilters(
             width, height, o.Fps, o.FitMode, o.CropAnchor, o.PadColor, scaleAlgo,
-            transportFmt, o.Deinterlace, o.DeintMode, o.DeintParity, o.DeintMarkedOnly);
+            transportFmt, o.Deinterlace, o.DeintMode, o.DeintParity, o.DeintMarkedOnly,
+            o.NnediWeights);
 
         // v7.9 #2: subtitles are validated here, before anything expensive, and
         // rendered last so the text is neither scaled nor cropped with the
@@ -196,8 +207,12 @@ public static class RealtimeEncoder
                 o.AvailableSubtitleEncoders ?? profile.SubtitleEncoders,
                 o.FFmpeg, sourcePath)
             : null;
-        if (subs is { Mode: SubtitleMode.Burn })
-            vf = SubtitleTrack.AppendBurn(vf, subs.BurnFiles, subs.FontDir, subs.FallbackFont);
+        // v7.9.8.3: a declared subtitle shape turns the plain chain into a
+        // filtergraph (crop + render + overlay); everything else stays -vf.
+        VideoFilter filter = subs is { Mode: SubtitleMode.Burn }
+            ? SubtitleTrack.BurnInto(vf, subs, width, height, transportFmt,
+                StreamSelection.VideoMap(o.VideoStream))
+            : VideoFilter.Simple(vf);
         int frameSize = PixelFormatUtil.RawFrameSize(width, height, transportFmt);
         int? targetSlots = duration is null ? null : (int)Math.Ceiling(duration.Value * o.Fps - 1e-9);
         string muxer = o.Encoder.FormatName;
@@ -219,7 +234,7 @@ public static class RealtimeEncoder
         {
             Preflight.Video(
                 ffmpeg: o.FFmpeg, sourcePath: sourcePath, encoder: o.Encoder, fps: o.Fps, quality: o.Quality,
-                threads: o.Threads, vf: vf, muxer: muxer,
+                threads: o.Threads, vf: filter, muxer: muxer,
                 stream: stream,
                 videoStream: o.VideoStream,
                 x264Preset: o.Encoder.Name == "libx264" ? o.X264Preset : null,
@@ -277,7 +292,7 @@ public static class RealtimeEncoder
             subs?.Dispose();
             throw;
         }
-        List<string> decCmd = BuildDecoderCommand(o, sourcePath, vf, transportFmt, duration);
+        List<string> decCmd = BuildDecoderCommand(o, sourcePath, filter, transportFmt, duration);
         // The encoder writes a ".part" sibling; Promote puts it in place only
         // once the run has actually succeeded.
         FileInfo part = Core.OutputFile.PartPath(dst);
@@ -305,7 +320,12 @@ public static class RealtimeEncoder
             Console.WriteLine(
                 $"{L.T("run.timerange"),-17}: {Timecode.Format(o.StartSeconds)} - {Timecode.Format(resolvedEnd)}"
                 + (duration is not null ? $" ({duration.Value:F3}s)" : ""));
-            Console.WriteLine($"{L.T("run.filters"),-17}: {vf}");
+            // v7.9.8.3: print what will actually run. A boxed subtitle is a
+            // filtergraph, and printing only the scale chain would hide the burn
+            // filters -- the line is what the user checks when the text comes out
+            // wrong.
+            Console.WriteLine($"{L.T("run.filters"),-17}: "
+                + (filter.IsGraph ? filter.Graph : filter.Chain));
 
             string? smb = Remote.Smb.Describe(sourcePath);
             if (smb is not null) Console.WriteLine(smb);
@@ -583,7 +603,7 @@ public static class RealtimeEncoder
     }
 
     private static List<string> BuildDecoderCommand(
-        RealtimeOptions o, string sourcePath, string vf, string transportFmt, double? duration)
+        RealtimeOptions o, string sourcePath, VideoFilter filter, string transportFmt, double? duration)
     {
         var cmd = new List<string> { o.FFmpeg, "-hide_banner", "-loglevel", "error" };
         // v7.9.6: swscale dither applies while the decoder converts the source
@@ -603,9 +623,19 @@ public static class RealtimeEncoder
         if (o.StartSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(o.StartSeconds)]);
         cmd.AddRange(["-i", sourcePath]);
         if (duration is not null) cmd.AddRange(["-t", ArgsBuilder.FloatArg(duration.Value)]);
-        cmd.AddRange([
-            "-map", StreamSelection.VideoMap(o.VideoStream), "-an", "-vf", vf, "-pix_fmt", transportFmt, "-f", "rawvideo", "pipe:1",
-        ]);
+        // v7.9.8.3: "-vf" and "-filter_complex" are mutually exclusive, so the
+        // filter decides which shape this is; a graph carries its own -map.
+        if (filter.IsGraph)
+        {
+            cmd.Add("-an");
+            cmd.AddRange(filter.Args());
+        }
+        else
+        {
+            cmd.AddRange(["-map", StreamSelection.VideoMap(o.VideoStream), "-an"]);
+            cmd.AddRange(filter.Args());
+        }
+        cmd.AddRange(["-pix_fmt", transportFmt, "-f", "rawvideo", "pipe:1"]);
         return cmd;
     }
 

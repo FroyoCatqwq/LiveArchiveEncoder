@@ -36,10 +36,17 @@ public static class ToolchainConsole
     }
 
     /// <summary>
-    /// Nested menu. Returns the source and proxy in effect afterwards so the
-    /// caller can re-run discovery when they changed.
+    /// Nested menu. Returns the source, proxy and GitHub front in effect
+    /// afterwards so the caller can re-run discovery when they changed.
+    ///
+    /// <para>v7.9.8.3 adds the two settings that belong to downloading rather
+    /// than to encoding: the front GitHub traffic goes through, and the NNEDI3
+    /// weights the <c>nnedi</c> filter cannot start without. Both were
+    /// CLI-only until now, which left the interactive shell unable to reach
+    /// them at all.</para>
     /// </summary>
-    public static (string Source, string? Proxy) Menu(string sourceId, string? proxy)
+    public static (string Source, string? Proxy, string? GhProxy) Menu(
+        string sourceId, string? proxy, string? ghProxy = null)
     {
         while (true)
         {
@@ -49,12 +56,14 @@ public static class ToolchainConsole
             Console.WriteLine($" 3. {L.T("tc.menu.download")}");
             Console.WriteLine($" 4. {L.T("tc.menu.delete")}");
             Console.WriteLine($" 5. {L.Pad(L.T("tc.menu.proxy"), 26)} = {proxy ?? L.T("value.none")}");
+            Console.WriteLine($" 6. {L.Pad(L.T("tc.menu.ghproxy"), 26)} = {DescribeFront(ghProxy)}");
+            Console.WriteLine($" 7. {L.Pad(L.T("tc.menu.nnedi"), 26)} = {DescribeWeights()}");
             Console.WriteLine($" 0. {L.T("tc.menu.back")}");
             Console.Write(L.T("menu.select"));
 
             switch ((Console.ReadLine() ?? "").Trim())
             {
-                case "0": return (sourceId, proxy);
+                case "0": return (sourceId, proxy, ghProxy);
                 case "1":
                     PrintInstalled(sourceId);
                     break;
@@ -62,7 +71,7 @@ public static class ToolchainConsole
                     sourceId = Switch(sourceId);
                     break;
                 case "3":
-                    sourceId = Download(sourceId, proxy);
+                    sourceId = Download(sourceId, proxy, ghProxy);
                     break;
                 case "4":
                     Delete();
@@ -70,11 +79,89 @@ public static class ToolchainConsole
                 case "5":
                     proxy = EditProxy(proxy);
                     break;
+                case "6":
+                    ghProxy = EditGhProxy(ghProxy);
+                    break;
+                case "7":
+                    NnediMenu(proxy, ghProxy);
+                    break;
                 default:
                     Console.WriteLine(L.T("menu.invalid"));
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// What the front setting currently says. Three states, not two: unset means
+    /// a download probes the route and picks one, which is not the same as
+    /// "off" (the user said no front, and a probe must not override that).
+    /// </summary>
+    private static string DescribeFront(string? front) =>
+        front is null ? L.T("tc.ghproxyauto")
+        : front.Length == 0 || string.Equals(front, GitHubProxy.Off, StringComparison.OrdinalIgnoreCase)
+            ? L.T("value.off")
+            : front;
+
+    private static string DescribeWeights() =>
+        Nnedi.Read() is { } record
+            ? $"{record.Release ?? "?"} ({record.Bytes:N0} B)"
+            : L.T("tc.notinstalled");
+
+    private static string? EditGhProxy(string? front)
+    {
+        Console.Write(L.T("tc.prompt.ghproxy"));
+        string entered = (Console.ReadLine() ?? "").Trim();
+        if (entered.Length == 0) return front;
+
+        if (entered is "-" || entered.Equals(GitHubProxy.Off, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(L.T("tc.ghproxyoff"));
+            return GitHubProxy.Off;
+        }
+
+        (string? prefix, string? error) = GitHubProxy.Normalise(entered);
+        if (error is not null)
+        {
+            Console.WriteLine(L.T("tc.ghproxybad", entered, error));
+            return front;
+        }
+        Console.WriteLine(L.T("tc.ghproxyset", prefix));
+        return prefix;
+    }
+
+    /// <summary>
+    /// Show the weights, offer to fetch them. The FFmpeg verifier is not passed
+    /// here: the menu runs before a build is necessarily installed, and a
+    /// download that has the right size and hash is worth having either way.
+    /// </summary>
+    private static void NnediMenu(string? proxy, string? front)
+    {
+        Console.WriteLine($"\n{L.T("nnedi.heading", Nnedi.WeightsPath)}");
+        if (Nnedi.Read() is { } record)
+        {
+            Console.WriteLine(L.T("nnedi.release", record.Release ?? "?"));
+            Console.WriteLine(L.T("nnedi.size", record.Bytes));
+            if (record.Sha256 is { Length: > 0 } sha) Console.WriteLine(L.T("nnedi.sha", sha[..16]));
+            if (record.InstalledAt is { Length: > 0 } when) Console.WriteLine(L.T("nnedi.when", when));
+        }
+        else
+        {
+            Console.WriteLine(L.T("nnedi.none"));
+        }
+
+        Console.Write(L.T("tc.prompt.nnedi"));
+        string entered = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
+        if (entered != "u") return;
+
+        (Nnedi.Outcome outcome, string? error, string? release) =
+            Nnedi.Update(null, proxy, front, front is null, Console.WriteLine);
+        Console.WriteLine(outcome switch
+        {
+            Nnedi.Outcome.Installed => L.T("nnedi.updok", release ?? "?", Nnedi.WeightsPath),
+            Nnedi.Outcome.AlreadyCurrent => L.T("nnedi.updcurrent", release ?? "?"),
+            _ => $"{L.T("error.prefix")}{L.T("nnedi.updfail", error ?? "")}",
+        });
     }
 
     private static string AskSource()
@@ -104,7 +191,7 @@ public static class ToolchainConsole
         return dist.Id;
     }
 
-    private static string Download(string sourceId, string? proxy)
+    private static string Download(string sourceId, string? proxy, string? front)
     {
         string picked = AskSource();
         if (picked.Length == 0) picked = sourceId;
@@ -150,7 +237,12 @@ public static class ToolchainConsole
 
         Console.WriteLine(L.T("tc.installing", dist.Label));
         Console.WriteLine(dist.Homepage);
-        (bool ok, string? error) = Toolchain.Install(dist, proxy, localArchive, Console.WriteLine);
+        // v7.9.8.3: same auto-route rule as the CLI -- when the shell has not
+        // been told which front to use, ask the network instead of assuming.
+        if (front is null && localArchive is null && dist.Url is { Length: > 0 } githubUrl)
+            front = GitHubProxy.Detect(githubUrl, proxy, Console.WriteLine);
+
+        (bool ok, string? error) = Toolchain.Install(dist, proxy, localArchive, Console.WriteLine, front);
         if (!ok)
         {
             Console.WriteLine($"{L.T("error.prefix")}{L.T("tc.installfail", error)}");

@@ -98,6 +98,15 @@ public sealed class RealtimeOptions
     public string DeintMode { get; init; } = "send_frame";
     public string DeintParity { get; init; } = "auto";
     public bool DeintMarkedOnly { get; init; }
+
+    /// <summary>
+    /// v7.9.8.3: the NNEDI3 weights file, when <see cref="Deinterlace"/> is
+    /// <c>nnedi</c>. Resolved by the caller (the CLI or the shell) so this layer
+    /// never has to decide where the file lives; null here plus
+    /// <c>nnedi</c> selected is a refusal with instructions, not a silent
+    /// fallback to yadif.
+    /// </summary>
+    public string? NnediWeights { get; init; }
     public string? X264Preset { get; init; } = "medium";
     public string? X264Tune { get; init; }
     public string? X264Profile { get; init; }

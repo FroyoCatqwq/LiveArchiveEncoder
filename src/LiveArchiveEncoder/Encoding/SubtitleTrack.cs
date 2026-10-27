@@ -39,6 +39,13 @@ public sealed record SubtitleSettings(
     /// </summary>
     public string? FallbackFont { get; init; }
 
+    /// <summary>
+    /// v7.9.8.3: the shape the text is laid out in -- <c>4:3</c>, <c>16:9</c> or
+    /// null/"source" for "the whole picture". See
+    /// <see cref="SubtitleTrack.BurnInto"/>.
+    /// </summary>
+    public string? BoxAspect { get; init; }
+
     public bool Active => Mode != SubtitleMode.Off && (Files.Count > 0 || Stream is not null);
 }
 
@@ -68,6 +75,14 @@ public sealed class SubtitlePlan : IDisposable
 
     /// <summary>v7.9.5.1: family forced over the file's own choice.</summary>
     public string? FallbackFont { get; init; }
+
+    /// <summary>
+    /// v7.9.8.3: the box the text is laid out in, as a ratio, or null for "the
+    /// whole picture". Resolved against the delivered frame at burn time --
+    /// the frame size is not known when the plan is made (a shard planner may
+    /// still adjust it).
+    /// </summary>
+    public (int Num, int Den)? BoxAspect { get; init; }
 
     /// <summary>Directory holding an extracted track; removed on dispose.</summary>
     public string? StageDir { get; init; }
@@ -167,6 +182,7 @@ public static class SubtitleTrack
                 BurnFiles = settings.Files,
                 FontDir = settings.FontDir,
                 FallbackFont = settings.FallbackFont,
+                BoxAspect = Constants.ParseAspect(settings.BoxAspect),
             };
         }
 
@@ -200,6 +216,7 @@ public static class SubtitleTrack
             BurnFiles = [staged],
             FontDir = settings.FontDir,
             FallbackFont = settings.FallbackFont,
+            BoxAspect = Constants.ParseAspect(settings.BoxAspect),
             StageDir = stageDir,
         };
     }
@@ -317,6 +334,34 @@ public static class SubtitleTrack
     }
 
     /// <summary>
+    /// Add the burn step to a finished filter chain.
+    ///
+    /// <para>Without a declared box this is the linear chain every earlier
+    /// version produced: the text is rendered onto the scaled and padded frame,
+    /// last, so it is neither scaled nor cropped with the picture.</para>
+    ///
+    /// <para>With a box (<c>--subtitle-aspect</c>) the text cannot live in that
+    /// chain: libass paints into whatever frame it is given, so a 4:3 script on a
+    /// 16:9 picture would either spread across the extra width or -- for a 16:9
+    /// script on a 4:3 picture -- run off the edge. Instead the finished frame is
+    /// cropped to the box, the text is rendered there, and the piece is overlaid
+    /// back at the same offset. Same size, same place, no scaling: the pixels
+    /// outside the box are untouched, and inside it the layout is exactly what
+    /// the script would get on a frame of its own shape.</para>
+    /// </summary>
+    public static VideoFilter BurnInto(
+        string chain, SubtitlePlan plan, int frameW, int frameH,
+        string transportFmt, string input)
+    {
+        string burn = AppendBurn("", plan.BurnFiles, plan.FontDir, plan.FallbackFont);
+        if (plan.BoxAspect is not { } aspect)
+            return VideoFilter.Simple(chain.Length == 0 ? burn : $"{chain},{burn}");
+
+        SubtitleBox box = SubtitleBox.Contain(frameW, frameH, aspect.Num, aspect.Den);
+        return VideoFilter.Boxed(chain, burn, input, box, frameW, frameH, transportFmt);
+    }
+
+    /// <summary>
     /// The directory handed to <c>fontsdir</c>. The program's own directory wins
     /// when it holds fonts -- those are the ones that travel with the tool -- and
     /// the user's extra directory is the fallback. Null means "let fontconfig
@@ -348,26 +393,13 @@ public static class SubtitleTrack
     /// Make a value safe inside a filter argument. Only the characters FFmpeg's
     /// filter parser treats specially are touched; a family name is plain text.
     /// </summary>
-    private static string EscapeFilterValue(string value) =>
-        value.Replace("\\", "\\\\", StringComparison.Ordinal)
-             .Replace(":", "\\:", StringComparison.Ordinal)
-             .Replace("'", "\\'", StringComparison.Ordinal)
-             .Replace(",", "\\,", StringComparison.Ordinal);
+    private static string EscapeFilterValue(string value) => Core.FilterArgs.EscapeValue(value);
 
     /// <summary>
-    /// Make a path safe inside a filter argument.
-    ///
-    /// FFmpeg parses a filter description on two levels (the graph, then each
-    /// option value), and both treat <c>\</c> and <c>:</c> as special, so a
-    /// Windows path needs its separators doubled and its drive colon escaped
-    /// <em>and</em> the whole thing single-quoted -- measured 2026-10-21:
-    /// <c>'C\:\\Users\\x.srt'</c> opens, the unquoted spellings all end up
-    /// parsed as the <c>original_size</c> option with a mangled name.
+    /// Make a path safe inside a filter argument (quoted, separators doubled,
+    /// drive colon escaped) -- see <see cref="Core.FilterArgs.EscapePath"/>.
     /// </summary>
-    public static string EscapeFilterPath(string path) =>
-        "'" + path.Replace("\\", "\\\\", StringComparison.Ordinal)
-                  .Replace(":", "\\:", StringComparison.Ordinal)
-                  .Replace("'", "\\'", StringComparison.Ordinal) + "'";
+    public static string EscapeFilterPath(string path) => Core.FilterArgs.EscapePath(path);
 
     /// <summary>
     /// The extra FFmpeg input carrying the track in copy mode, seeked to the

@@ -64,6 +64,10 @@ public sealed class CliArgsTests
         Language = "zh",
         FfmpegSource = "path",
         FfmpegProxy = "http://127.0.0.1:7890",
+        // v7.9.8.3: a remembered front and a weights file are part of the run,
+        // so a line that reproduces it has to carry both.
+        GhProxy = "https://gh-proxy.com/",
+        NnediWeights = "D:/weights/nnedi3_weights.bin",
         PlayMode = "ffplay",
         PlayerPath = "mpc.exe",
         Recompress = new RecompressSettings
@@ -71,12 +75,16 @@ public sealed class CliArgsTests
             Enabled = true,
             Args = "-c:v libx264 -crf 28",
             Container = "mkv",
+            // v7.9.8.3: a second hop. The pairs are positional, so the container
+            // of pass 2 has to come back attached to pass 2.
+            Extra = [new RecompressPass { Args = "-c:v flv -q:v 9", Container = "flv" }],
         },
         Subtitles = new SubtitleConfig
         {
             Mode = "copy",
             Files = ["clip.ass"],
             Codec = "ass",
+            BoxAspect = "4:3",
         },
     };
 
@@ -149,11 +157,17 @@ public sealed class CliArgsTests
         await Assert.That(opts.Play).IsEqualTo(PlayMode.Ffplay);
         await Assert.That(opts.PlayerPath).IsEqualTo("mpc.exe");
         await Assert.That(opts.Recompress).IsTrue();
-        await Assert.That(opts.RecompressArgs).IsEqualTo("-c:v libx264 -crf 28");
-        await Assert.That(opts.RecompressContainer).IsEqualTo("mkv");
+        await Assert.That(opts.RecompressArgs).IsEquivalentTo(new[] { "-c:v libx264 -crf 28", "-c:v flv -q:v 9" });
+        await Assert.That(opts.RecompressContainers).IsEquivalentTo(new[] { "mkv", "flv" });
         await Assert.That(opts.SubtitleFiles).IsEquivalentTo(new[] { "clip.ass" });
         await Assert.That(opts.SubtitleMode).IsEqualTo("copy");
         await Assert.That(opts.SubtitleCodec).IsEqualTo("ass");
+        // v7.9.8.3: the box ratio, the front and the weights file are settings
+        // like any other -- a line that drops one produces a different file (or a
+        // download through a route the original refused).
+        await Assert.That(opts.SubtitleAspect).IsEqualTo("4:3");
+        await Assert.That(opts.GhProxy).IsEqualTo("https://gh-proxy.com/");
+        await Assert.That(opts.NnediWeights).IsEqualTo("D:/weights/nnedi3_weights.bin");
     }
 
     [Test]

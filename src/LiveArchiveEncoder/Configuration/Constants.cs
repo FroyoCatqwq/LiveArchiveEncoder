@@ -212,6 +212,29 @@ public static class Constants
     /// <summary>How a subtitle track reaches the output.</summary>
     public static readonly string[] SubtitleModes = ["burn", "copy", "off"];
 
+    /// <summary>
+    /// v7.9.8.3: the shape burned text is laid out in. <c>source</c> means the
+    /// whole picture, which is what every version before this one did.
+    /// </summary>
+    public static readonly string[] SubtitleAspects = ["source", "4:3", "16:9"];
+
+    /// <summary>
+    /// Parse <c>--subtitle-aspect</c> into a ratio, or null for "the whole
+    /// picture". Unknown spellings are a null too -- the parser only lets the
+    /// three above through, and a settings file that invented a fourth should
+    /// fall back to the old behaviour rather than fail an encode.
+    /// </summary>
+    public static (int Num, int Den)? ParseAspect(string? value)
+    {
+        string text = (value ?? "").Trim().ToLowerInvariant().Replace('：', ':');
+        return text switch
+        {
+            "4:3" or "4/3" or "1.333" or "1.33" => (4, 3),
+            "16:9" or "16/9" or "1.778" or "1.78" => (16, 9),
+            _ => null,
+        };
+    }
+
     /// <summary>Which part survives when <c>crop</c> has to discard an edge.</summary>
     public static readonly string[] CropAnchors = ["center", "top", "bottom", "left", "right"];
 
@@ -368,7 +391,20 @@ public static class Constants
             ["area"] = "area", ["gauss"] = "gauss",
         }.ToFrozenDictionary();
 
-    public static readonly string[] DeinterlaceFilters = ["bwdif", "yadif", "w3fdif"];
+    /// <summary>
+    /// The deinterlacers this tool will use, quality-ordered except for
+    /// <c>nnedi</c>, which is last because it needs a 13 MB weights file and is
+    /// the slowest of the four by a wide margin.
+    ///
+    /// <para>v7.9.8.3: <c>nnedi</c> is FFmpeg's own NNEDI3 filter. It is listed
+    /// only when the build has it; whether the weights are installed is a
+    /// separate question the runner answers before the encode starts.</para>
+    /// </summary>
+    public static readonly string[] DeinterlaceFilters = ["bwdif", "yadif", "w3fdif", "nnedi"];
+
+    /// <summary>Filters that cannot run without an external file.</summary>
+    public static bool NeedsWeights(string? filter) =>
+        string.Equals(filter, "nnedi", StringComparison.OrdinalIgnoreCase);
 
     // ------------------------------------------------------------- v7.9.6 #1
     // Colour handling. The pixel-format table itself lives in

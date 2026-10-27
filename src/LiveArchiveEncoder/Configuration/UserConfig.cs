@@ -134,6 +134,16 @@ public sealed class UserConfig
     /// <summary>Proxy for FFmpeg downloads; null means "ask every time".</summary>
     public string? FfmpegProxy { get; set; }
 
+    /// <summary>
+    /// v7.9.8.3: GitHub download front used for FFmpeg and for the NNEDI3
+    /// weights, e.g. <c>https://gh-proxy.com/</c>. Null means "straight from
+    /// GitHub". Absent from older files, which is the same thing.
+    /// </summary>
+    public string? GhProxy { get; set; }
+
+    /// <summary>v7.9.8.3: explicit NNEDI3 weights file; null uses the managed install.</summary>
+    public string? NnediWeights { get; set; }
+
     /// <summary>"off" / "ffplay" / "external".</summary>
     public string PlayMode { get; set; } = "off";
 
@@ -451,6 +461,8 @@ public static class ConfigStore
         Language = c.Language,
         FfmpegSource = c.FfmpegSource,
         FfmpegProxy = c.FfmpegProxy,
+        GhProxy = c.GhProxy,
+        NnediWeights = c.NnediWeights,
         PlayMode = UI.Player.ModeName(c.Play),
         PlayerPath = c.PlayerPath,
         Recompress = CloneRecompress(c.Recompress),
@@ -473,6 +485,7 @@ public static class ConfigStore
         Codec = s.Codec,
         FontDir = s.FontDir,
         FallbackFont = s.FallbackFont,
+        BoxAspect = s.BoxAspect.Or("source"),
     };
 
     private static FpsRungSetting CloneRung(FpsRungSetting s) => new()
@@ -487,6 +500,12 @@ public static class ConfigStore
         Enabled = s.Enabled,
         Args = s.Args.Or(""),
         Container = s.Container.Or("mp4"),
+        // v7.9.8.3: the extra passes are part of the request, so they are copied
+        // rather than shared -- the file is written from this snapshot, and a
+        // later menu edit must not change what it says.
+        Extra = s.Extra is null
+            ? []
+            : [.. s.Extra.Where(p => p is not null).Select(p => p.Clone())],
     };
 
     /// <summary>
@@ -588,6 +607,16 @@ public static class ConfigStore
             ? FFmpeg.FfmpegCatalog.DefaultId
             : wanted;
         c.FfmpegProxy = stored.FfmpegProxy;
+        // v7.9.8.3: a prefix that no longer parses is dropped rather than carried
+        // into a download, where it would turn every URL into nonsense. "off" is
+        // the one literal that survives: it records a decision, and a decision
+        // must outlive the run that made it (null means "never asked", which is
+        // what lets Nnedi probe and pick a route on its own).
+        c.GhProxy = string.Equals(stored.GhProxy?.Trim(), FFmpeg.GitHubProxy.Off,
+                StringComparison.OrdinalIgnoreCase)
+            ? FFmpeg.GitHubProxy.Off
+            : FFmpeg.GitHubProxy.Normalise(stored.GhProxy).Prefix;
+        c.NnediWeights = stored.NnediWeights;
         c.Play = UI.Player.ParseMode(stored.PlayMode);
         c.PlayerPath = stored.PlayerPath;
 

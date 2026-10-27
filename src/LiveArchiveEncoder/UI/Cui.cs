@@ -213,10 +213,11 @@ public static partial class Cui
                         // The toolchain menu can install or select a different
                         // build, which invalidates every capability probe done
                         // so far -- re-resolve instead of keeping stale lists.
-                        (string newSource, string? newProxy) =
-                            ToolchainConsole.Menu(c.FfmpegSource, c.FfmpegProxy);
+                        (string newSource, string? newProxy, string? newFront) =
+                            ToolchainConsole.Menu(c.FfmpegSource, c.FfmpegProxy, c.GhProxy);
                         c.FfmpegSource = newSource;
                         c.FfmpegProxy = newProxy;
+                        c.GhProxy = newFront;
                         Persist(c);
                         RefreshToolchain(c, ref ffmpeg, ref ffprobe, ref btbn, ref caps,
                             ref encoders, ref audioAvailable,
@@ -671,6 +672,7 @@ public static partial class Cui
             Console.WriteLine($" 3. {L.Pad(L.T("sub.menu.stream"), 30)} = {(s.Stream is int idx ? idx.ToString(CultureInfo.InvariantCulture) : L.T("value.notselected"))}");
             Console.WriteLine($" 4. {L.Pad(L.T("sub.menu.codec"), 30)} = {(s.Codec is { Length: > 0 } code ? code : L.T("value.auto"))}");
             Console.WriteLine($" 5. {L.Pad(L.T("sub.menu.fonts"), 30)} = {(s.FallbackFont is { Length: > 0 } f ? f : L.T("value.auto"))}");
+            Console.WriteLine($" 6. {L.Pad(L.T("sub.menu.aspect"), 30)} = {s.BoxAspect}");
             Console.WriteLine($" 0. {L.T("sub.menu.back")}");
             Console.Write(L.T("menu.select"));
 
@@ -787,6 +789,18 @@ public static partial class Cui
                     break;
                 case "5":
                     EditSubtitleFonts(s);
+                    break;
+                case "6":
+                    // v7.9.8.3: cycle the shape libass lays the text out in. Only
+                    // burning uses it, so a copy run keeps whatever was picked for
+                    // the next burn.
+                    s.BoxAspect = s.BoxAspect switch
+                    {
+                        "source" => "4:3",
+                        "4:3" => "16:9",
+                        _ => "source",
+                    };
+                    Console.WriteLine(L.T("sub.aspect.set", s.BoxAspect));
                     break;
             }
         }
@@ -1848,6 +1862,11 @@ public static partial class Cui
                 throw new ArgumentException($"scale algorithm '{c.ScaleAlgo}' is not exposed by this FFmpeg build");
             if (c.AudioEncoder is not null && !audioAvailable.Contains(c.AudioEncoder))
                 throw new ArgumentException($"audio encoder '{c.AudioEncoder}' is not available");
+            // v7.9.8.3: nnedi cannot start without its weights. Checked here so
+            // the refusal is a sentence before the confirm prompt, not FFmpeg's
+            // "Cannot open file" after it.
+            if (Constants.NeedsWeights(c.Deinterlace) && FFmpeg.Nnedi.Resolve(c.NnediWeights) is null)
+                throw new ArgumentException(L.T("nnedi.missing"));
         }
         catch (ArgumentException exc)
         {
@@ -1910,6 +1929,9 @@ public static partial class Cui
                 {
                     FontDir = c.Subtitles.FontDir,
                     FallbackFont = c.Subtitles.FallbackFont,
+                    // v7.9.8.3: the box ratio decides how the text is laid out, so
+                    // the shell has to hand it over like the CLI does.
+                    BoxAspect = c.Subtitles.BoxAspect,
                 },
                 // Detected once here (and inherited by shards) instead of once
                 // per shard: the copy path needs the build's own encoder list.
@@ -1933,6 +1955,11 @@ public static partial class Cui
                 DeintMode = c.DeintMode,
                 DeintParity = c.DeintParity,
                 DeintMarkedOnly = c.DeintMarkedOnly,
+                // Resolved here (not in the encoder) so every shard inherits one
+                // answer, and so an unset flag still means "the managed install".
+                NnediWeights = Constants.NeedsWeights(c.Deinterlace)
+                    ? FFmpeg.Nnedi.Resolve(c.NnediWeights)
+                    : null,
                 X264Preset = c.Encoder.Name == "libx264" ? c.X264Preset : null,
                 X264Tune = c.Encoder.Name == "libx264" ? c.X264Tune : null,
                 X264Profile = c.Encoder.Name == "libx264" ? c.X264Profile : null,
@@ -1965,12 +1992,11 @@ public static partial class Cui
                     PostProcess.PostPipeline.Run(ffmpeg, c.OutputPath.FullName, c);
                 finalPath = post.FinalPath;
 
-                if (post.RecompressRan && post.RecompressPath is { Length: > 0 } rc)
-                    Console.WriteLine(L.T("post.recompress", rc));
+                foreach (string hop in post.Passes) Console.WriteLine(L.T("post.recompress", hop));
 
                 if (post.Failed)
                 {
-                    string stage = post.FailedStage!;
+                    string stage = post.StageName;
                     string detail = post.RecompressError ?? "";
                     Console.WriteLine($"{L.T("error.prefix")}{L.T("post.failed", stage, detail)}");
                     Console.WriteLine(L.T("post.kept", c.OutputPath.FullName));

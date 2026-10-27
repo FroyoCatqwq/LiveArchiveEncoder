@@ -149,14 +149,34 @@ public static class Report
         }
         if (c.Recompress.Args.Length > 0)
         {
+            // v7.9.8.3: a chain prints every hop, because the last one is not the
+            // whole story -- each intermediate file is a real product.
+            string chain = string.Join(" -> ", c.Recompress.Stages()
+                .Select(p => $".{p.Container} {p.Args}"));
             Line(L.T("report.recompress"),
-                $"{(c.Recompress.Enabled ? "on" : L.T("value.off"))} .{c.Recompress.Container} {c.Recompress.Args}");
+                $"{(c.Recompress.Enabled ? "on" : L.T("value.off"))} {chain}");
         }
         if (c.Subtitles.Active)
         {
             Line(L.T("report.subtitles"),
                 $"{c.Subtitles.Mode} {string.Join(", ", c.Subtitles.Files.Select(Path.GetFileName))}"
-                + (c.Subtitles.FallbackFont is { Length: > 0 } font ? $" font={font}" : ""));
+                + (c.Subtitles.FallbackFont is { Length: > 0 } font ? $" font={font}" : "")
+                + (c.Subtitles.BoxAspect is { Length: > 0 } box
+                    && !string.Equals(box, "source", StringComparison.OrdinalIgnoreCase)
+                    ? $" box={box}" : ""));
+        }
+        // v7.9.8.3: the download settings a run depends on. Printed only when they
+        // are not the default, like every other line here.
+        if (c.GhProxy is { Length: > 0 } front)
+        {
+            Line(L.T("report.ghproxy"),
+                string.Equals(front, FFmpeg.GitHubProxy.Off, StringComparison.OrdinalIgnoreCase)
+                    ? L.T("value.off") : front);
+        }
+        if (c.NnediWeights is { Length: > 0 } weights)
+        {
+            Line(L.T("report.nnedi"), L.T("report.nnedi.value",
+                Path.GetFileName(weights), Path.GetDirectoryName(weights) ?? ""));
         }
     }
 
