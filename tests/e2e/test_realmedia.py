@@ -11,6 +11,8 @@ ever decoded, and the second pass did not know rv10/rv20 at all, so
 
 from __future__ import annotations
 
+import shutil
+
 import harness
 from harness import run
 
@@ -88,7 +90,11 @@ def test_recompress_stages_and_only_then_promotes(exe, workdir):
     assert first.returncode == 0, first.stderr[-300:]
 
     blocked = out / "stage_web.mp4"
-    if blocked.exists():
+    # The scratch directory survives between runs on purpose, so a previous run
+    # left this very directory here; rmdir it instead of tripping over it.
+    if blocked.is_dir():
+        shutil.rmtree(blocked)
+    elif blocked.exists():
         blocked.unlink()
     blocked.mkdir()                      # File.Move cannot land on a directory
 
