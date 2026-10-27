@@ -181,6 +181,23 @@ public static class AudioCatalog
             MaxChannels = 8,
             Experimental = true,
         },
+        new()
+        {
+            // v7.9.8.1: RealAudio 1.0, the voice track of the RealMedia years.
+            // The encoder has exactly one mode -- 8 kHz, mono, s16 -- and no
+            // other rate can be honoured, so anything else is snapped rather
+            // than refused (the same rule as ac3 at 16 kHz, and for the same
+            // reason: a value it cannot honour is not a reason to lose the run).
+            //
+            // Its bitrate is not a knob either: FFmpeg accepts -b:a and throws
+            // it away (measured 2026-10-27 on N-128100: -b:a 32k produced the
+            // same 8 kbps stream as no -b:a at all). Hence the wide band -- a
+            // narrow one would reject perfectly valid runs and change nothing.
+            Name = "real_144",
+            SampleRates = [8000],
+            MaxChannels = 1,
+            Note = "RealAudio 1.0: 8 kHz mono only, fixed 14.4 kbps",
+        },
         // Opus always runs at 48 kHz internally; FFmpeg resamples, but only
         // these input rates are accepted by the encoder's own rate list.
         new()
@@ -227,7 +244,10 @@ public static class AudioCatalog
         ["mpeg"] = ["mp2", "mp3_mf", "libmp3lame", "ac3", "pcm_s16le"],
         ["asf"] = ["wmav2", "wmav1", "libmp3lame", "mp3_mf", "ac3", "pcm_s16le"],
         ["ogg"] = ["libvorbis", "libopus", "flac"],
-        ["rm"] = ["ac3", "aac"],
+        // v7.9.8.1: real_144 leads. Until this version the entry was just the
+        // muxer's own default (ac3), which is a codec no RealMedia player ever
+        // had -- a 2003 .rm that only VLC can open is not an archive of 2003.
+        ["rm"] = ["real_144", "ac3", "aac"],
         ["flv"] = ["aac", "libmp3lame", "mp3_mf"],
         ["mov"] = ["aac", "libmp3lame", "ac3", "pcm_s16le"],
         ["amv"] = ["adpcm_ima_amv", "adpcm_ima_wav"],

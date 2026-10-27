@@ -72,13 +72,37 @@ public static partial class FFmpegCapabilities
             if (verified.Contains(name)) continue;
             CaptureResult p = ProcessRunner.Run([ffmpeg, "-hide_banner", "-h", $"filter={name}"], 20);
             string text = p.Stdout + "\n" + p.Stderr;
-            bool unknown = Regex.IsMatch(
-                text,
-                $@"^Unknown filter ['""]{Regex.Escape(name)}['""]\.?\s*$",
-                RegexOptions.Multiline | RegexOptions.IgnoreCase);
-            if (!unknown) verified.Add(name);
+            if (!AnnouncesUnknownFilter(text, name)) verified.Add(name);
         }
         return verified;
+    }
+
+    /// <summary>
+    /// Does this output say the filter does not exist?
+    ///
+    /// v7.9.8.1: this used to build a regex per filter (<c>$@"^Unknown filter
+    /// ['""]{Regex.Escape(name)}['""]\.?$"</c>), which the runtime cannot cache
+    /// because the pattern differs every time, and which under NativeAOT runs in
+    /// the interpreter. The line says exactly one thing, so it is read as text.
+    /// </summary>
+    private static bool AnnouncesUnknownFilter(string text, string name)
+    {
+        const string Lead = "Unknown filter";
+        foreach (string raw in text.Split('\n'))
+        {
+            ReadOnlySpan<char> line = raw.AsSpan().Trim();
+            if (!line.StartsWith(Lead, StringComparison.OrdinalIgnoreCase)) continue;
+
+            ReadOnlySpan<char> rest = line[Lead.Length..].Trim();
+            if (rest.Length >= 2 && rest[^1] == '.') rest = rest[..^1].TrimEnd();
+            if (rest.Length < 3) continue;
+
+            char quote = rest[0];
+            if (quote is not ('\'' or '"')) continue;
+            if (rest[^1] != quote) continue;
+            if (rest[1..^1].Equals(name, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 
     public static HashSet<string> DetectScaleAlgorithms(string ffmpeg)
@@ -102,21 +126,31 @@ public static partial class FFmpegCapabilities
         var found = new HashSet<string>(StringComparer.Ordinal);
         foreach (string canonical in Constants.ScaleAlgorithmAliases.Values.Distinct())
         {
-            if (Regex.IsMatch(text, $@"^\s+{Regex.Escape(canonical)}\s+",
-                RegexOptions.IgnoreCase | RegexOptions.Multiline))
-            {
-                found.Add(canonical);
-            }
+            if (MentionsIndentedWord(text, canonical)) found.Add(canonical);
         }
-        if (found.Contains("gauss")
-            || Regex.IsMatch(text, @"^\s+gaussian\s+", RegexOptions.IgnoreCase | RegexOptions.Multiline))
-        {
-            found.Add("gauss");
-        }
+        if (found.Contains("gauss") || MentionsIndentedWord(text, "gaussian")) found.Add("gauss");
         if (found.Count == 0)
             throw new InvalidOperationException(
                 "Could not detect scaler algorithms from `ffmpeg -h filter=scale`");
         return found;
+    }
+
+    /// <summary>
+    /// Is <paramref name="word"/> listed at the start of a line (after indent)?
+    ///
+    /// v7.9.8.1: replaces a <c>Regex.IsMatch</c> whose pattern was built from the
+    /// name on every call -- uncacheable, interpreter-only under NativeAOT, and
+    /// doing by parser what a span comparison does directly.
+    /// </summary>
+    private static bool MentionsIndentedWord(string text, string word)
+    {
+        foreach (string raw in text.Split('\n'))
+        {
+            ReadOnlySpan<char> line = raw.AsSpan().TrimStart();
+            if (!line.StartsWith(word, StringComparison.OrdinalIgnoreCase)) continue;
+            if (line.Length == word.Length || char.IsWhiteSpace(line[word.Length])) return true;
+        }
+        return false;
     }
 
     /// <summary>Parses "30/1", "25", "30000/1001" style FFmpeg rate declarations.</summary>

@@ -46,7 +46,16 @@ public static class Recompress
     {
         if (!settings.Enabled) return (true, null);
 
-        (List<string> argv, string? error) = BuildArgv(ffmpeg, input, output, settings);
+        // v7.9.8.1: the same ".part" rule the live pass follows. This stage was
+        // the one write path v7.9.8 missed -- `ffmpeg -y` truncates the
+        // destination as it opens it, so a second pass that failed halfway used
+        // to destroy the "_web" file it was replacing, leaving a short file that
+        // looks finished. The live product survives a bad second pass; its
+        // predecessor did not.
+        var dst = new FileInfo(output);
+        FileInfo part = OutputFile.PartPath(dst);
+
+        (List<string> argv, string? error) = BuildArgv(ffmpeg, input, part.FullName, settings);
         if (error is not null) return (false, error);
 
         string? dir = Path.GetDirectoryName(output);
@@ -65,14 +74,33 @@ public static class Recompress
                                        or TimeoutException
                                        or IOException)
         {
+            OutputFile.Discard(part);
             return (false, exc.Message);
         }
 
         if (result.ExitCode != 0)
+        {
+            OutputFile.Discard(part);
             return (false, $"recompress failed (exit {result.ExitCode}): {Tail(result.Stderr)}");
+        }
 
-        if (!File.Exists(output) || new FileInfo(output).Length == 0)
+        part.Refresh();
+        if (!part.Exists || part.Length == 0)
+        {
+            OutputFile.Discard(part);
             return (false, "the recompressed file was not produced");
+        }
+
+        try
+        {
+            OutputFile.Promote(part, dst);
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                       or InvalidOperationException)
+        {
+            OutputFile.Discard(part);
+            return (false, $"could not put the recompressed file in place: {exc.Message}");
+        }
 
         return (true, null);
     }

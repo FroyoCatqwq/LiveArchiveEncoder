@@ -18,6 +18,72 @@
 
 ---
 
+## v7.9.8.1（2026-10-27）
+
+第四个补丁号，三件事：**RealMedia 能出当年那样的文件**、**第二遍也走 `.part`**，
+以及工具链升到 .NET 10.0.403。
+
+### 1. ⚠ `.rm` 的音频从 `ac3` 改成 `real_144`
+
+`rv10`/`rv20` 一直能写 `.rm`，但音频从来没指定过，于是落进 **rm muxer 自己的默认
+`ac3`**：文件确实能 mux，ffprobe 也读得出来，可是 2003 年的 RealPlayer 一个都解不了。
+"能装进容器"和"当年那个文件"是两件事，这个工具存在的理由正是后者。
+
+- `AudioCatalog` 新增 `real_144`（RealAudio 1.0）：**只支持 8 kHz、单声道、s16**，
+  其它采样率会被吸附（44100→8000）、双声道会被降到单声道，各打一行提示。
+  它有负一档码率：FFmpeg 收下 `-b:a` 但不理会（实测 `-b:a 32k` 与不写完全一样），
+  所以码率这一维是宽松的，写多少都不影响产物。
+- `--container`/扩展名推到 `rm` 时，默认音频链变成 `real_144 → ac3 → aac`，
+  前两个都在 `Constants.DefaultAudioByContainer` 和 `AudioCatalog.ContainerCodecs` 里。
+- 显式 `--audio-encoder ac3` 仍然照办——想做"技术上能装的怪文件"是用户的自由。
+- `--audio-mode separate` 可用了：音频先写成 `.ra`（同一个 rm muxer），再和视频
+  `-c copy` 合并。工具本来就会先用 3 帧样本探一次能不能合并、再解码验证，这次让
+  它第一次有东西可探。
+
+### 2. ⚠ 第二遍编码也走 `name.part.ext`
+
+v7.9.8 给三条直播写入路径都加了 `.part`，**漏了 `PostProcess/Recompress`**：
+第二遍是 `ffmpeg -y` 直接写 `clip_web.mp4`，所以一次失败的二次压缩会把上一版交付
+文件截断，硬盘上留一个"看起来完成了"的半截。现在它和直播层用同一条规则：写
+`clip_web.part.mp4`、校验非空、`File.Move` 换名，失败删掉 `.part`。
+
+### 3. 第二遍认识 RealVideo 了
+
+`RecompressCodecs` 的视频表里**没有** `rv10`/`rv20`，于是 `--recompress-codec rv20`
+在 `FindVideo` 拿到 null 之后一路回退到 `libx264 + mp4`——一个自称 RealVideo 的
+H.264 文件。现在两者是正式条目，容器只有 `rm`，默认音频 `real_144`；
+`--recompress-codec rv20` 会真的产出 rv20 + ra_144 的 `.rm`。
+
+顺带把"这两个编码器装不进别的容器"写成了明确约束：AVI 没有 rv10 的 fourcc
+（读回来是 `rawvideo`），Matroska 直接拒（`does not yet support muxing rv10`），
+而 `--parallel` 的分片恰恰用 mkv 暂存——所以 `.rm` 的 `--parallel` 会明确拒绝并
+退回单遍（`Format 'rm' cannot be joined safely`）。
+
+### 4. 死代码与工具链
+
+- `FrameBufferPool` 里那句 `Monitor.Pulse(_sync)` **没有等待者**（消费者是轮询
+  `TryTakeLatest` 的），它唯一的作用是让这把锁没法换成 `System.Threading.Lock`。
+  删掉之后门锁换成 `Lock`（`lock` 直接编译成 `Lock.EnterScope()`）。
+- `FFmpegCapabilities` 的两处 `Regex.IsMatch` 用了**运行时拼出来的模式**，既无法
+  缓存、又在 NativeAOT 下走解释器；改成按行读文本的 span 比较。
+- `Cui` 的 `^(\d+)x(\d+)$` 换成 `[GeneratedRegex]`，并用 `TryParse` 接住
+  "99999999999x10" 这种正则匹配得上、`int` 装不下的输入（以前抛 `OverflowException`，
+  提示是"值太大或太小"，跟输入框毫无关系）。
+- 三台机器的 .NET SDK 升到 **10.0.403**，并且删掉旧的 10.0.402：
+  `mise use -g dotnet@10.0.403` + `mise uninstall dotnet@10.0.402`。
+  产物由 10.0.403 重新编译。
+
+### 验证
+
+- 单测 554 例 → 553 过 / 1 跳过（需要字体文件）。新增 `RealMediaTests` 7 条：
+  默认音频是 real_144、8 kHz 单声道吸附、只属于 rm 容器、第二遍两个编码器存在、
+  容器配对、以及 AVI/Matroska 被拒的理由。
+- e2e 200 例两阶段全绿。新增 `tests/e2e/test_realmedia.py` 3 条：`.rm` 里是
+  rv10+ra_144 且能干净解码；`--recompress-codec rv20` 真出 rv20 而不是 H.264；
+  第二遍失败时旧交付文件原样保留、不留 `.part`。
+
+---
+
 ## v7.9.8（2026-10-27）
 
 第六个补丁版，没有新功能：**把整份代码按"会不会在用户机器上出事"过了一遍**，

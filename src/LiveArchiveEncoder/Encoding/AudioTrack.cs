@@ -50,6 +50,10 @@ public static class AudioTrack
         ["libspeex"] = "ogg",
         ["flac"] = "flac",
         ["roq_dpcm"] = "roq",
+        // v7.9.8.1: real_144 is a RealMedia codec with no other home; the rm
+        // muxer writes it as a bare .ra (verified: `-c:a real_144 -f rm x.ra`
+        // probes back as ra_144, 8 kHz mono).
+        ["real_144"] = "rm",
         ["adpcm_ima_amv"] = "amv",
         ["adpcm_ima_wav"] = "wav",
         ["adpcm_ms"] = "wav",

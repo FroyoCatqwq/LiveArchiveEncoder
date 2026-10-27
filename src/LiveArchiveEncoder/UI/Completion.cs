@@ -22,7 +22,8 @@ public static class Completion
     [
         ("--start-time", []), ("--start", []), ("--end-time", []), ("--end", []),
         ("--encoder", ["@ENCODERS"]),
-        ("--audio-encoder", ["libmp3lame", "aac", "ac3", "mp2", "wmav2", "adpcm_ima_amv", "roq_dpcm"]),
+        ("--audio-encoder", ["libmp3lame", "aac", "ac3", "mp2", "wmav2", "real_144",
+                             "adpcm_ima_amv", "roq_dpcm"]),
         ("--limit", []), ("--recover", []), ("--window", []), ("--fps", []),
         ("--fps-levels", ["13,8,5,3", "25,15,10,5"]),
         ("--qv", []), ("--threads", []), ("--buffer-frames", []),

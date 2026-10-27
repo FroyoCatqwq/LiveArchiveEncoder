@@ -252,7 +252,10 @@ public static class Constants
             // FFmpeg and need -strict, which this tool never passes, so the
             // lib-prefixed pair is what the preference list offers.
             ["ogg"] = ["libvorbis", "libopus"],
-            ["rm"] = ["ac3", "aac"],
+            // v7.9.8.1: RealMedia gets its own audio codec first. ac3 muxes, but
+            // no player of the period ever decoded it, so a .rm carrying it is a
+            // file from nowhere.
+            ["rm"] = ["real_144", "ac3", "aac"],
             ["mp4"] = ["aac", "libopus", "libmp3lame"],
             ["flv"] = ["aac", "libmp3lame", "mp3_mf"],
             ["mov"] = ["aac", "libmp3lame"],

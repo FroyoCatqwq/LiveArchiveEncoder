@@ -82,6 +82,18 @@ public static class RecompressCodecs
         new("mjpeg", ["avi", "mov", "mkv"], "-q:v", 4, ["-pix_fmt", "yuvj420p"]),
         new("wmv2", ["asf", "avi"], "-q:v", 6, []),
         new("h263", ["avi", "flv"], "-q:v", 6, ["-pix_fmt", "yuv420p"]),
+        // v7.9.8.1: the RealMedia pair. rv10 (RealVideo 1.0) is the H.263-era
+        // codec of the 1998-2000 sites, rv20 (2.0) the one that carried the
+        // 2001-2005 portals -- the codec those .rm files people still have on a
+        // shelf actually contain.
+        //
+        // Only the rm muxer can write them. AVI and Matroska cannot: AVI stores
+        // no fourcc for them (measured 2026-10-27 -- the stream comes back as
+        // rawvideo) and the Matroska muxer refuses outright ("does not yet
+        // support muxing rv10"), which is also why --parallel must stay off for
+        // these two (its shards are staged in Matroska).
+        new("rv10", ["rm"], "-q:v", 6, ["-pix_fmt", "yuv420p"]),
+        new("rv20", ["rm"], "-q:v", 6, ["-pix_fmt", "yuv420p"]),
     ];
 
     public static readonly IReadOnlyList<SecondPassAudioCodec> Audio =
@@ -99,6 +111,10 @@ public static class RecompressCodecs
         // mono into .wmv probes back as codec_name wmv2 / wmav2 in an asf
         // container, and AVI takes the same pair.
         new("wmav2", ["asf", "avi"], 32, []),
+        // v7.9.8.1: RealAudio 1.0. 16 kbps is the number the codec is named
+        // after (14.4); the encoder ignores -b:a and writes 8 kbps either way,
+        // so this value only decides what the command line says.
+        new("real_144", ["rm"], 16, []),
     ];
 
     /// <summary>Audio encoders by name, plus the "leave the track alone" spelling.</summary>
@@ -132,6 +148,9 @@ public static class RecompressCodecs
         // WMV wants its own audio: mp3-in-ASF plays, but a 2003 .wmv whose audio
         // codec is mp3 is not what the site served.
         "wmv2" => "wmav2",
+        // RealMedia takes its own voice codec: a .rm with AAC in it plays in
+        // VLC and nowhere near the period.
+        "rv10" or "rv20" => "real_144",
         "libvpx-vp9" or "libvpx" or "libaom-av1" or "libsvtav1" => "libopus",
         _ => "aac",
     };

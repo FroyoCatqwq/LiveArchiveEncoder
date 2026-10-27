@@ -22,10 +22,10 @@ public sealed class FrameBufferPool
     private readonly int _readyCapacity;
     private int _readyHead;
     private int _readyCount;
-    // object, not System.Threading.Lock: this gate is used with Monitor.Pulse to
-    // wake the capture thread, and the Lock type has no Pulse -- passing one to
-    // Monitor.Pulse would box it and signal a monitor nobody holds (CS9216).
-    private readonly object _sync = new();
+    // System.Threading.Lock: this is the one gate taken on every frame (rent,
+    // publish, take), and with the stray Monitor.Pulse gone (see Publish) there
+    // is nothing left that needs a monitor.
+    private readonly Lock _sync = new();
 
     public int FrameSize { get; }
 
@@ -79,7 +79,12 @@ public sealed class FrameBufferPool
             _readyIndex[tail] = index;
             _readySeq[tail] = sequence;
             _readyCount++;
-            Monitor.Pulse(_sync);
+            // v7.9.8.1: this used to be Monitor.Pulse(_sync). Nothing in the
+            // process ever waited on this pool -- the consumer polls
+            // TryTakeLatest from the pacing loop -- so the pulse woke nobody and
+            // only made the gate un-convertible to System.Threading.Lock (which
+            // has no Pulse, and would be boxed by Monitor.Pulse into signalling
+            // a monitor nobody holds, CS9216). Removed, and the gate is a Lock.
         }
         if (evicted >= 0) Release(evicted);
     }

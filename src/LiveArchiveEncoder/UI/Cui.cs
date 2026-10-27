@@ -9,8 +9,18 @@ using LiveArchiveEncoder.PostProcess;
 namespace LiveArchiveEncoder.UI;
 
 /// <summary>Interactive menu shell, ported from run_cui / choose_encoder / edit_settings.</summary>
-public static class Cui
+public static partial class Cui
 {
+    /// <summary>
+    /// "WIDTHxHEIGHT" exactly, the form every resolution prompt accepts.
+    ///
+    /// v7.9.8.1: source-generated instead of <c>Regex.Match(text, ...)</c> at the
+    /// call site -- the static helpers are cached per pattern string and run in
+    /// the interpreter under NativeAOT, which is the build most users run.
+    /// </summary>
+    [GeneratedRegex(@"^(\d+)x(\d+)$")]
+    private static partial Regex ResolutionPattern();
+
     public static int Run(
         string ffmpeg, string ffprobe, bool btbn,
         FFmpeg.Capabilities caps,
@@ -1299,10 +1309,10 @@ public static class Cui
                         string sizeRaw = ReadRaw(L.T("param.prompt.size", c.Width, c.Height)).ToLowerInvariant();
                         if (sizeRaw.Length > 0)
                         {
-                            Match m = Regex.Match(sizeRaw, @"^(\d+)x(\d+)$");
-                            if (!m.Success) throw new FormatException(L.T("param.sizefmt"));
-                            c.Width = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
-                            c.Height = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+                            if (!TryReadResolution(sizeRaw, out int width, out int height))
+                                throw new FormatException(L.T("param.sizefmt"));
+                            c.Width = width;
+                            c.Height = height;
                         }
                         break;
                     case "10":
@@ -1627,14 +1637,28 @@ public static class Cui
             return;
         }
 
-        Match m = Regex.Match(raw, @"^(\d+)x(\d+)$");
-        if (!m.Success)
+        if (!TryReadResolution(raw, out int w, out int h))
         {
             Console.WriteLine(L.T("param.sizefmt"));
             return;
         }
-        ApplySize(c, int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture),
-            int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture));
+        ApplySize(c, w, h);
+    }
+
+    /// <summary>
+    /// "1280x720" to a pair of numbers. Rejects what the pattern accepts but an
+    /// <see cref="int"/> cannot hold: <c>^(\d+)x(\d+)$</c> happily matches
+    /// "99999999999x10", and int.Parse then throws an OverflowException whose
+    /// message ("Value was either too large...") says nothing about the field.
+    /// </summary>
+    private static bool TryReadResolution(string raw, out int width, out int height)
+    {
+        width = 0;
+        height = 0;
+        Match m = ResolutionPattern().Match(raw);
+        return m.Success
+            && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out width)
+            && int.TryParse(m.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out height);
     }
 
     private static void ApplySize(Config c, int width, int height)
