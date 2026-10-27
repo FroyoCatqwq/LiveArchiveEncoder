@@ -43,6 +43,30 @@ CASES = [
 ]
 
 
+# Where the C# build deliberately differs from the frozen v6.3.3 reference,
+# field by field, with the reason. Anything not listed must match exactly: the
+# matrix exists to make a silent difference visible, not to be relaxed.
+DIVERGENCES = {
+    # v7.9.8.1: the reference never named an audio codec for RealMedia, so the
+    # rm muxer's own default (ac3) ended up in a .rm that no player of 2003
+    # could decode. The C# side writes real_144 -- which is the entire point of
+    # reproducing the era. Container, codec and geometry still match.
+    "rv20_default": {"audio": ("ac3", "ra_144")},
+    "rv20_timerange": {"audio": ("ac3", "ra_144")},
+}
+
+
+def _excused(case: str, diff: str) -> bool:
+    """True when this diff is one the case's entry declares."""
+    field, _, rest = diff.partition(": ")
+    allowed = DIVERGENCES.get(case, {}).get(field)
+    if allowed is None:
+        return False
+    py_v, _, cs_v = rest.partition(" cs=")
+    py_v = py_v.removeprefix("py=")
+    return (py_v, cs_v) == allowed
+
+
 @pytest.mark.parametrize(("name", "ext", "extra"), CASES, ids=[c[0] for c in CASES])
 def test_matches_the_baseline(exe, src, py_baseline, workdir, name, ext, extra):
     work = workdir("matrix")
@@ -72,4 +96,10 @@ def test_matches_the_baseline(exe, src, py_baseline, workdir, name, ext, extra):
     diffs, notes = harness.structural_diffs(py_media, cs_media)
     for note in notes:
         print(f"note: {note}")
+
+    excused = [d for d in diffs if _excused(name, d)]
+    for line in excused:
+        print(f"note: documented divergence: {line}")
+    diffs = [d for d in diffs if d not in excused]
+
     assert not diffs, "structural diff:\n  " + "\n  ".join(diffs)
