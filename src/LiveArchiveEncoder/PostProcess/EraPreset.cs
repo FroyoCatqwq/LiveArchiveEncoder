@@ -93,6 +93,79 @@ public sealed class EraPreset
     /// <summary>Bitrate ceiling; the adaptive ladder starts dropping fps above it.</summary>
     public double? LimitKbps { get; init; }
 
+    /// <summary>
+    /// The live pass's quality in the MPEG quantiser scale (2..31), for the
+    /// legacy codecs a row names: rv10/20, wmv2, flv, mpeg4.
+    ///
+    /// <para>v7.9.8.2. Until this field existed a preset never touched the
+    /// quality at all, so the live pass ran with whatever the previous encoder
+    /// left in the settings -- and when the row (or the user) picked H.264, that
+    /// leftover MPEG number became a CRF: <c>q:v 9</c> is 375 kbps at
+    /// 352x264@15, <c>crf 9</c> is 935 kbps for the same frame, so the 2007 row
+    /// (320 kbps) saturated its ladder on the first second and reported a 15 fps
+    /// capture that actually ran at the last rung.</para>
+    ///
+    /// <para>The values are read off the era's own budget, not off a formula:
+    /// each one is the coarsest quantiser whose encode still lands inside
+    /// <see cref="LimitKbps"/> on the reference clip (see
+    /// <c>docs/era-presets.md</c> for the measurement column). q:v moves in
+    /// whole steps and the picture barely changes between adjacent ones, so
+    /// being one step generous costs little; being four steps generous is what
+    /// the ladder notices.</para>
+    /// </summary>
+    public int LiveQv { get; init; } = 10;
+
+    /// <summary>
+    /// The same picture on x264's scale, for the rows whose period's codec is
+    /// H.264 and for any row the user re-encodes with libx264.
+    ///
+    /// <para>Not <c>LiveQv</c> converted arithmetically: an equal-<em>bitrate</em>
+    /// pairing was measured for every geometry in this table, and the round
+    /// numbers that came back (crf 28 for 45 kbps, 22 for 300-320 kbps, 19 for
+    /// 900 kbps, 18 for 2.5 Mbps) are what is stored here -- each one lands at
+    /// 0.76..1.04x of the row's ceiling on the reference clip, where a converted
+    /// number was off by up to 0.4x either way.</para>
+    /// </summary>
+    public int LiveCrf { get; init; } = 21;
+
+    /// <summary>
+    /// Seconds the ladder averages the output bitrate over, v7.9.8.2.
+    ///
+    /// <para>The ladder itself is a measurement, so its window is part of what
+    /// the era means: RealServer and Windows Media Services adapted a stream
+    /// only after several seconds of sustained trouble, while a 2010s CDN
+    /// stepped within one or two. Three seconds on the pre-2006 rows, the tool's
+    /// own two from 2006.</para>
+    /// </summary>
+    public double WindowSeconds { get; init; } = 2.0;
+
+    /// <summary>
+    /// Decoded frames the encoder may queue, v7.9.8.2. A 160x120 capture in
+    /// 1998 had no reason to hold eight frames of anything; a 2014 720p row
+    /// does, because the frames are 20x the size and the encoder is the slow
+    /// half of the pair.
+    /// </summary>
+    public int BufferFrames { get; init; } = 6;
+
+    /// <summary>
+    /// The deinterlacer of the period, v7.9.8.2. <c>yadif</c> arrived in 2006
+    /// (MPlayer, then FFmpeg); the rows before it therefore say <c>off</c> --
+    /// a 2003 WMV capture really did carry its field structure into the file,
+    /// and that is what the artefact is supposed to look like.
+    /// </summary>
+    public string Deinterlace { get; init; } = "off";
+
+    public string DeintMode { get; init; } = "send_frame";
+    public string DeintParity { get; init; } = "auto";
+
+    /// <summary>
+    /// Only act on frames the source marks as interlaced (v7.9.8.2). True for
+    /// every era row: a period preset says how a *broadcast* of that year was
+    /// processed, and running yadif over a progressive file would soften it for
+    /// no reason -- the flag is what makes the two cases distinguishable.
+    /// </summary>
+    public bool DeintMarkedOnly { get; init; } = true;
+
     /// <summary>Scaler kernel, deliberately era-appropriate.</summary>
     public string? ScaleAlgo { get; init; }
 
@@ -184,13 +257,56 @@ public sealed class EraPreset
             c.Limit = limit;
             c.Recover = limit * 0.75;
         }
+        c.Window = WindowSeconds;
+        c.BufferFrames = BufferFrames;
+        if (Deinterlace is { Length: > 0 } deint)
+        {
+            c.Deinterlace = deint;
+            c.DeintMode = DeintMode;
+            c.DeintParity = DeintParity;
+            c.DeintMarkedOnly = DeintMarkedOnly;
+        }
         if (ScaleAlgo is { Length: > 0 } scale) c.ScaleAlgo = scale;
         if (AudioKbps is { } kbps) c.AudioKbps = kbps;
         if (AudioChannels is { } channels) c.AudioChannels = channels;
         c.AudioRate = AudioRate;
         if (AudioEncoder is not null) c.AudioEncoder = AudioEncoder;
+        // v7.9.8.2: the quality belongs to the encoder, so it is written here
+        // rather than in the settings it inherits -- and it is written for
+        // whichever encoder is in effect, not for the one this row names. The
+        // caller applies the encoder first; a preset with no live layer (a bare
+        // site row) leaves the user's number alone.
+        c.Qv = QualityFor(c.Encoder?.Name);
         return true;
     }
+
+    /// <summary>
+    /// This row's live quality, in the scale <paramref name="encoderName"/>
+    /// reads. OpenH264 gets the CRF number: it cannot use it, but it is the same
+    /// picture the CRF-capable H.264 encoder of that row would produce, and the
+    /// ceiling is what actually pins the bitrate.
+    /// </summary>
+    public int QualityFor(string? encoderName) =>
+        EncoderMath.ScaleOf(encoderName) == EncoderMath.QualityScale.Qv ? LiveQv : LiveCrf;
+
+    /// <summary>
+    /// The quality pair a ceiling implies, for a row that does not state one --
+    /// a custom preset written before v7.9.8.2, which has no live quality in the
+    /// file. Interpolated from the built-in table, so a hand-written 500 kbps
+    /// row lands where the built-in rows of that rate land.
+    /// </summary>
+    public static (int Qv, int Crf) QualityBand(double? kbps) => kbps switch
+    {
+        null => (11, 22),
+        <= 60 => (12, 28),
+        <= 130 => (11, 23),
+        <= 450 => (11, 22),
+        <= 850 => (10, 21),
+        <= 1000 => (9, 19),
+        <= 1600 => (9, 23),
+        <= 2000 => (9, 21),
+        _ => (8, 18),
+    };
 
     /// <summary>
     /// Point the live pass at this preset's encoder, if it names one. The
@@ -345,89 +461,89 @@ public static class EraPresets
     private static readonly IReadOnlyList<EraPreset> BuiltIn =
     [
         // ---- the web in general, before "a video site" was a business ----
-        GenericRow(1998, "rv20", 160, 120, 10, 45, 16, 16000, 1,
+        GenericRow(1998, "rv20", 160, 120, 10, 45, 16, 16000, 1, 12, 28,
             "era.generic.1998", ladder: [10, 8, 5, 3], crf: 34),
-        GenericRow(2003, "rv20", 320, 240, 15, 225, 24, 22050, 1,
+        GenericRow(2003, "rv20", 320, 240, 15, 225, 24, 22050, 1, 11, 22,
             "era.generic.2003", ladder: [15, 12, 10, 8, 5], crf: 31),
-        GenericRow(2007, "flv", 352, 264, 15, 300, 32, 22050, 1,
+        GenericRow(2007, "flv", 352, 264, 15, 300, 32, 22050, 1, 11, 22,
             "era.generic.2007", ladder: [15, 12, 10, 8, 5], crf: 28),
-        GenericRow(2010, "libx264", 640, 480, 25, 900, 64, 44100, 1,
+        GenericRow(2010, "libx264", 640, 480, 25, 900, 64, 44100, 1, 9, 19,
             "era.generic.2010", ladder: [25, 20, 15, 10], crf: 25, profile: "main"),
-        GenericRow(2014, "libx264", 1280, 720, 30, 2500, 96, 44100, 2,
+        GenericRow(2014, "libx264", 1280, 720, 30, 2500, 96, 44100, 2, 8, 18,
             "era.generic.2014", ladder: [30, 25, 20, 15], crf: 23, profile: "high"),
 
         // ---- CCTV: Windows Media, then FLV, then its own CDN ----
         Site("cctv", 2003, 320, 240, 15, 250, 32, 22050, 1, "wmv2", "wmav2", "asf",
-            "era.cctv.2003", liveEncoder: "wmv2"),
+            11, 22, "era.cctv.2003", liveEncoder: "wmv2"),
         Site("cctv", 2006, 384, 288, 25, 350, 48, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.cctv.2006"),
+            11, 24, "era.cctv.2006"),
         Site("cctv", 2011, 640, 360, 25, 700, 96, 44100, 2, "libx264", "aac", "mp4",
-            "era.cctv.2011", h264: "libopenh264"),
+            10, 21, "era.cctv.2011", h264: "libopenh264"),
 
         // ---- Sina: portal video, then podcast, then H.264 ----
         Site("sina", 2003, 320, 240, 12, 200, 24, 22050, 1, "wmv2", "wmav2", "asf",
-            "era.sina.2003", liveEncoder: "wmv2"),
+            11, 22, "era.sina.2003", liveEncoder: "wmv2"),
         Site("sina", 2006, 320, 240, 12, 200, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.sina.2006"),
+            11, 22, "era.sina.2006"),
         Site("sina", 2010, 640, 360, 25, 600, 96, 44100, 2, "libx264", "aac", "mp4",
-            "era.sina.2010", h264: "libopenh264"),
+            10, 22, "era.sina.2010", h264: "libopenh264"),
 
         // ---- Sohu ----
         Site("sohu", 2003, 320, 240, 15, 220, 32, 22050, 1, "wmv2", "wmav2", "asf",
-            "era.sohu.2003", liveEncoder: "wmv2"),
+            11, 22, "era.sohu.2003", liveEncoder: "wmv2"),
         Site("sohu", 2007, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.sohu.2007"),
+            11, 22, "era.sohu.2007"),
         Site("sohu", 2012, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4",
-            "era.sohu.2012", h264: "libopenh264"),
+            10, 20, "era.sohu.2012", h264: "libopenh264"),
 
         // ---- NetEase: the small-window player of 2003, then a late FLV site ----
         Site("netease", 2003, 176, 144, 12, 120, 24, 22050, 1, "wmv2", "wmav2", "asf",
-            "era.netease.2003", liveEncoder: "wmv2"),
+            11, 22, "era.netease.2003", liveEncoder: "wmv2"),
         Site("netease", 2008, 320, 240, 15, 240, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.netease.2008"),
+            11, 22, "era.netease.2008"),
 
         // ---- Tencent: the player that pushed 25 fps ----
         Site("qq", 2006, 320, 240, 25, 260, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.qq.2006"),
+            11, 23, "era.qq.2006"),
         Site("qq", 2010, 640, 360, 25, 700, 96, 44100, 2, "libx264", "aac", "mp4",
-            "era.qq.2010", h264: "libopenh264"),
+            10, 21, "era.qq.2010", h264: "libopenh264"),
 
         // ---- Tudou / Youku / Ku6 / 56 / AcFun: the FLV years ----
         Site("tudou", 2006, 352, 264, 12, 295, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.tudou.2006"),
+            11, 22, "era.tudou.2006"),
         Site("tudou", 2009, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.tudou.2009"),
+            11, 22, "era.tudou.2009"),
         Site("youku", 2007, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.youku.2007"),
+            11, 22, "era.youku.2007"),
         Site("youku", 2011, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4",
-            "era.youku.2011", h264: "libopenh264"),
+            10, 20, "era.youku.2011", h264: "libopenh264"),
         Site("ku6", 2007, 320, 240, 15, 240, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.ku6.2007"),
+            11, 22, "era.ku6.2007"),
         Site("56", 2007, 320, 240, 15, 220, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.56.2007"),
+            11, 22, "era.56.2007"),
         Site("acfun", 2009, 320, 240, 15, 260, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.acfun.2009"),
+            11, 23, "era.acfun.2009"),
 
         // ---- Bilibili: FLV at 4:3, then 360p H.264, then 720p ----
         Site("bilibili", 2010, 384, 288, 24, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.bilibili.2010"),
+            11, 24, "era.bilibili.2010"),
         Site("bilibili", 2012, 640, 360, 30, 700, 96, 44100, 2, "libx264", "aac", "mp4",
-            "era.bilibili.2012", h264: "libopenh264"),
+            10, 21, "era.bilibili.2012", h264: "libopenh264"),
         Site("bilibili", 2014, 1280, 720, 30, 1800, 128, 44100, 2, "libx264", "aac", "mp4",
-            "era.bilibili.2014", h264: "libopenh264"),
+            9, 21, "era.bilibili.2014", h264: "libopenh264"),
 
         // ---- iQiyi ----
         Site("iqiyi", 2011, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4",
-            "era.iqiyi.2011", h264: "libopenh264"),
+            10, 20, "era.iqiyi.2011", h264: "libopenh264"),
 
         // ---- YouTube ----
         Site("youtube", 2007, 320, 240, 15, 200, 64, 22050, 1, "flv", "libmp3lame", "flv",
-            "era.youtube.2007"),
+            11, 22, "era.youtube.2007"),
         Site("youtube", 2011, 640, 360, 30, 700, 96, 44100, 2, "libx264", "aac", "mp4",
-            "era.youtube.2011", h264: "libopenh264"),
+            10, 21, "era.youtube.2011", h264: "libopenh264"),
         // The one period-correct case where the site's codec is not H.264 at all.
         Site("youtube", 2015, 1280, 720, 30, 1500, 96, 48000, 2, "libvpx-vp9", "libopus", "webm",
-            "era.youtube.2015"),
+            9, 23, "era.youtube.2015"),
     ];
 
     /// <summary>
@@ -478,11 +594,40 @@ public static class EraPresets
     private static readonly List<EraPreset> CustomRows = [];
     private static readonly Lock Gate = new();
 
-    /// <summary>A site row: the site's ladder and the capture settings of that year.</summary>
+    /// <summary>
+    /// The capture pipeline of a year: how long the ladder averages, how deep
+    /// the frame queue is, and which deinterlacer existed (v7.9.8.2).
+    ///
+    /// <para>Three thresholds, each with a reason rather than a taste:</para>
+    /// <list type="bullet">
+    /// <item><description>2006 -- <c>yadif</c> ships with MPlayer in 2006 and
+    /// enters FFmpeg the same year. Every row before it says <c>off</c>,
+    /// because there was nothing to call.</description></item>
+    /// <item><description>2006 -- streaming servers of the modem and WMV
+    /// years adapted after several seconds of sustained trouble; a FLV portal
+    /// stepped inside its own two-second buffer.</description></item>
+    /// <item><description>2003 / 2009 -- the frame queue grows with the frame:
+    /// four at 320x240, six at 384x288, eight once the rows reach 640x360 and
+    /// beyond.</description></item>
+    /// </list>
+    /// </summary>
+    public static (double Window, int Buffer, string Deint) LivePipeline(int year) =>
+        (year < 2006 ? 3.0 : 2.0,
+         year <= 2003 ? 4 : year <= 2009 ? 6 : 8,
+         year >= 2006 ? "yadif" : "off");
+
+    /// <summary>
+    /// A site row: the site's ladder and the capture settings of that year.
+    ///
+    /// <para><paramref name="qv"/> and <paramref name="crf"/> are the live
+    /// pass's quality in the two scales it can be asked for (v7.9.8.2); see
+    /// <see cref="EraPreset.LiveQv"/>.</para>
+    /// </summary>
     private static EraPreset Site(
         string site, int year, int width, int height, double fps,
         int videoKbps, int audioKbps, int audioRate, int channels,
-        string videoCodec, string audioCodec, string container, string noteKey,
+        string videoCodec, string audioCodec, string container,
+        int qv, int crf, string noteKey,
         string? liveEncoder = null, string? h264 = null) => new()
     {
         Id = $"{site}/{year}",
@@ -500,6 +645,8 @@ public static class EraPresets
         Fps = fps,
         FpsLevels = SiteLadder(fps),
         LimitKbps = videoKbps,
+        LiveQv = qv,
+        LiveCrf = crf,
         ScaleAlgo = year < 2010 ? "bicubic" : "lanczos",
         AudioEncoder = videoCodec switch
         {
@@ -524,6 +671,9 @@ public static class EraPresets
         RecompressContainer = container,
         H264Impl = h264,
         NoteKey = noteKey,
+        WindowSeconds = LivePipeline(year).Window,
+        BufferFrames = LivePipeline(year).Buffer,
+        Deinterlace = LivePipeline(year).Deint,
     };
 
     /// <summary>
@@ -534,7 +684,8 @@ public static class EraPresets
     private static EraPreset GenericRow(
         int year, string liveEncoder, int width, int height, double fps,
         int videoKbps, int audioKbps, int audioRate, int channels,
-        string noteKey, double[] ladder, int crf, string profile = "baseline") => new()
+        int qv, int liveCrf, string noteKey,
+        double[] ladder, int crf, string profile = "baseline") => new()
     {
         Id = $"{Generic}/{year}",
         Site = Generic,
@@ -550,6 +701,8 @@ public static class EraPresets
         Fps = fps,
         FpsLevels = ladder,
         LimitKbps = videoKbps,
+        LiveQv = qv,
+        LiveCrf = liveCrf,
         ScaleAlgo = year < 2004 ? "neighbor" : year < 2010 ? "bicubic" : "lanczos",
         AudioEncoder = liveEncoder is "flv" ? "libmp3lame" : null,
         AudioKbps = audioKbps,
@@ -569,6 +722,9 @@ public static class EraPresets
         RecompressContainer = "mp4",
         H264Impl = year >= 2010 ? "libopenh264" : null,
         NoteKey = noteKey,
+        WindowSeconds = LivePipeline(year).Window,
+        BufferFrames = LivePipeline(year).Buffer,
+        Deinterlace = LivePipeline(year).Deint,
     };
 
     /// <summary>

@@ -1211,7 +1211,16 @@ public static partial class Cui
         while (true)
         {
             string enc = c.Encoder?.Name ?? "(none)";
-            string qualityLabel = enc == "libx264" ? "CRF" : "q:v";
+            // v7.9.8.2: name the scale the number is actually in, and say so out
+            // loud when the encoder has no quality knob at all -- a menu row
+            // that reads "q:v 9" under libopenh264 is describing a setting that
+            // never reaches FFmpeg.
+            string qualityLabel = EncoderMath.ScaleOf(enc) switch
+            {
+                EncoderMath.QualityScale.Crf => "CRF",
+                EncoderMath.QualityScale.Bitrate => L.T("param.quality.idle"),
+                _ => "q:v",
+            };
             Console.WriteLine($"\n{L.T("param.heading")}");
             Row(1, L.T("param.limit"), $"{c.Limit:G6}");
             Row(2, L.T("param.recover"), $"{c.Recover:G6}");
@@ -2154,6 +2163,15 @@ public static partial class Cui
             c.Encoder = swapped;
             c.Container = null;
         }
+
+        // v7.9.8.2: the quality belongs to the encoder, so it is written last --
+        // after the row's own encoder and after the --h264 swap above, both of
+        // which can change which scale the number has to be in. This is the bug
+        // this version exists for: applying a preset used to leave whatever the
+        // previous encoder had put there, so an MPEG q:v 9 became crf 9 the
+        // moment the row (or the user) chose libx264 -- 935 kbps into a 320 kbps
+        // stream, and the frame-rate ladder fell to its last rung immediately.
+        if (live && c.Encoder is not null) c.Qv = preset.QualityFor(c.Encoder.Name);
         if (encoder && c.Encoder is not null)
         {
             List<string>? usable = AudioCatalog.Compatible(
@@ -2337,6 +2355,7 @@ public static partial class Cui
         string? encoderName = null;
         int? liveWidth = null, liveHeight = null;
         double? liveFps = null, limit = null;
+        int? liveQuality = null;
         double[]? liveLevels = null;
         if (era)
         {
@@ -2370,7 +2389,27 @@ public static partial class Cui
             liveLevels = ParseLevels(ladderRaw, liveFps ?? 15);
             limit = ReadDouble(L.T("era.custom.limit", $"{existing?.LimitKbps ?? 300:G6}"),
                 existing?.LimitKbps ?? 300);
+
+            // v7.9.8.2: one question, in the scale the row's own encoder reads.
+            // Both numbers are stored, so flipping --h264 later does not turn a
+            // quantiser into a CRF (which is what this version is about).
+            EncoderMath.QualityScale scale = EncoderMath.ScaleOf(encoderName);
+            if (scale == EncoderMath.QualityScale.Bitrate) scale = EncoderMath.QualityScale.Crf;
+            (int Min, int Max) range = EncoderMath.QualityRange(scale);
+            (int bandQv, int bandCrf) = PostProcess.EraPreset.QualityBand(limit);
+            int defaultQuality = Math.Clamp(
+                scale == EncoderMath.QualityScale.Crf ? existing?.LiveCrf ?? bandCrf : existing?.LiveQv ?? bandQv,
+                range.Min, range.Max);
+            string qualityLabel = scale == EncoderMath.QualityScale.Crf ? "CRF" : "q:v";
+            liveQuality = Math.Clamp(
+                ReadInt(L.T("era.custom.livequality", qualityLabel, defaultQuality), defaultQuality),
+                range.Min, range.Max);
         }
+
+        // v7.9.8.2: the two numbers a live layer keeps. Asked once, stored twice.
+        (int Qv, int Crf) livePair = liveQuality is { } answered
+            ? EncoderMath.QualityPair(encoderName, answered)
+            : PostProcess.EraPreset.QualityBand(limit);
 
         var preset = new PostProcess.EraPreset
         {
@@ -2385,6 +2424,16 @@ public static partial class Cui
             Fps = liveFps,
             FpsLevels = liveLevels,
             LimitKbps = limit,
+            LiveQv = livePair.Qv,
+            LiveCrf = livePair.Crf,
+            // v7.9.8.2: a row written by hand gets the pipeline of the year it
+            // claims, and keeps whatever an earlier edit of it stored.
+            WindowSeconds = existing?.WindowSeconds
+                ?? PostProcess.EraPresets.LivePipeline(from).Window,
+            BufferFrames = existing?.BufferFrames
+                ?? PostProcess.EraPresets.LivePipeline(from).Buffer,
+            Deinterlace = existing?.Deinterlace
+                ?? PostProcess.EraPresets.LivePipeline(from).Deint,
             ScaleAlgo = era ? existing?.ScaleAlgo ?? "bicubic" : null,
             AudioEncoder = era ? existing?.AudioEncoder : null,
             AudioKbps = era ? existing?.AudioKbps : null,

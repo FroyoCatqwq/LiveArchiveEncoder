@@ -225,6 +225,24 @@ public sealed class CustomEraConfig
     public List<double>? FpsLevels { get; set; }
 
     public double? LimitKbps { get; set; }
+
+    /// <summary>
+    /// v7.9.8.2: the live pass's quality, in both scales the encoders read.
+    /// Absent from older files, which is why the load path falls back to the
+    /// band the row's own ceiling implies rather than to zero.
+    /// </summary>
+    public int? LiveQv { get; set; }
+    public int? LiveCrf { get; set; }
+
+    /// <summary>
+    /// v7.9.8.2: the rest of the capture pipeline -- how long the ladder
+    /// averages, how deep the frame queue is, and which deinterlacer existed.
+    /// Absent from older files, where the year's own row supplied them.
+    /// </summary>
+    public double? WindowSeconds { get; set; }
+    public int? BufferFrames { get; set; }
+    public string? Deinterlace { get; set; }
+
     public string? ScaleAlgo { get; set; }
     public string? AudioEncoder { get; set; }
     public int? AudioKbps { get; set; }
@@ -658,6 +676,11 @@ public static class EraConfigMap
         Fps = p.Fps,
         FpsLevels = p.FpsLevels is { Length: > 0 } levels ? [.. levels] : null,
         LimitKbps = p.LimitKbps,
+        LiveQv = p.LiveQv,
+        LiveCrf = p.LiveCrf,
+        WindowSeconds = p.WindowSeconds,
+        BufferFrames = p.BufferFrames,
+        Deinterlace = p.Deinterlace,
         ScaleAlgo = p.ScaleAlgo,
         AudioEncoder = p.AudioEncoder,
         AudioKbps = p.AudioKbps,
@@ -726,6 +749,21 @@ public static class EraConfigMap
             Fps = Positive(c.Fps, 0),
             FpsLevels = CleanLevels(c.FpsLevels),
             LimitKbps = liveLimit,
+            // v7.9.8.2: a file written before the live quality existed states
+            // no number; the band its own ceiling implies is the honest
+            // replacement, and it is written back on the next edit.
+            LiveQv = Math.Clamp(Value(c.LiveQv, PostProcess.EraPreset.QualityBand(liveLimit).Qv), 2, 31),
+            LiveCrf = Math.Clamp(Value(c.LiveCrf, PostProcess.EraPreset.QualityBand(liveLimit).Crf), 0, 51),
+            // Same idea for the pipeline: a file written before these fields
+            // existed gets the year it claims, not a modern default.
+            WindowSeconds = c.WindowSeconds is > 0 and <= 30
+                ? c.WindowSeconds.Value
+                : PostProcess.EraPresets.LivePipeline(c.YearFrom).Window,
+            BufferFrames = c.BufferFrames is >= 2 and <= 64
+                ? c.BufferFrames.Value
+                : PostProcess.EraPresets.LivePipeline(c.YearFrom).Buffer,
+            Deinterlace = c.Deinterlace is { Length: > 0 } deint ? deint.Trim().ToLowerInvariant()
+                : PostProcess.EraPresets.LivePipeline(c.YearFrom).Deint,
             ScaleAlgo = c.ScaleAlgo.HasText ? c.ScaleAlgo.Trim().ToLowerInvariant() : (era ? "bicubic" : null),
             AudioEncoder = c.AudioEncoder.HasText ? c.AudioEncoder.Trim().ToLowerInvariant() : null,
             AudioKbps = Positive(c.AudioKbps, 0),

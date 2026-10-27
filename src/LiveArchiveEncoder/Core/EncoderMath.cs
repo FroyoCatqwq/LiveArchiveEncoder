@@ -10,6 +10,98 @@ public static class EncoderMath
     public static int DefaultQuality(string name) =>
         Constants.DefaultQuality.TryGetValue(name, out int value) ? value : 10;
 
+    /// <summary>
+    /// Which scale a quality number is written in. v7.9.8.2.
+    ///
+    /// <para>There were two of these before and they were treated as one: an
+    /// MPEG-family <c>-q:v 9</c> and x264's <c>-crf 9</c> are not the same
+    /// picture, they are not even the same order of magnitude. Measured on
+    /// <c>tests/media/test_src.mp4</c> at 352x264@15 (2026-10-27): mpeg4
+    /// <c>-q:v 9</c> is 375 kbps, libx264 <c>-crf 9</c> is 935 kbps -- 2.5x the
+    /// ceiling of the 2007 preset that asked for it, which drove the frame-rate
+    /// ladder to its last rung within a second.</para>
+    ///
+    /// <para>Every place that prints, stores or forwards a quality number has to
+    /// know which of these it is holding; <c>ArgsBuilder.VideoQualityArgs</c> is
+    /// the only place that turns it into flags.</para>
+    /// </summary>
+    public enum QualityScale
+    {
+        /// <summary>MPEG-style quantiser, 2..31, lower is better. mpeg4, flv, wmv2, rv10/20, h263, mjpeg.</summary>
+        Qv = 0,
+
+        /// <summary>x264/x265/VP9/AV1 constant quality, 0..51, lower is better.</summary>
+        Crf = 1,
+
+        /// <summary>No quality knob at all: the bitrate is the only dial (libopenh264).</summary>
+        Bitrate = 2,
+    }
+
+    /// <summary>The scale <paramref name="name"/>'s quality number lives in.</summary>
+    public static QualityScale ScaleOf(string? name) => name?.Trim().ToLowerInvariant() switch
+    {
+        // OpenH264 has no -crf and no usable -q:v: given either it falls back to
+        // its default buffer mode and overshoots by 3x (measured 2026-10-26:
+        // 700 kbps asked, 2.1 Mbps delivered). Bitrate is its only dial.
+        "libopenh264" => QualityScale.Bitrate,
+        "libx264" or "libx264rgb" or "libx265" or "libvpx-vp9" or "libvpx"
+            or "libaom-av1" or "libsvtav1" => QualityScale.Crf,
+        _ => QualityScale.Qv,
+    };
+
+    /// <summary>
+    /// The same picture expressed in another encoder's scale. Used when the
+    /// encoder changes under a quality number that was written for the previous
+    /// one -- a 2007 preset's <c>q:v</c> handed to libx264, or a user flipping
+    /// the encoder in the menu.
+    ///
+    /// <para>Calibrated by equal bitrate rather than by taste: for every
+    /// geometry in the built-in table, the mpeg4 quantiser and the x264 CRF that
+    /// produced the same rate were paired up (2026-10-27, 13 pairs between
+    /// 45 and 2500 kbps); the fit is crf = 7.5 + 1.17 * q:v, i.e. q:v 9 is
+    /// crf 18 and q:v 12 is crf 22. Converting to or from a bitrate encoder is
+    /// not a conversion -- its dial is elsewhere -- so the number passes
+    /// through unchanged and the caller uses the ceiling.</para>
+    /// </summary>
+    public static int ConvertQuality(string? from, string? to, int value) =>
+        ConvertQuality(ScaleOf(from), ScaleOf(to), value);
+
+    /// <summary>Scale-to-scale form of <see cref="ConvertQuality(string?, string?, int)"/>.</summary>
+    public static int ConvertQuality(QualityScale source, QualityScale target, int value)
+    {
+        if (source == target) return value;
+
+        // Bitrate has no number to translate; the ceiling is what it needs.
+        if (source == QualityScale.Bitrate || target == QualityScale.Bitrate) return value;
+
+        return source == QualityScale.Qv
+            ? Math.Clamp((int)Math.Round(7.5 + 1.17 * value), 0, 51)
+            : Math.Clamp((int)Math.Round((value - 7.5) / 1.17), 2, 31);
+    }
+
+    /// <summary>
+    /// One number, expressed in both of the scales a row has to keep: the
+    /// caller asks in whichever one the user typed, and both are stored so a
+    /// later encoder switch needs no second question. A bitrate-only encoder is
+    /// treated as the CRF one it replaces -- its number is never used anyway.
+    /// </summary>
+    public static (int Qv, int Crf) QualityPair(string? encoderName, int value)
+    {
+        QualityScale scale = ScaleOf(encoderName);
+        if (scale == QualityScale.Bitrate) scale = QualityScale.Crf;
+        return scale == QualityScale.Crf
+            ? (ConvertQuality(QualityScale.Crf, QualityScale.Qv, value), value)
+            : (value, ConvertQuality(QualityScale.Qv, QualityScale.Crf, value));
+    }
+
+    /// <summary>Half-open range a quality number may take in this scale, for prompts and validation.</summary>
+    public static (int Min, int Max) QualityRange(QualityScale scale) => scale switch
+    {
+        QualityScale.Crf => (0, 51),
+        QualityScale.Bitrate => (0, 0),
+        _ => (2, 31),
+    };
+
     public static (double Fps, bool Exact) ChooseBaseFps(double requested, EncoderCaps caps)
     {
         // v7.9.5: RealMedia and RoQ store the rate as an integer in the file

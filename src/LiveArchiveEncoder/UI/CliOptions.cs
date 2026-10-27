@@ -47,6 +47,17 @@ public sealed class CliOptions
     public bool ScaleAlgoExplicit { get; init; }
     public bool AudioKbpsExplicit { get; init; }
     public bool AudioChannelsExplicit { get; init; }
+
+    /// <summary>
+    /// v7.9.8.2: the three live knobs an era preset also speaks for. They need
+    /// their own flags because their defaults are ordinary values, not nulls --
+    /// "the user typed --window 2" and "nobody said anything" have to be
+    /// distinguishable for the preset to stay a fallback rather than an
+    /// override.
+    /// </summary>
+    public bool WindowExplicit { get; init; }
+    public bool BufferFramesExplicit { get; init; }
+    public bool DeinterlaceExplicit { get; init; }
     public int? Qv { get; init; }
     public int Threads { get; init; } = 16;
     public int BufferFrames { get; init; } = 6;
@@ -322,6 +333,9 @@ public static class CliParser
         bool scaleAlgoExplicit = false;
         bool audioKbpsExplicit = false;
         bool audioChannelsExplicit = false;
+        bool windowExplicit = false;
+        bool bufferFramesExplicit = false;
+        bool deinterlaceExplicit = false;
         int? qv = null;
         int threads = 16;
         int bufferFrames = 6;
@@ -478,6 +492,7 @@ public static class CliParser
                 case "--window":
                     if (!TryValue(out string windowRaw) || !TryDouble(windowRaw, out window))
                         return (null, "--window requires a number");
+                    windowExplicit = true;
                     break;
                 case "--fps":
                     if (!TryValue(out string fpsRaw) || !TryDouble(fpsRaw, out fps))
@@ -500,6 +515,7 @@ public static class CliParser
                 case "--buffer-frames":
                     if (!TryValue(out string bufferRaw) || !int.TryParse(bufferRaw, out bufferFrames))
                         return (null, "--buffer-frames requires an integer");
+                    bufferFramesExplicit = true;
                     break;
                 case "--audio-kbps":
                     if (!TryValue(out string kbpsRaw) || !int.TryParse(kbpsRaw, out audioKbps))
@@ -645,6 +661,7 @@ public static class CliParser
                 case "--deinterlace":
                     if (!TryValue(out deinterlace)) return (null, "--deinterlace requires a value");
                     deinterlace = deinterlace.ToLowerInvariant();
+                    deinterlaceExplicit = true;
                     break;
                 case "--deint-mode":
                     if (!TryValue(out deintMode)) return (null, "--deint-mode requires a value");
@@ -874,6 +891,9 @@ public static class CliParser
             ScaleAlgoExplicit = scaleAlgoExplicit,
             AudioKbpsExplicit = audioKbpsExplicit,
             AudioChannelsExplicit = audioChannelsExplicit,
+            WindowExplicit = windowExplicit,
+            BufferFramesExplicit = bufferFramesExplicit,
+            DeinterlaceExplicit = deinterlaceExplicit,
             Qv = qv,
             Threads = threads,
             BufferFrames = bufferFrames,

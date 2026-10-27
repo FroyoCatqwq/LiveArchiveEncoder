@@ -1,5 +1,6 @@
 using System.Globalization;
 using LiveArchiveEncoder.Configuration;
+using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.Encoding;
 
@@ -7,27 +8,61 @@ namespace LiveArchiveEncoder.Encoding;
 public static class ArgsBuilder
 {
     /// <summary>
-    /// The quality knob of the live pass.
+    /// The quality knob of the live pass, in whichever scale the encoder reads.
     ///
     /// <para>v7.9.7: OpenH264 has no <c>-crf</c> and no <c>-q:v</c>; handing it
     /// either leaves it in its default buffer mode, which overshoots the target
     /// by 3x (measured: 700 kbps asked, 2.1 Mbps delivered). It wants a bitrate
     /// and <c>-rc_mode bitrate</c>, so the preset's ceiling becomes exactly
     /// that.</para>
+    ///
+    /// <para>v7.9.8.2: libx264 used to be the only CRF encoder here, and a
+    /// preset's MPEG quantiser went straight into <c>-crf</c> -- the 2007 row's
+    /// <c>q:v 9</c> became <c>crf 9</c>, 935 kbps into a 320 kbps stream, and the
+    /// frame-rate ladder dropped to its last rung before the first second was
+    /// out. Two things changed: the number now arrives already converted to the
+    /// encoder's scale (<see cref="EncoderMath.ConvertQuality"/>), and a CRF
+    /// encoder is additionally pinned to the ceiling with VBV, so a wrong number
+    /// costs picture quality instead of collapsing the ladder. Measured with the
+    /// cap at the ceiling: <c>crf 9</c> at 320 kbps went from 935 to 330 kbps
+    /// and x264 emitted no "buffer underflow" noise (the MPEG-family encoders
+    /// do -- a fixed quantiser and a tight VBV are contradictory requests, which
+    /// is why this cap is CRF-only).</para>
     /// </summary>
     public static List<string> VideoQualityArgs(string name, int quality, double? limitKbps = null)
     {
-        if (name == "libopenh264")
+        double ceiling = limitKbps is { } kbps && kbps > 0 ? kbps : FallbackCeilingKbps;
+
+        switch (EncoderMath.ScaleOf(name))
         {
-            var openh264 = new List<string> { "-rc_mode", "bitrate" };
-            if (limitKbps is { } kbps && kbps > 0)
-                openh264.InsertRange(0, ["-b:v", $"{kbps.ToString("G6", CultureInfo.InvariantCulture)}k"]);
-            return openh264;
+            case EncoderMath.QualityScale.Bitrate:
+                // Bitrate mode already pins the average; -maxrate/-bufsize would
+                // only re-state it, and OpenH264 reads neither.
+                return ["-rc_mode", "bitrate", "-b:v", $"{ceiling.ToString("G6", CultureInfo.InvariantCulture)}k"];
+
+            case EncoderMath.QualityScale.Crf:
+                // The buffer is two seconds of the ceiling: long enough that a
+                // burst is not starved, short enough that a whole scene cannot
+                // hide in it.
+                return
+                [
+                    "-crf", quality.ToString(CultureInfo.InvariantCulture),
+                    "-maxrate", $"{ceiling.ToString("G6", CultureInfo.InvariantCulture)}k",
+                    "-bufsize", $"{(ceiling * 2).ToString("G6", CultureInfo.InvariantCulture)}k",
+                ];
+
+            default:
+                return ["-q:v", quality.ToString(CultureInfo.InvariantCulture)];
         }
-        return name == "libx264"
-            ? ["-crf", quality.ToString(CultureInfo.InvariantCulture)]
-            : ["-q:v", quality.ToString(CultureInfo.InvariantCulture)];
     }
+
+    /// <summary>
+    /// What OpenH264 is told when a caller forgot the ceiling. It is the same
+    /// 200 kbps the settings file starts at, and it exists only so that a
+    /// bitrate-only encoder is never left on its own default -- which is
+    /// 1.1 Mbps at 352x264, i.e. every frame-rate rung at once.
+    /// </summary>
+    private const double FallbackCeilingKbps = 200.0;
 
     public static List<string> X264Args(string? preset, string? tune, string? profile, string? level)
     {

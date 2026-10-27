@@ -18,6 +18,100 @@
 
 ---
 
+## v7.9.8.2（2026-10-27）
+
+第五个补丁号，一件事：**时代预设终于把直播画质、窗口、缓冲和反交错也一起说了**。
+
+起因是一句现场观察：用 `libx264`/`libopenh264` 时 `q:v` 没被改，直播编码的码率
+特别高，帧率一下子掉到底。查下去发现预设**从来没设过画质**——`ApplyLive` 只写
+尺寸、帧率、码率上限、缩放和音频，`Qv` 一直是上一个编码器留下的数字。
+
+### 1. ⚠ 画质数字现在带"刻度"
+
+`q:v` 和 `crf` 不是一个东西。`EncoderMath.DefaultQuality` 里早就写着两者的分别
+（mpeg4 = 8，libx264 = 28），但**只有一个数字在流动**：`2007` 那一行要的是
+352x264@15 / 320 kbps，`q:v 9` 在 mpeg4 下是 375 kbps；同一个 9 交给 libx264
+就是 `-crf 9`，实测 **935 kbps**——2.9 倍上限。而帧率阶梯读的正是这个实测码率，
+于是第一秒就走到了最后一档，"15 fps 的抓取"实际从头到尾没跑过 15 fps。
+
+- `EncoderMath.QualityScale`（`Qv` / `Crf` / `Bitrate`）+ `ScaleOf(encoder)`：
+  哪些编码器读哪种刻度，从此只有这一处判断。
+- `EncoderMath.ConvertQuality(from, to, value)`：按**等码率**标定，`crf = 7.5 + 1.17 × q:v`
+  （q:v 9 ↔ crf 18、q:v 12 ↔ crf 22，13 组 45–2500 kbps 的实测配对拟合）。
+  换编码器时数字跟着换刻度，不再原样搬运。
+- `EraPreset` 增加 `LiveQv` 与 `LiveCrf`，**每一个内置行都写了两个数**（27 站点行
+  + 5 通用行）。每行的 crf 都是让参考素材落在该行上限 0.76–1.04 倍的那个值，不是
+  换算出来的。
+- `Cli` 与 CUI 的 `ApplyPreset` 都改为"预设按**当前生效的编码器**给数字"。CUI 那
+  条路径正是这次报障的来源：`ApplyPreset` 换了 `c.Encoder` 却没动 `c.Qv`。
+
+### 2. ⚠ CRF 编码器多了一道 VBV 上限
+
+只把数字改对还不够——用户显式 `--qv 9` 时仍然会得到近无损。libx264 现在会连同
+`-maxrate <上限>k -bufsize <2×上限>k` 一起下发：实测 `crf 9` 在 320 kbps 上限下
+从 935 kbps 压到 413 kbps，x264 不会像 MPEG 家族那样刷 `rc buffer underflow`。
+固定量化器 + 紧 VBV 对 mpeg4/flv/wmv2/rv20 是自相矛盾的请求（实测每帧刷一条
+warning 且照样超），所以这条只给 CRF 编码器。
+
+### 3. `libopenh264` 永远有一个码率
+
+它没有 CRF 也没有可用的 `q:v`，码率是唯一的旋钮。以前只在"有上限"时才发
+`-b:v`，漏了就落回它自己的默认值（352x264 实测 1.1 Mbps，等于把所有档位一次
+用完）。现在缺上限时用 200 kbps 兜底，参数菜单第 6 行也照实标成 `q:v（不生效）`
+而不是假装它管用。
+
+### 4. 窗口、缓冲帧、反交错按年代给值
+
+`EraPreset` 新增 `WindowSeconds` / `BufferFrames` / `Deinterlace`（含 mode、parity、
+marked-only），三个阈值都有实体理由：
+
+| 年 | window | 缓冲帧 | 反交错 |
+| --- | --- | --- | --- |
+| ≤2003 | 3 s | 4 | `off` |
+| 2006–2009 | 2 s | 6 | `yadif` |
+| ≥2010 | 2 s | 8 | `yadif` |
+
+- **2006**：`yadif` 2006 年随 MPlayer 出现、同年进 FFmpeg。更早的行写 `off`，
+  因为当年没有这个滤镜可调——2003 年的 WMV 抓取确实是把隔行结构写进文件的。
+- **2006**：调制解调器和 WMV 年代的流服务器要持续几秒才降档，FLV 门户在自己
+  两秒的缓冲里就反应了。
+- **2003 / 2009**：帧队列随帧变大——320x240 四帧、384x288 六帧、640x360 以上
+  八帧。
+- 所有时代行都带 `DeintMarkedOnly`：只处理源标记为隔行的帧，否则一份逐行素材
+  会被 yadif 白白磨软。
+- 三者的显式开关（`--window` / `--buffer-frames` / `--deinterlace`）优先于预设，
+  和其余"预设是兜底不是覆盖"的字段一致。`--deinterlace` 一旦由用户给出，mode /
+  parity / marked-only 也归用户——半个预设加半个参数是合成不出来的配置。
+
+### 5. 自定义预设与老配置
+
+`CustomEraConfig` 增加 `LiveQv` / `LiveCrf` / `WindowSeconds` / `BufferFrames` /
+`Deinterlace`，CUI 的新建/编辑向导问一次画质（按该行编码器的刻度问），两个数
+一起存。老配置文件没有这些字段时，按行自己的年份取 `LivePipeline`，而不是套一个
+现代默认值。
+
+### 验证
+
+- 单测 **564 例 → 563 过 / 1 跳过**（需要字体文件）。新增
+  `tests/LiveArchiveEncoder.Tests/EraLiveQualityTests.cs` 10 条：刻度判定、q↔crf
+  换算与往返、`-crf` + VBV 与 `-q:v` 的分配、OpenH264 兜底码率、每行两个数都在
+  合法刻度且 crf 严格大于 qv、`ApplyLive` 按生效编码器写数、三个阈值的年份表、
+  以及自定义行与老文件的回退。
+- e2e **205 例两阶段全绿**。新增 `tests/e2e/test_era_quality.py` 5 条：2007 行
+  + libx264 的总码率不超过上限 1.3 倍（修复前是 2.9 倍）、`--qv 9` 也压得住、
+  2011 行的 OpenH264 真的被钉在 700 kbps、2003/2014 行的 window/缓冲/反交错、
+  以及显式开关压过预设。
+- 实测对照（`tests/media/test_src.mp4`，352x264@15，上限 320 kbps）：
+
+| 情形 | 视频码率 |
+| --- | --- |
+| 修复前 `q:v 9` → `-crf 9` | 935 kbps（掉底） |
+| `q:v 9` / `crf 22`（修复后） | 306 kbps |
+| 强制 `--qv 9` + VBV | 413 kbps |
+| OpenH264 700k | 689 kbps |
+
+---
+
 ## v7.9.8.1（2026-10-27）
 
 第四个补丁号，三件事：**RealMedia 能出当年那样的文件**、**第二遍也走 `.part`**，

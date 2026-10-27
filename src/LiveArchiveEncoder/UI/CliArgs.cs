@@ -96,7 +96,11 @@ public static class CliArgs
             argv.AddRange(["--deint-mode", c.DeintMode]);
         if (!string.Equals(c.DeintParity, "auto", StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--deint-parity", c.DeintParity]);
-        if (c.DeintMarkedOnly) argv.Add("--deint-marked-only");
+        // Only meaningful with a filter; printing it next to "--deinterlace off"
+        // would read as a setting that does something (v7.9.8.2 -- the 2003 rows
+        // say off and used to emit this anyway).
+        if (c.DeintMarkedOnly && !string.Equals(c.Deinterlace, "off", StringComparison.OrdinalIgnoreCase))
+            argv.Add("--deint-marked-only");
         if (!string.Equals(c.Hwaccel, "off", StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--hwaccel", c.Hwaccel]);
         if (!string.Equals(c.X264Preset, "medium", StringComparison.OrdinalIgnoreCase))

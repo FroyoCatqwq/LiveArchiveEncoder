@@ -375,7 +375,15 @@ public static class Cli
             return 2;
         }
 
-        string deinterlace = args.Deinterlace.ToLowerInvariant();
+        // v7.9.8.2: the era's deinterlacer, the same fallback rule as every other
+        // preset value -- but the *whole* deinterlace block follows it. Naming a
+        // filter by hand means the mode, the parity and the marked-only flag are
+        // the caller's too; half a preset and half a flag is how a run ends up
+        // deinterlacing with a filter that did not exist in the year it claims.
+        string deinterlace = (args.DeinterlaceExplicit
+                ? args.Deinterlace
+                : era?.Deinterlace ?? args.Deinterlace)
+            .ToLowerInvariant();
         if (deinterlace != "off" && !availableFilters.Contains(deinterlace))
         {
             Console.Error.WriteLine($"ERROR: FFmpeg filter '{deinterlace}' is not available in this build");
@@ -411,10 +419,17 @@ public static class Cli
                 FpsLevelKbps = levelKbps,
                 Limit = effectiveLimit,
                 Recover = recover,
-                Window = args.Window,
-                Qv = args.Qv ?? EncoderMath.DefaultQuality(encoder.Name),
+                Window = args.WindowExplicit ? args.Window : era?.WindowSeconds ?? args.Window,
+                // v7.9.8.2: the preset's own quality, read in the scale of the
+                // encoder that won -- an era row states it twice for exactly
+                // this reason. Falling through to the encoder's default is the
+                // pre-v7.9.8.2 behaviour: 28 for libx264 no matter which year
+                // was asked for, which for a 2007 row is a third of its rate.
+                Qv = args.Qv ?? era?.QualityFor(encoder.Name) ?? EncoderMath.DefaultQuality(encoder.Name),
                 Threads = args.Threads,
-                BufferFrames = args.BufferFrames,
+                BufferFrames = args.BufferFramesExplicit
+                    ? args.BufferFrames
+                    : era?.BufferFrames ?? args.BufferFrames,
                 AudioKbps = audioKbps,
                 AudioChannels = audioChannels,
                 AudioRate = audioRate,
@@ -437,9 +452,13 @@ public static class Cli
                 ColorTransfer = args.ColorTransfer,
                 Dither = args.Dither,
                 Deinterlace = deinterlace,
-                DeintMode = args.DeintMode,
-                DeintParity = args.DeintParity,
-                DeintMarkedOnly = args.DeintMarkedOnly,
+                // The block travels with the filter: see the note where
+                // `deinterlace` is resolved above.
+                DeintMode = !args.DeinterlaceExplicit && era is not null ? era.DeintMode : args.DeintMode,
+                DeintParity = !args.DeinterlaceExplicit && era is not null ? era.DeintParity : args.DeintParity,
+                DeintMarkedOnly = !args.DeinterlaceExplicit && era is not null
+                    ? era.DeintMarkedOnly
+                    : args.DeintMarkedOnly,
                 Hwaccel = args.Hwaccel,
                 X264Preset = args.X264Preset,
                 X264Tune = args.X264Tune,
