@@ -253,13 +253,11 @@ public sealed class EraPreset
         // H.264 encoder of this period" and resolves to whatever was picked.
         string codecName = string.Equals(VideoCodec, "libx264", StringComparison.OrdinalIgnoreCase)
             ? h264 : VideoCodec;
-        SecondPassVideoCodec? info = RecompressCodecs.FindVideo(codecName);
-        if (info is null)
-            return RecompressCodecs.VideoArgsAtBitrate(RecompressCodecs.FindVideo("libx264")!, RcVideoKbps);
-
-        // OpenH264 has no quality knob: a site's ladder is a bitrate, so use it.
-        if (info.QualityFlag.Length == 0)
-            return RecompressCodecs.VideoArgsAtBitrate(info, RcVideoKbps);
+        // A site's ladder is always a bitrate, never a quality number: that is
+        // true for the 2003 WMV rows, for FLV, and for OpenH264 (which has no
+        // CRF at all), so one path covers every codec the table names.
+        SecondPassVideoCodec info = RecompressCodecs.FindVideo(codecName)
+            ?? RecompressCodecs.FindVideo("libx264")!;
         return RecompressCodecs.VideoArgsAtBitrate(info, RcVideoKbps);
     }
 
