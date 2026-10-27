@@ -257,6 +257,16 @@ public sealed class CliOptions
     public string? EraAspect { get; init; }
 
     /// <summary>
+    /// v7.9.7: which H.264 encoder to use where the preset says H.264 --
+    /// <c>libx264</c> or <c>libopenh264</c>. Null means "the preset decides",
+    /// and the 2011+ presets decide OpenH264.
+    /// </summary>
+    public string? H264Impl { get; init; }
+
+    /// <summary>True when <c>--h264</c> was given; a preset must not override it.</summary>
+    public bool H264Explicit { get; init; }
+
+    /// <summary>
     /// v7.9.6.3: measure the link to an input path (or URL) and print the
     /// verdict that <c>--parallel</c> would use. No encode happens.
     /// </summary>
@@ -386,6 +396,7 @@ public static class CliParser
         bool eraNative = false;
         string? era = null;
         string? eraAspect = null;
+        string? h264 = null;
         string? netTest = null;
         string? iperf3Host = null;
         bool emitArgs = false;
@@ -792,6 +803,21 @@ public static class CliParser
                     eraAspect = PostProcess.EraAspects.Label(parsed);
                     break;
 
+                // v7.9.7: which H.264 encoder stands in for the era's own.
+                case "--h264":
+                case "--h264-impl":
+                    if (!TryValue(out string h264Raw)) return (null, "--h264 requires libx264 or libopenh264");
+                    h264 = h264Raw.Trim().ToLowerInvariant();
+                    if (h264 is not ("libx264" or "libopenh264" or "x264" or "openh264"))
+                        return (null, "--h264 must be libx264 or libopenh264");
+                    h264 = h264 switch
+                    {
+                        "x264" => "libx264",
+                        "openh264" => "libopenh264",
+                        _ => h264,
+                    };
+                    break;
+
                 // v7.9.6.3: network measurement, which is also what decides
                 // whether --parallel may be used over a share.
                 case "--net-test":
@@ -927,6 +953,8 @@ public static class CliParser
             EraNative = eraNative,
             Era = era,
             EraAspect = eraAspect,
+            H264Impl = h264,
+            H264Explicit = h264 is not null,
             NetTest = netTest,
             Iperf3Host = iperf3Host,
             EmitArgs = emitArgs,
@@ -1045,6 +1073,9 @@ public static class CliParser
             ("--era-aspect", "4:3|16:9|source",
                 "capture and deliver a preset in this frame shape; only shapes the "
                 + "selected encoder can encode are accepted (default: source)"),
+            ("--h264", "libx264|libopenh264",
+                "which H.264 encoder to use where the preset says H.264 (default: the "
+                + "preset's own -- OpenH264 from 2011 on, libx264 before)"),
             ("--net-test", "PATH|URL", "measure the link to a source and print the verdict "
                                       + "--parallel would use, then exit"),
             ("--iperf3", "HOST[:PORT]", "measure the link with iperf3 against that host "

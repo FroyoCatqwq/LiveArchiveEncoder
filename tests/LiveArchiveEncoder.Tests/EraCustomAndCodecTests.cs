@@ -21,7 +21,13 @@ public sealed class RecompressCodecTests
             await Assert.That(codec.Name).IsNotEmpty();
             await Assert.That(codec.Name).IsEqualTo(codec.Name.ToLowerInvariant());
             await Assert.That(codec.Containers).IsNotEmpty().Because(codec.Name);
-            await Assert.That(codec.DefaultQuality).IsGreaterThan(0).Because(codec.Name);
+            // v7.9.7: an encoder with no quality knob (OpenH264: bitrate only)
+            // carries an empty flag and a zero default on purpose -- the preset
+            // always drives it with -b:v. Anything else must have a real knob.
+            if (codec.QualityFlag.Length == 0)
+                await Assert.That(codec.DefaultQuality).IsEqualTo(0).Because(codec.Name);
+            else
+                await Assert.That(codec.DefaultQuality).IsGreaterThan(0).Because(codec.Name);
         }
 
         await Assert.That(RecompressCodecs.VideoNames).Contains("libx265");

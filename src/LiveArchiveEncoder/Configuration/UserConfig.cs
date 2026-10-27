@@ -170,6 +170,12 @@ public sealed class UserConfig
     public string? EraAspect { get; set; }
 
     /// <summary>
+    /// v7.9.7: which H.264 encoder the run uses where it says H.264 --
+    /// "libx264" or "libopenh264". Null means "ask the preset".
+    /// </summary>
+    public string? H264Impl { get; set; }
+
+    /// <summary>
     /// v7.9.5.1: presets the user wrote. Null (absent from the file) means
     /// "leave whatever is loaded alone" -- loading a named profile that predates
     /// this field must not delete presets someone added in the meantime.
@@ -192,6 +198,12 @@ public sealed class UserConfig
 public sealed class CustomEraConfig
 {
     public string Id { get; set; } = "";
+
+    /// <summary>v7.9.7: the site the row belongs to, used to group the menu.</summary>
+    public string? Site { get; set; }
+
+    /// <summary>v7.9.7: the year the row describes, 0 for a range-only preset.</summary>
+    public int Year { get; set; }
 
     /// <summary>"era" (both layers) or "site" (second pass only).</summary>
     public string Kind { get; set; } = "site";
@@ -232,6 +244,10 @@ public sealed class CustomEraConfig
     public string VideoCodec { get; set; } = "libx264";
     public string AudioCodec { get; set; } = "aac";
     public string Container { get; set; } = "mp4";
+
+    /// <summary>v7.9.7: "libopenh264" or "libx264" for a row whose codec is H.264.</summary>
+    public string? H264Impl { get; set; }
+
     public string? Note { get; set; }
 }
 
@@ -374,6 +390,7 @@ public static class ConfigStore
         EraPreset = c.EraPreset,
         EraNative = c.EraNative,
         EraAspect = c.EraAspect,
+        H264Impl = c.H264Impl,
         CustomEras = [.. c.CustomEras.Select(EraConfigMap.ToConfig)],
     };
 
@@ -515,6 +532,7 @@ public static class ConfigStore
         c.EraPreset = stored.EraPreset;
         c.EraNative = stored.EraNative;
         c.EraAspect = stored.EraAspect;
+        c.H264Impl = stored.H264Impl;
 
         // v7.9.5.1: the user's own presets become part of the live table here,
         // so every later `--era` lookup in this process sees them. A file that
@@ -579,6 +597,8 @@ public static class EraConfigMap
     public static CustomEraConfig ToConfig(PostProcess.EraPreset p) => new()
     {
         Id = p.Id,
+        Site = p.Site,
+        Year = p.Year,
         Kind = p.Kind == PostProcess.EraKind.Era ? "era" : "site",
         YearFrom = p.YearFrom,
         YearTo = p.YearTo,
@@ -605,6 +625,7 @@ public static class EraConfigMap
         VideoCodec = p.VideoCodec,
         AudioCodec = p.AudioCodec,
         Container = p.RecompressContainer,
+        H264Impl = p.H264Impl,
         Note = p.NoteText,
     };
 
@@ -643,6 +664,8 @@ public static class EraConfigMap
         return new PostProcess.EraPreset
         {
             Id = id,
+            Site = c.Site.HasText ? c.Site.Trim().ToLowerInvariant() : "",
+            Year = Math.Clamp(c.Year, 0, 2100),
             BuiltIn = false,
             Kind = era ? PostProcess.EraKind.Era : PostProcess.EraKind.Site,
             YearFrom = Math.Clamp(c.YearFrom, 1990, 2100),
@@ -670,22 +693,34 @@ public static class EraConfigMap
             VideoCodec = videoCodec,
             AudioCodec = audioCodec,
             RecompressContainer = container,
+            H264Impl = c.H264Impl is "libopenh264" ? "libopenh264" : c.H264Impl is "libx264" ? "libx264" : null,
             NoteText = c.Note.HasText ? c.Note.Trim() : null,
             NoteKey = null,
         };
     }
 
-    /// <summary>Ids are lower-case slugs so a command line can carry them unquoted.</summary>
+    /// <summary>
+    /// Ids are lower-case slugs so a command line can carry them unquoted.
+    /// v7.9.7: a slash survives, because a custom row may be written as
+    /// <c>mysite/2012</c> to sit next to the built-in <c>site/year</c> rows;
+    /// only one is allowed, and the machine host is dropped.
+    /// </summary>
     public static string NormaliseId(string? raw)
     {
         if (!raw.HasText) return "";
         var sb = new System.Text.StringBuilder(raw.Length);
+        bool slash = false;
         foreach (char ch in raw.Trim().ToLowerInvariant())
         {
             if (ch is >= 'a' and <= 'z' or >= '0' and <= '9') sb.Append(ch);
+            else if (ch == '/' && !slash && sb.Length > 0)
+            {
+                sb.Append('/');
+                slash = true;
+            }
             else if (ch is '_' or '-' or ' ' or '.') sb.Append('_');
         }
-        string id = sb.ToString().Trim('_');
+        string id = sb.ToString().Trim('_').Trim('/');
         // Keep it short enough to type and to print in a menu column.
         return id.Length > 24 ? id[..24] : id;
     }

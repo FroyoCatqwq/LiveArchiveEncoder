@@ -6,9 +6,28 @@ namespace LiveArchiveEncoder.Encoding;
 /// <summary>FFmpeg argument construction, ported from the Python builders.</summary>
 public static class ArgsBuilder
 {
-    public static List<string> VideoQualityArgs(string name, int quality) =>
-        name == "libx264" ? ["-crf", quality.ToString(CultureInfo.InvariantCulture)]
-                          : ["-q:v", quality.ToString(CultureInfo.InvariantCulture)];
+    /// <summary>
+    /// The quality knob of the live pass.
+    ///
+    /// <para>v7.9.7: OpenH264 has no <c>-crf</c> and no <c>-q:v</c>; handing it
+    /// either leaves it in its default buffer mode, which overshoots the target
+    /// by 3x (measured: 700 kbps asked, 2.1 Mbps delivered). It wants a bitrate
+    /// and <c>-rc_mode bitrate</c>, so the preset's ceiling becomes exactly
+    /// that.</para>
+    /// </summary>
+    public static List<string> VideoQualityArgs(string name, int quality, double? limitKbps = null)
+    {
+        if (name == "libopenh264")
+        {
+            var openh264 = new List<string> { "-rc_mode", "bitrate" };
+            if (limitKbps is { } kbps && kbps > 0)
+                openh264.InsertRange(0, ["-b:v", $"{kbps.ToString("G6", CultureInfo.InvariantCulture)}k"]);
+            return openh264;
+        }
+        return name == "libx264"
+            ? ["-crf", quality.ToString(CultureInfo.InvariantCulture)]
+            : ["-q:v", quality.ToString(CultureInfo.InvariantCulture)];
+    }
 
     public static List<string> X264Args(string? preset, string? tune, string? profile, string? level)
     {

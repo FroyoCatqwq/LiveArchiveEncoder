@@ -294,6 +294,14 @@ public sealed class Config
     public string? EraAspect { get; set; }
 
     /// <summary>
+    /// v7.9.7: which H.264 encoder stands in for the era's own -- "libx264" or
+    /// "libopenh264". Null means "whatever the preset names", and the presets
+    /// from 2011 on name OpenH264 because that is what the portals of the time
+    /// deployed. Never applied to a preset whose codec is not H.264.
+    /// </summary>
+    public string? H264Impl { get; set; }
+
+    /// <summary>
     /// Presets the user wrote (v7.9.5.1). They live here rather than in the
     /// built-in table so an upgrade can add rows without fighting a local edit;
     /// a custom preset that reuses a built-in id replaces that row.

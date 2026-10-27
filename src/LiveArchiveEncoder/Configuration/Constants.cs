@@ -72,6 +72,10 @@ public static class Constants
             ["libxvid"] = ("avi", "avi"),
             ["libtheora"] = ("ogv", "ogg"),
             ["libx264"] = ("mp4", "mp4"),
+            // v7.9.7: the 2010s era presets capture and deliver with OpenH264,
+            // so it has to be a first-class live encoder, not just a name the
+            // second pass knows.
+            ["libopenh264"] = ("mp4", "mp4"),
             ["flv"] = ("flv", "flv"),
             ["flashsv"] = ("flv", "flv"),
             ["flashsv2"] = ("flv", "flv"),
@@ -120,6 +124,7 @@ public static class Constants
             ["mpeg4"] = [("avi", "avi"), ("mp4", "mp4"), ("mov", "mov"), ("mkv", "matroska")],
             ["libxvid"] = [("avi", "avi"), ("mp4", "mp4"), ("mov", "mov"), ("mkv", "matroska")],
             ["libx264"] = [("mp4", "mp4"), ("avi", "avi"), ("mkv", "matroska"), ("mov", "mov"), ("flv", "flv")],
+            ["libopenh264"] = [("mp4", "mp4"), ("mkv", "matroska"), ("mov", "mov"), ("flv", "flv")],
             ["h261"] = [("h261", "h261"), ("avi", "avi"), ("mkv", "matroska")],
             ["h263"] = [("h263", "h263"), ("avi", "avi"), ("mkv", "matroska")],
             ["h263p"] = [("avi", "avi"), ("mkv", "matroska")],
@@ -226,7 +231,7 @@ public static class Constants
     public static readonly FrozenDictionary<string, int> DefaultQuality =
         new Dictionary<string, int>
         {
-            ["libx264"] = 28, ["libtheora"] = 7, ["rv10"] = 8, ["rv20"] = 8,
+            ["libx264"] = 28, ["libopenh264"] = 26, ["libtheora"] = 7, ["rv10"] = 8, ["rv20"] = 8,
             ["wmv1"] = 10, ["wmv2"] = 10, ["mpeg1video"] = 8, ["mpeg2video"] = 8,
             ["mpeg4"] = 8, ["libxvid"] = 8, ["cinepak"] = 10, ["cljr"] = 10,
             ["h261"] = 10, ["h263"] = 10, ["h263p"] = 10, ["mjpeg"] = 6,

@@ -212,7 +212,7 @@ public static partial class FFmpegDiscovery
     [GeneratedRegex(
         @"^(?:a64multi(?:5)?|amv|asv[12]|cinepak|cljr|flashsv2?|flv|h261|h263(?:p)?"
         + @"|mjpeg|msmpeg4(?:v2)?|msrle|msvideo1|mpeg[124]video|mpeg4|qtrle|roqvideo"
-        + @"|rpza|rv(?:10|20)|smc|snow|svq1|wmv[12]|zmbv|libtheora|libx264|libxvid|vivo)$",
+        + @"|rpza|rv(?:10|20)|smc|snow|svq1|wmv[12]|zmbv|libtheora|libx264|libxvid|libopenh264|vivo)$",
         RegexOptions.IgnoreCase)]
     private static partial Regex LegacyEncoderName();
 
@@ -264,7 +264,7 @@ public static partial class FFmpegDiscovery
         if (!LegacyEncoderName().IsMatch(lname)) return null;
 
         string desc = description.ToLowerInvariant();
-        if (lname is "libx264" or "libxvid" or "libtheora") return "classic-library";
+        if (lname is "libx264" or "libxvid" or "libtheora" or "libopenh264") return "classic-library";
         if (lname.StartsWith("mpeg", StringComparison.Ordinal)
             || lname.StartsWith("msmpeg", StringComparison.Ordinal)) return "mpeg-classic";
         if (lname.StartsWith("wmv", StringComparison.Ordinal)

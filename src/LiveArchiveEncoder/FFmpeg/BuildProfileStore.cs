@@ -27,7 +27,10 @@ namespace LiveArchiveEncoder.FFmpeg;
 public sealed class BuildProfile
 {
     /// <summary>Bumped whenever the shape below changes; an older file is ignored.</summary>
-    public const int SchemaVersion = 2;
+    // v7.9.7: bumped from 2 because the cached encoder list is now expected to
+    // contain libopenh264 (the era presets select it); a profile written by an
+    // older build would silently claim the encoder does not exist.
+    public const int SchemaVersion = 3;
 
     public int Schema { get; set; } = SchemaVersion;
 

@@ -269,8 +269,9 @@ Two flags are additions rather than ports:
 | `--subtitle-font FAMILY`, `--subtitle-font-dir DIR` | force a font family over the one an ASS file names (also gives SRT/VTT one, which they never specify), and add an extra font directory |
 | `--list-subtitle-fonts`, `--font-import PATH` | report the fonts a subtitle file asks for and whether this machine has them; copy font files into the program's own `fonts` directory |
 | `--recompress-only` | run that pass on an existing file and stop — no live encode, no encoder discovery (`LiveArchiveEncoder clip.mkv --recompress-only --era youku07`) |
-| `--era ID` | apply an era/site preset: one set of live + recompress settings per era of online video, 1997→2016 — dial-up RealVideo G2, early-ADSL RealMedia, the FLV years, early H.264, 720p. 18 **site** presets (`sina06`, `sohu06`, `qq06`, `tudou06`, `youku07`, `ku6_07`, `56_07`, `cctv06`, `acfun08`, `bilibili09`, `youtube07`, `bilibili11`, `youku11`, `iqiyi11`, `cctv12`, `youtube11`, `bilibili14`, `youtube15`) carry the codec that site served — Sorenson Spark in FLV, H.264 in MP4, VP9 in WebM — and use it for both passes unless you name an encoder. Since v7.9.6.2 a site preset fills the capture side as well (frame size, rate, ladder, ceiling, audio), so `--era youku07` records 352x264@15 at 320 kbps instead of transcoding a 2016 master with 2007 settings. Your own presets go in the settings file (`CustomEras`) and can override a built-in id. Sources in `docs/era-presets.md` |
-| era ladders (v7.9.6.1) | each era preset also carries the adaptive frame-rate ladder of its period (`mp4_10`: 25→20→15→10, `hd14`: 30→25→20→15), so a 25 fps preset no longer drops onto the tool's 13/8/5/3 default — an explicit `--fps` or `--fps-levels` still wins |
+| `--era ID` | apply a preset: one set of live + recompress settings per **site and year** of online video, 1997→2016. Ids are `site/year` — `--era youku/2007`, `--era bilibili/2012`, `--era generic/1998` (the last is "the web in general in that year", formerly `dialup98`). 27 site rows across 13 sites plus 5 generic years; each carries the codec that site actually served at that time (Sorenson Spark in FLV, WMV8 + WMA in ASF, H.264 in MP4, VP9 + Opus in WebM) and uses it for both passes unless you name an encoder. The pre-v7.9.7 ids (`cctv03`, `youku07`, `hd14`, …) still resolve and print a one-line rename note. Your own presets go in the settings file (`CustomEras`) and can override a built-in id. Every row's numbers are cited against an archived page — see `docs/era-presets.md` |
+| `--h264 libx264\|libopenh264` | v7.9.7: which H.264 encoder to use where the preset says H.264. Presets from 2010 on default to **OpenH264** (the period's reference implementation — fixed-bitrate and slightly soft, which is what a 2012 360p stream looked like), earlier ones to libx264. It moves the live pass and the second pass together. OpenH264 needs a build that has it; this project's BtbN GPL snapshot does, and `--ffmpeg-download nonfree` is the fallback |
+| era ladders (v7.9.6.1) | each preset also carries the adaptive frame-rate ladder of its period (`bilibili/2012`: 30→25→20→15, `cctv/2006`: 25→20→15→10), so a 25 fps preset no longer drops onto the tool's 13/8/5/3 default — an explicit `--fps` or `--fps-levels` still wins |
 | `--era-modern` / `--era-native` | render a preset's second pass with libx264 + AAC in MP4 instead of the site's own codec (the default), or say so explicitly |
 | `--era-aspect 4:3\|16:9\|source` | v7.9.6.3: capture and deliver a preset in the other frame shape. Keeps the capture width and changes the height (352x264 → 352x198, 1280x720 → 1280x960) and only offers a shape the encoder can actually encode — H.261/H.263 exist at CIF sizes only, AMV wants multiples of 16, everything else wants even sides; an impossible request is refused at parse time (exit 2) instead of failing on the first frame twenty minutes in |
 | `--net-test PATH\|URL` | v7.9.6.3: measure the link behind a source — throughput, jitter and first-byte latency, by reading the source the way the shards would — print the verdict `--parallel` would use, and exit (0 = shardable, 1 = not) |
@@ -346,7 +347,14 @@ presets can be captured in 4:3 or 16:9 as long as the encoder really encodes
 that frame; a network source is measured before it is sharded instead of being
 forced to a single pass; four Windows Media era presets cover 2002-2006; and
 the documented floor drops to what .NET 10 supports — Windows Server 2019 and
-glibc 2.28, i.e. the two machines CI runs on.
+glibc 2.28, i.e. the two machines CI runs on. v7.9.7 rewrites the preset table as
+**site → year**: `--era youku/2007`, `--era bilibili/2012`, `--era generic/1998`,
+one row per site per year it changed shape, with the old ids (`cctv03`, `hd14`, …)
+still resolving through an alias table; every row now carries a Wayback
+citation or is explicitly marked as an encoder-envelope estimate
+(`docs/era-presets.md`); and H.264 becomes a choice — `--h264
+libx264|libopenh264`, with the 2010-and-later presets defaulting to OpenH264
+because that, not x264, is what those years' portals actually ran.
 
 ## Layout
 

@@ -239,12 +239,19 @@ public sealed class SitePresetTests
         await Assert.That(EraPresets.Sites.Select(s => s.Id))
             .IsEquivalentTo(new[]
             {
-                // v7.9.6.3: the Windows Media years.
-                "cctv03", "sina03", "sohu03", "netease03",
-                "sina06", "sohu06", "qq06", "tudou06", "youku07", "ku6_07", "56_07",
-                "cctv06", "acfun08", "bilibili09", "youtube07",
-                "bilibili11", "youku11", "iqiyi11", "cctv12", "youtube11",
-                "bilibili14", "youtube15",
+                // v7.9.7: site -> year. Every row is one site in one year, and a
+                // site that changed shape has one row per shape.
+                "cctv/2003", "cctv/2006", "cctv/2011",
+                "sina/2003", "sina/2006", "sina/2010",
+                "sohu/2003", "sohu/2007", "sohu/2012",
+                "netease/2003", "netease/2008",
+                "qq/2006", "qq/2010",
+                "tudou/2006", "tudou/2009",
+                "youku/2007", "youku/2011",
+                "ku6/2007", "56/2007", "acfun/2009",
+                "bilibili/2010", "bilibili/2012", "bilibili/2014",
+                "iqiyi/2011",
+                "youtube/2007", "youtube/2011", "youtube/2015",
             });
     }
 

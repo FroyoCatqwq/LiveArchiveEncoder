@@ -51,6 +51,10 @@ public static class Preflight
         string? pixFmt = null,
         Configuration.ColorOverride? colors = null,
         string dither = "auto",
+        // v7.9.7: OpenH264's only quality knob is a bitrate, so the trial has to
+        // carry the same ceiling the real run uses or it would open the encoder
+        // in its default mode and prove nothing.
+        double? limitKbps = null,
         string? transportFmt = null)
     {
         string tempDir = Path.Combine(Path.GetTempPath(),
@@ -106,7 +110,7 @@ public static class Preflight
                 if (audio.Rate is not null && audio.Rate.Value != 0)
                     cmd.AddRange(["-ar", audio.Rate.Value.ToString()]);
             }
-            cmd.AddRange(ArgsBuilder.VideoQualityArgs(encoder.Name, quality));
+            cmd.AddRange(ArgsBuilder.VideoQualityArgs(encoder.Name, quality, limitKbps));
             // v7.9.6: an explicit request is also pinned on the encoder side, so
             // the output really keeps it instead of being quietly retuned to the
             // encoder's own default.

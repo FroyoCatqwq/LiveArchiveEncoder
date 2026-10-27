@@ -50,6 +50,15 @@ public static class RecompressCodecs
     [
         new("libx264", ["mp4", "mkv", "mov", "avi", "flv"], "-crf", 26,
             ["-preset", "veryfast", "-pix_fmt", "yuv420p"]),
+        // v7.9.7: the H.264 encoder of the 2010s portals was not x264. Cisco's
+        // OpenH264 is the reference implementation those services actually
+        // deployed (it is what a browser's WebRTC stack and several Chinese
+        // CDNs shipped), and its rate control at a fixed bitrate reproduces the
+        // soft, slightly-smeared look of a 2012 360p stream far better than
+        // x264's psychovisual tricks do. It has no constant-quality mode: the
+        // bitrate is the knob, which is why QualityFlag is empty.
+        new("libopenh264", ["mp4", "mkv", "mov", "flv"], "", 0,
+            ["-pix_fmt", "yuv420p"]),
         // HEVC in MP4 only opens in a player that understands the hvc1 tag;
         // without it QuickTime and Windows' own player refuse the file.
         new("libx265", ["mp4", "mkv", "mov"], "-crf", 30,

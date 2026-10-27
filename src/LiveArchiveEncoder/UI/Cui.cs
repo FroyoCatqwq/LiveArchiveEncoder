@@ -1983,8 +1983,12 @@ public static class Cui
 
     private static string DescribeEra(Config c) =>
         c.EraPreset is { Length: > 0 } id && PostProcess.EraPresets.Find(id) is not null
-            ? id + (c.EraNative ? "" : " (modern)")
+            ? id + (c.EraNative ? "" : " (modern)") + H264Suffix(c)
             : L.T("era.none");
+
+    /// <summary>Print the H.264 implementation only when the run actually has a choice.</summary>
+    private static string H264Suffix(Config c) =>
+        c.H264Impl is { Length: > 0 } impl && impl != "libx264" ? $" [{impl}]" : "";
 
     private static string DescribeRecompress(Config c) =>
         (c.Recompress.Enabled ? "on" : L.T("value.off"))
@@ -2004,16 +2008,18 @@ public static class Cui
     private static void PickEraPreset(
         Config c, List<EncoderInfo> encoders, HashSet<string> audioAvailable)
     {
-        IReadOnlyList<PostProcess.EraPreset> list = PostProcess.EraPresets.All;
+        // v7.9.7: the table is site -> year, so the menu is two levels. Printing
+        // 31 flat rows with the year buried in the id was the thing this version
+        // set out to fix.
+        IReadOnlyList<(string Site, IReadOnlyList<PostProcess.EraPreset> Rows)> groups =
+            PostProcess.EraPresets.Groups;
         Console.WriteLine($"\n== {L.T("era.menu")} ==");
-        foreach (PostProcess.EraPreset preset in list)
+        for (int i = 0; i < groups.Count; i++)
         {
-            string kind = preset.Kind == PostProcess.EraKind.Site
-                ? L.T("era.kind.site") : L.T("era.kind.era");
-            string mark = preset.BuiltIn ? " " : "*";
-            Console.WriteLine($"  {preset.Id,-16} {preset.YearFrom}-{preset.YearTo} {kind}{mark} "
-                + $"{preset.Summary()}");
-            Console.WriteLine($"  {"",-16} {preset.Note}");
+            (string site, IReadOnlyList<PostProcess.EraPreset> rows) = groups[i];
+            string years = string.Join(" ", rows.Select(r => r.YearLabel));
+            string mark = rows.Any(r => !r.BuiltIn) ? "*" : " ";
+            Console.WriteLine($"  {i + 1,2}. {site,-10}{mark} {years}");
         }
         Console.WriteLine($"  n. {L.T("era.menu.new")}");
         Console.WriteLine($"  e. {L.T("era.menu.edit")}");
@@ -2021,6 +2027,8 @@ public static class Cui
         Console.WriteLine($"  m. {L.T("era.menu.toggle")} = "
             + (c.EraNative ? L.T("era.native.on") : L.T("era.native.off")));
         Console.WriteLine($"  a. {L.Pad(L.T("era.menu.aspect"), 26)} = {c.EraAspect ?? "source"}");
+        Console.WriteLine($"  h. {L.Pad(L.T("era.menu.h264"), 26)} = "
+            + (c.H264Impl ?? L.T("era.h264.auto")));
 
         Console.Write(L.T("era.prompt", c.EraPreset ?? ""));
         string pick = (Console.ReadLine() ?? "").Trim();
@@ -2042,17 +2050,55 @@ public static class Cui
                 c.EraAspect = NextAspect(c.EraAspect);
                 Console.WriteLine(L.T("era.aspect.set", c.EraAspect));
                 return;
+            case "h":
+                // v7.9.7: auto (the preset's own) -> libopenh264 -> libx264 -> auto.
+                c.H264Impl = NextH264(c.H264Impl);
+                Console.WriteLine(L.T("era.h264.set", c.H264Impl ?? L.T("era.h264.auto")));
+                return;
         }
 
+        // A site name lists its years and asks which one; a full id applies as is.
+        string? chosenId = pick;
         PostProcess.EraPreset? chosen = PostProcess.EraPresets.Find(pick);
         if (chosen is null)
         {
-            Console.WriteLine($"{L.T("error.prefix")}{L.T("era.unknown", pick, PostProcess.EraPresets.Ids)}");
+            var group = groups.FirstOrDefault(g =>
+                string.Equals(g.Site, pick, StringComparison.OrdinalIgnoreCase));
+            if (group.Rows is { Count: > 0 })
+            {
+                for (int i = 0; i < group.Rows.Count; i++)
+                {
+                    PostProcess.EraPreset row = group.Rows[i];
+                    Console.WriteLine($"  {i + 1}. {row.YearLabel,-6} {row.Summary()}");
+                    Console.WriteLine($"     {row.Note}");
+                }
+                Console.Write(L.T("era.pickyear", group.Site));
+                string yearPick = (Console.ReadLine() ?? "").Trim();
+                if (yearPick.Length == 0) return;
+                chosen = int.TryParse(yearPick, out int index) && index >= 1 && index <= group.Rows.Count
+                    ? group.Rows[index - 1]
+                    : group.Rows.FirstOrDefault(r =>
+                        string.Equals(r.YearLabel, yearPick, StringComparison.OrdinalIgnoreCase));
+                chosenId = chosen?.Id;
+            }
+        }
+
+        if (chosen is null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("era.unknown", pick, PostProcess.EraPresets.SitesList)}");
             return;
         }
 
         ApplyPreset(c, chosen, encoders, audioAvailable);
     }
+
+    /// <summary>auto -> libopenh264 -> libx264 -> auto (v7.9.7).</summary>
+    private static string? NextH264(string? current) => (current ?? "").Trim().ToLowerInvariant() switch
+    {
+        "libopenh264" => "libx264",
+        "libx264" => null,
+        _ => "libopenh264",
+    };
 
     /// <summary>source -> 4:3 -> 16:9 -> source (v7.9.6.3).</summary>
     private static string NextAspect(string? current) =>
@@ -2067,10 +2113,23 @@ public static class Cui
     private static void ApplyPreset(
         Config c, PostProcess.EraPreset preset, List<EncoderInfo> encoders, HashSet<string> audioAvailable)
     {
+        // v7.9.7: an empty H264Impl means "follow the preset", so the effective
+        // encoder is only pinned when the user typed one.
+        string h264 = c.H264Impl ?? preset.H264Impl ?? "libx264";
+
         bool live = preset.ApplyLive(c);
         // v7.9.5.1: the site's own codec becomes the live encoder when the build
         // has it, and the container follows that encoder.
         bool encoder = preset.ApplyEncoder(c, encoders);
+        // v7.9.7: an H.264 row named the period's encoder, so a --h264-style
+        // override has to move the live pass too.
+        if (encoder && preset.H264Impl is { Length: > 0 }
+            && !string.Equals(preset.Encoder, h264, StringComparison.OrdinalIgnoreCase)
+            && encoders.FirstOrDefault(e => string.Equals(e.Name, h264, StringComparison.OrdinalIgnoreCase)) is { } swapped)
+        {
+            c.Encoder = swapped;
+            c.Container = null;
+        }
         if (encoder && c.Encoder is not null)
         {
             List<string>? usable = AudioCatalog.Compatible(
@@ -2101,7 +2160,7 @@ public static class Cui
             }
         }
 
-        c.Recompress.Args = preset.RecompressArgsFor(c.EraNative, size);
+        c.Recompress.Args = preset.RecompressArgsFor(c.EraNative, size, h264);
         c.Recompress.Container = preset.ContainerFor(c.EraNative);
         c.EraPreset = preset.Id;
 
@@ -2119,7 +2178,7 @@ public static class Cui
         else if (preset.HasEncoder)
             Console.WriteLine(L.T("note.eracodecmissing", preset.Id, preset.Encoder ?? ""));
         Console.WriteLine(L.T(c.EraNative ? "era.native.on" : "era.native.off"));
-        Console.WriteLine($" {preset.Fragment(c.EraNative)}");
+        Console.WriteLine($" {preset.Fragment(c.EraNative, size, h264)}");
         Console.WriteLine(L.T("rc.hint"));
     }
 

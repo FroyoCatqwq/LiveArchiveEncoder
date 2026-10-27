@@ -47,22 +47,43 @@ public static class Cli
         PostProcess.EraPreset? era = null;
         if (args.Era is { Length: > 0 } eraId)
         {
+            // v7.9.7: ids are site/year now. The pre-rewrite spellings still
+            // resolve (cctv03 -> cctv/2003); say so once, because a script that
+            // prints its own settings should not keep emitting a dead id.
+            if (!args.Quiet && PostProcess.EraPresets.IsAlias(eraId)
+                && PostProcess.EraPresets.Canonical(eraId) is { } renamed)
+            {
+                Console.WriteLine(L.T("note.eraalias", eraId.Trim(), renamed));
+            }
             era = PostProcess.EraPresets.Find(eraId);
             if (era is null)
             {
                 Console.Error.WriteLine($"ERROR: unknown era preset '{eraId}'; "
-                    + $"choose one of {PostProcess.EraPresets.Ids}");
+                    + $"sites are {PostProcess.EraPresets.SitesList} "
+                    + $"(ids look like cctv/2003)");
                 return 2;
             }
         }
+
+        // v7.9.7: the H.264 encoder to use wherever this run says H.264 -- the
+        // user's --h264 first, then the preset's own choice, then libx264.
+        string h264Impl = era?.EffectiveH264(args.H264Impl)
+            ?? args.H264Impl
+            ?? stored.H264Impl
+            ?? "libx264";
+        if (era?.H264Impl is { Length: > 0 } presetH264 && !args.H264Explicit && !args.Quiet)
+            Console.WriteLine(L.T("note.erah264", era.Id, presetH264));
 
         // A preset's second pass is rendered with the codec that site actually
         // served unless --era-modern asked for a viewing copy (v7.9.5.1). Said
         // out loud: the picture difference between those two is the whole point.
         if (era is not null && !args.Quiet)
         {
+            string nativeCodec = string.Equals(era.VideoCodec, "libx264", StringComparison.OrdinalIgnoreCase)
+                ? h264Impl
+                : era.VideoCodec;
             Console.WriteLine(L.T(eraNative ? "note.eranative" : "note.eramodern",
-                era.Id, eraNative ? era.VideoCodec : "libx264",
+                era.Id, eraNative ? nativeCodec : h264Impl,
                 eraNative ? era.NativeContainer : EraPreset.ModernContainer));
         }
 
@@ -72,10 +93,16 @@ public static class Cli
         string wantedEncoder = args.Encoder;
         if (era is { Encoder: { Length: > 0 } presetEncoder } && !args.EncoderExplicit)
         {
-            if (encoders.Any(e => string.Equals(e.Name, presetEncoder, StringComparison.OrdinalIgnoreCase)))
-                wantedEncoder = presetEncoder;
+            // An H.264 row names "the H.264 encoder of that period", so --h264
+            // moves the live pass too; a FLV, WMV or RealVideo row keeps its own
+            // codec. The test is the *live* encoder, not the delivery codec --
+            // a generic year captures with rv20 and delivers H.264.
+            bool h264Row = presetEncoder is "libx264" or "libopenh264";
+            string candidate = h264Row ? h264Impl : presetEncoder;
+            if (encoders.Any(e => string.Equals(e.Name, candidate, StringComparison.OrdinalIgnoreCase)))
+                wantedEncoder = candidate;
             else
-                Console.WriteLine(L.T("note.eracodecmissing", era.Id, presetEncoder));
+                Console.WriteLine(L.T("note.eracodecmissing", era.Id, candidate));
         }
 
         EncoderInfo? encoder = encoders.FirstOrDefault(
@@ -359,7 +386,7 @@ public static class Cli
         // The second pass is resolved before the Config literal so a bad codec /
         // container pair is reported as an argument error, not lost in a chain.
         (RecompressSettings recompress, string? recompressError) =
-            ResolveRecompress(args, era, eraNative, eraSize);
+            ResolveRecompress(args, era, eraNative, eraSize, h264Impl);
         try
         {
             if (recompressError is not null) throw new ArgumentException(recompressError);
@@ -431,6 +458,7 @@ public static class Cli
                 Recompress = recompress,
                 EraPreset = era?.Id ?? (args.Era is null ? stored.EraPreset : null),
                 EraNative = eraNative,
+                H264Impl = h264Impl,
                 // v7.9.5.1: the user's own presets travel with the run, so
                 // saving the settings file keeps them.
                 CustomEras = [.. EraPresets.Custom],
@@ -661,6 +689,7 @@ public static class Cli
         }
 
         bool eraNative = !args.EraModern;
+        string h264Impl = era?.EffectiveH264(args.H264Impl) ?? args.H264Impl ?? "libx264";
         // The second pass is the only pass here, so the encoder whose limits
         // matter is the one the preset delivers with.
         (int W, int H)? eraSize = null;
@@ -675,7 +704,7 @@ public static class Cli
             }
         }
 
-        (RecompressSettings settings, string? resolveError) = ResolveRecompress(args, era, eraNative, eraSize);
+        (RecompressSettings settings, string? resolveError) = ResolveRecompress(args, era, eraNative, eraSize, h264Impl);
         if (resolveError is not null)
         {
             Console.Error.WriteLine($"ERROR: {L.T("post.args.bad", resolveError)}");
@@ -757,15 +786,18 @@ public static class Cli
     /// writes exactly what it was given.
     /// </summary>
     private static (RecompressSettings Settings, string? Error) ResolveRecompress(
-        CliOptions args, PostProcess.EraPreset? era, bool eraNative, (int W, int H)? eraSize = null)
+        CliOptions args, PostProcess.EraPreset? era, bool eraNative, (int W, int H)? eraSize = null,
+        string? h264Impl = null)
     {
         var rc = new RecompressSettings
         {
             Enabled = false,
             // v7.9.6.3: a preset at another frame shape has to deliver that
-            // shape too -- a "youku07 16:9" capture whose second pass wrote
+            // shape too -- a "youku 2007 16:9" capture whose second pass wrote
             // 352x264 would be describing two different recordings.
-            Args = era?.RecompressArgsFor(eraNative, eraSize) ?? "",
+            // v7.9.7: and with the H.264 encoder the run settled on, so a
+            // --h264 switch reaches the second pass as well.
+            Args = era?.RecompressArgsFor(eraNative, eraSize, h264Impl) ?? "",
             Container = era?.ContainerFor(eraNative) ?? "mp4",
         };
 

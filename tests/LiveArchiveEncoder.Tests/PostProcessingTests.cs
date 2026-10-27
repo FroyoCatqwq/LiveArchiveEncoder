@@ -207,7 +207,11 @@ public sealed class EraPresetTests
         await Assert.That(ids.Distinct().Count()).IsEqualTo(ids.Count);
         foreach (string id in ids)
         {
-            await Assert.That(System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-z0-9_]+$")).IsTrue();
+            // v7.9.7: built-ins are "site/year"; a hand-written preset may be a
+            // bare slug. Nothing else is allowed, because the id travels on a
+            // command line unquoted.
+            await Assert.That(System.Text.RegularExpressions.Regex
+                .IsMatch(id, "^[a-z0-9_]+(/[0-9]{4})?$")).IsTrue().Because(id);
         }
     }
 
@@ -316,10 +320,46 @@ public sealed class EraPresetTests
     [Test]
     public async Task FindIsCaseInsensitiveAndRejectsUnknowns()
     {
-        await Assert.That(EraPresets.Find("FLV07")!.Id).IsEqualTo("flv07");
+        // v7.9.7: the id is "site/year" now, and the pre-rewrite spelling still
+        // resolves to it -- a settings file from v7.9.6 must keep working.
+        await Assert.That(EraPresets.Find("GENERIC/2007")!.Id).IsEqualTo("generic/2007");
+        await Assert.That(EraPresets.Find("flv07")!.Id).IsEqualTo("generic/2007");
+        await Assert.That(EraPresets.Find("YOUKU07")!.Id).IsEqualTo("youku/2007");
         await Assert.That(EraPresets.Find("nope")).IsNull();
         await Assert.That(EraPresets.Find("")).IsNull();
         await Assert.That(EraPresets.Find(null)).IsNull();
+    }
+
+    [Test]
+    public async Task EveryOldIdResolvesToABuiltInRow()
+    {
+        // The alias table is the compatibility promise: every id v7.9.6 printed
+        // must still name a preset, and the target must exist.
+        foreach ((string oldId, string newId) in EraPresets.Aliases)
+        {
+            await Assert.That(EraPresets.Canonical(oldId)).IsEqualTo(newId).Because(oldId);
+            await Assert.That(EraPresets.Find(oldId)).IsNotNull().Because(oldId);
+            await Assert.That(EraPresets.IsAlias(oldId)).IsTrue().Because(oldId);
+            await Assert.That(EraPresets.Find(newId)!.BuiltIn).IsTrue().Because(newId);
+        }
+    }
+
+    [Test]
+    public async Task SiteSlashYearIsTheOnlyBuiltInShape()
+    {
+        foreach (EraPreset preset in EraPresets.All.Where(p => p.BuiltIn))
+        {
+            await Assert.That(preset.Id).IsEqualTo($"{preset.Site}/{preset.Year}").Because(preset.Id);
+            await Assert.That(preset.Year).IsGreaterThanOrEqualTo(1990).Because(preset.Id);
+            await Assert.That(preset.Year).IsLessThanOrEqualTo(2100).Because(preset.Id);
+        }
+        // Every built-in site has at least one year, and every group is ordered.
+        foreach ((string site, IReadOnlyList<EraPreset> rows) in EraPresets.Groups)
+        {
+            await Assert.That(rows.Count).IsGreaterThan(0).Because(site);
+            await Assert.That(rows.All(r => string.Equals(r.Site, site, StringComparison.OrdinalIgnoreCase)))
+                .IsTrue().Because(site);
+        }
     }
 }
 

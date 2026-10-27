@@ -236,6 +236,7 @@ public static class RealtimeEncoder
                 pixFmt: o.PixFmt.HasText ? transportFmt : null,
                 colors: ColorOverride.Parse(o.ColorRange, o.ColorSpace, o.ColorPrimaries, o.ColorTransfer),
                 dither: o.Dither,
+                limitKbps: o.LimitKbps,
                 transportFmt: transportFmt);
         }
 
@@ -627,7 +628,7 @@ public static class RealtimeEncoder
         if (subtitleInput >= 0) cmd.AddRange(["-map", SubtitleTrack.CopyMap(subtitleInput, subs!)]);
 
         cmd.AddRange(["-c:v", o.Encoder.Name]);
-        cmd.AddRange(ArgsBuilder.VideoQualityArgs(o.Encoder.Name, o.Quality));
+        cmd.AddRange(ArgsBuilder.VideoQualityArgs(o.Encoder.Name, o.Quality, o.LimitKbps));
         // v7.9.6: pin the format on the encoder side too when the user named
         // one. The pipe already carries --pix_fmt, but without this the encoder
         // is free to hand the muxer its own default (measured: libx264 given
@@ -1134,7 +1135,7 @@ public static class RealtimeEncoder
                 "-frames:v", "3",
                 "-c:v", o.Encoder.Name,
             };
-            videoCmd.AddRange(ArgsBuilder.VideoQualityArgs(o.Encoder.Name, o.Quality));
+            videoCmd.AddRange(ArgsBuilder.VideoQualityArgs(o.Encoder.Name, o.Quality, o.LimitKbps));
             videoCmd.AddRange(["-f", o.Encoder.FormatName, "-y", videoPath]);
             CaptureResult video = ProcessRunner.Run(videoCmd, 60);
             if (video.ExitCode != 0)

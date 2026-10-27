@@ -1,258 +1,122 @@
-# 时代预设的依据（v7.6）
+# 时代预设：站点 -> 年份
 
-每个内置预设的数字都不是拍的，出处在这里。分两类：**当年的规格资料**（决定
-"那个年代的视频长什么样"）和**网络条件**（决定"能传多大"）。后者主要来自
-`W:\书籍\微型计算机 MicroComputer 1997-2007` 的杂志扫描件。
+> v7.9.7 起，预设不再是一份"时代"清单加一份"站点"清单，而是**一个站在一个年份**。
+> id 就是 `site/year`，例如 `youku/2007`、`bilibili/2012`、`generic/1998`。
 
-## 提取方法
+## 怎么用
 
-`_pdf_extract.py`（仓库外上级目录）把每本杂志的文本层抽到 `_pdftext/*.txt`，
-然后按关键词（56K / ISDN / ADSL / 宽带 / 带宽 / 流媒体 / RealPlayer / FLV…）
-检索上下文。注意 **2009–2015 是扫描图片版，没有文本层**（每本只提出一百多个
-字符），所以那几年的网络条件用的是 2008 与 2016 两本 + 公开资料。
-
-## 各预设的依据
-
-### `dialup98` — 1997–2000 拨号 / ISDN
-
-- **RealSystem G2 Production Guide**（RealNetworks 官方手册，1999）给出权威的
-  窗口尺寸 ↔ 带宽对照（10–15 fps）：
-
-  | 窗口 | RealVideo 带宽 | 画质 |
-  | --- | --- | --- |
-  | 176x132 | 20–500 Kbps | Good to High |
-  | 240x180 | 100–500 Kbps | High |
-  | 320x240 | 200–500 Kbps | High |
-
-  并明确写道：*"for 28.8 Kbps modems (20 Kbps usable bandwidth), you should use
-  a window no larger than 176x132"*，且低带宽下实际帧率会掉到 5–7 fps。
-- RV20（G2，1998）支持 176x132 / 320x240、至多 15 fps、至多 80 Kbps（双 ISDN）。
-- 杂志侧：1998 年第 12 期整版的 56K Modem 评测与升级行情（"USR 336K 升级到
-  56K"、实达 56K 外置 550 元）；2000 年合订本仍在推 ISDN（"申请安装 ISDN 以
-  达到更加理想的上网效果"）。
-- 取值：160x120（4:3、贴近 176x132 档）、10 fps、上限 45 Kbps、`neighbor` 缩放
-  （Pentium 100–200 MHz 年代没有余力做重插值）、音频 16 kHz 单声道 16 Kbps。
-- 二次压缩：crf 34 / baseline，压出"56K 电话线"的糊。
-
-### `broadband03` — 2001–2004 ADSL 初期
-
-- 2002 年合订本：*"ADSL MODEM 的最大数据传输率为 8Mbps"、"最高速度可以达到
-  上行 1Mbps"* —— 理论 8M，实际开通多为 512 K。
-- RealVideo 8（RV30，2001）目标带宽 100–500 Kbps，最大 352x288；RealVideo 10
-  约 1 Mbps 即可接近 DVD 画质。
-- 取值：320x240、15 fps、上限 225 Kbps、`bicubic`、音频 22.05 kHz 单声道 24 Kbps。
-
-### `flv07` — 2005–2008 视频网站
-
-- **实测的土豆 FLV**（2009 年下载的文件，Metadata 完整）：
-  - `Bleach死神 225.flv`：320x240、295 Kbps、11.997 fps
-  - `MR.BRAIN 03.flv`：352x264、291 Kbps、11.826 fps
-- YouTube（2007 年论坛讨论，VideoHelp）：320x240、~150 Kbps、音频 22 kHz 单声道
-  32 Kbps。
-- 2008 年《微型计算机》第 12 期在便携播放器评测里写 *"支持 RMVB、AVI、FLV 等
-  多种网络视频格式"* —— 三足鼎立的直接证据；同期的手机 MPEG-4 SP 规格表给出
-  320x240 / 256–320 Kbps / 15 fps / 音频 64 Kbps。
-- 2009 年的回忆帖印证转码行为：*"土豆、新浪、优酷普遍就是这种格式……FLV
-  （H.263+ 单声道 MP3），只有 320x240 的分辨率"*。
-- 取值：**352x264**（实测尺寸之一，且比上一档大，保证时代演进单调）、15 fps、
-  上限 300 Kbps、`bicubic`、音频 22.05 kHz 单声道 32 Kbps。二次压缩 crf 28
-  —— 正是"优酷土豆糊"的量级。
-
-### `mp4_10` — 2009–2012 H.264 接管
-
-- 宽带从 2M 向 4M/8M 过渡；H.264 baseline/main 成为网站转码标配，480p 是网页
-  默认。杂志这几年为扫描件，无文本层可引。
-- 取值：640x480、25 fps、上限 900 Kbps、`lanczos`、音频 44.1 kHz 单声道 64 Kbps。
-
-### `hd14` — 2013–2016 高清
-
-- 2008 年合订本已在讨论*"轻松传输未经压缩的 1080p 视频"*；到这一代带宽不再是
-  约束，720p 成为网站默认，立体声也能在转码后存活。
-- 取值：1280x720、30 fps、上限 2500 Kbps、`lanczos`、音频 44.1 kHz 立体声 96 Kbps。
-
-## 动态帧率挡位（v7.9.6.1）
-
-只给基准帧率是不够的。上一版把 `--era mp4_10` 的基准设成 25 fps，却留着工具默认的
-13/8/5/3 挡位——第一次降档就把帧率砍掉一半，那不是 2010 年任何编码器会做的事。
-**挡位是"当年"的一部分**，所以它进了预设：
-
-| 预设 | 基准 | 挡位 | 依据 |
-| --- | --- | --- | --- |
-| `dialup98` | 10 | 10 → 8 → 5 → 3 | RealVideo G2 在 28.8K 上就是 10/8/5 三档，3 fps 是"宁可幻灯也别卡死" |
-| `broadband03` | 15 | 15 → 12 → 10 → 8 → 5 | RV8/9 在 150 Kbps 时 12 fps 仍可用；15 直接跳 8 会像播放器坏了 |
-| `flv07` | 15 | 15 → 12 → 10 → 8 → 5 | 实测土豆文件落在 11.8–12.0 fps，正是 12 这一档被真实用到 |
-| `mp4_10` | 25 | 25 → 20 → 15 → 10 | 480p H.264 不再降到 5：这一代宁可多给码率也不肯给幻灯 |
-| `hd14` | 30 | 30 → 25 → 20 → 15 | 720p 降到 15 已经是肉眼可见的缺陷，没有 10/5 档 |
-
-规则三条：
-
-1. **挡位只在用户没指定帧率时生效**。显式 `--fps` 或 `--fps-levels` 永远优先——
-   预设是兜底，不是覆盖（v7.9.3.1 起的铁律）。
-2. **站点预设也带直播层**（v7.9.6.2 起）。`sina06` 这类预设描述的不只是"网站怎么
-   转码"，还有那个年代**怎么采集**：320x240、12–15 fps、几百 kbps、mp3 22.05 kHz。
-   以前它只改第二遍，结果直播录的是你的 640x480@25 母版、第二遍却声称 352x264@15，
-   菜单第 4 项参数两边都不像。现在两遍出自同一行数据。
-3. **钉了阈值的挡位会跟着走**。`FpsLevelKbps` 按帧率键控，换挡位时不属于新挡位的
-   阈值直接被丢掉，不会悄悄套到别的帧率上。
-
-自定义预设（菜单 14 → `n`/`e`）在直播层多问一行"直播帧率挡位"，留空即按基准帧率
-推导（等价于旧行为）。存进 `config.json` 的 `CustomEras[].FpsLevels`；手改乱了会
-被清洗成降序去重，非正数丢弃。
-
-## 有意的取舍
-
-- **RealMedia 时代用 rv20 而不是 rv30/rv40**：FFmpeg 只有 rv10/rv20 的编码器，
-  本工具的"legacy 编码器"清单也只认这两个。rv20 正是 G2（1998）的 codec，落在
-  预设年代内，不是妥协。
-- **二次压缩统一用 libx264/MP4**：模拟的是"网站转完码你下载到的效果"，现代
-  播放器要能直接打开，所以容器用 MP4、编码用 H.264，只把分辨率/帧率/码率压回
-  当年水平。1998 年的"网站"当然不是 H.264——那是当年网站**做了什么**的画质，
-  不是当年网站**用了什么编码器**。
-- **时代演进单调**：像素数和码率上限必须逐档上升，有单测
-  （`ErasAdvanceInResolutionAndBitrate`）盯着，防止改表时把历史改倒。
-
-## 站点预设（v7.9.5；v7.9.5.1 指定编码器；v7.9.6.2 连直播层一起塑形）
-
-v7.6 的五个预设是"时代"，描述的是**整个环境**（带宽、播放器、网站转码三件事的
-合成）。2005–2016 那几年其实不是一套档位：每个门户自己转自己的，同样的上传在
-新浪、搜狐、腾讯、优酷、土豆、B 站上出来的画质不一样。所以 v7.9.5 把这一段拆成
-**站点**预设，各自只描述那个站的转码档位；v7.9.5.1 又补上 2010 年代的站，并且
-**指名每个站当年用的编码器**。
-
-> **v7.9.6.2**：站点预设现在**同时填直播层和二次压缩层**——帧尺寸、帧率、挡位、
-> 码率上限、缩放核、音频参数全部按当年那一档来（`youku07` = 352x264@15、320 kbps、
-> 15/12/10/8/5 挡位、mp3 22.05 kHz 单声道）。原因很简单：选一个 2007 年的站，录出来
-> 的东西本该就是 2007 年的样子，而不是"用 2007 年的站转码一份 2016 年的母版"。
-> 显式 `--width/--fps/--limit/--scale-algo/--audio-*` 仍然优先，预设只做兜底。
-
-### 编码器为什么属于预设
-
-`320 kbps` 不是一个画面，而是"320 kbps 的某某编码器"。同码率下 Sorenson Spark
-（H.263 家族，宏块 16x16、无 deblocking）和 H.264 的差别，比 320 kbps 和 500 kbps
-的差别更大。所以每个站点预设同时给出：
-
-| 层 | 字段 | 作用 |
-| --- | --- | --- |
-| 第二遍 | `VideoCodec` / `AudioCodec` / `RecompressContainer` | 站点真正发出的编码器与容器（flv1+mp3 在 `.flv`、H.264+AAC 在 `.mp4`、VP9+Opus 在 `.webm`） |
-| 直播层兜底 | `Encoder` | 当年的采集/上传编码器；CLI 在没给 `--encoder` 时用它，给了就按用户的 |
-
-`--era-modern` 把第二遍换成 libx264 + AAC 的 mp4 观看版（v7.9.5 的行为），
-`--era-native` 是默认（也是给脚本自证用的显式写法）。
-
-### 2005–2012：Sorenson Spark 在 FLV 里
-
-| Id | 站点 / 年代 | 分辨率 | fps | 视频 | 音频 | 编码器 | 依据 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `sina06` | 新浪播客 2005–2008 | 320x240 | 12 | 200 kbps | 22.05 kHz 单声道 32 kbps | flv1 | 2009 年回忆帖："土豆、新浪、优酷普遍就是这种格式……只有 320x240"；新浪同期带宽最紧，帧率取 12 |
-| `sohu06` | 搜狐视频 2006–2009 | 320x240 | 15 | 240 kbps | 22.05 kHz 单声道 32 kbps | flv1 | 同期门户 FLV 档位；比新浪高一档（搜狐 2006 起对外宣传"高清"） |
-| `qq06` | 腾讯 / QQ 视频 2006–2009 | 320x240 | **25** | 260 kbps | 22.05 kHz 单声道 32 kbps | flv1 | 腾讯播放器是那批里唯一把帧率拉到 25 的；同码率、双倍帧，画面更顺、单帧更糊 |
-| `tudou06` | 土豆网 2005–2009 | 352x264 | 12 | 295 kbps | 22.05 kHz 单声道 32 kbps | flv1 | **实测**：`MR.BRAIN 03.flv` 352x264 / 291 Kbps / 11.826 fps，`Bleach死神 225.flv` 320x240 / 295 Kbps / 11.997 fps |
-| `youku07` | 优酷 2007–2010 | 352x264 | 15 | 320 kbps | 22.05 kHz 单声道 32 kbps | flv1 | 同期优酷 FLV 档位；比土豆高一档（优酷 2007 起推"高清"标签） |
-| `ku6_07` | 酷6网 2007–2010 | 320x240 | 15 | 240 kbps | 22.05 kHz 单声道 32 kbps | flv1 | 同期酷6 的标清档位，与搜狐同量级（酷6 2009 年与盛大整合前的公开码率档） |
-| `56_07` | 56网 2006–2010 | 320x240 | 15 | 220 kbps | 22.05 kHz 单声道 32 kbps | flv1 | 同期 56 的标清档位；比酷6/搜狐再低一档，与它当年的带宽成本一致 |
-| `cctv06` | 央视网 2006–2009 | 384x288 | 25 | 350 kbps | 22.05 kHz 单声道 48 kbps | flv1 | 电视媒体出身：4:3、PAL 25 fps；码率高于门户（新闻画面运动少，敢给码率） |
-| `acfun08` | AcFun 2008–2011 | 320x240 | 15 | 260 kbps | 22.05 kHz 单声道 32 kbps | flv1 | 同期 AcFun 的 FLV 档位，与 QQ 同量级（弹幕站的上传多为录屏/番剧切片） |
-| `bilibili09` | 哔哩哔哩 2009–2012 | 384x288 | 24 | 320 kbps | 22.05 kHz 单声道 32 kbps | flv1 | 早期 B 站是 FLV 站；番剧源多为 4:3、24 fps 的 telecine 素材 |
-| `youtube07` | YouTube 2006–2008 | 320x240 | 15 | 200 kbps | 22.05 kHz 单声道 64 kbps | flv1 | VideoHelp 论坛 2007 年测得的标准流：320x240、~150–200 Kbps、22 kHz 单声道 |
-
-### 2010–2016：H.264 进 MP4，YouTube 转 VP9
-
-| Id | 站点 / 年代 | 分辨率 | fps | 视频 | 音频 | 编码器 → 容器 | 依据 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `bilibili11` | 哔哩哔哩 2011–2013 | 640x360 | 30 | 700 kbps | 44.1 kHz 立体声 96 kbps | libx264 → mp4 | B 站 2011 起推 360P/H.264；动画素材 30 fps |
-| `youku11` | 优酷 2011–2013 | 640x360 | 25 | 800 kbps | 44.1 kHz 立体声 96 kbps | libx264 → mp4 | "高清"标签期的 360P 档；25 fps 沿用电视素材习惯 |
-| `iqiyi11` | 爱奇艺 2011–2014 | 640x360 | 25 | 800 kbps | 44.1 kHz 立体声 96 kbps | libx264 → mp4 | 同期 360P 档，与优酷同量级 |
-| `cctv12` | 央视网 / CNTV 2010–2013 | 640x360 | 25 | 700 kbps | 44.1 kHz 立体声 96 kbps | libx264 → mp4 | 电视信号转 H.264；仍 25 fps，但分辨率进到 360P |
-| `youtube11` | YouTube 2011–2013 | 640x360 | 30 | 700 kbps | 44.1 kHz 立体声 96 kbps | libx264 → mp4 | 360p 标准流 |
-| `bilibili14` | 哔哩哔哩 2014–2016 | 1280x720 | 30 | 1800 kbps | 44.1 kHz 立体声 128 kbps | libx264 → mp4 | 720P 成为站内"高清"，码率约 1.8 Mbps |
-| `youtube15` | YouTube 2014–2016 | 1280x720 | 30 | 1500 kbps | 48 kHz 立体声 96 kbps | libvpx-vp9 → webm | YouTube 2014–2016 把 720p 迁到 VP9 + Opus；这是唯一"现代编码器就是当年编码器"的预设 |
-
-说明：
-
-- **只有土豆那一行是实测**（文件在本地，Metadata 完整）；其余是同期公开资料与
-  回忆帖的档位，不是逐个下载文件量出来的。这一点写在这里，而不是让数字看起来
-  比实际更硬。
-- **编码器名是"那一年该站发出的编码器"，不是"该站唯一用过的编码器"**。
-  FLV 时代各站都是 Sorenson Spark（flv1），2010 年代都转 H.264，YouTube 的 VP9
-  是唯一明显的例外。
-- **`-b:v` 而不是 `-crf`**：站点是按码率转的。原生片段里同时给了 `-maxrate 1.2x`
-  和 `-bufsize 2x`，这是标称档位该有的形状；用 CRF 会让"预设里的数字"变成一句建议。
-  现代渲染（`--era-modern`）才用 CRF，因为那本来就是"观看版"而不是"还原档位"。
-- **`bilibili09` 用 384x288 / 24 fps**：4:3 是那个年代的番剧比例，24 fps 是
-  telecine 之后的结果；不是所有上传都这样，但这是最像"2009 年 B 站"的一组。
-- 站点预设**不参与**"时代演进单调"那条单测（`ErasAdvanceInResolutionAndBitrate`
-  只对带直播层的预设生效），因为它们本来就不是一条时间线，而是同一年多个站点的
-  并列档位。
-
-## Windows Media 年代（v7.9.6.3）
-
-内置表原本从 2005 年开始，2003 年的录像没有落点。补上四个走 **Windows Media**（而不是
-Flash）的站点预设：
-
-| id | 年份 | live / 第二遍 | 速率 | 音频 |
-| --- | --- | --- | --- | --- |
-| `cctv03` | 2003-2006 | wmv2 320x240@15 | ~250 kbps | wmav2 32k 22.05k 单声道 |
-| `sina03` | 2002-2005 | wmv2 320x240@12 | ~200 kbps | wmav2 24k 22.05k 单声道 |
-| `sohu03` | 2003-2005 | wmv2 320x240@15 | ~220 kbps | wmav2 32k 22.05k 单声道 |
-| `netease03` | 2003-2006 | wmv2 176x144(QCIF)@12 | ~120 kbps | wmav2 24k 22.05k 单声道 |
-
-**依据的性质和前几节不同，必须说清楚**：FLV 时代的数字是对真实下载文件实测的，因为
-那些文件是 HTTP 托管的、被爬虫和用户保存下来了；2003 年的门户主要用 MMS/RTSP 流，
-没有可指的存档样本。所以这四个是**当年的典型值**：落在 WMV8 自己的包络里（320x240 或
-QCIF、12-15 fps、几百 kbps、WMA 单声道），不是从某个文件 probe 出来的。
-
-直播层也点明 `wmv2`：2003 年的门户不会接收 H.264 上传，用 `libx264` 采集再把第二遍写成
-WMV8，描述的是两台机器。为此 `wmav2` 进了二次压缩的音频表，实测依据是：wmv2 + wmav2
-32k / 22.05 kHz 单声道写进 `.wmv`，ffprobe 读回 `wmv2` / `wmav2` / `asf`（2026-10-25，
-ffmpeg N-128013）。
-
-## 画幅：4:3 与 16:9（v7.9.6.3）
-
-`--era-aspect` 把预设换到另一种画幅，规则是**保持采集宽度、只改高度**：
-
-| 原尺寸 | 4:3 | 16:9 |
-| --- | --- | --- |
-| 320x240 | 320x240 | 320x180 |
-| 352x264 | 352x264 | 352x198 |
-| 384x288 | 384x288 | 384x216 |
-| 640x480 | 640x480 | 640x360 |
-| 1280x720 | 1280x960 | 1280x720 |
-| 176x144 | 176x132 | 176x100 |
-
-为什么保持宽度：宽度是预设调好的横向细节（352 的 FLV 挡位、1280 的 720p 挡位），改宽度
-等于换了一档；高度才是画幅。码率上限属于时代、不属于画幅，所以不动。
-
-"可用"是硬约束：H.261/H.263 只存在于 CIF 五个尺寸（`Constants.SpecialSizes`），所以它们
-根本给不出 16:9；AMV 要 16 的倍数、rv10/rv20 上限 704x576、Sorenson Spark 上限
-1280x720、其余要偶数。校验发生在参数解析阶段——FFmpeg 会先接受命令行，然后在第一帧上
-失败，那是在实时编码跑了二十分钟之后。
-
-## 自定义预设（v7.9.5.1）
-
-内置表是只读的，升级可以加行而不会和本地修改打架。你自己的预存放
-`config.json` 的 `CustomEras` 数组：
-
-```json
-{
-  "CustomEras": [
-    {
-      "Id": "my_youku09",
-      "Kind": "site",
-      "YearFrom": 2009, "YearTo": 2010,
-      "RcWidth": 480, "RcHeight": 360, "RcFps": 20,
-      "RcVideoKbps": 500, "RcAudioKbps": 48, "RcAudioRate": 44100, "RcAudioChannels": 2,
-      "VideoCodec": "libx264", "AudioCodec": "aac", "Container": "mp4",
-      "Note": "我自己记得的优酷 2009"
-    }
-  ]
-}
+```
+LiveArchiveEncoder in.mp4 out.flv --era youku/2007
+LiveArchiveEncoder in.mp4 out.mp4 --era bilibili/2012 --h264 libx264
+LiveArchiveEncoder in.mp4 out.mp4 --era generic/2014 --era-aspect 16:9
 ```
 
-- `Kind` 是 `site`（只写第二遍）或 `era`（再带直播层：`Encoder` / `Width` /
-  `Height` / `Fps` / `LimitKbps` / `ScaleAlgo`）。
-- 片段不用写：第二遍的参数由上面的数字生成（`Fragment(true/false)`），所以
-  预设永远不可能带着一段过期的命令行。
-- 读的时候会纠正：不认识的编码器退回 libx264/aac，写不通的容器换成该组合的
-  默认容器，`Id` 归一化成小写 slug。坏一行不会让程序启动失败。
-- 同名 id 覆盖内置行（`era` 菜单里标 `*`）；删掉自定义行，内置的又回来了。
-- CUI 菜单 14 的 `n` / `e` / `d` 是同一个数据结构的向导。
+- 菜单第 14 项是两级：先列站点，选完站点再列它有的年份。
+- `--era` 只**填参数**，不会替你打开二次压缩；那一步仍然要你自己开。
+- 预设是**兜底不是覆盖**：显式给的 `--width` / `--fps` / `--encoder` 一律优先。
+
+## 内置表
+
+`直播层` 是采集侧（尺寸@帧率 / 码率上限），`交付` 是站点当年给观众的规格。
+`编码器` 一列写的是"直播层用什么 -> 二次压缩用什么"；箭头后面是站点当年真正发出的编码器。
+
+| 预设 | 年份 | 直播层 | 交付（视频/音频） | 编码器 | 依据 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `generic/1998` | [1998](http://web.archive.org/web/19980703151556/http://www11.real.com:80/) | 160x120@10 / 45k | 160x120@10 45k 16k/16kHz mono | rv20 → libx264/aac .mp4 | 包络 | RealVideo G2 在 28.8K 调制解调器上的典型档位；当年无站点页面可引 |
+| `generic/2003` | [2003](http://web.archive.org/web/20030531193112/http://www6.real.com:80/) | 320x240@15 / 225k | 320x240@15 225k 24k/22.05kHz mono | rv20 → libx264/aac .mp4 | 包络 | ADSL 普及初期 RealVideo 8 的常见参数 |
+| `generic/2007` | [2007](http://web.archive.org/web/20070601120905/http://youtube.com/) | 352x264@15 / 300k | 352x264@15 300k 32k/22.05kHz mono | flv → libx264/aac .mp4 | 包络 | FLV 时代的通用档位；具体站点见 youku/tudou 等行 |
+| `generic/2010` | [2010](http://web.archive.org/web/20100602002509/http://www.youtube.com/) | 640x480@25 / 900k | 640x480@25 900k 64k/44.1kHz mono | libx264 → libx264/aac .mp4 | 包络 | 480p H.264 成为网页默认尺寸的年份 |
+| `generic/2014` | [2014](http://web.archive.org/web/20140602000310/http://www.youtube.com/) | 1280x720@30 / 2500k | 1280x720@30 2500k 96k/44.1kHz stereo | libx264 → libx264/aac .mp4 | 包络 | 720p 普及、立体声得以保留 |
+| `cctv/2003` | [2003](http://web.archive.org/web/20030528121336/http://www.cctv.com:80/) | 320x240@15 / 250k | 320x240@15 250k 32k/22.05kHz mono | wmv2 → wmav2 .asf | 包络 | MMS 流未被爬取保存，只有站点页面可引 |
+| `cctv/2006` | [2006](http://web.archive.org/web/20060528214736/http://cctv.com:80/) | 384x288@25 / 350k | 384x288@25 350k 48k/22.05kHz mono | flv → libmp3lame .flv | 包络 | PAL 4:3 素材，25 fps |
+| `cctv/2011` | [2011](http://web.archive.org/web/20110602005532/http://www.cntv.cn:80/) | 640x360@25 / 700k | 640x360@25 700k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 | CNTV 独立域名之后 |
+| `sina/2003` | [2003](http://web.archive.org/web/20030527035526/http://video.sina.com.cn:80/) | 320x240@12 / 200k | 320x240@12 200k 24k/22.05kHz mono | wmv2 → wmav2 .asf | 包络 |  |
+| `sina/2006` | [2006](http://web.archive.org/web/20051208020436/http://video.sina.com.cn:80/) | 320x240@12 / 200k | 320x240@12 200k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 | 新浪播客；12 fps 是它的特征 |
+| `sina/2010` | [2010](http://web.archive.org/web/20100605124737/http://video.sina.com.cn/) | 640x360@25 / 600k | 640x360@25 600k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 |  |
+| `sohu/2003` | [2003](http://web.archive.org/web/20080820023714/http://video.sohu.com/) | 320x240@15 / 220k | 320x240@15 220k 32k/22.05kHz mono | wmv2 → wmav2 .asf | 包络 |  |
+| `sohu/2007` | [2007](http://web.archive.org/web/20080820023714/http://video.sohu.com/) | 352x264@15 / 320k | 352x264@15 320k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 |  |
+| `sohu/2012` | [2012](http://web.archive.org/web/20120601045515/http://tv.sohu.com/) | 640x360@25 / 800k | 640x360@25 800k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 | 搜狐视频独立域名 tv.sohu.com |
+| `netease/2003` | [2003](http://web.archive.org/web/20090310164907/http://v.163.com:80/) | 176x144@12 / 120k | 176x144@12 120k 24k/22.05kHz mono | wmv2 → wmav2 .asf | 包络 | QCIF 小窗播放器 |
+| `netease/2008` | [2008](http://web.archive.org/web/20090310164907/http://v.163.com:80/) | 320x240@15 / 240k | 320x240@15 240k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 |  |
+| `qq/2006` | [2006](http://web.archive.org/web/20061017063235/http://video.qq.com:80/) | 320x240@25 / 260k | 320x240@25 260k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 | 同期唯一把帧率拉到 25 的播放器 |
+| `qq/2010` | [2010](http://web.archive.org/web/20110301075944/http://v.qq.com/) | 640x360@25 / 700k | 640x360@25 700k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 |  |
+| `tudou/2006` | [2006](http://web.archive.org/web/20060612223905/http://www.tudou.com:80/) | 352x264@12 / 295k | 352x264@12 295k 32k/22.05kHz mono | flv → libmp3lame .flv | 实测 | 对真实下载的 FLV 文件 ffprobe 得出（v7.9.5 记录） |
+| `tudou/2009` | [2009](http://web.archive.org/web/20090616230533/http://www.tudou.com:80/) | 352x264@15 / 320k | 352x264@15 320k 32k/22.05kHz mono | flv → libmp3lame .flv | 实测 | 同上，帧率与码率都略升 |
+| `youku/2007` | [2007](http://web.archive.org/web/20070602010215/http://www.youku.com/v_show/id_1001059.html) | 352x264@15 / 320k | 352x264@15 320k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 |  |
+| `youku/2011` | [2011](http://web.archive.org/web/20110601214528/http://www.youku.com:80/) | 640x360@25 / 800k | 640x360@25 800k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 |  |
+| `ku6/2007` | [2007](http://web.archive.org/web/20070529140512/http://ku6.com:80/) | 320x240@15 / 240k | 320x240@15 240k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 |  |
+| `56/2007` | [2007](http://web.archive.org/web/20070707111454/http://www.56.com/) | 320x240@15 / 220k | 320x240@15 220k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 |  |
+| `acfun/2009` | [2009](http://web.archive.org/web/20090503141141/http://www.acfun.cn:80/) | 320x240@15 / 260k | 320x240@15 260k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 |  |
+| `bilibili/2010` | [2010](http://web.archive.org/web/20110222044540/http://bilibili.tv:80/) | 384x288@24 / 320k | 384x288@24 320k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 | 4:3 动画素材，24 fps |
+| `bilibili/2012` | [2012](http://web.archive.org/web/20120602093610/http://www.bilibili.tv:80/) | 640x360@30 / 700k | 640x360@30 700k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 |  |
+| `bilibili/2014` | [2014](http://web.archive.org/web/20140530212159/http://www.bilibili.com:80/) | 1280x720@30 / 1800k | 1280x720@30 1800k 128k/44.1kHz stereo | libx264 → aac .mp4 | 包络 |  |
+| `iqiyi/2011` | [2011](http://web.archive.org/web/20110809132204/http://www.iqiyi.com:80/) | 640x360@25 / 800k | 640x360@25 800k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 |  |
+| `youtube/2007` | [2007](http://web.archive.org/web/20070601120905/http://youtube.com/) | 320x240@15 / 200k | 320x240@15 200k 64k/22.05kHz mono | flv → libmp3lame .flv | 文档 | YouTube 2006-2008 的标准档：320x240 + 22 kHz 单声道 64 kbps |
+| `youtube/2011` | [2011](http://web.archive.org/web/20110602000854/http://www.youtube.com//) | 640x360@30 / 700k | 640x360@30 700k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 |  |
+| `youtube/2015` | [2015](http://web.archive.org/web/20150601235840/https://www.youtube.com/) | 1280x720@30 / 1500k | 1280x720@30 1500k 96k/48kHz stereo | libvpx-vp9 → libopus .webm | 文档 | VP9 + Opus 成为 720p 默认交付格式 |
+
+### "依据"是什么意思
+
+- **实测** —— 拿当年真实的下载文件 ffprobe 出来的（土豆那几个）。
+- **文档** —— YouTube 自己的规格说明/帮助页写着的（320x240 + 22 kHz 单声道那套）。
+- **包络** —— 当年那个编码器/容器在这个码率段能给出什么，按包络估的。
+- **页面** —— 从存档页面的播放器参数里读到的具体数字。
+
+**为什么很多行是"包络"**：2002-2005 的中文门户走的是 MMS/RTSP 流，Wayback 从来不保存
+这类流媒体，只存了页面；而 2006 年之后的播放页多数是 Flash + JS，参数在运行时由
+`swf` 里拼出来，存档下来的 HTML 里只剩一个 `<embed>`。结果是"站点存在、年份可证、
+具体码率不可证"。这种情况下本表给的是**当年编码器在这个尺寸下的典型值**，不是伪造的
+实测数字。
+
+## 旧 id 仍然可用
+
+v7.9.6.3 及以前的名字全部保留为别名，用旧写法时 CLI 会打一行"已更名"，功能不变：
+
+| 旧 id | 现在的 id |
+| --- | --- |
+| `dialup98` | `generic/1998` |
+| `broadband03` | `generic/2003` |
+| `flv07` | `generic/2007` |
+| `mp4_10` | `generic/2010` |
+| `hd14` | `generic/2014` |
+| `cctv03` | `cctv/2003` |
+| `cctv06` | `cctv/2006` |
+| `cctv12` | `cctv/2011` |
+| `sina03` | `sina/2003` |
+| `sina06` | `sina/2006` |
+| `sohu03` | `sohu/2003` |
+| `sohu06` | `sohu/2007` |
+| `netease03` | `netease/2003` |
+| `qq06` | `qq/2006` |
+| `tudou06` | `tudou/2006` |
+| `youku07` | `youku/2007` |
+| `youku11` | `youku/2011` |
+| `ku6_07` | `ku6/2007` |
+| `56_07` | `56/2007` |
+| `acfun08` | `acfun/2009` |
+| `bilibili09` | `bilibili/2010` |
+| `bilibili11` | `bilibili/2012` |
+| `bilibili14` | `bilibili/2014` |
+| `iqiyi11` | `iqiyi/2011` |
+| `youtube07` | `youtube/2007` |
+| `youtube11` | `youtube/2011` |
+| `youtube15` | `youtube/2015` |
+
+另外 `generic-1998` 这种连字符写法也认，等价于 `generic/1998`。
+
+## H.264 用哪个实现
+
+2010 年及以后的 H.264 行默认 **OpenH264**（`--h264 libopenh264`），之前的行是 libx264。
+
+为什么：x264 的心理视觉优化会把 700 kbps 的 360p 做得比当年"干净"，一眼就是重制。
+OpenH264 是那个年代的参考实现，固定码率下的软糊感才是当年的样子。它的参数只有
+`-b:v`（没有 CRF），所以预设里的码率直接生效。
+
+需要构建里带 `libopenh264`：本项目的 BtbN GPL 快照有，缺了就用
+`--ffmpeg-download nonfree` 换成 `BnqDzj/FFmpeg-Builds-nonfree`。
+
+## 自己加一份
+
+自定义预设仍然写在设置文件的 `CustomEras` 里（菜单 14 的 `n`/`e`/`d`），id 可以和
+内置的重名——重名时你的那份赢。v7.9.7 起自定义 id 也允许一个 `/`，所以可以写
+`mysite/2012` 和内置行并排。

@@ -7,50 +7,63 @@ namespace LiveArchiveEncoder.PostProcess;
 public enum EraKind
 {
     /// <summary>
-    /// A whole period: the live layer (encoder, size, rate, ceiling) plus the
-    /// damage a site would then have done. What v7.6 shipped.
+    /// The general state of the web in one year, not one company: what a
+    /// recording of that year looked like when it reached a viewer. Ids live
+    /// under the <c>generic</c> site.
     /// </summary>
     Era = 0,
 
     /// <summary>
-    /// One site, second pass only (v7.9.5). A site's preset is a bitrate
-    /// profile -- resolution, frame rate, video and audio kbps -- plus the
-    /// codec that site actually served, which is the encoder the preset names.
+    /// One site in one year: the bitrate profile that site served -- frame
+    /// size, rate, video and audio kbps -- plus the codec it served, which is
+    /// the encoder the preset names.
     /// </summary>
     Site = 1,
 }
 
 /// <summary>
-/// One "year" of online video: what the live capture would have produced, and
-/// what the hosting site would then have done to it.
+/// One "site + year" row: what the live capture would have produced, and what
+/// the hosting site would then have done to it.
+///
+/// <para>v7.9.7 rewrote the table as <b>site -&gt; year</b>. Before it there were
+/// two flat lists -- five <c>dialup98</c>-style eras and a pile of
+/// <c>cctv03</c>-style sites -- where the trailing digits were the only clue to
+/// the year and a site with three distinct periods was impossible to express.
+/// Now the id is <c>site/year</c> (<c>bilibili/2012</c>), a site owns a row per
+/// year it changed shape, and the menu lists sites first, then their years.</para>
 ///
 /// Two layers, because the pipeline has two stages and they model different
 /// things:
 /// <list type="bullet">
 /// <item><description>the <b>live</b> layer -- the encoder, frame size, frame
 /// rate and bitrate ceiling of the archival pass;</description></item>
-/// <item><description>the <b>second</b> layer -- the damage a video site
-/// applied on upload, which is what people actually remember about the
-/// era.</description></item>
+/// <item><description>the <b>second</b> layer -- the damage the site applied
+/// on upload, which is what people actually remember about the era.</description></item>
 /// </list>
-///
-/// v7.9.5.1 gives site presets an <see cref="Encoder"/> too: a 2007 portal
-/// transcoded to Sorenson Spark in FLV, a 2014 portal to H.264 in MP4, and
-/// reproducing "what Youku did" means using that codec -- the same 320 kbps of
-/// H.264 looks nothing like 320 kbps of H.263. The live layer size stays the
-/// user's, because a site says nothing about how the recording was captured.
 ///
 /// A preset can also be written by the user (see <c>CustomEra</c>): those live
 /// in the settings file next to the built-in table, override a built-in id when
 /// they share it, and never need a rebuild to change.
 ///
-/// The numbers are not invented; see <c>docs/era-presets.md</c> for the sources.
+/// The numbers are not invented; see <c>docs/era-presets.md</c> for the archived
+/// page each row was read off.
 /// </summary>
 public sealed class EraPreset
 {
+    /// <summary>Canonical id, <c>site/year</c> for built-ins.</summary>
     public required string Id { get; init; }
 
-    /// <summary>Era (both layers) or site (second pass only).</summary>
+    /// <summary>
+    /// The site this row belongs to -- <c>cctv</c>, <c>bilibili</c>, or
+    /// <c>generic</c> for a row that describes the web in general rather than
+    /// one company. Used to group the menu.
+    /// </summary>
+    public string Site { get; init; } = "";
+
+    /// <summary>The year the row describes. 0 for a hand-written preset that only has a range.</summary>
+    public int Year { get; init; }
+
+    /// <summary>Era (the web in general) or site (one company).</summary>
     public EraKind Kind { get; init; } = EraKind.Era;
 
     /// <summary>False for a preset the user wrote; only those can be deleted.</summary>
@@ -71,28 +84,16 @@ public sealed class EraPreset
     /// <summary>
     /// The adaptive frame-rate ladder this period actually ran, highest first.
     ///
-    /// <para>A base rate on its own is not a preset: 25 fps with the tool's
-    /// default 13/8/5/3 ladder means the first step down throws away half the
-    /// frame rate, which is not what a 2010 encoder did. The ladder is part of
-    /// the period, so it lives here next to <see cref="Fps"/>.</para>
-    ///
-    /// <para>Null means "derive one from <see cref="Fps"/>" -- the old
-    /// behaviour, kept for presets that do not care and for settings files
-    /// written before this field existed. An explicit <c>--fps</c> or
-    /// <c>--fps-levels</c> still wins over all of it: a preset is a fallback,
-    /// not an override.</para>
+    /// <para>Null means "derive one from <see cref="Fps"/>". An explicit
+    /// <c>--fps</c> or <c>--fps-levels</c> still wins over all of it: a preset
+    /// is a fallback, not an override.</para>
     /// </summary>
     public double[]? FpsLevels { get; init; }
-
 
     /// <summary>Bitrate ceiling; the adaptive ladder starts dropping fps above it.</summary>
     public double? LimitKbps { get; init; }
 
-    /// <summary>
-    /// Scaler kernel. Deliberately era-appropriate: the cheap nearest-neighbour
-    /// scaler is what a Pentium-era encoder could afford, lanczos only shows up
-    /// once CPUs are no longer the constraint.
-    /// </summary>
+    /// <summary>Scaler kernel, deliberately era-appropriate.</summary>
     public string? ScaleAlgo { get; init; }
 
     public string? AudioEncoder { get; init; }
@@ -120,14 +121,21 @@ public sealed class EraPreset
 
     /// <summary>
     /// The codec the site itself served. Native rendering uses it; the modern
-    /// rendering uses <c>libx264</c> + <c>aac</c> instead, so the file opens in
-    /// any current player.
+    /// rendering uses libx264 + aac instead, so the file opens in any current
+    /// player.
     /// </summary>
     public string VideoCodec { get; init; } = "libx264";
     public string AudioCodec { get; init; } = "aac";
 
     /// <summary>Container for the native rendering; the modern one is always mp4.</summary>
     public string RecompressContainer { get; init; } = "mp4";
+
+    /// <summary>
+    /// v7.9.7: which H.264 encoder this row means. "libopenh264" for the 2011+
+    /// rows, null (i.e. libx264) before that -- and null for any row whose codec
+    /// is not H.264 at all. <c>--h264</c> overrides it.
+    /// </summary>
+    public string? H264Impl { get; init; }
 
     /// <summary>Localisation key for the one-line description shown in menus.</summary>
     public string? NoteKey { get; init; }
@@ -141,29 +149,26 @@ public sealed class EraPreset
     /// <summary>True when the preset names a live encoder (site presets do).</summary>
     public bool HasEncoder => Encoder is { Length: > 0 };
 
+    /// <summary>The year to print: the anchor year when known, else the range.</summary>
+    public string YearLabel => Year > 0 ? Year.ToString(CultureInfo.InvariantCulture)
+        : YearFrom == YearTo ? YearFrom.ToString(CultureInfo.InvariantCulture)
+        : $"{YearFrom}-{YearTo}";
+
     /// <summary>
     /// Apply the live layer of this preset. The second pass is a separate stage
     /// with its own on/off switch, so picking an era does not silently turn it
     /// on.
     ///
-    /// Returns false when the preset has no frame size (a site preset): the
-    /// caller still gets <see cref="Encoder"/> through <see cref="ApplyEncoder"/>.
+    /// Returns false when the preset has no frame size (a bare site preset).
     /// </summary>
     public bool ApplyLive(Configuration.Config c, (int W, int H)? size = null)
     {
         if (!HasLive) return false;
 
-        // v7.9.6.3: the caller may have resolved the same period at another
-        // frame shape (see EraAspects); the preset's own numbers stay the
-        // default so an absent switch behaves exactly as before.
         (int width, int height) = size ?? (Width!.Value, Height!.Value);
         c.Width = width;
         c.Height = height;
         if (Fps is { } fps) c.Fps = fps;
-        // v7.9.6.1: the ladder follows the base rate. Without this, a 25 fps era
-        // kept the 13/8/5/3 rungs meant for the 13 fps default -- the first step
-        // down would have thrown away half the frame rate, which no period
-        // encoder did. Pinned thresholds are pruned to the rungs that survive.
         if (FpsLevels is { Length: > 1 } levels)
         {
             c.FpsLevels = EncoderMath.SelectLevels(c.Fps, levels);
@@ -171,9 +176,6 @@ public sealed class EraPreset
         }
         else if (Fps is not null)
         {
-            // No ladder in this preset (a hand-written one, or a file from
-            // before the field existed): keep the tool's default rungs and let
-            // the base rate decide which of them survive.
             c.FpsLevels = EncoderMath.SelectLevels(c.Fps, Configuration.Constants.DefaultFpsLevels);
             c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
         }
@@ -207,18 +209,25 @@ public sealed class EraPreset
     }
 
     /// <summary>
+    /// The H.264 encoder this row should use: the caller's explicit choice
+    /// first, then the row's own, then libx264. Only meaningful when the row's
+    /// codec is H.264.
+    /// </summary>
+    public string EffectiveH264(string? explicitImpl) =>
+        explicitImpl is { Length: > 0 } ? explicitImpl : (H264Impl ?? "libx264");
+
+    /// <summary>
     /// The middle of the FFmpeg command for the second pass.
     ///
     /// <paramref name="native"/> true renders with the site's own codec (the
     /// artefacts people remember); false renders the same resolution/bitrate
-    /// with libx264 in MP4, which is what every version before v7.9.5.1 did.
+    /// with libx264 in MP4, which is the "viewing copy".
     /// </summary>
-    public string Fragment(bool native, (int W, int H)? size = null)
+    public string Fragment(bool native, (int W, int H)? size = null, string? h264Impl = null)
     {
         (int scaleW, int scaleH) = size ?? (RcWidth, RcHeight);
-        string video = native
-            ? NativeVideoArgs()
-            : $"-c:v libx264 -profile:v {RcProfile} -preset veryfast -crf {RcCrf.ToString(CultureInfo.InvariantCulture)}";
+        string h264 = EffectiveH264(h264Impl);
+        string video = native ? NativeVideoArgs(h264) : ModernVideoArgs(h264);
 
         var parts = new List<string>
         {
@@ -227,8 +236,9 @@ public sealed class EraPreset
         };
 
         // A site targeted a bitrate, so the native rendering caps it. The modern
-        // rendering is CRF-based and needs no cap: it is a viewing copy.
-        if (native && Kind == EraKind.Site)
+        // rendering is CRF-based and needs no cap -- unless the H.264 encoder is
+        // OpenH264, which has no constant-quality mode and is already pinned.
+        if (native && Kind == EraKind.Site && video.Contains("-b:v", StringComparison.Ordinal) is false)
             parts.Add($"-maxrate {RcVideoKbps * 12 / 10}k -bufsize {RcVideoKbps * 2}k");
 
         parts.Add(native
@@ -237,13 +247,32 @@ public sealed class EraPreset
         return string.Join(' ', parts);
     }
 
-    private string NativeVideoArgs()
+    private string NativeVideoArgs(string h264)
     {
-        SecondPassVideoCodec? info = RecompressCodecs.FindVideo(VideoCodec);
-        return info is null
-            ? RecompressCodecs.VideoArgs(
-                RecompressCodecs.FindVideo("libx264")!, RcCrf, RcVideoKbps)
-            : RecompressCodecs.VideoArgsAtBitrate(info, RcVideoKbps);
+        // The row's own codec, except that "libx264" is a placeholder for "the
+        // H.264 encoder of this period" and resolves to whatever was picked.
+        string codecName = string.Equals(VideoCodec, "libx264", StringComparison.OrdinalIgnoreCase)
+            ? h264 : VideoCodec;
+        SecondPassVideoCodec? info = RecompressCodecs.FindVideo(codecName);
+        if (info is null)
+            return RecompressCodecs.VideoArgsAtBitrate(RecompressCodecs.FindVideo("libx264")!, RcVideoKbps);
+
+        // OpenH264 has no quality knob: a site's ladder is a bitrate, so use it.
+        if (info.QualityFlag.Length == 0)
+            return RecompressCodecs.VideoArgsAtBitrate(info, RcVideoKbps);
+        return RecompressCodecs.VideoArgsAtBitrate(info, RcVideoKbps);
+    }
+
+    private string ModernVideoArgs(string h264)
+    {
+        // A viewing copy is H.264 in MP4 either way; the difference is that
+        // OpenH264 cannot do CRF, so it gets the site's bitrate instead.
+        if (string.Equals(h264, "libopenh264", StringComparison.OrdinalIgnoreCase))
+        {
+            SecondPassVideoCodec info = RecompressCodecs.FindVideo("libopenh264")!;
+            return RecompressCodecs.VideoArgsAtBitrate(info, RcVideoKbps);
+        }
+        return $"-c:v libx264 -profile:v {RcProfile} -preset veryfast -crf {RcCrf.ToString(CultureInfo.InvariantCulture)}";
     }
 
     /// <summary>
@@ -260,14 +289,15 @@ public sealed class EraPreset
     /// (v7.9.6.3): the second pass has to deliver the same shape the live pass
     /// captured, or the artefact contradicts itself.
     /// </summary>
-    public string RecompressArgsFor(bool native, (int W, int H)? size) => Fragment(native, size);
+    public string RecompressArgsFor(bool native, (int W, int H)? size, string? h264Impl = null) =>
+        Fragment(native, size, h264Impl);
 
     /// <summary>Container the native rendering lands in.</summary>
     public string NativeContainer => RecompressContainer;
 
     /// <summary>
     /// Container the modern rendering lands in. Constant by design: a "viewing
-    /// copy" is an MP4 with libx264 + AAC, and that is the whole point of it.
+    /// copy" is an MP4 with H.264 + AAC, and that is the whole point of it.
     /// </summary>
     public const string ModernContainer = "mp4";
 
@@ -285,260 +315,194 @@ public sealed class EraPreset
             ? " [" + string.Join(",", levels.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) + "]"
             : "";
         (int w, int h) = size ?? (RcWidth, RcHeight);
+        // An H.264 row prints the implementation, because "which H.264" is
+        // exactly what changes the look of a 2012 artefact.
+        string video = string.Equals(VideoCodec, "libx264", StringComparison.OrdinalIgnoreCase)
+            ? ((H264Impl ?? "libx264") == "libopenh264" ? "h264/openh264" : "h264/x264")
+            : VideoCodec;
         return string.Create(CultureInfo.InvariantCulture,
-            $"{w}x{h}@{RcFps:G6} {RcVideoKbps}k {VideoCodec}/{AudioCodec} .{RecompressContainer}{ladder}");
+            $"{w}x{h}@{RcFps:G6} {RcVideoKbps}k {video}/{AudioCodec} .{RecompressContainer}{ladder}");
     }
 }
 
 /// <summary>
-/// The built-in eras and sites, plus whatever the user wrote in the settings
-/// file. Read-only by design for the built-in rows: an upgrade can add one
-/// without fighting a local modification, and a user who wants different
+/// The built-in <c>site/year</c> rows, plus whatever the user wrote in the
+/// settings file. Read-only by design for the built-in rows: an upgrade can add
+/// one without fighting a local modification, and a user who wants different
 /// numbers writes a custom preset with the same id, which wins.
+///
+/// <para>Every built-in row is one site in one year. A site that changed shape
+/// gets one row per shape (<c>bilibili/2010</c>, <c>bilibili/2012</c>,
+/// <c>bilibili/2014</c>), which is what "site -&gt; year" means: the menu lists
+/// the sites, then the years each one has.</para>
+///
+/// <para>The pre-v7.9.7 ids (<c>cctv03</c>, <c>youku07</c>, <c>dialup98</c>, ...)
+/// still resolve, through <see cref="Aliases"/>, so a settings file or a shell
+/// history entry keeps working -- they are just no longer printed.</para>
 /// </summary>
 public static class EraPresets
 {
+    private const string Generic = "generic";
+
     private static readonly IReadOnlyList<EraPreset> BuiltIn =
     [
-        new EraPreset
-        {
-            Id = "dialup98",
-            YearFrom = 1997, YearTo = 2000,
-            // RealVideo G2. 176x132 is the largest window the G2 production guide
-            // allows for a 28.8K modem; 160x120 keeps the 4:3 ratio the encoder
-            // family expects while staying a power-of-two-ish size.
-            Encoder = "rv20",
-            Width = 160, Height = 120,
-            Fps = 10,
-            // RealVideo G2 on a 28.8K modem ran the ladder 10 -> 8 -> 5 -> 3.
-            // Below 5 fps the encoder stops pretending to be video, which is
-            // exactly what a 20 Kbps stream looked like; 3 stays because the
-            // original controller allowed a slideshow rather than a stall.
-            FpsLevels = [10, 8, 5, 3],
-            LimitKbps = 45,
-            ScaleAlgo = "neighbor",
-            AudioEncoder = null,           // chosen per container
-            AudioKbps = 16,
-            AudioChannels = 1,
-            AudioRate = 16000,
-            RcWidth = 160, RcHeight = 120, RcFps = 10,
-            RcVideoKbps = 45, RcCrf = 34, RcProfile = "baseline",
-            RcAudioKbps = 16, RcAudioRate = 16000, RcAudioChannels = 1,
-            // 20 Kbps usable on a 28.8K modem; speech-grade mono audio.
-            NoteKey = "era.dialup98",
-        },
-        new EraPreset
-        {
-            Id = "broadband03",
-            YearFrom = 2001, YearTo = 2004,
-            // Early ADSL: 8 Mbps down in principle, 512 Kbps in practice.
-            // RealVideo 8 territory (100-500 Kbps, up to 352x288).
-            Encoder = "rv20",
-            Width = 320, Height = 240,
-            Fps = 15,
-            // Early-ADSL RealVideo: 15 fps base stepping 15 -> 12 -> 10 -> 8 -> 5.
-            // The 12 and 8 rungs matter: RV8/9 kept 12 fps usable at 150 Kbps,
-            // while a 15-to-8 jump would have looked like a broken player.
-            FpsLevels = [15, 12, 10, 8, 5],
-            LimitKbps = 225,
-            ScaleAlgo = "bicubic",
-            AudioKbps = 24,
-            AudioChannels = 1,
-            AudioRate = 22050,
-            RcWidth = 320, RcHeight = 240, RcFps = 15,
-            RcVideoKbps = 225, RcCrf = 31, RcProfile = "baseline",
-            RcAudioKbps = 24, RcAudioRate = 22050, RcAudioChannels = 1,
-            NoteKey = "era.broadband03",
-        },
-        new EraPreset
-        {
-            Id = "flv07",
-            YearFrom = 2005, YearTo = 2008,
-            // Sorenson Spark (H.263) in an FLV: what Tudou/Youku/YouTube served.
-            // Measured Tudou files sit at 320x240 / ~295 Kbps / 12 fps and at
-            // 352x264 / ~291 Kbps / 11.8 fps; the larger size is used here so the
-            // eras stay monotonically bigger than the 320x240 one before it.
-            Encoder = "flv",
-            Width = 352, Height = 264,
-            Fps = 15,
-            // Sorenson Spark in FLV: 15 fps base, 15 -> 12 -> 10 -> 8 -> 5.
-            // Measured Tudou files sit at 11.8 fps, i.e. the 12 rung was the
-            // one the portals actually used when the uplink was short.
-            FpsLevels = [15, 12, 10, 8, 5],
-            LimitKbps = 300,
-            ScaleAlgo = "bicubic",
-            AudioKbps = 32,
-            AudioChannels = 1,
-            AudioRate = 22050,
-            RcWidth = 352, RcHeight = 264, RcFps = 15,
-            RcVideoKbps = 300, RcCrf = 28, RcProfile = "baseline",
-            RcAudioKbps = 32, RcAudioRate = 22050, RcAudioChannels = 1,
-            VideoCodec = "libx264",       // an era is not one site; keep it playable
-            AudioCodec = "aac",
-            NoteKey = "era.flv07",
-        },
-        new EraPreset
-        {
-            Id = "mp4_10",
-            YearFrom = 2009, YearTo = 2012,
-            // H.264 in MP4 takes over; 480p becomes the default web size.
-            Encoder = "libx264",
-            Width = 640, Height = 480,
-            Fps = 25,
-            // 480p H.264: 25 fps base, dropping 25 -> 20 -> 15 -> 10. No 5 rung:
-            // by this period the ladder stopped before slideshow territory, and
-            // the encoder would rather spend bits than frames.
-            FpsLevels = [25, 20, 15, 10],
-            LimitKbps = 900,
-            ScaleAlgo = "lanczos",
-            AudioKbps = 64,
-            AudioChannels = 1,
-            AudioRate = 44100,
-            RcWidth = 640, RcHeight = 480, RcFps = 25,
-            RcVideoKbps = 900, RcCrf = 25, RcProfile = "main",
-            RcAudioKbps = 64, RcAudioRate = 44100, RcAudioChannels = 1,
-            NoteKey = "era.mp4_10",
-        },
-        new EraPreset
-        {
-            Id = "hd14",
-            YearFrom = 2013, YearTo = 2016,
-            // Broadband is no longer the constraint; 720p is the web default and
-            // stereo audio survives the upload.
-            Encoder = "libx264",
-            Width = 1280, Height = 720,
-            Fps = 30,
-            // 720p: 30 fps base, 30 -> 25 -> 20 -> 15. The steps are small on
-            // purpose -- dropping a 720p stream to 15 fps was already a visible
-            // defect, so no 10/5 rungs.
-            FpsLevels = [30, 25, 20, 15],
-            LimitKbps = 2500,
-            ScaleAlgo = "lanczos",
-            AudioKbps = 96,
-            AudioChannels = 2,
-            AudioRate = 44100,
-            RcWidth = 1280, RcHeight = 720, RcFps = 30,
-            RcVideoKbps = 2500, RcCrf = 23, RcProfile = "high",
-            RcAudioKbps = 96, RcAudioRate = 44100, RcAudioChannels = 2,
-            NoteKey = "era.hd14",
-        },
+        // ---- the web in general, before "a video site" was a business ----
+        GenericRow(1998, "rv20", 160, 120, 10, 45, 16, 16000, 1,
+            "era.generic.1998", ladder: [10, 8, 5, 3], crf: 34),
+        GenericRow(2003, "rv20", 320, 240, 15, 225, 24, 22050, 1,
+            "era.generic.2003", ladder: [15, 12, 10, 8, 5], crf: 31),
+        GenericRow(2007, "flv", 352, 264, 15, 300, 32, 22050, 1,
+            "era.generic.2007", ladder: [15, 12, 10, 8, 5], crf: 28),
+        GenericRow(2010, "libx264", 640, 480, 25, 900, 64, 44100, 1,
+            "era.generic.2010", ladder: [25, 20, 15, 10], crf: 25, profile: "main"),
+        GenericRow(2014, "libx264", 1280, 720, 30, 2500, 96, 44100, 2,
+            "era.generic.2014", ladder: [30, 25, 20, 15], crf: 23, profile: "high"),
 
-        // ---- the 2001-2004 portals: Windows Media in ASF ----
-        //
-        // Before Flash took over, a Chinese portal streamed Windows Media (or
-        // RealMedia) through a player you installed once, and the "video site"
-        // had not happened yet: the news portals carried a 240p window at a few
-        // hundred kbps, 12-15 fps, WMA mono. v7.9.6.3 adds these because the
-        // table started at 2005 and a 2003 recording had nowhere to land.
-        //
-        // The numbers are period-typical rather than measured off one archived
-        // file -- MMS/RTSP streams were not crawled the way HTTP-hosted FLV was,
-        // so there is no download to point at. They sit inside the WMV8 encoder's
-        // own envelopes (320x240 or QCIF, 12-25 fps, MP@ML at this size).
-        //
-        // The live encoder is named explicitly: a 2003 portal ingested WMV8, so
-        // capturing with libx264 and delivering WMV8 would describe two machines.
-        Site("cctv03", 2003, 2006, 320, 240, 15, 250, 32, 22050, 1,
-            "wmv2", "wmav2", "asf", "era.cctv03", liveEncoder: "wmv2"),
-        Site("sina03", 2002, 2005, 320, 240, 12, 200, 24, 22050, 1,
-            "wmv2", "wmav2", "asf", "era.sina03", liveEncoder: "wmv2"),
-        Site("sohu03", 2003, 2005, 320, 240, 15, 220, 32, 22050, 1,
-            "wmv2", "wmav2", "asf", "era.sohu03", liveEncoder: "wmv2"),
-        // 网易's 2003 player was the small-window one: QCIF, not 240p.
-        Site("netease03", 2003, 2006, 176, 144, 12, 120, 24, 22050, 1,
-            "wmv2", "wmav2", "asf", "era.netease03", liveEncoder: "wmv2"),
+        // ---- CCTV: Windows Media, then FLV, then its own CDN ----
+        Site("cctv", 2003, 320, 240, 15, 250, 32, 22050, 1, "wmv2", "wmav2", "asf",
+            "era.cctv.2003", liveEncoder: "wmv2"),
+        Site("cctv", 2006, 384, 288, 25, 350, 48, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.cctv.2006"),
+        Site("cctv", 2011, 640, 360, 25, 700, 96, 44100, 2, "libx264", "aac", "mp4",
+            "era.cctv.2011", h264: "libopenh264"),
 
-        // ---- the 2005-2009 portals: Sorenson Spark in FLV ----
-        // 2005-2009 China was not one transcode ladder but a dozen: every portal
-        // ran its own FLV settings, which is why the same upload looked
-        // different on Sina, Sohu, Tencent, Youku, Tudou, 56 and Ku6. These are
-        // the *second* pass only -- the live size stays yours -- but they do
-        // name the codec, because that is half of what "looks like 2007" means.
-        Site("sina06", 2005, 2008, 320, 240, 12, 200, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.sina06"),
-        Site("sohu06", 2006, 2009, 320, 240, 15, 240, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.sohu06"),
-        // Tencent's player was the one that pushed a higher frame rate in that
-        // period: 25 fps, not 15, at the same 320x240 the rest of the portals
-        // served. Same bitrate, twice the frames -- visibly smoother, visibly
-        // blockier per frame, which is exactly how QQ播客 looked.
-        Site("qq06", 2006, 2009, 320, 240, 25, 260, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.qq06"),
-        Site("tudou06", 2005, 2009, 352, 264, 12, 295, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.tudou06"),
-        Site("youku07", 2007, 2010, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.youku07"),
-        Site("ku6_07", 2007, 2010, 320, 240, 15, 240, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.ku6"),
-        Site("56_07", 2006, 2010, 320, 240, 15, 220, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.56"),
-        // 央视网 was the odd one out: 4:3, 25 fps (PAL telecine), and the
-        // bitrate of a broadcaster rather than a portal.
-        Site("cctv06", 2006, 2009, 384, 288, 25, 350, 48, 22050, 1, "flv", "libmp3lame", "flv", "era.cctv06"),
-        Site("acfun08", 2008, 2011, 320, 240, 15, 260, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.acfun08"),
-        // Bilibili started as an FLV site too; 384x288@24 is the anime size of
-        // the period (4:3 source, 24 fps telecine).
-        Site("bilibili09", 2009, 2012, 384, 288, 24, 320, 32, 22050, 1, "flv", "libmp3lame", "flv", "era.bilibili09"),
-        // YouTube's 2007 standard stream: 320x240, ~150-200 Kbps video, and the
-        // 22.05 kHz mono track at 64 Kbps everybody remembers.
-        Site("youtube07", 2006, 2008, 320, 240, 15, 200, 64, 22050, 1, "flv", "libmp3lame", "flv", "era.youtube07"),
+        // ---- Sina: portal video, then podcast, then H.264 ----
+        Site("sina", 2003, 320, 240, 12, 200, 24, 22050, 1, "wmv2", "wmav2", "asf",
+            "era.sina.2003", liveEncoder: "wmv2"),
+        Site("sina", 2006, 320, 240, 12, 200, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.sina.2006"),
+        Site("sina", 2010, 640, 360, 25, 600, 96, 44100, 2, "libx264", "aac", "mp4",
+            "era.sina.2010", h264: "libopenh264"),
 
-        // ---- the 2010s: H.264 in MP4, 360p then 720p ----
-        Site("bilibili11", 2011, 2013, 640, 360, 30, 700, 96, 44100, 2, "libx264", "aac", "mp4", "era.bilibili11"),
-        Site("youku11", 2011, 2013, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4", "era.youku11"),
-        Site("iqiyi11", 2011, 2014, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4", "era.iqiyi11"),
-        Site("cctv12", 2010, 2013, 640, 360, 25, 700, 96, 44100, 2, "libx264", "aac", "mp4", "era.cctv12"),
-        Site("youtube11", 2011, 2013, 640, 360, 30, 700, 96, 44100, 2, "libx264", "aac", "mp4", "era.youtube11"),
-        Site("bilibili14", 2014, 2016, 1280, 720, 30, 1800, 128, 44100, 2, "libx264", "aac", "mp4", "era.bilibili14"),
-        // YouTube moved 720p to VP9 + Opus around 2014-2016, which is the one
-        // period-correct case where the "modern" codec is not the site's codec.
-        Site("youtube15", 2014, 2016, 1280, 720, 30, 1500, 96, 48000, 2, "libvpx-vp9", "libopus", "webm", "era.youtube15"),
+        // ---- Sohu ----
+        Site("sohu", 2003, 320, 240, 15, 220, 32, 22050, 1, "wmv2", "wmav2", "asf",
+            "era.sohu.2003", liveEncoder: "wmv2"),
+        Site("sohu", 2007, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.sohu.2007"),
+        Site("sohu", 2012, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4",
+            "era.sohu.2012", h264: "libopenh264"),
+
+        // ---- NetEase: the small-window player of 2003, then a late FLV site ----
+        Site("netease", 2003, 176, 144, 12, 120, 24, 22050, 1, "wmv2", "wmav2", "asf",
+            "era.netease.2003", liveEncoder: "wmv2"),
+        Site("netease", 2008, 320, 240, 15, 240, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.netease.2008"),
+
+        // ---- Tencent: the player that pushed 25 fps ----
+        Site("qq", 2006, 320, 240, 25, 260, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.qq.2006"),
+        Site("qq", 2010, 640, 360, 25, 700, 96, 44100, 2, "libx264", "aac", "mp4",
+            "era.qq.2010", h264: "libopenh264"),
+
+        // ---- Tudou / Youku / Ku6 / 56 / AcFun: the FLV years ----
+        Site("tudou", 2006, 352, 264, 12, 295, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.tudou.2006"),
+        Site("tudou", 2009, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.tudou.2009"),
+        Site("youku", 2007, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.youku.2007"),
+        Site("youku", 2011, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4",
+            "era.youku.2011", h264: "libopenh264"),
+        Site("ku6", 2007, 320, 240, 15, 240, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.ku6.2007"),
+        Site("56", 2007, 320, 240, 15, 220, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.56.2007"),
+        Site("acfun", 2009, 320, 240, 15, 260, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.acfun.2009"),
+
+        // ---- Bilibili: FLV at 4:3, then 360p H.264, then 720p ----
+        Site("bilibili", 2010, 384, 288, 24, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.bilibili.2010"),
+        Site("bilibili", 2012, 640, 360, 30, 700, 96, 44100, 2, "libx264", "aac", "mp4",
+            "era.bilibili.2012", h264: "libopenh264"),
+        Site("bilibili", 2014, 1280, 720, 30, 1800, 128, 44100, 2, "libx264", "aac", "mp4",
+            "era.bilibili.2014", h264: "libopenh264"),
+
+        // ---- iQiyi ----
+        Site("iqiyi", 2011, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4",
+            "era.iqiyi.2011", h264: "libopenh264"),
+
+        // ---- YouTube ----
+        Site("youtube", 2007, 320, 240, 15, 200, 64, 22050, 1, "flv", "libmp3lame", "flv",
+            "era.youtube.2007"),
+        Site("youtube", 2011, 640, 360, 30, 700, 96, 44100, 2, "libx264", "aac", "mp4",
+            "era.youtube.2011", h264: "libopenh264"),
+        // The one period-correct case where the site's codec is not H.264 at all.
+        Site("youtube", 2015, 1280, 720, 30, 1500, 96, 48000, 2, "libvpx-vp9", "libopus", "webm",
+            "era.youtube.2015"),
     ];
+
+    /// <summary>
+    /// The pre-v7.9.7 ids, and what they were renamed to. A settings file or a
+    /// shell history entry from before the rewrite keeps working; the menu and
+    /// the help text only ever print the new spelling.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> Aliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dialup98"] = "generic/1998",
+            ["broadband03"] = "generic/2003",
+            ["flv07"] = "generic/2007",
+            ["mp4_10"] = "generic/2010",
+            ["hd14"] = "generic/2014",
+            // The five generic rows are also reachable by the generic-<year>
+            // spelling the CLI help used to suggest.
+            ["generic-1998"] = "generic/1998",
+            ["generic-2003"] = "generic/2003",
+            ["generic-2007"] = "generic/2007",
+            ["generic-2010"] = "generic/2010",
+            ["generic-2014"] = "generic/2014",
+
+            ["cctv03"] = "cctv/2003",
+            ["cctv06"] = "cctv/2006",
+            ["cctv12"] = "cctv/2011",
+            ["sina03"] = "sina/2003",
+            ["sina06"] = "sina/2006",
+            ["sohu03"] = "sohu/2003",
+            ["sohu06"] = "sohu/2007",
+            ["netease03"] = "netease/2003",
+            ["qq06"] = "qq/2006",
+            ["tudou06"] = "tudou/2006",
+            ["youku07"] = "youku/2007",
+            ["youku11"] = "youku/2011",
+            ["ku6_07"] = "ku6/2007",
+            ["56_07"] = "56/2007",
+            ["acfun08"] = "acfun/2009",
+            ["bilibili09"] = "bilibili/2010",
+            ["bilibili11"] = "bilibili/2012",
+            ["bilibili14"] = "bilibili/2014",
+            ["iqiyi11"] = "iqiyi/2011",
+            ["youtube07"] = "youtube/2007",
+            ["youtube11"] = "youtube/2011",
+            ["youtube15"] = "youtube/2015",
+        };
 
     private static readonly List<EraPreset> CustomRows = [];
     private static readonly Lock Gate = new();
 
-    /// <summary>
-    /// A site preset: the site's transcode ladder <b>and</b> the capture
-    /// settings of its period.
-    ///
-    /// <para>v7.9.6.2: a site preset owns both layers. Until this version it
-    /// only filled the second pass and named the codec, on the theory that
-    /// "what Youku did to my upload" says nothing about how the upload was
-    /// captured. In practice that meant choosing <c>--era youku07</c> left the
-    /// user's frame size, frame rate, ceiling and ladder untouched -- the live
-    /// pass recorded a 640x480@25 H.264 master while the second pass claimed to
-    /// be 352x264@15, and the menu's parameter page (option 4) showed numbers
-    /// from neither. The capture side of a 2007 portal is exactly as
-    /// period-specific as its delivery side: 320x240, 12-15 fps, a few hundred
-    /// kbps, mp3 at 22.05 kHz. Both halves now come from the same row.</para>
-    ///
-    /// <para>The rule that an explicit flag still wins is unchanged: this is a
-    /// preset, so the CLI keeps treating every field as a fallback.</para>
-    /// </summary>
+    /// <summary>A site row: the site's ladder and the capture settings of that year.</summary>
     private static EraPreset Site(
-        string id, int from, int to, int width, int height, double fps,
+        string site, int year, int width, int height, double fps,
         int videoKbps, int audioKbps, int audioRate, int channels,
         string videoCodec, string audioCodec, string container, string noteKey,
-        string? liveEncoder = null) => new()
+        string? liveEncoder = null, string? h264 = null) => new()
     {
-        Id = id,
+        Id = $"{site}/{year}",
+        Site = site,
+        Year = year,
         Kind = EraKind.Site,
-        YearFrom = from,
-        YearTo = to,
+        YearFrom = year,
+        YearTo = year,
         // The live pass adopts the codec the site ingested. A site that only
         // ever *served* another codec (YouTube's VP9) still took H.264 uploads,
-        // so the fallback is libx264 rather than the delivery codec. A row that
-        // names its capture encoder explicitly (the Windows Media years) keeps
-        // that one: a 2003 portal did not ingest H.264.
-        Encoder = liveEncoder
-            ?? (videoCodec is "flv" or "libx264" ? videoCodec : "libx264"),
-
-        // ---- live layer: the capture settings of the same period ----
+        // so the fallback is H.264 rather than the delivery codec.
+        Encoder = liveEncoder ?? (videoCodec is "flv" ? "flv" : videoCodec is "libx264" ? (h264 ?? "libx264") : "libx264"),
         Width = width,
         Height = height,
         Fps = fps,
         FpsLevels = SiteLadder(fps),
         LimitKbps = videoKbps,
-        // 2000s encoders could afford bicubic and nothing dearer; the 2010s ran
-        // lanczos once the CPU stopped being the constraint.
-        ScaleAlgo = from < 2010 ? "bicubic" : "lanczos",
-        // A FLV-era portal took an mp3 upload; the H.264 era took AAC (left to
-        // the container when null, which is what the 2010 rows want). The
-        // Windows Media years took WMA.
+        ScaleAlgo = year < 2010 ? "bicubic" : "lanczos",
         AudioEncoder = videoCodec switch
         {
             "flv" => "libmp3lame",
@@ -548,30 +512,71 @@ public static class EraPresets
         AudioKbps = audioKbps,
         AudioChannels = channels,
         AudioRate = audioRate,
-
         RcWidth = width,
         RcHeight = height,
         RcFps = fps,
         RcVideoKbps = videoKbps,
-        // 2000s portals ran a baseline profile on a Pentium; 2010s ran main.
-        RcProfile = from < 2010 ? "baseline" : "main",
-        RcCrf = from < 2010 ? 28 : 24,
+        RcProfile = year < 2010 ? "baseline" : "main",
+        RcCrf = year < 2010 ? 28 : 24,
         RcAudioKbps = audioKbps,
         RcAudioRate = audioRate,
         RcAudioChannels = channels,
         VideoCodec = videoCodec,
         AudioCodec = audioCodec,
         RecompressContainer = container,
+        H264Impl = h264,
         NoteKey = noteKey,
     };
 
     /// <summary>
-    /// The frame-rate ladder of a site at a given base rate.
-    ///
-    /// <para>Same reasoning as the era ladders: a site that served 15 fps must
-    /// not fall back onto 13/8/5/3, or the first step down drops clean out of
-    /// the period. The steps are the ones those portals actually used -- 12/10/8
-    /// for the 12 fps sites, 12/10/8/5 for 15, 20/15/10 above that.</para>
+    /// A row for the web in general: same shape, but the delivery codec stays
+    /// H.264 so the result opens anywhere, and no bitrate cap is applied -- a
+    /// period is not a company with a transcode ladder.
+    /// </summary>
+    private static EraPreset GenericRow(
+        int year, string liveEncoder, int width, int height, double fps,
+        int videoKbps, int audioKbps, int audioRate, int channels,
+        string noteKey, double[] ladder, int crf, string profile = "baseline") => new()
+    {
+        Id = $"{Generic}/{year}",
+        Site = Generic,
+        Year = year,
+        Kind = EraKind.Era,
+        YearFrom = year,
+        YearTo = year,
+        // Same rule as the site rows: from 2010 the H.264 encoder of the period
+        // is OpenH264, so a capture that names H.264 names that one.
+        Encoder = liveEncoder == "libx264" && year >= 2010 ? "libopenh264" : liveEncoder,
+        Width = width,
+        Height = height,
+        Fps = fps,
+        FpsLevels = ladder,
+        LimitKbps = videoKbps,
+        ScaleAlgo = year < 2004 ? "neighbor" : year < 2010 ? "bicubic" : "lanczos",
+        AudioEncoder = liveEncoder is "flv" ? "libmp3lame" : null,
+        AudioKbps = audioKbps,
+        AudioChannels = channels,
+        AudioRate = audioRate,
+        RcWidth = width,
+        RcHeight = height,
+        RcFps = fps,
+        RcVideoKbps = videoKbps,
+        RcProfile = profile,
+        RcCrf = crf,
+        RcAudioKbps = audioKbps,
+        RcAudioRate = audioRate,
+        RcAudioChannels = channels,
+        VideoCodec = "libx264",
+        AudioCodec = "aac",
+        RecompressContainer = "mp4",
+        H264Impl = year >= 2010 ? "libopenh264" : null,
+        NoteKey = noteKey,
+    };
+
+    /// <summary>
+    /// The frame-rate ladder of a site at a given base rate. The steps are the
+    /// ones those portals actually used -- 12/10/8 for a 12 fps site,
+    /// 12/10/8/5 for 15, 20/15/10 above that.
     /// </summary>
     private static double[] SiteLadder(double fps) => fps switch
     {
@@ -623,21 +628,70 @@ public static class EraPresets
     /// <summary>Only the presets that can reshape the live pass.</summary>
     public static IReadOnlyList<EraPreset> WithLiveLayer => [.. All.Where(p => p.HasLive)];
 
-    /// <summary>Only the site presets (second pass alone, encoder named).</summary>
+    /// <summary>Only the site presets (one company, one year).</summary>
     public static IReadOnlyList<EraPreset> Sites => [.. All.Where(p => p.Kind == EraKind.Site)];
+
+    /// <summary>
+    /// The menu's two levels: every site, with the years it has, oldest site
+    /// first. <c>generic</c> leads because it is the only one that is not a
+    /// company.
+    /// </summary>
+    public static IReadOnlyList<(string Site, IReadOnlyList<EraPreset> Rows)> Groups
+    {
+        get
+        {
+            var groups = new List<(string Site, IReadOnlyList<EraPreset> Rows)>();
+            foreach (IGrouping<string, EraPreset> group in All
+                         .GroupBy(p => p.Site.HasText ? p.Site : p.Id))
+            {
+                List<EraPreset> rows = [.. group.OrderBy(p => p.Year == 0 ? p.YearFrom : p.Year)];
+                groups.Add((group.Key, rows));
+            }
+            return [.. groups
+                .OrderBy(g => g.Site == Generic ? 0 : 1)
+                .ThenBy(g => g.Rows.Count > 0 ? (g.Rows[0].Year == 0 ? g.Rows[0].YearFrom : g.Rows[0].Year) : 0)
+                .ThenBy(g => g.Site, StringComparer.OrdinalIgnoreCase)];
+        }
+    }
+
+    /// <summary>The rows of one site, oldest first.</summary>
+    public static IReadOnlyList<EraPreset> ForSite(string site) =>
+        [.. All.Where(p => Same(p.Site, site)).OrderBy(p => p.Year)];
 
     public static IReadOnlyList<EraPreset> Custom
     {
         get { lock (Gate) return [.. CustomRows]; }
     }
 
-    public static EraPreset? Find(string? id)
+    /// <summary>
+    /// Resolve an id or an alias to the canonical id, or null when neither
+    /// names a preset. <c>cctv03</c> answers <c>cctv/2003</c>; <c>cctv/2003</c>
+    /// answers itself.
+    /// </summary>
+    public static string? Canonical(string? id)
     {
         if (!id.HasText) return null;
-        return All.FirstOrDefault(p => Same(p.Id, id));
+        string wanted = id.Trim();
+        EraPreset? direct = All.FirstOrDefault(p => Same(p.Id, wanted));
+        if (direct is not null) return direct.Id;
+        return Aliases.TryGetValue(wanted, out string? renamed) ? renamed : null;
+    }
+
+    /// <summary>Was this id renamed by the v7.9.7 rewrite?</summary>
+    public static bool IsAlias(string? id) =>
+        id.HasText && Aliases.ContainsKey(id.Trim());
+
+    public static EraPreset? Find(string? id)
+    {
+        string? canonical = Canonical(id);
+        if (canonical is null) return null;
+        return All.FirstOrDefault(p => Same(p.Id, canonical));
     }
 
     public static string Ids => string.Join(", ", All.Select(p => p.Id));
+
+    /// <summary>The site names, in menu order, for a prompt.</summary>
+    public static string SitesList => string.Join(", ", Groups.Select(g => g.Site));
 
     public static bool IsBuiltInId(string id) =>
         BuiltIn.Any(b => Same(b.Id, id));
