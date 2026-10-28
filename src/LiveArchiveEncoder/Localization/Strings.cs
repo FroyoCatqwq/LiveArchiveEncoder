@@ -16,7 +16,7 @@ public static class L
 
     private static readonly Dictionary<string, string> En = new()
     {
-        ["app.title"] = "Live Archive Encoder CUI v7.9.8.4 (.NET 10 / .NET 11)",
+        ["app.title"] = $"Live Archive Encoder CUI v{Configuration.Constants.Version} (.NET 10 / .NET 11)",
         ["env.heading"] = "System check",
         ["env.cores"] = "only {0} CPU core(s); the documented minimum is {1}",
         ["env.memory"] = "about {0} GB of memory; the documented minimum is {1} GB",
@@ -574,6 +574,36 @@ public static class L
         ["report.nnedi"] = "NNEDI3 weights",
         ["report.nnedi.value"] = "{0} ({1})",
 
+        // ---- v7.9.8.5: updating the program from its own releases ----
+        ["update.menu"] = "Update the program",
+        ["update.heading"] = "Update",
+        ["update.hint"] = "{0} is available -- menu 21 installs it in place",
+        ["update.never"] = "never checked",
+        ["update.unknown"] = "checked, no release seen",
+        ["update.latest"] = "up to date",
+        ["update.newer"] = "{0} available",
+        ["update.sub.heading"] = "Update -- replaces the running executable:",
+        ["update.sub.check"] = "Check now",
+        ["update.sub.apply"] = "Download and install the newest build",
+        ["update.sub.auto"] = "Check when the shell starts",
+        ["update.sub.back"] = "Back",
+        ["update.lastcheck"] = "last check: {0}",
+        ["update.autoset"] = "start-up update check: {0}",
+        ["update.currentlabel"] = "this build",
+        ["update.latestlabel"] = "latest",
+        ["update.current"] = "this build: {0} ({1})",
+        ["update.feed"] = "feed      : {0}",
+        ["update.uptodate"] = "already the newest build ({0}).",
+        ["update.available"] = "a newer build is available: {0}  {1}",
+        ["update.applyhint"] = "press 2 to download and install it.",
+        ["update.confirm"] = "download and replace this program now? [Y/n] ",
+        ["update.checkfailed"] = "could not read the release feed: {0}",
+        ["update.fail"] = "update failed: {0}",
+        ["update.page"] = "release page: {0}",
+        ["update.staged"] = "{0} is in place; start the program again to use it.",
+        ["update.stagedrestart"] = "{0} is in place; restarting...",
+        ["update.digestmissing"] = "NOTE: this release carries no SHA-256 digest, so only its size was checked.",
+
         // First run: no FFmpeg at all, and somebody is at the keyboard.
         ["firstrun.heading"] = "No FFmpeg found on this machine.",
         ["firstrun.body"] = "This tool can download and keep its own copy, so nothing has to be "
@@ -730,7 +760,7 @@ public static class L
 
     private static readonly Dictionary<string, string> Zh = new()
     {
-        ["app.title"] = "Live Archive Encoder 交互界面 v7.9.8.4 (.NET 10 / .NET 11)",
+        ["app.title"] = $"Live Archive Encoder 交互界面 v{Configuration.Constants.Version} (.NET 10 / .NET 11)",
         ["env.heading"] = "系统检查",
         ["env.cores"] = "只有 {0} 个 CPU 核心；文档给出的下限是 {1}",
         ["env.memory"] = "内存约 {0} GB；文档给出的下限是 {1} GB",
@@ -1257,6 +1287,36 @@ public static class L
         ["report.ghproxy"] = "GitHub 代理",
         ["report.nnedi"] = "NNEDI3 权重",
         ["report.nnedi.value"] = "{0}（{1}）",
+
+        // ---- v7.9.8.5：从自己的发布页更新程序 ----
+        ["update.menu"] = "更新程序",
+        ["update.heading"] = "更新",
+        ["update.hint"] = "有新版 {0}——菜单 21 可以就地安装",
+        ["update.never"] = "从未检查",
+        ["update.unknown"] = "检查过，没有拿到发布信息",
+        ["update.latest"] = "已是最新",
+        ["update.newer"] = "有新版 {0}",
+        ["update.sub.heading"] = "更新——会替换正在运行的可执行文件：",
+        ["update.sub.check"] = "现在检查",
+        ["update.sub.apply"] = "下载并安装最新版本",
+        ["update.sub.auto"] = "启动时自动检查",
+        ["update.sub.back"] = "返回",
+        ["update.lastcheck"] = "上次检查：{0}",
+        ["update.autoset"] = "启动时自动检查：{0}",
+        ["update.currentlabel"] = "当前版本",
+        ["update.latestlabel"] = "最新版本",
+        ["update.current"] = "当前版本：{0}（{1}）",
+        ["update.feed"] = "信息源    ：{0}",
+        ["update.uptodate"] = "已经是最新版本（{0}）。",
+        ["update.available"] = "有更新的版本：{0}  {1}",
+        ["update.applyhint"] = "按 2 下载并安装。",
+        ["update.confirm"] = "现在下载并替换本程序？[Y/n] ",
+        ["update.checkfailed"] = "读不到发布信息：{0}",
+        ["update.fail"] = "更新失败：{0}",
+        ["update.page"] = "发布页：{0}",
+        ["update.staged"] = "{0} 已就位；重新启动程序即可使用。",
+        ["update.stagedrestart"] = "{0} 已就位；正在重启……",
+        ["update.digestmissing"] = "注意：这个发布没有 SHA-256 摘要，只校验了大小。",
 
         // 首次启动：机器上完全没有 FFmpeg，且有人在键盘前。
         ["firstrun.heading"] = "这台机器上找不到 FFmpeg。",

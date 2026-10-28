@@ -123,6 +123,10 @@ public static class CliArgs
         // travel with the line -- otherwise the copy would probe and pick a front
         // the original was told not to use.
         if (c.GhProxy is { Length: > 0 } front) argv.AddRange(["--gh-proxy", front]);
+        // v7.9.8.5: only the non-default travels. "check on start" is the default,
+        // so a line printed from a settings file that turned it off has to say so
+        // -- otherwise replaying the line would quietly turn it back on.
+        if (!c.AutoUpdateCheck) argv.Add("--no-update-check");
         if (!string.Equals(c.PlayMode, "off", StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--play", c.PlayMode]);
         if (c.PlayerPath is { Length: > 0 } player) argv.AddRange(["--player", player]);

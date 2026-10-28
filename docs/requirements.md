@@ -119,6 +119,7 @@ FFmpeg 自己的编码器也有要求：`libx264` 在中低端 CPU 上跑 640x48
 | 下载 FFmpeg | 需要访问 GitHub / gyan.dev / SourceForge；`--proxy` 可指定代理 |
 | 下载 NNEDI3 权重（`--nnedi-update`） | 只需访问 GitHub（`sekrit-twc/znedi3`），约 13.5 MB。大陆线路直连 `raw.githubusercontent.com` 实测**连上后不给数据**，用 `--gh-proxy` 或让它自动选路 |
 | GitHub 下载前沿（`--gh-proxy`） | 需要能访问前沿本身（默认 `gh-proxy.com`）；不设置代理也能用，这是它存在的目的 |
+| 程序自更新（`--update` / 启动检查） | 需要访问 `api.github.com` 的 releases 接口和 release 资产所在主机；同样认 `--proxy` 与 `--gh-proxy`。启动检查有 3 秒预算、24 小时缓存，失败静默。发布页返回 401/403/404 时可用 `LAE_UPDATE_TOKEN`（只从环境变量读，不落盘） |
 
 网络源**强制单遍编码**：N 个分片各自打开同一个共享连接，是这个项目里最容易挂死的形态。
 

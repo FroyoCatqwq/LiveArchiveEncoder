@@ -263,6 +263,16 @@ public sealed class Config
     public string? GhProxy { get; set; }
 
     /// <summary>
+    /// v7.9.8.5: ask the release feed for a newer build when the shell starts.
+    ///
+    /// <para>On by default, and cheap: the answer is cached for a day, the
+    /// request has a three-second budget, and nothing is ever printed when it
+    /// fails. It is skipped entirely when the input is not a terminal, so a
+    /// scripted run never pays for it.</para>
+    /// </summary>
+    public bool AutoUpdateCheck { get; set; } = true;
+
+    /// <summary>
     /// v7.9.8.3: an NNEDI3 weights file to use instead of the managed one.
     /// Null means "whatever <c>--nnedi-update</c> installed".
     /// </summary>

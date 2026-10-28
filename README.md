@@ -31,6 +31,16 @@ exactly what v6.3.3 would have produced.
 > `-audio-codec` / `-audio-kbps` pair with the pass they follow, and the shell
 > exits instead of redrawing forever when stdin closes.
 
+> **v7.9.8.5:** the program updates itself. `--update` downloads the newest release,
+> checks it against the `sha256:` digest GitHub recorded at upload, runs the
+> downloaded build's `--version` to prove it starts and is not older, then hands
+> over to it — because Windows will not let a process replace its own running
+> image. The files are copied one at a time after the old process exits, so a
+> failed update leaves a complete old build rather than a mixture of two.
+> `--update-check` answers 0 / 3 / 2 for scripts, `--version` prints the number,
+> and the shell gains menu 21 (check / install / check-on-start, cached a day,
+> silent when offline). Proxy and `--gh-proxy` apply here too.
+
 Full user guide: [`docs/usage.md`](docs/usage.md); system and hardware requirements:
 [`docs/requirements.md`](docs/requirements.md). Version history, from Python
 v6.2.2 to the current release: [`docs/CHANGELOG.md`](docs/CHANGELOG.md). Where
@@ -296,6 +306,7 @@ Two flags are additions rather than ports:
 | NNEDI3 deinterlacing (v7.9.8.3) | `--deinterlace nnedi` now has weights to go with it: `--nnedi-update` fetches `nnedi3_weights.bin` (13,574,928 B, znedi3 `r3.3`) into `%LOCALAPPDATA%\LiveArchiveEncoder\nnedi`, records tag/size/sha256, proves the blob by letting the filter initialise on it, and resumes an interrupted download. `--nnedi-status` prints what is installed, `--nnedi-weights PATH` uses a copy elsewhere. The filter cannot start without the file, so a missing one is refused before the preflight instead of FFmpeg's "Cannot open file" mid-run |
 | `--gh-proxy [URL]`, `--no-gh-proxy` (v7.9.8.3) | fetch GitHub downloads through a front (`https://gh-proxy.com/` by default). Measured 2026-10-27: `raw.githubusercontent.com` accepts the connection and then delivers nothing (0 bytes in 20 s), while the same URL through the front answers `206` with a correct `Content-Range`, so range/resume still works. Unset means "probe for 5 s and pick"; `off` is remembered in the settings file and stops the probing |
 | multi-pass recompress (v7.9.8.3) | `--recompress-args`, `--recompress-codec` and `--recompress-container` are repeatable: the Nth of each is the Nth transcode, each reading the previous hop's file (`clip_web.mp4` → `clip_web2.flv` → `clip_web3.rm`). A hop named by codec picks its own container, and a failed hop reports which one (`recompress 2/3`) without touching the live product. The CUI builds the same chain since v7.9.8.4 (menu 15 → 8: type a fragment to add a pass, a number to drop it, `-` to clear), and "recompress a file directly" runs the whole chain instead of only the first hop |
+| `--update` / `--update-check` / `--version` (v7.9.8.5) | the program updates itself: `--update-check` exits 0 (current), 3 (newer available) or 2 (feed unreadable); `--update` downloads the release asset for **this** platform and flavour (`win/linux`, `x64/arm64`, JIT vs AOT read from `RuntimeFeature.IsDynamicCodeSupported`), verifies the `sha256:` digest, unpacks into `<program dir>/.update-<tag>/`, proves the downloaded binary by running its `--version`, and starts it with `--self-update-apply` to swap the files after this process exits. `--update-feed URL` points it at a mirror or a local server; `LAE_UPDATE_TOKEN` lifts an authentication wall without writing a credential anywhere. It never downgrades and never touches FFmpeg |
 | `--subtitle-aspect 4:3\|16:9\|source` (v7.9.8.3) | lay burned text out in a box of that shape and composite it back onto the finished frame (`crop` + `subtitles` + `overlay`, same size and offset, no scaling). A 4:3 subtitle on a 16:9 picture keeps its 4:3 layout instead of being spread across the extra width; `source` is the old whole-frame behaviour |
 | burned subtitles follow the source clock (v7.9.8.4) | `--start-time` makes FFmpeg rebase the picture to 00:00:00 while the subtitle file still counts from the beginning of the source, so from `00:22:45` every line landed 22 minutes late — outside the clip, nothing drawn. The burn filter is now wrapped in `setpts=PTS±offset/TB` (and the offset taken back off, because `-t` is measured on the timestamps that leave the chain); a run from 00:00:00 builds exactly the command it always did |
 | `--era-aspect 4:3\|16:9\|source` | v7.9.6.3: capture and deliver a preset in the other frame shape. Keeps the capture width and changes the height (352x264 → 352x198, 1280x720 → 1280x960) and only offers a shape the encoder can actually encode — H.261/H.263 exist at CIF sizes only, AMV wants multiples of 16, everything else wants even sides; an impossible request is refused at parse time (exit 2) instead of failing on the first frame twenty minutes in |

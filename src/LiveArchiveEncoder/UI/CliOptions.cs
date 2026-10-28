@@ -220,6 +220,25 @@ public sealed class CliOptions
     /// <summary>v7.9.8.3: an explicit NNEDI3 weights file (or the folder holding it).</summary>
     public string? NnediWeights { get; init; }
 
+    /// <summary>v7.9.8.5: print the version alone and exit.</summary>
+    public bool ShowVersion { get; init; }
+
+    /// <summary>v7.9.8.5: report whether a newer build exists, then exit.</summary>
+    public bool UpdateCheck { get; init; }
+
+    /// <summary>v7.9.8.5: download and install the newest build, then exit.</summary>
+    public bool Update { get; init; }
+
+    /// <summary>
+    /// v7.9.8.5: a release feed to ask instead of the built-in GitHub one. It has
+    /// to speak GitHub's release JSON; that is what makes a mirror, a corporate
+    /// proxy or a local test server interchangeable with the real thing.
+    /// </summary>
+    public string? UpdateFeed { get; init; }
+
+    /// <summary>v7.9.8.5: skip this run's start-up update check.</summary>
+    public bool NoUpdateCheck { get; init; }
+
     /// <summary>When set, download and install that distribution, then exit.</summary>
     public string? FfmpegDownload { get; init; }
 
@@ -436,6 +455,11 @@ public static class CliParser
         bool nnediUpdate = false;
         bool nnediStatus = false;
         string? nnediWeights = null;
+        bool showVersion = false;
+        bool updateCheck = false;
+        bool update = false;
+        string? updateFeed = null;
+        bool noUpdateCheck = false;
         string? ffmpegDownload = null;
         string? ffmpegArchive = null;
         string? ffmpegDelete = null;
@@ -816,6 +840,28 @@ public static class CliParser
                         return (null, "--nnedi-weights requires a file path");
                     nnediWeights = weightsRaw.Trim().Trim('"');
                     break;
+                case "--version":
+                    showVersion = true;
+                    break;
+                case "--update":
+                    update = true;
+                    break;
+                case "--update-check":
+                    updateCheck = true;
+                    break;
+                case "--update-feed":
+                    if (!TryValue(out string feedRaw))
+                        return (null, "--update-feed requires a URL");
+                    if (!Uri.TryCreate(feedRaw.Trim(), UriKind.Absolute, out Uri? feedUri)
+                        || (feedUri.Scheme != Uri.UriSchemeHttp && feedUri.Scheme != Uri.UriSchemeHttps))
+                    {
+                        return (null, $"--update-feed '{feedRaw}' is not an http(s) URL");
+                    }
+                    updateFeed = feedUri.ToString();
+                    break;
+                case "--no-update-check":
+                    noUpdateCheck = true;
+                    break;
                 case "--play":
                     if (!TryValue(out string playRaw)) return (null, "--play requires a mode");
                     play = Player.ParseMode(playRaw);
@@ -1043,6 +1089,11 @@ public static class CliParser
             NnediUpdate = nnediUpdate,
             NnediStatus = nnediStatus,
             NnediWeights = nnediWeights,
+            ShowVersion = showVersion,
+            UpdateCheck = updateCheck,
+            Update = update,
+            UpdateFeed = updateFeed,
+            NoUpdateCheck = noUpdateCheck,
             FfmpegDownload = ffmpegDownload,
             FfmpegArchive = ffmpegArchive,
             FfmpegDelete = ffmpegDelete,
@@ -1180,6 +1231,14 @@ public static class CliParser
                                  + "needs (sekrit-twc/znedi3), then exit"),
             ("--nnedi-status", "", "print the installed NNEDI3 weights, then exit"),
             ("--nnedi-weights", "PATH", "use this weights file (or folder) instead of the installed one"),
+            ("--version", "", "print the program version and exit"),
+            ("--update-check", "", "ask the release feed for a newer build, then exit "
+                                 + "(0 = up to date, 3 = newer available, 2 = could not check)"),
+            ("--update", "", "download and install the newest build in place, then exit "
+                           + "(honours --proxy and --gh-proxy)"),
+            ("--update-feed", "URL", "ask this release feed instead of GitHub's; it has to "
+                                   + "return GitHub release JSON (a mirror or a local server)"),
+            ("--no-update-check", "", "do not look for a newer build when the shell starts"),
             ("--play", "MODE", "after encoding: off, ffplay or external (default: off)"),
             ("--player", "PATH", "external player executable (default: system file association)"),
             ("--recompress", "", "re-encode the result the way a video site would (default: off)"),

@@ -144,6 +144,13 @@ public sealed class UserConfig
     /// <summary>v7.9.8.3: explicit NNEDI3 weights file; null uses the managed install.</summary>
     public string? NnediWeights { get; set; }
 
+    /// <summary>
+    /// v7.9.8.5: look for a newer build when the shell starts. Absent from older
+    /// files, so the default (on) applies to them -- and "on" is what a program
+    /// that can now update itself should do.
+    /// </summary>
+    public bool AutoUpdateCheck { get; set; } = true;
+
     /// <summary>"off" / "ffplay" / "external".</summary>
     public string PlayMode { get; set; } = "off";
 
@@ -463,6 +470,7 @@ public static class ConfigStore
         FfmpegProxy = c.FfmpegProxy,
         GhProxy = c.GhProxy,
         NnediWeights = c.NnediWeights,
+        AutoUpdateCheck = c.AutoUpdateCheck,
         PlayMode = UI.Player.ModeName(c.Play),
         PlayerPath = c.PlayerPath,
         Recompress = CloneRecompress(c.Recompress),
@@ -617,6 +625,7 @@ public static class ConfigStore
             ? FFmpeg.GitHubProxy.Off
             : FFmpeg.GitHubProxy.Normalise(stored.GhProxy).Prefix;
         c.NnediWeights = stored.NnediWeights;
+        c.AutoUpdateCheck = stored.AutoUpdateCheck;
         c.Play = UI.Player.ParseMode(stored.PlayMode);
         c.PlayerPath = stored.PlayerPath;
 

@@ -24,7 +24,8 @@ public static partial class Cui
     public static int Run(
         string ffmpeg, string ffprobe, bool btbn,
         FFmpeg.Capabilities caps,
-        string? language = null, string? ffmpegSource = null)
+        string? language = null, string? ffmpegSource = null,
+        bool noUpdateCheck = false, string? updateFeed = null)
     {
         // v7.9.5: all of this comes from one cached build profile instead of
         // three launches (`-version`, `-encoders` twice). A second start of the
@@ -88,6 +89,25 @@ public static partial class Cui
         // restore made the menu show a number the run would not use.
         if (c.Parallel > 1 && Remote.Smb.IsRemotePath(c.InputPath?.FullName))
             Console.WriteLine(L.T("parallel.netcheckhint"));
+
+        // v7.9.8.5: one request a day, three seconds, silent when it fails.
+        // Skipped entirely when the input is a pipe -- a scripted run must not
+        // wait on the network for a hint nobody is going to read.
+        Update.UpdateState updateState = Update.UpdateState.Load();
+        if (c.AutoUpdateCheck && !noUpdateCheck && !Console.IsInputRedirected
+            && !updateState.IsFresh(Update.SelfUpdate.CheckTtl))
+        {
+            (Update.Release? seen, _) = Update.SelfUpdate.Check(
+                updateFeed, c.FfmpegProxy, c.GhProxy, 3);
+            if (seen is not null) updateState.Seen = seen.Tag;
+        }
+        if (Update.VersionTag.Parse(updateState.Seen) is { } seenTag
+            && seenTag.IsNewerThan(Update.SelfUpdate.CurrentTag))
+        {
+            Console.WriteLine($"{L.Pad(L.T("update.heading"), 17)}: "
+                + L.T("update.hint", updateState.Seen!));
+        }
+
         while (true)
         {
             Console.WriteLine($"\n{L.T("menu.heading")}");
@@ -118,6 +138,9 @@ public static partial class Cui
             // v7.9.6: pixel format and colour tags -- what the picture is made
             // of, rather than what it is compressed with.
             Console.WriteLine($"20. {L.Pad(L.T("menu.pictureformat"), 22)} = {DescribePixFmt(c)}");
+            // v7.9.8.5: the program can replace itself, so the shell needs a door
+            // to it that is not a command line nobody reads.
+            Console.WriteLine($"21. {L.Pad(L.T("update.menu"), 22)} = {DescribeUpdate(updateState)}");
             Console.WriteLine($" 0. {L.T("menu.exit")}");
             Console.Write(L.T("menu.select"));
 
@@ -260,6 +283,9 @@ public static partial class Cui
                     EditPictureFormat(c);
                     Persist(c);
                     break;
+                case "21":
+                    updateState = UpdateMenu(c, updateFeed);
+                    break;
                 default:
                     Console.WriteLine(L.T("menu.invalid"));
                     break;
@@ -304,6 +330,148 @@ public static partial class Cui
 
     private static FileInfo DefaultOutput(FileInfo src, EncoderInfo encoder) =>
         new(Path.Combine(src.DirectoryName ?? ".", $"{Path.GetFileNameWithoutExtension(src.Name)}_live.{encoder.Extension}"));
+
+    /// <summary>
+    /// Menu summary of the update state (v7.9.8.5): what the last check saw,
+    /// not a fresh request -- a menu that goes to the network on every redraw is
+    /// unusable on a slow link, and offline it would stall each time.
+    /// </summary>
+    private static string DescribeUpdate(Update.UpdateState state)
+    {
+        if (Update.VersionTag.Parse(state.Seen) is not { } seen)
+            return state.CheckedAt is null ? L.T("update.never") : L.T("update.unknown");
+
+        return seen.IsNewerThan(Update.SelfUpdate.CurrentTag)
+            ? L.T("update.newer", state.Seen!)
+            : L.T("update.latest");
+    }
+
+    /// <summary>
+    /// The update submenu (v7.9.8.5).
+    ///
+    /// <para>Applying returns only on failure: a staged update ends the process so
+    /// the downloaded build can be moved over the running image, and the build
+    /// that comes back is the new one. Anything else would mean printing a menu
+    /// from a program whose files were just replaced underneath it.</para>
+    /// </summary>
+    private static Update.UpdateState UpdateMenu(Config c, string? feed)
+    {
+        while (true)
+        {
+            Update.UpdateState state = Update.UpdateState.Load();
+
+            Console.WriteLine($"\n{L.T("update.sub.heading")}");
+            Console.WriteLine($" 1. {L.T("update.sub.check")}");
+            Console.WriteLine($" 2. {L.T("update.sub.apply")}");
+            Console.WriteLine($" 3. {L.Pad(L.T("update.sub.auto"), 30)} = "
+                + (c.AutoUpdateCheck ? L.T("value.yes") : L.T("value.no")));
+            if (state.CheckedAt is { } at)
+            {
+                Console.WriteLine($"    {L.T("update.lastcheck", at.LocalDateTime.ToString("G", CultureInfo.CurrentCulture))}");
+            }
+            Console.WriteLine($" 0. {L.T("update.sub.back")}");
+            Console.Write(L.T("menu.select"));
+
+            switch (Ask().Trim())
+            {
+                case "0":
+                    return state;
+
+                case "1":
+                    UpdateCheckNow(c, feed);
+                    break;
+
+                case "2":
+                    ApplyUpdate(c, feed);
+                    // Unreachable in practice: a successful update exits. Any
+                    // other ending returns here so the menu stays usable.
+                    break;
+
+                case "3":
+                    c.AutoUpdateCheck = !c.AutoUpdateCheck;
+                    Persist(c);
+                    Console.WriteLine(L.T("update.autoset",
+                        c.AutoUpdateCheck ? L.T("value.yes") : L.T("value.no")));
+                    break;
+
+                default:
+                    Console.WriteLine(L.T("menu.invalid"));
+                    break;
+            }
+        }
+    }
+
+    private static void UpdateCheckNow(Config c, string? feed)
+    {
+        Console.WriteLine($"{L.Pad(L.T("update.currentlabel"), 17)}: "
+            + $"{Update.SelfUpdate.Current} ({Update.SelfUpdate.Flavour()})");
+
+        string? front = c.GhProxy;
+        if (front is null && !Update.SelfUpdate.IsCustomFeed(feed))
+        {
+            // Nobody has decided the route yet: ask the network, the same way the
+            // FFmpeg and NNEDI3 downloads do.
+            front = FFmpeg.GitHubProxy.Detect(
+                Update.SelfUpdate.PublicFeed, c.FfmpegProxy, Console.WriteLine);
+        }
+
+        (Update.Release? release, string? error) = Update.SelfUpdate.Check(
+            feed, c.FfmpegProxy, front, 12, Console.WriteLine);
+
+        if (release is null)
+        {
+            Console.WriteLine(L.T("update.checkfailed", error ?? ""));
+            return;
+        }
+
+        Console.WriteLine($"{L.Pad(L.T("update.latestlabel"), 17)}: {release.Tag}");
+        if (!release.Version.IsNewerThan(Update.SelfUpdate.CurrentTag))
+        {
+            Console.WriteLine(L.T("update.uptodate", release.Tag));
+            return;
+        }
+
+        Console.WriteLine(L.T("update.available", release.Tag, release.PageUrl ?? ""));
+        Console.WriteLine(L.T("update.applyhint"));
+    }
+
+    private static void ApplyUpdate(Config c, string? feed)
+    {
+        Console.Write(L.T("update.confirm"));
+        string answer = Ask().Trim().ToLowerInvariant();
+        if (answer is not ("" or "y" or "yes")) return;
+
+        string? front = c.GhProxy;
+        if (front is null && !Update.SelfUpdate.IsCustomFeed(feed))
+            front = FFmpeg.GitHubProxy.Detect(
+                Update.SelfUpdate.PublicFeed, c.FfmpegProxy, Console.WriteLine);
+
+        Update.UpdateReport report = Update.SelfUpdate.Install(
+            feed, c.FfmpegProxy, front, restart: true, Console.WriteLine);
+
+        if (report.Kind == Update.Outcome.Failed)
+        {
+            Console.WriteLine(L.T("update.fail", report.Error ?? ""));
+            if (report.Release?.PageUrl is { Length: > 0 } page)
+                Console.WriteLine(L.T("update.page", page));
+            return;
+        }
+
+        if (report.DigestMissing) Console.WriteLine(L.T("update.digestmissing"));
+
+        if (report.Kind == Update.Outcome.UpToDate)
+        {
+            Console.WriteLine(L.T("update.uptodate", report.Tag ?? "?"));
+            return;
+        }
+
+        Console.WriteLine(L.T("update.stagedrestart", report.Tag ?? "?"));
+        Persist(c);
+        // The replacement process is already waiting for this pid. Leaving now
+        // is what lets it work; anything printed after this point would be printed
+        // by a program that no longer exists.
+        Environment.Exit(0);
+    }
 
     /// <summary>Menu summary of the two stream picks; null means "first".</summary>
     private static string DescribeStreams(Config c) => L.T("stream.value",

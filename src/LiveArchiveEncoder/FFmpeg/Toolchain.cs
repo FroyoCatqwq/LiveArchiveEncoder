@@ -285,7 +285,12 @@ public static class Toolchain
             return Download(url, destination, proxy, log ?? (_ => { }));
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
-                                        or ArgumentException or NotSupportedException)
+                                        or ArgumentException or NotSupportedException
+                                        // v7.9.8.5: a URL that is not a URL reaches
+                                        // HttpClient as an InvalidOperationException, and
+                                        // a bad entry in a download list is an error to
+                                        // report, not a crash.
+                                        or InvalidOperationException)
         {
             return (false, exc.Message);
         }

@@ -13,6 +13,20 @@ namespace LiveArchiveEncoder.Configuration;
 /// </summary>
 public static class Constants
 {
+    /// <summary>
+    /// The program's own version, without the <c>v</c> the release tag carries.
+    ///
+    /// <para>v7.9.8.5: this is the single source. Before it, the version existed
+    /// only inside the localised banner string (<c>app.title</c>), which meant a
+    /// self-update had nothing trustworthy to compare a release tag against --
+    /// parsing a translated sentence for a number is not a version check.</para>
+    ///
+    /// <para>Bump this and the release tag together: <c>--update-check</c>
+    /// compares <c>tag_name</c> from the feed with this value, so a forgotten
+    /// bump makes the program offer its own version as an upgrade forever.</para>
+    /// </summary>
+    public const string Version = "7.9.8.5";
+
     public const int DefaultWidth = 256;
     public const int DefaultHeight = 192;
     public const double DefaultFps = 13.0;

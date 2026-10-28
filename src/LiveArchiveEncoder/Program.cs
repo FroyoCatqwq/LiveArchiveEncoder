@@ -16,6 +16,18 @@ public static class Program
             return 2;
         }
 
+        // v7.9.8.5: the second half of --update, running from the staging
+        // directory as the freshly downloaded build. It has to come first: this
+        // process waits for the old one to exit, and anything that touches the
+        // console or the settings file before that would belong to the old
+        // program's lifetime.
+        if (args.Length > 0 && string.Equals(args[0], "--self-update-apply", StringComparison.Ordinal))
+            return Update.SelfUpdate.Apply(args);
+
+        // Housekeeping for earlier updates. A failure (read-only install
+        // directory) is not worth a word.
+        Update.SelfUpdate.CleanupStaging();
+
         Interrupt.Attach();
 
         (CliOptions? options, string? parseError) = CliParser.Parse(args);
@@ -43,6 +55,18 @@ public static class Program
             CpuInfo.Print();
             return 0;
         }
+
+        // v7.9.8.5: the version alone, for scripts and for the update check
+        // itself -- the staged build is verified by running exactly this.
+        if (cli.ShowVersion)
+        {
+            Console.Out.WriteLine(Configuration.Constants.Version);
+            return 0;
+        }
+
+        // v7.9.8.5: updating needs no input file and no FFmpeg, so it runs
+        // before discovery -- a broken FFmpeg install must not block the fix.
+        if (cli.UpdateCheck || cli.Update) return RunUpdate(cli);
 
         // v7.9.1: settings file -> command line. Reads one JSON file and prints
         // the equivalent command line; no FFmpeg, no encode, so it works on a
@@ -415,7 +439,8 @@ public static class Program
 
         if (string.IsNullOrEmpty(cli.Input) && !cli.NoCui)
         {
-            return Cui.Run(ffmpeg, ffprobe, btbn, caps, cli.Language, source);
+            return Cui.Run(ffmpeg, ffprobe, btbn, caps, cli.Language, source,
+                cli.NoUpdateCheck, cli.UpdateFeed);
         }
 
         if (string.IsNullOrEmpty(cli.Input))
@@ -440,6 +465,90 @@ public static class Program
             Console.Error.WriteLine($"ERROR: {exc.Message}");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// <c>--update-check</c> and <c>--update</c>.
+    ///
+    /// <para>Exit codes are for scripts: 0 up to date, 3 newer available, 2 the
+    /// feed could not be read, 1 the update failed. 3 rather than 1 because
+    /// "there is an update" is not an error, and telling the two apart from the
+    /// outside is the whole point of running this non-interactively.</para>
+    /// </summary>
+    private static int RunUpdate(CliOptions cli)
+    {
+        UserConfig stored = ConfigStore.Load();
+        string? proxy = cli.FfmpegProxy ?? stored.FfmpegProxy;
+
+        (string? front, string? frontError) = ResolveFront(stored, cli.GhProxy);
+        if (frontError is not null)
+        {
+            Console.Error.WriteLine($"ERROR: --gh-proxy: {frontError}");
+            return 2;
+        }
+
+        // Nobody has said which route GitHub traffic should take, and this is an
+        // explicit request: spend five seconds probing rather than assume. A
+        // custom feed is not GitHub's, so a front would only corrupt its URL.
+        if (front is null && cli.GhProxy is null && !Update.SelfUpdate.IsCustomFeed(cli.UpdateFeed))
+            front = FFmpeg.GitHubProxy.Detect(Update.SelfUpdate.PublicFeed, proxy, Console.WriteLine);
+
+        if (cli.GhProxy is not null)
+        {
+            stored.GhProxy = front.HasText ? front : FFmpeg.GitHubProxy.Off;
+            ConfigStore.Save(stored);
+        }
+
+        string feed = Update.SelfUpdate.FeedOr(cli.UpdateFeed);
+        Console.WriteLine(L.T("update.current", Update.SelfUpdate.Current, Update.SelfUpdate.Flavour()));
+        Console.WriteLine(L.T("update.feed", feed));
+
+        if (cli.UpdateCheck)
+        {
+            (Update.Release? release, string? error) =
+                Update.SelfUpdate.Check(feed, proxy, front, 12, Console.WriteLine);
+            if (release is null)
+            {
+                Console.Error.WriteLine($"ERROR: {L.T("update.checkfailed", error ?? "")}");
+                return 2;
+            }
+
+            if (!release.Version.IsNewerThan(Update.SelfUpdate.CurrentTag))
+            {
+                Console.WriteLine(L.T("update.uptodate", release.Tag));
+                return 0;
+            }
+
+            Console.WriteLine(L.T("update.available", release.Tag, release.PageUrl ?? ""));
+            return 3;
+        }
+
+        // A console the user is watching gets the new build started again; a
+        // piped run does not, because relaunching a shell UI into a pipe would
+        // print a menu into somebody's log file.
+        bool restart = !Console.IsInputRedirected;
+        Update.UpdateReport report =
+            Update.SelfUpdate.Install(feed, proxy, front, restart, Console.WriteLine);
+
+        if (report.Kind == Update.Outcome.Failed)
+        {
+            Console.Error.WriteLine($"ERROR: {L.T("update.fail", report.Error ?? "")}");
+            if (report.Release?.PageUrl is { Length: > 0 } page)
+                Console.Error.WriteLine(L.T("update.page", page));
+            return 1;
+        }
+
+        if (report.DigestMissing) Console.WriteLine(L.T("update.digestmissing"));
+
+        if (report.Kind == Update.Outcome.UpToDate)
+        {
+            Console.WriteLine(L.T("update.uptodate", report.Tag ?? "?"));
+            return 0;
+        }
+
+        Console.WriteLine(L.T(report.Restarting ? "update.stagedrestart" : "update.staged",
+            report.Tag ?? "?"));
+        return 0;
     }
 
     /// <summary>
