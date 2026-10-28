@@ -407,10 +407,11 @@ public static partial class Cui
             + $"{Update.SelfUpdate.Current} ({Update.SelfUpdate.Flavour()})");
 
         string? front = c.GhProxy;
-        if (front is null && !Update.SelfUpdate.IsCustomFeed(feed))
+        if (front is null && !Update.SelfUpdate.IsCustomFeed(feed) && !Update.SelfUpdate.HasToken)
         {
             // Nobody has decided the route yet: ask the network, the same way the
-            // FFmpeg and NNEDI3 downloads do.
+            // FFmpeg and NNEDI3 downloads do. Not with a token though -- a front
+            // cannot carry one, and probing would just pick a route that fails.
             front = FFmpeg.GitHubProxy.Detect(
                 Update.SelfUpdate.PublicFeed, c.FfmpegProxy, Console.WriteLine);
         }
@@ -442,7 +443,7 @@ public static partial class Cui
         if (answer is not ("" or "y" or "yes")) return;
 
         string? front = c.GhProxy;
-        if (front is null && !Update.SelfUpdate.IsCustomFeed(feed))
+        if (front is null && !Update.SelfUpdate.IsCustomFeed(feed) && !Update.SelfUpdate.HasToken)
             front = FFmpeg.GitHubProxy.Detect(
                 Update.SelfUpdate.PublicFeed, c.FfmpegProxy, Console.WriteLine);
 

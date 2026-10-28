@@ -2178,6 +2178,16 @@ Windows 不允许替换一个正在映射为可执行映像的文件——包括
 一个匿名访问被限制的仓库，未认证请求全部 404，而 API 仍报 `private=false`，同一个
 请求带上 token 就是 200——这种情况下程序没错，缺的是凭据。
 
+**token 与前沿互斥**：前沿是替你把请求重新发一遍，`Authorization` 头不会跟过去（实测
+同一个 feed，带 token 走 `gh-proxy.com` 是 404，不走前沿是 200）。所以设了 token 时
+程序会**自动绕过前沿**并打一行说明；显式设了 `--gh-proxy` 也一样绕过。另外带 token 时
+下载不走 aria2c——凭据只能塞进命令行参数，而命令行对同机的每个进程都是可读的。
+
+```powershell
+$env:LAE_UPDATE_TOKEN = "ghp_..."      # 只在这一次会话里
+LiveArchiveEncoder --update-check      # 会自动直连 GitHub，不走前沿
+```
+
 ### 会遇到的情况
 
 | 现象 | 意思 |

@@ -203,12 +203,30 @@ public static class SelfUpdate
         string? feed, string? proxy, string? front,
         int timeoutSeconds = 12, Action<string>? log = null)
     {
+        // A front re-issues the request from its own side, so the Authorization
+        // header never arrives -- measured 2026-10-28: the same feed answers 404
+        // through gh-proxy.com with a token attached and 200 without the front.
+        // A token therefore wins over a front rather than silently 404ing.
+        bool token = HasToken;
+        if (token && front.HasText)
+        {
+            log?.Invoke("A token is set, so the GitHub front is bypassed "
+                + "(a front cannot forward credentials).");
+            front = null;
+        }
+
         string url = GitHubProxy.Apply(FeedOr(feed), front);
         log?.Invoke($"Feed: {url}");
 
         (string? body, string? error) = Fetch(url, proxy, timeoutSeconds);
         return body is null ? (null, error) : Parse(body);
     }
+
+    /// <summary>True when <c>LAE_UPDATE_TOKEN</c> is set; never stored, never logged.</summary>
+    public static bool HasToken => Environment.GetEnvironmentVariable("LAE_UPDATE_TOKEN").HasText;
+
+    /// <summary>The token itself, trimmed, or null. Read at every use rather than cached.</summary>
+    private static string? Token => Environment.GetEnvironmentVariable("LAE_UPDATE_TOKEN")?.Trim();
 
     /// <summary>
     /// Parse a GitHub release document. Separated from the request so the whole
@@ -357,7 +375,7 @@ public static class SelfUpdate
         string partial = archive + ".part";
         Say($"Downloading {asset.Name} ({asset.Size:N0} bytes)...");
         (bool downloaded, string? downloadError) =
-            Toolchain.DownloadFile(asset.Url, partial, proxy, log);
+            Toolchain.DownloadFile(asset.Url, partial, proxy, log, Token);
         if (!downloaded)
             return Fail(release, asset, $"download failed: {downloadError}");
 
@@ -969,7 +987,8 @@ public static class SelfUpdate
                     401 or 403 => " (the feed wants credentials: set LAE_UPDATE_TOKEN)",
                     404 => " (no such release feed -- private or restricted repository, "
                         + "or a URL that does not exist; LAE_UPDATE_TOKEN lifts an "
-                        + "authentication wall)",
+                        + "authentication wall, and it bypasses the GitHub front, which "
+                        + "cannot forward credentials)",
                     _ => "",
                 };
                 return (null, $"HTTP {code} {response.ReasonPhrase}{hint}");

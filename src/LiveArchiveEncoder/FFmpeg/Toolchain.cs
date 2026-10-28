@@ -276,13 +276,14 @@ public static class Toolchain
     /// subtly different copy of the downloader.</para>
     /// </summary>
     public static (bool Ok, string? Error) DownloadFile(
-        string url, string destination, string? proxy, Action<string>? log = null)
+        string url, string destination, string? proxy, Action<string>? log = null,
+        string? bearer = null)
     {
         try
         {
             string? dir = Path.GetDirectoryName(destination);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            return Download(url, destination, proxy, log ?? (_ => { }));
+            return Download(url, destination, proxy, log ?? (_ => { }), bearer);
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
                                         or ArgumentException or NotSupportedException
@@ -298,9 +299,16 @@ public static class Toolchain
 
     /// <summary>aria2c when available, HttpClient otherwise.</summary>
     private static (bool Ok, string? Error) Download(
-        string url, string destination, string? proxy, Action<string> log)
+        string url, string destination, string? proxy, Action<string> log,
+        string? bearer = null)
     {
-        string? aria2c = FindOnPath("aria2c");
+        string? aria2c = bearer.HasText ? null : FindOnPath("aria2c");
+        // A credential rules aria2c out: it would have to travel as a command
+        // line argument, where every process on the machine can read it. One
+        // connection is the right trade for a download that needs to prove who
+        // it is.
+        if (bearer.HasText) log("Downloading with a single connection (the feed needs a token).");
+
         if (aria2c is not null)
         {
             log($"Downloading with aria2c ({aria2c}), 16 connections...");
@@ -344,10 +352,13 @@ public static class Toolchain
             log($"aria2c exited with {code}: {Tail(output)}");
         }
 
-        log(aria2c is null
-            ? "aria2c not found; downloading with a single connection."
-            : "Falling back to a single-connection download.");
-        return DownloadHttp(url, destination, proxy, log);
+        if (!bearer.HasText)
+        {
+            log(aria2c is null
+                ? "aria2c not found; downloading with a single connection."
+                : "Falling back to a single-connection download.");
+        }
+        return DownloadHttp(url, destination, proxy, log, bearer);
     }
 
     /// <summary>
@@ -375,7 +386,8 @@ public static class Toolchain
     }
 
     private static (bool Ok, string? Error) DownloadHttp(
-        string url, string destination, string? proxy, Action<string> log)
+        string url, string destination, string? proxy, Action<string> log,
+        string? bearer = null)
     {
         try
         {
@@ -403,6 +415,13 @@ public static class Toolchain
                 Timeout = Timeout.InfiniteTimeSpan,
             };
             client.DefaultRequestHeaders.UserAgent.ParseAdd(BrowserUserAgent);
+            // v7.9.8.5: only reached with a token when the caller supplied one;
+            // the header stays in this process rather than in an argument list.
+            if (bearer.HasText)
+            {
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearer!.Trim());
+            }
             using HttpResponseMessage response =
                 client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
             if (!response.IsSuccessStatusCode)

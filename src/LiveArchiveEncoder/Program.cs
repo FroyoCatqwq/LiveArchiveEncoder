@@ -489,9 +489,15 @@ public static class Program
 
         // Nobody has said which route GitHub traffic should take, and this is an
         // explicit request: spend five seconds probing rather than assume. A
-        // custom feed is not GitHub's, so a front would only corrupt its URL.
-        if (front is null && cli.GhProxy is null && !Update.SelfUpdate.IsCustomFeed(cli.UpdateFeed))
+        // custom feed is not GitHub's, so a front would only corrupt its URL, and
+        // a token means the request has to reach GitHub itself -- a front cannot
+        // forward credentials.
+        if (front is null && cli.GhProxy is null
+            && !Update.SelfUpdate.IsCustomFeed(cli.UpdateFeed)
+            && !Update.SelfUpdate.HasToken)
+        {
             front = FFmpeg.GitHubProxy.Detect(Update.SelfUpdate.PublicFeed, proxy, Console.WriteLine);
+        }
 
         if (cli.GhProxy is not null)
         {
