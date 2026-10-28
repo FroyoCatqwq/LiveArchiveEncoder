@@ -31,6 +31,19 @@ exactly what v6.3.3 would have produced.
 > `-audio-codec` / `-audio-kbps` pair with the pass they follow, and the shell
 > exits instead of redrawing forever when stdin closes.
 
+> **v7.9.8.6:** a pass over the whole codebase rather than a feature. Fifteen
+> defects, the kind that only surface when the tool is used for an hour: a plain
+> `--encoder` run rewrote the settings file from scratch and wiped the shell's
+> recompress chain, subtitle block, GitHub front and NNEDI3 weights path;
+> `--deinterlace nnedi` together with `--parallel` refused to run, claiming the
+> weights file was missing (the copy handed to each shard dropped the path); typing
+> a letter where a number was expected took the interactive shell down with a stack
+> trace; and the frame write had no deadline, so a stalled pipe made Ctrl+C do
+> nothing and left two FFmpeg children behind. The completion scripts are now
+> generated from the same option table the parser is checked against -- they had
+> fallen **43 options** behind -- and every run says the one thing nobody guesses:
+> it runs at the source's pace.
+
 > **v7.9.8.5:** the program updates itself. `--update` downloads the newest release,
 > checks it against the `sha256:` digest GitHub recorded at upload, runs the
 > downloaded build's `--version` to prove it starts and is not older, then hands
@@ -309,6 +322,9 @@ Two flags are additions rather than ports:
 | `--update` / `--update-check` / `--version` (v7.9.8.5) | the program updates itself: `--update-check` exits 0 (current), 3 (newer available) or 2 (feed unreadable); `--update` downloads the release asset for **this** platform and flavour (`win/linux`, `x64/arm64`, JIT vs AOT read from `RuntimeFeature.IsDynamicCodeSupported`), verifies the `sha256:` digest, unpacks into `<program dir>/.update-<tag>/`, proves the downloaded binary by running its `--version`, and starts it with `--self-update-apply` to swap the files after this process exits. `--update-feed URL` points it at a mirror or a local server; `LAE_UPDATE_TOKEN` lifts an authentication wall without writing a credential anywhere. It never downgrades and never touches FFmpeg |
 | `--subtitle-aspect 4:3\|16:9\|source` (v7.9.8.3) | lay burned text out in a box of that shape and composite it back onto the finished frame (`crop` + `subtitles` + `overlay`, same size and offset, no scaling). A 4:3 subtitle on a 16:9 picture keeps its 4:3 layout instead of being spread across the extra width; `source` is the old whole-frame behaviour |
 | burned subtitles follow the source clock (v7.9.8.4) | `--start-time` makes FFmpeg rebase the picture to 00:00:00 while the subtitle file still counts from the beginning of the source, so from `00:22:45` every line landed 22 minutes late — outside the clip, nothing drawn. The burn filter is now wrapped in `setpts=PTS±offset/TB` (and the offset taken back off, because `-t` is measured on the timestamps that leave the chain); a run from 00:00:00 builds exactly the command it always did |
+| a run never rewrites the settings it was not told about (v7.9.8.6) | the interactive shell writes one settings file; a command-line run reads it, uses what it was told, and saves back the rest **unchanged**. Before this, every CLI encode rebuilt the snapshot from defaults, so one `--encoder mpeg4` silently reset the recompress chain (all of its extra hops), the subtitle block, `--gh-proxy`, `--nnedi-weights`, the auto-update switch, the toolchain source and the player. `--no-gh-proxy` (stored as an empty value) and "did not mention it" stay different things |
+| completion scripts (v7.9.8.6) | `--completion bash\|zsh\|fish\|powershell` is generated from `UI/OptionCatalog.cs`, the same table two tests hold against the parser source in both directions. v7.9.8.5 shipped scripts that knew 69 of 112 spellings, so `--era-aspect`, `--h264`, `--pix-fmt`, the colour block and both update switches completed nothing in any shell; fish additionally never saw free-text options at all, because it has no "anything not matched above" fallback |
+| a note before the run (v7.9.8.6) | the progress line says frames and kbps, never "this is realtime", so a 50-minute programme reads as a hung process -- and an output still named `*.part.*` reads as a failure. Both are stated once, before the encode starts (silent under `--quiet`) |
 | `--era-aspect 4:3\|16:9\|source` | v7.9.6.3: capture and deliver a preset in the other frame shape. Keeps the capture width and changes the height (352x264 → 352x198, 1280x720 → 1280x960) and only offers a shape the encoder can actually encode — H.261/H.263 exist at CIF sizes only, AMV wants multiples of 16, everything else wants even sides; an impossible request is refused at parse time (exit 2) instead of failing on the first frame twenty minutes in |
 | `--net-test PATH\|URL` | v7.9.6.3: measure the link behind a source — throughput, jitter and first-byte latency, by reading the source the way the shards would — print the verdict `--parallel` would use, and exit (0 = shardable, 1 = not) |
 | `--iperf3 HOST[:PORT]` | v7.9.6.3: measure the link with `iperf3 -c HOST -J` as a *reference*. Both ends need iperf3 and an open port, and a public iperf3 server only stands in for the WAN path — it cannot see a NAS's own disk or per-connection limits, so reading the source stays the authoritative measurement |

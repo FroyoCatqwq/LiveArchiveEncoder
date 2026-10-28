@@ -18,6 +18,159 @@
 
 ---
 
+## v7.9.8.6（2026-10-28）
+
+第九个补丁号，主题是**把"能跑"变成"跑得住"**：全量过一遍代码，修掉 15 处会崩、会丢
+配置、会留下孤儿进程或在取消后仍然写成品的问题；补全脚本从手抄改成从一张表生成；把
+程序里几句会让人误解的话改成实话。
+
+产物格式没有改。⚠ 标出的两条会改变用户看到的东西。
+
+### 1. 一次命令行编码会清空菜单里的配置（⚠ 数据丢失）
+
+`Cli.Run` 从零构造 `Config`，跑完再 `Capture` 回写设置文件 —— 而它没赋值的那些字段
+（二次压缩链、字幕块、GitHub 前沿、NNEDI3 权重路径、自动更新开关、工具链来源、播放器）
+用的是**默认值**，于是"跑一次 `--encoder mpeg4 in.rm out.avi`"就把菜单里配好的东西
+换成了默认值。二次压缩链里的多跳 `Extra` 尤其惨：菜单里加了三跳，编码一次就全没了。
+
+现在 rule 是"这一次运行只拥有它说过的字段"：`CliOptions` 新增 `FfmpegSourceExplicit`
+/ `PlayExplicit` 与两个按内容判断的 `TouchedRecompress` / `TouchedSubtitles`，
+`MergeStoredPreferences` 逐字段决定用命令行的还是文件里的。`--no-gh-proxy`（存 `""`）
+和"没提这件事"（`null`）仍然是两件事。
+
+### 2. 补全脚本落后解析器 43 个选项
+
+`Completion` 自己维护一份选项表，`CliOptions` 的 `switch` 是另一份。数了一下：解析器
+认 **112** 种写法，补全只认 **69**。v7.9.8.2 之后加的东西基本都没进去 —— `--era-aspect`、
+`--h264`、`--pix-fmt`、整块颜色参数、`--update`/`--update-feed`、两个 NNEDI3 开关、
+`--subtitle-aspect`，在四个 shell 里都补不出任何东西。
+
+现在唯一来源是 `UI/OptionCatalog.cs`（`Flag` / `Value` / `File` 三种，附可选值），
+`Completion` 只负责排版。两条新测试直接**读 `CliOptions.cs` 的源码**核对两个方向：
+解析器有而表里没有 → 红；表里有而解析器不认 → 也红。
+
+顺带发现 fish 有个真问题：它没有"没匹配上就列所有选项"的兜底，所以**纯文本取值的选项
+名字根本不会出现**在生成的脚本里（`--threads`、`--net-test` 之类）。现在 fish 先把每个
+选项名登记一遍，再补取值列表。
+
+### 3. 菜单里打错一个字，整个进程带堆栈退出
+
+`Cui.ReadInt` / `ReadDouble` 用的是裸 `int.Parse` / `double.Parse`，而菜单 `switch`
+外面没有任何 catch —— 在"并行分片"或"自定义时代预设"里输入 `abc`、`3,5`、`15fps`，
+得到的是 `Unhandled exception. System.FormatException` 和一堆堆栈，且本次改动全部丢失
+（`Persist` 在 case 末尾，没走到）。现在两个读取器都改成 `TryParse` + 一行
+`无效的值：…`，回车照旧沿用默认值。
+
+### 4. "已重新选择"其实什么都没选（⚠ 产物变化：修好了没声音的片子）
+
+第 4 菜单换容器时，如果当前音频编码器不适合新容器，提示语是
+`'{0}' does not fit the new container '{1}'; picking another.`，而代码只做了
+`c.AudioEncoder = null` —— 于是产出一个**没有音轨**的视频，界面上那一行显示
+`(none)`，用户多半以为是显示问题。现在真的挑一个能封进新容器的编码器
+（`EncoderMath.ChooseAudioEncoder`），一个都挑不出来时才说 `audio.none`。
+
+### 5. 界面上出现过一行 `sub.fonts.missing`
+
+`Strings.cs` 里根本没有这个键，而 `L.T` 的既定行为是"缺键就把键名当文案返回"。字幕 →
+字体 → 检查字体，只要某个字体没装，屏幕上就是那串点号。两张表都补了文案。
+
+新测试 `EveryKeyTheSourceAsksForExists` 扫源码里所有 `L.T("…")` 字面量，要求每个键在
+每种语言里都存在 —— 原有的两条测试只比对两张表**互相**是否齐，**两边都缺**的键能一路
+绿灯，这次的 bug 正是这么溜过去的。
+
+### 6. 时代预设菜单把序号印出来，却不接受序号
+
+列表按 `1. 2. 3.` 编号，输入 `3` 得到 `unknown era preset '3'`（`Find` 只认 id，站点
+名匹配也不成立），而下一层的年份列表**是**接受序号的。现在上层也认序号。
+
+### 7. 两处 Option 克隆漏字段 → 文档化的组合直接不可用
+
+分片管线与"视频/音频分离"管线都手写了一整块 `new RealtimeOptions { … }`，其中
+**都没有 `NnediWeights`**，于是 `--deinterlace nnedi --parallel 4`（以及
+`--deinterlace nnedi --audio-mode separate`）会在每个分片里抛"needs its NNEDI3
+weights file"——反过来指责用户没装权重。这已经是同一个坑的第二次（v7.9.6 漏的是每档
+码率阈值）。
+
+根因是"复制靠人抄"，所以 `RealtimeOptions` 改成了 `record`，两处改成 `with` 表达式：
+以后加字段不用再记得补任何一处。分离管线的视频阶段显式写 `Parallel = 1`，因为分片发生
+在上一层（`Run` 已经把 `--parallel N` 交给 `ParallelEncoder`），照抄会把每个分片再切一次。
+
+### 8. 编码器卡住时 Ctrl+C 无效，两个 FFmpeg 变孤儿
+
+写帧是同步 `encoderStdin.Write`，管道满（网络目标卡住、muxer 死锁）就永久阻塞；而取消
+只在循环头检查，于是回不去循环头，`finally` 里的 kill 也永远不执行。现在写帧带
+**30 秒**截止（`WriteAsync` + `WaitAsync`），超时按"编码器不再收帧"报错并走正常清理；
+取消则原样抛 `OperationCanceledException`。
+
+同一方法里还有两处：
+
+- **排空阶段**用 `WaitForExit(2×时长 + 60s)` 一次等到底 —— 一小时片子的最后两小时里
+  Ctrl+C 没人理。改成 250 ms 切片等待。
+- `HighResolutionTimer.Enable()` 写在 `try` 外面，编码器启动失败就漏一次计时器引用；
+  而 `Process.Start` 失败时**已经起来的解码器**没人 kill（`Dispose` 不会杀子进程），
+  网络源的那条连接会挂到进程结束。现在 `Enable()` 在 `try` 内第一行，编码器启动失败
+  先杀解码器再抛。
+
+### 9. 取消之后仍然把成品写到最终文件名
+
+分片管线的 `join` 与最终 `remux` 调 `ProcessRunner.Run` 时没传 `cancellationToken`，
+取消后这两步照跑（最长 `2 × 片段时长`），跑完继续 `Promote` —— 一个被取消的任务把成品
+落到了最终名字上。两处都传了 token；`Parallel.For` 里的
+`catch (Exception)` 也补了 OCE 前置分支，取消不再被报成
+`shard encoding failed: … The operation was canceled.`。
+
+### 10. 解码器中途死掉时，真正的诊断被一条无意义的异常盖掉
+
+`decoderDiagnostics` 由 stderr 读线程加锁追加，主循环里 `TailLines(...)` 却无锁复制。
+解码器非零退出的瞬间正好是高频 `Add`/`RemoveAt`，这时 `[.. list]` 可能抛
+"集合已修改"，把"到底是哪一行 ffmpeg 报了错"换成一句和问题无关的话。读取处加锁。
+
+### 11. 其余四处
+
+| 位置 | 问题 | 修法 |
+| --- | --- | --- |
+| `FrameBufferPool.Release` | 防重复归还的判断是 `_freeCount >= _free.Length`，只在**池全空闲**时成立——而那正是重复归还算不上事的状态；还有缓冲借出时，第二次归还会让同一块被两个写者拿到，画面静默错乱 | 增加真实状态位 `_borrowed[]`；顺带把取帧时每帧一次的 `new int[]` 去掉（类注释本来承诺"构造后不再分配"） |
+| `RealtimeEncoder` 字幕暂存 | `BuildDecoderCommand` / `BuildEncoderCommand` 抛错时，为内嵌字幕建的临时目录不会被清理 | 两个 builder 外面加 guard，与 preflight 那段一致 |
+| `Interrupt` | `_source` 的"检查-后-替换"没有同步，第二次 Ctrl+C 可能落在窗口里被丢掉 | `Lock` 包住这对字段，`Cancel()` 放在锁外（`System.Threading.Lock` 不可重入） |
+| `--help` / 报告 / 横幅 | 三处写着"损坏由 `frame_damage.py` 处理"，那个脚本既不在仓库也不在任何发布的包里 | 改成实话：本工具只做编码，损坏效果属于另一个独立项目 |
+
+### 12. 使用前提示
+
+新增一行 `note.realtime`，在编码开始前打印（`--quiet` 时不打）：
+
+```
+注意：实时节奏——编码按素材本身的时长跑，10 分钟的片段就要等约 10 分钟
+（--parallel N 能缩短，代价是分片）。输出在通过校验前，文件名里一直带 '.part'。
+```
+
+这是第一次用这个工具的人**必然**会误解的两件事：以为进程卡死，以及以为 `.part` 是失败
+产物。
+
+### 语法与特性
+
+代码库在 v7.8.1 已经做过一轮现代化（`FrozenDictionary`、`[GeneratedRegex]`、
+`System.Threading.Lock`、集合表达式、`IsNullOrWhiteSpace` 的替代扩展），这次只补三处
+**有实收益**的，不为好看改结构：
+
+- `RealtimeOptions` → `record` + `with`（第 7 条，同时根治一类 bug）；
+- 写帧的 `WriteAsync(...).AsTask().WaitAsync(TimeSpan)`（第 8 条）；
+- 新测试里的 `[GeneratedRegex]`（AOT 友好，不在运行时编正则）。
+
+### 验证
+
+- 单测 **618（617 过 / 1 跳过＝本机无字体）**，新增 25 条：补全目录 11 条（含两条源码
+  扫描）、配置合并 5 条、本地化键扫描 1 条等。
+- e2e **218 通过 / 2 跳过 / 0 失败**（phase 1 独占 28、phase 2 并行 190；跳过的是本机
+  FFmpeg 没有 `.a64` 解复用器）。
+- 断言口径：补全与本地化这两组测试都直接读**源码文本**，所以它们验证的是"代码与表一致"，
+  不是"手写的期望值恰好相等"。
+- e2e 顺带修了一处脏：这套测试原来把设置文件写进开发机真实的
+  `%LOCALAPPDATA%\LiveArchiveEncoder\config.json`。本版开始程序会**读**这个文件，于是
+  一个测试存下的二次压缩链会被后一个测试继承（本次先出现的 5 个失败就是这么来的）。现在
+  整套 e2e 跑在自己的 `LAE_CONFIG_DIR` 里。
+
+---
+
 ## v7.9.8.5（2026-10-28）
 
 第八个补丁号，只做一件事：**程序能更新自己**。顺带补上它需要的那个版本号，以及开发

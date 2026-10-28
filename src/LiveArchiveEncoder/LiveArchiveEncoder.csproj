@@ -75,9 +75,14 @@
     <AdditionalNativeLibraryDirectories Include="/usr/lib/x86_64-linux-gnu" />
   </ItemGroup>
 
-  <!-- Keep the GC heap small: this process allocates almost nothing per frame. -->
+  <!-- v7.9.8.6: the settings-file merge is tested directly. It stays internal so it
+       is not part of what a caller of this tool can depend on. -->
   <ItemGroup>
-    <RuntimeHostConfigurationOption Include="System.GC.Conserve" Value="7" Trim="false" />
+    <InternalsVisibleTo Include="LiveArchiveEncoder.Tests" />
+  </ItemGroup>
+
+  <!-- Keep the GC heap small: this process allocates almost nothing per frame. -->
+  <ItemGroup>    <RuntimeHostConfigurationOption Include="System.GC.Conserve" Value="7" Trim="false" />
   </ItemGroup>
 
 </Project>

@@ -13,7 +13,14 @@ namespace LiveArchiveEncoder.Core;
 /// </summary>
 public static class Interrupt
 {
+    // v7.9.8.6: the pair (_source, _reported) is read by the console handler thread
+    // and written by the main thread. Unprotected, a Ctrl+C landing between
+    // BeginOperation's check and its reassignment was swallowed: Request saw the
+    // already-cancelled old source and returned, so the new operation ran on
+    // thinking nobody had asked it to stop.
+    private static readonly Lock Gate = new();
     private static CancellationTokenSource _source = new();
+    private static bool _reported;
 
     /// <summary>
     /// Installs the Ctrl+C handler. The default kill is swallowed on purpose:
@@ -32,9 +39,21 @@ public static class Interrupt
     /// <summary>Raises a cancellation and reports it once per operation.</summary>
     public static void Request()
     {
-        if (_source.IsCancellationRequested) return;
+        CancellationTokenSource? target = null;
+        lock (Gate)
+        {
+            if (!_reported)
+            {
+                _reported = true;
+                target = _source;
+            }
+        }
+        if (target is null) return;
+
+        // Outside the gate: Cancel runs the registered callbacks synchronously, and
+        // one of them reaching back in here would deadlock on a non-reentrant Lock.
         Console.Error.WriteLine("\nInterrupted.");
-        _source.Cancel();
+        target.Cancel();
     }
 
     /// <summary>
@@ -47,7 +66,14 @@ public static class Interrupt
                         "benign no-op into ObjectDisposedException.")]
     public static CancellationToken BeginOperation()
     {
-        if (_source.IsCancellationRequested) _source = new CancellationTokenSource();
-        return _source.Token;
+        lock (Gate)
+        {
+            if (_reported || _source.IsCancellationRequested)
+            {
+                _source = new CancellationTokenSource();
+                _reported = false;
+            }
+            return _source.Token;
+        }
     }
 }

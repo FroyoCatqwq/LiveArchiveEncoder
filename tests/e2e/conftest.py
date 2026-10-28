@@ -83,10 +83,12 @@ def workdir():
 
 @pytest.fixture(scope="session")
 def cui_config():
-    """The real settings file, backed up for the duration of the CUI suite.
+    """The settings file the CUI tests write and read back.
 
-    Using the real file is the point of the test (it is where the persistence
-    checks read from); it is restored no matter how the suite ends.
+    v7.9.8.6: harness.config_path() is the suite's own LAE_CONFIG_DIR now, not the
+    developer's %LOCALAPPDATA%, so this is a private file. The backup/restore stays
+    because the suite rewrites it repeatedly and a later phase expects a clean
+    start; it costs one copy.
     """
     path = harness.config_path()
     backup = path.with_suffix(".json.bak")

@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.Localization;
 
@@ -15,7 +17,7 @@ namespace LiveArchiveEncoder.Tests;
 /// and TUnit's default parallelism would race two of them.
 /// </summary>
 [NotInParallel]
-public sealed class LocalizationTests
+public sealed partial class LocalizationTests
 {
     private string _original = "";
 
@@ -61,6 +63,43 @@ public sealed class LocalizationTests
     {
         L.SetLanguage(L.English);
         await Assert.That(L.T("no.such.key")).IsEqualTo("no.such.key");
+    }
+
+    /// <summary>
+    /// v7.9.8.6: the parity tests above compare the two tables with each other, so
+    /// a key that is missing from <em>both</em> passes them and then renders as its
+    /// own name on screen. That is exactly what happened to "sub.fonts.missing":
+    /// the subtitle font check printed the dotted key for any font the file asked
+    /// for and the machine did not have. This walks the source for literal keys.
+    /// </summary>
+    [Test]
+    public async Task EveryKeyTheSourceAsksForExists()
+    {
+        HashSet<string> asked = LiteralKeys();
+        await Assert.That(asked.Count).IsGreaterThan(50).Because("the scan should find the call sites");
+
+        foreach (string language in L.Languages)
+        {
+            string[] missing = [.. asked.Where(k => !L.KeysFor(language).Contains(k)).Order(StringComparer.Ordinal)];
+            await Assert.That(missing).IsEmpty()
+                .Because($"{language} has no text for: {string.Join(", ", missing)}");
+        }
+    }
+
+    [GeneratedRegex("L\\.T\\(\\s*\"([a-z][a-z0-9._]*)\"")]
+    private static partial Regex KeyLiteral();
+
+    private static HashSet<string> LiteralKeys([CallerFilePath] string thisFile = "")
+    {
+        string source = Path.GetFullPath(Path.Combine(
+            Path.GetDirectoryName(thisFile)!, "..", "..", "src", "LiveArchiveEncoder"));
+        if (!Directory.Exists(source))
+            throw new InvalidOperationException($"the source tree is not readable at {source}");
+
+        return [.. Directory.EnumerateFiles(source, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .SelectMany(f => KeyLiteral().Matches(File.ReadAllText(f)).Select(m => m.Groups[1].Value))
+            .Distinct(StringComparer.Ordinal)];
     }
 
     [Test]

@@ -122,7 +122,7 @@ public static class Report
         Line(L.T("report.deintavail"), deintAvailable.Length == 0 ? L.T("value.none") : deintAvailable);
         Line(L.T("report.scaleavail"),
             string.Join(", ", availableScaleAlgorithms.OrderBy(x => x, StringComparer.Ordinal)));
-        Line(L.T("report.impairments"), "use frame_damage.py (separate post-processing tool)");
+        Line(L.T("report.impairments"), L.T("app.impairments.value"));
         // The shard count changes what the run actually does, so it belongs in
         // the configuration dump even though it is not encoder state.
         Line(L.T("menu.parallel"),

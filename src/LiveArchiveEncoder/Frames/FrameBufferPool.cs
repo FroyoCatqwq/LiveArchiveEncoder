@@ -17,11 +17,20 @@ public sealed class FrameBufferPool
     private readonly byte[][] _buffers;
     private readonly int[] _free;
     private int _freeCount;
+    // v7.9.8.6: real ownership. The old double-release guard was
+    // `_freeCount >= _free.Length`, which is only true when the whole pool is
+    // idle -- exactly the state in which a duplicate release is harmless. With any
+    // buffer lent out, a second Release of the same index used to enqueue it
+    // twice, and two consumers would then write the same frame buffer.
+    private readonly bool[] _borrowed;
     private readonly int[] _readyIndex;
     private readonly long[] _readySeq;
     private readonly int _readyCapacity;
     private int _readyHead;
     private int _readyCount;
+    // Scratch for TryTakeLatest. The class promises no allocation per frame; this
+    // array is sized once, and only the single consumer thread touches it.
+    private readonly int[] _releases;
     // System.Threading.Lock: this is the one gate taken on every frame (rent,
     // publish, take), and with the stray Monitor.Pulse gone (see Publish) there
     // is nothing left that needs a monitor.
@@ -42,9 +51,11 @@ public sealed class FrameBufferPool
         _free = new int[slots];
         for (int i = 0; i < slots; i++) _free[i] = slots - 1 - i;
         _freeCount = slots;
+        _borrowed = new bool[slots];
 
         _readyIndex = new int[_readyCapacity];
         _readySeq = new long[_readyCapacity];
+        _releases = new int[Math.Max(1, _readyCapacity)];
     }
 
     public byte[] this[int index] => _buffers[index];
@@ -59,6 +70,7 @@ public sealed class FrameBufferPool
                 return false;
             }
             index = _free[--_freeCount];
+            _borrowed[index] = true;
             return true;
         }
     }
@@ -97,7 +109,7 @@ public sealed class FrameBufferPool
     {
         index = -1;
         sequence = 0;
-        int[] releases = Array.Empty<int>();
+        int releases = 0;
 
         lock (_sync)
         {
@@ -107,18 +119,17 @@ public sealed class FrameBufferPool
             index = _readyIndex[newest];
             sequence = _readySeq[newest];
 
-            if (_readyCount > 1)
+            for (int i = 0; i < _readyCount - 1; i++)
             {
-                releases = new int[_readyCount - 1];
-                for (int i = 0; i < releases.Length; i++)
-                {
-                    releases[i] = _readyIndex[(_readyHead + i) % _readyCapacity];
-                }
+                _releases[releases++] = _readyIndex[(_readyHead + i) % _readyCapacity];
             }
             _readyCount = 0;
         }
 
-        foreach (int slot in releases) Release(slot);
+        // Outside the gate on purpose: System.Threading.Lock is not reentrant, so
+        // Release cannot be called from inside this one. TryTakeLatest belongs to
+        // the single pacing thread, so the scratch array cannot be clobbered.
+        for (int i = 0; i < releases; i++) Release(_releases[i]);
         return true;
     }
 
@@ -132,11 +143,13 @@ public sealed class FrameBufferPool
         if (index < 0) return;
         lock (_sync)
         {
-            // v7.9.3.1: the free list is a fixed array, so a double release
-            // would write past its end and hand the same buffer to two
-            // consumers. Nothing double-releases today; the check is here
-            // because the failure mode is silent corruption rather than an
-            // exception at the call site.
+            // v7.9.8.6: only a buffer that is actually lent out can be returned.
+            // The previous check compared the free count against the pool size,
+            // which only caught the harmless case; a real duplicate release used to
+            // put the same slot in the free list twice and hand it to two writers,
+            // which corrupts the picture silently instead of throwing.
+            if (!_borrowed[index]) return;
+            _borrowed[index] = false;
             if (_freeCount >= _free.Length) return;
             _free[_freeCount++] = index;
         }

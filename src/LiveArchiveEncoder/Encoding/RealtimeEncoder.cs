@@ -18,7 +18,11 @@ namespace LiveArchiveEncoder.Encoding;
 /// count, pipe throughput and timer precision, not the pacing semantics.
 /// </summary>
 public static class RealtimeEncoder
-{    /// <summary>Mutable flags shared with the capture thread (a local cannot be volatile).</summary>
+{
+    /// <summary>How long one frame may sit unclaimed in the encoder's stdin pipe.</summary>
+    private const int WriteDeadlineSeconds = 30;
+
+    /// <summary>Mutable flags shared with the capture thread (a local cannot be volatile).</summary>
     private sealed class CaptureState
     {
         public volatile bool Stop;
@@ -296,12 +300,29 @@ public static class RealtimeEncoder
             subs?.Dispose();
             throw;
         }
-        List<string> decCmd = BuildDecoderCommand(o, sourcePath, filter, transportFmt, duration);
-        // The encoder writes a ".part" sibling; Promote puts it in place only
-        // once the run has actually succeeded.
+        // The encoder writes a ".part" sibling; Promote puts it in place only once
+        // the run has actually succeeded.
         FileInfo part = Core.OutputFile.PartPath(dst);
-        List<string> encCmd = BuildEncoderCommand(
-            o, part, transportFmt, width, height, hasAudio, audioRate, audioChannels, duration, stream, muxer, subs);
+
+        List<string> decCmd;
+        List<string> encCmd;
+        try
+        {
+            decCmd = BuildDecoderCommand(o, sourcePath, filter, transportFmt, duration);
+            // The encoder writes a ".part" sibling; Promote puts it in place only
+            // once the run has actually succeeded.
+            encCmd = BuildEncoderCommand(
+                o, part, transportFmt, width, height, hasAudio, audioRate, audioChannels, duration, stream,
+                muxer, subs);
+        }
+        catch
+        {
+            // v7.9.8.6: same rule as the preflight above -- a staging directory
+            // created for an embedded subtitle track must not outlive a refused
+            // command line. These two builders are where that path actually throws.
+            subs?.Dispose();
+            throw;
+        }
 
         if (o.Verbose)
         {
@@ -469,64 +490,25 @@ public static class RealtimeEncoder
                     o.AudioStream, audioStop.Token),
                 audioStop.Token);
 
-            var videoOptions = new RealtimeOptions
+            // v7.9.8.6: `with`, for the reason written on RealtimeOptions -- the
+            // hand-written copy below had already lost the per-rung bitrates once
+            // (v7.9.6) and the NNEDI3 weights path once (v7.9.8.6). Only what this
+            // stage actually changes is listed.
+            var videoOptions = o with
             {
-                FFmpeg = o.FFmpeg,
-                FFprobe = o.FFprobe,
-                SourcePath = o.SourcePath,
                 DestinationPath = videoOnly,
-                Encoder = o.Encoder,
-                Fps = o.Fps,
-                FpsLevels = o.FpsLevels,
-                // v7.9.6: this copy used to drop the per-rung thresholds, so a
-                // user who pinned "8:128:115" got the derived ones instead --
-                // only on this path (--audio-mode auto/separate), which is why
-                // no test noticed. Every field the video stage reads is now
-                // copied explicitly.
-                FpsLevelKbps = o.FpsLevelKbps,
-                Quality = o.Quality,
-                Threads = o.Threads,
-                LimitKbps = o.LimitKbps,
-                RecoverKbps = o.RecoverKbps,
-                WindowSeconds = o.WindowSeconds,
-                BufferFrames = o.BufferFrames,
+                // Picture only: the audio pass owns the track, and this file is
+                // muxed back together with it below.
                 AudioEncoder = null,
                 AudioKbps = audioKbps,
                 AudioChannels = audioChannels,
                 AudioRate = audioRate,
-                // The video stage re-enters Run(), which probes the source
-                // again: it has to make the same stream pick.
-                VideoStream = o.VideoStream,
-                AudioStream = o.AudioStream,
-                Subtitles = o.Subtitles,
-                AvailableSubtitleEncoders = o.AvailableSubtitleEncoders,
-                Hwaccel = o.Hwaccel,
-                Width = o.Width,
-                Height = o.Height,
-                FitMode = o.FitMode,
-                CropAnchor = o.CropAnchor,
-                PadColor = o.PadColor,
-                ScaleAlgo = o.ScaleAlgo,
-                PixFmt = o.PixFmt,
-                ColorRange = o.ColorRange,
-                ColorSpace = o.ColorSpace,
-                ColorPrimaries = o.ColorPrimaries,
-                ColorTransfer = o.ColorTransfer,
-                Dither = o.Dither,
-                Deinterlace = o.Deinterlace,
-                DeintMode = o.DeintMode,
-                DeintParity = o.DeintParity,
-                DeintMarkedOnly = o.DeintMarkedOnly,
-                X264Preset = o.X264Preset,
-                X264Tune = o.X264Tune,
-                X264Profile = o.X264Profile,
-                X264Level = o.X264Level,
-                StartSeconds = o.StartSeconds,
-                EndSeconds = o.EndSeconds,
-                AvailableFilters = o.AvailableFilters,
-                AvailableScaleAlgorithms = o.AvailableScaleAlgorithms,
-                Verbose = o.Verbose,
                 AudioMode = AudioMode.Inline,
+                // One video pass here. Sharding happens a level up: Run() already
+                // routed --parallel N to ParallelEncoder, and every shard re-enters
+                // RunSingle, which is what reaches this method. Copying the count
+                // through would shard each shard again.
+                Parallel = 1,
             };
 
             EncodeResult video = Run(videoOptions, cancellationToken);
@@ -765,8 +747,6 @@ public static class RealtimeEncoder
         double? resolvedEnd,
         CancellationToken cancellationToken)
     {
-        HighResolutionTimer.Enable();
-
         var monitor = new OutputMonitor(o.WindowSeconds);
         var pool = new FrameBufferPool(o.BufferFrames, frameSize);
         var captureState = new CaptureState();
@@ -799,8 +779,22 @@ public static class RealtimeEncoder
 
         using var decoder = Process.Start(decoderStart)
             ?? throw new InvalidOperationException("Failed to start decoder FFmpeg");
-        using var encoderProc = Process.Start(encoderStart)
-            ?? throw new InvalidOperationException("Failed to start encoder FFmpeg");
+
+        // v7.9.8.6: a failed encoder start used to leave the decoder running --
+        // Process.Dispose() does not stop a child, and the cleanup in the finally
+        // below is not reached from here. On a network source that orphan kept a
+        // connection (and the output staging file) alive for the whole session.
+        Process encoderProc;
+        try
+        {
+            encoderProc = Process.Start(encoderStart)
+                ?? throw new InvalidOperationException("Failed to start encoder FFmpeg");
+        }
+        catch (Exception exc)
+        {
+            try { decoder.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            throw new InvalidOperationException($"Failed to start encoder FFmpeg: {exc.Message}", exc);
+        }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -898,6 +892,10 @@ public static class RealtimeEncoder
 
         try
         {
+            // v7.9.8.6: armed inside the try, so the finally below always pairs
+            // with it. Enabling it before the try meant any exception in between
+            // leaked one hold on the 1 ms timer for the rest of the process.
+            HighResolutionTimer.Enable();
             captureThread.Start();
             Stream encoderStdin = encoderProc.StandardInput.BaseStream;
             long nextSlot = Stopwatch.GetTimestamp();
@@ -920,7 +918,13 @@ public static class RealtimeEncoder
                 decoder.Refresh();
                 if (decoder.HasExited && decoder.ExitCode != 0)
                 {
-                    List<string> tail = TailLines(decoderDiagnostics, 8);
+                    // The stderr reader thread appends to this list while holding
+                    // diagnosticsLock; copying it outside the lock throws
+                    // "collection was modified" exactly when a decoder dies
+                    // mid-stream -- replacing the diagnostic that matters with an
+                    // exception that means nothing.
+                    List<string> tail;
+                    lock (diagnosticsLock) tail = TailLines(decoderDiagnostics, 8);
                     throw new InvalidOperationException(
                         $"decoder exited before the capture finished (code {decoder.ExitCode}); "
                         + (tail.Count > 0 ? string.Join(" | ", tail) : "no decoder diagnostic"));
@@ -1048,15 +1052,18 @@ public static class RealtimeEncoder
 
                 try
                 {
-                    encoderStdin.Write(payload, 0, frameSize);
-                    encoderStdin.Flush();
+                    WriteFrame(encoderStdin, payload, frameSize, cancellationToken);
                 }
-                catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (ex is IOException or ObjectDisposedException or TimeoutException)
                 {
                     encoderProc.Refresh();
                     string rc = encoderProc.HasExited ? encoderProc.ExitCode.ToString() : "running";
                     throw new InvalidOperationException(
-                        $"encoder stdin closed at output slot {slots} (returncode={rc}); "
+                        $"encoder stdin stopped accepting frames at output slot {slots} (returncode={rc}); "
                         + JoinDiagnostics(monitor.TailDiagnostics(8)), ex);
                 }
 
@@ -1100,14 +1107,12 @@ public static class RealtimeEncoder
             }
 
             double encoderTimeout = Math.Max(60.0, (duration ?? 60.0) * 2.0 + 60.0);
-            int encRc;
-            if (!encoderProc.WaitForExit((int)(encoderTimeout * 1000)))
-            {
-                try { encoderProc.Kill(entireProcessTree: true); } catch { /* already gone */ }
-                encoderProc.WaitForExit(5000);
-                throw new InvalidOperationException($"encoder did not terminate within {encoderTimeout:F0}s");
-            }
-            encRc = encoderProc.ExitCode;
+            // Sliced wait: the drain after the last frame can take minutes on a
+            // large file, and a single WaitForExit(ms) made exactly that stretch
+            // ignore Ctrl+C (and then report the kill as "encoder exited").
+            WaitForExitOrCancel(encoderProc, encoderTimeout,
+                $"encoder did not terminate within {encoderTimeout:F0}s", cancellationToken);
+            int encRc = encoderProc.ExitCode;
 
             double decoderTimeout = Math.Max(10.0, (duration ?? 30.0) * 0.25 + 10.0);
             if (!decoder.WaitForExit((int)(decoderTimeout * 1000)))
@@ -1178,6 +1183,9 @@ public static class RealtimeEncoder
                 }
                 catch { /* already gone */ }
             }
+            // No `using` on the encoder any more (it is started inside a guard),
+            // so its handle is released here.
+            try { encoderProc.Dispose(); } catch { /* nothing left to release */ }
             _ = HighResolutionTimer.Disable();
         }
     }
@@ -1312,6 +1320,48 @@ public static class RealtimeEncoder
         {
             throw new InvalidOperationException(
                 $"muxed video stream is {videoDuration.Value:F3}s, far short of {expectedDuration:F3}s");
+        }
+    }
+
+    /// <summary>
+    /// Hand one frame to the encoder, with a deadline.
+    ///
+    /// A synchronous <c>Write</c> blocks for as long as the encoder refuses to
+    /// drain its stdin -- a stalled network target and a muxer waiting on its own
+    /// buffer are both real -- and this loop only looks at the cancel token at the
+    /// top. The old synchronous write therefore made Ctrl+C do nothing, skipped
+    /// the finally that kills both children, and left two orphan FFmpegs behind.
+    /// 30 s is far longer than any legitimate stall: one frame of rawvideo goes
+    /// out per slot, and a slot is at most a third of a second of programme.
+    /// </summary>
+    private static void WriteFrame(Stream stdin, byte[] payload, int count, CancellationToken token)
+    {
+        Task write = stdin.WriteAsync(payload.AsMemory(0, count), token).AsTask();
+        write.WaitAsync(TimeSpan.FromSeconds(WriteDeadlineSeconds), token).GetAwaiter().GetResult();
+        stdin.Flush();
+    }
+
+    /// <summary>
+    /// Wait for a child in 250 ms slices so a cancel is observed while it is
+    /// still running. Killing is the caller's desired outcome either way; what
+    /// differs is whether the user waits two minutes to find out.
+    /// </summary>
+    private static void WaitForExitOrCancel(
+        Process proc, double timeoutSeconds, string timeoutMessage, CancellationToken token)
+    {
+        var clock = Stopwatch.StartNew();
+        while (!proc.WaitForExit(250))
+        {
+            if (token.IsCancellationRequested)
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+                token.ThrowIfCancellationRequested();
+            }
+            if (clock.Elapsed.TotalSeconds < timeoutSeconds) continue;
+
+            try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            proc.WaitForExit(5000);
+            throw new InvalidOperationException(timeoutMessage);
         }
     }
 

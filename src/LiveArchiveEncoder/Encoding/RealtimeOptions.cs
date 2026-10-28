@@ -2,8 +2,18 @@ using LiveArchiveEncoder.Configuration;
 
 namespace LiveArchiveEncoder.Encoding;
 
-/// <summary>All inputs of a single realtime encode call.</summary>
-public sealed class RealtimeOptions
+/// <summary>
+/// All inputs of a single realtime encode call.
+///
+/// A record, not a class, because the two callers that re-enter the encoder
+/// (the shard pipeline and the split audio/video pipeline) have to hand down a
+/// copy with a few fields changed. v7.9.8.6: those copies used to be written out
+/// by hand, and twice in a row a field was forgotten -- first the per-rung
+/// bitrates, then <see cref="NnediWeights"/> and <see cref="Parallel"/>, so
+/// <c>--deinterlace nnedi --parallel 4</c> failed claiming the weights file was
+/// missing. <c>with</c> copies every property, including the ones added later.
+/// </summary>
+public sealed record RealtimeOptions
 {
     public required string FFmpeg { get; init; }
     public required string FFprobe { get; init; }

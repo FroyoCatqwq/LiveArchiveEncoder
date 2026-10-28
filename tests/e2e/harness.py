@@ -23,11 +23,21 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # The apphost carries no extension on Unix; every path in this suite goes
 # through EXE_NAME so the same tests run on Windows and on Linux.
 EXE_NAME = "LiveArchiveEncoder.exe" if os.name == "nt" else "LiveArchiveEncoder"
+
+# v7.9.8.6: the tool now reads the settings file (so a run keeps everything it was
+# not told about), which means the suite must not share the developer's copy.
+# Before this, a CLI test wrote the real %LOCALAPPDATA% config, and the next test
+# inherited whatever the previous one had saved -- a recompress chain enabled with
+# someone's arguments, subtitle paths pointing at a scratch file that was gone.
+# One directory per pytest process keeps the persistence tests meaningful (they
+# still see their own writes) without touching the machine's real settings.
+CONFIG_ROOT = Path(tempfile.mkdtemp(prefix="lae-e2e-cfg-"))
 
 E2E = Path(__file__).resolve().parent
 TESTS = E2E.parent
@@ -110,6 +120,9 @@ def run(cmd: list[str], *, timeout: int = 300, **kw) -> subprocess.CompletedProc
         # The pipe is bytes now, so a caller's str has to be encoded the way
         # the tool reads its stdin (UTF-8; menu keys are ASCII in practice).
         payload = payload.encode("utf-8")
+    # Every child gets the private settings directory; a caller that supplies its
+    # own env (a few tests do) keeps it, and only inherits ours when it does not.
+    kw.setdefault("env", {**os.environ, "LAE_CONFIG_DIR": str(CONFIG_ROOT)})
     p = subprocess.run(cmd, capture_output=True, timeout=timeout,
                        input=payload, **kw)
     p.stdout = decode_output(p.stdout)
@@ -266,12 +279,13 @@ def parse_summary(stdout: str, stderr: str, code: int) -> dict:
 # ---------------------------------------------------------------------------
 
 def config_path() -> Path:
-    """SpecialFolder.LocalApplicationData is %LOCALAPPDATA% on Windows and
-    ~/.local/share everywhere else; the C# side asks the runtime, so this has
-    to agree with it or the tests would back up the wrong file."""
-    appdata = (os.environ.get("LOCALAPPDATA") if os.name == "nt"
-               else os.path.expanduser("~/.local/share"))
-    return Path(appdata) / "LiveArchiveEncoder" / "config.json"
+    """The settings file the children actually use.
+
+    v7.9.8.6: that is the suite's own directory (CONFIG_ROOT, handed to every child
+    as LAE_CONFIG_DIR), not the developer's %LOCALAPPDATA%. The real path is still
+    what an installed build uses, which is why this used to point there -- and why
+    a test run left a settings file referring to scratch paths behind."""
+    return CONFIG_ROOT / "config.json"
 
 
 def cui(exe: Path, args: list[str], keys: str, timeout: int = 180) -> subprocess.CompletedProcess:

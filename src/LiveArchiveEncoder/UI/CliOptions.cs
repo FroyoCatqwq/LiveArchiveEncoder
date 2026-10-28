@@ -200,6 +200,14 @@ public sealed class CliOptions
     /// <summary>FFmpeg distribution to use: btbn / gyan / avbuild / nonfree.</summary>
     public string FfmpegSource { get; init; } = LiveArchiveEncoder.FFmpeg.FfmpegCatalog.DefaultId;
 
+    /// <summary>
+    /// v7.9.8.6: true when <c>--ffmpeg-source</c> appeared. The property above
+    /// always holds a value, so without this a CLI run cannot tell "the user asked
+    /// for btbn" from "nobody said anything" -- and saving the settings file at the
+    /// end of the run reset the toolchain the shell had been pointed at.
+    /// </summary>
+    public bool FfmpegSourceExplicit { get; init; }
+
     /// <summary>Proxy for FFmpeg downloads, e.g. http://127.0.0.1:10808.</summary>
     public string? FfmpegProxy { get; init; }
 
@@ -256,6 +264,13 @@ public sealed class CliOptions
     /// <summary>What to open when the encode finishes.</summary>
     public PlayMode Play { get; init; } = PlayMode.Off;
 
+    /// <summary>
+    /// v7.9.8.6: true when <c>--play</c> or <c>--player</c> appeared. Same reason
+    /// as <see cref="FfmpegSourceExplicit"/>: Off is both "the default" and a
+    /// perfectly good request, and saving the run used to erase the shell's choice.
+    /// </summary>
+    public bool PlayExplicit { get; init; }
+
     /// <summary>External player executable; empty uses the shell association.</summary>
     public string? PlayerPath { get; init; }
 
@@ -299,6 +314,25 @@ public sealed class CliOptions
 
     /// <summary>Audio bitrate per named-codec pass; 0 = the codec's default.</summary>
     public IReadOnlyList<int> RecompressAudioKbpsList { get; init; } = [];
+
+    /// <summary>
+    /// v7.9.8.6: true when this run replaces the saved recompress chain rather
+    /// than adjusting it. Only the flags that describe the chain count: a lone
+    /// --recompress-quality is a modifier for a chain the shell already has, and
+    /// treating it as "the run owns the chain" would drop the other passes.
+    /// </summary>
+    public bool TouchedRecompress =>
+        Recompress || NoRecompress || RecompressOnly
+        || RecompressArgs.Count > 0 || RecompressContainers.Count > 0
+        || RecompressCodecs.Count > 0;
+
+    /// <summary>
+    /// v7.9.8.6: true when this run replaces the saved subtitle request. Same rule
+    /// as above -- a path or a stream pick replaces the block, a lone
+    /// --subtitle-aspect only changes one field of it.
+    /// </summary>
+    public bool TouchedSubtitles =>
+        SubtitleFiles.Count > 0 || SubtitleStream is not null;
 
     /// <summary>
     /// v7.9.5.1: render an era/site preset with libx264 + AAC in MP4 instead of
@@ -450,6 +484,7 @@ public static class CliParser
         string? language = null;
         string? completion = null;
         string? ffmpegSource = FFmpeg.FfmpegCatalog.DefaultId;
+        bool ffmpegSourceExplicit = false;
         string? ffmpegProxy = null;
         string? ghProxy = null;
         bool nnediUpdate = false;
@@ -465,6 +500,7 @@ public static class CliParser
         string? ffmpegDelete = null;
         bool ffmpegList = false;
         PlayMode play = PlayMode.Off;
+        bool playExplicit = false;
         string? playerPath = null;
         bool recompress = false;
         var recompressArgs = new List<string>();
@@ -792,6 +828,7 @@ public static class CliParser
                     break;
                 case "--ffmpeg-source":
                     if (!TryValue(out ffmpegSource)) return (null, "--ffmpeg-source requires a value");
+                    ffmpegSourceExplicit = true;
                     ffmpegSource = ffmpegSource.Trim().ToLowerInvariant();
                     // "path" is the escape hatch back to the system FFmpeg.
                     if (FFmpeg.FfmpegCatalog.Find(ffmpegSource) is null
@@ -864,6 +901,7 @@ public static class CliParser
                     break;
                 case "--play":
                     if (!TryValue(out string playRaw)) return (null, "--play requires a mode");
+                    playExplicit = true;
                     play = Player.ParseMode(playRaw);
                     if (play == PlayMode.Off && !playRaw.Trim().Equals("off", StringComparison.OrdinalIgnoreCase)
                         && playRaw.Trim().Length > 0)
@@ -871,6 +909,7 @@ public static class CliParser
                     break;
                 case "--player":
                     if (!TryValue(out playerPath)) return (null, "--player requires a path");
+                    playExplicit = true;
                     break;
                 case "--list-filters": listFilters = true; break;
                 case "--quiet": quiet = true; break;
@@ -1084,6 +1123,7 @@ public static class CliParser
             Language = language,
             Completion = completion,
             FfmpegSource = ffmpegSource,
+            FfmpegSourceExplicit = ffmpegSourceExplicit,
             FfmpegProxy = ffmpegProxy,
             GhProxy = ghProxy,
             NnediUpdate = nnediUpdate,
@@ -1099,6 +1139,7 @@ public static class CliParser
             FfmpegDelete = ffmpegDelete,
             FfmpegList = ffmpegList,
             Play = play,
+            PlayExplicit = playExplicit,
             PlayerPath = playerPath,
             // --recompress-args arms the pass on its own: nobody writes out a
             // full argument list and then expects it not to run.
@@ -1282,7 +1323,7 @@ public static class CliParser
         var sb = new System.Text.StringBuilder();
         sb.Append("usage: LiveArchiveEncoder [--help] [options] [input] [output]\n\n");
         sb.Append("Live-style adaptive archival encoder ");
-        sb.Append("(frame/packet impairment is handled by frame_damage.py)\n\n");
+        sb.Append("(this program encodes; picture/packet damage effects are a separate tool)\n\n");
         sb.Append("positional arguments:\n");
         sb.Append("  input                   source file; omit to enter the interactive UI\n");
         sb.Append("  output                  destination file\n\n");

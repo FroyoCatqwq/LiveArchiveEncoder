@@ -1,6 +1,4 @@
-﻿using System.Globalization;
 using System.Text;
-using LiveArchiveEncoder.Configuration;
 
 namespace LiveArchiveEncoder.UI;
 
@@ -14,94 +12,15 @@ namespace LiveArchiveEncoder.UI;
 ///   LiveArchiveEncoder --completion zsh       &gt; "${fpath[1]}/_lae"
 ///   LiveArchiveEncoder --completion fish      &gt; ~/.config/fish/completions/lae.fish
 ///   LiveArchiveEncoder --completion powershell &gt; lae.ps1   (then dot-source it)
+///
+/// v7.9.8.6: the option list now comes from <see cref="OptionCatalog"/> instead of
+/// a second copy maintained here. The copy had drifted to 69 options against the
+/// parser's 112, so most of what the tool learned after v7.9 completed nothing.
 /// </summary>
 public static class Completion
 {
-    /// <summary>Options that take a value; everything else is a bare flag.</summary>
-    private static readonly (string Flag, string[] Values)[] ValueOptions =
-    [
-        ("--start-time", []), ("--start", []), ("--end-time", []), ("--end", []),
-        ("--encoder", ["@ENCODERS"]),
-        ("--audio-encoder", ["libmp3lame", "aac", "ac3", "mp2", "wmav2", "real_144",
-                             "adpcm_ima_amv", "roq_dpcm"]),
-        ("--limit", []), ("--recover", []), ("--window", []), ("--fps", []),
-        ("--fps-levels", ["13,8,5,3", "25,15,10,5"]),
-        ("--qv", []), ("--threads", []), ("--buffer-frames", []),
-        // v7.9.3.1: the stream picks and the x264 knobs were missing from every
-        // shell, so `--video-str<TAB>` completed nothing at all.
-        ("--video-stream", []), ("--audio-stream", []),
-        ("--audio-kbps", []), ("--audio-channels", ["1", "2"]), ("--audio-rate", ["22050", "44100"]),
-        ("--width", []), ("--height", []),
-        // v7.8: container choice and picture fit.
-        ("--container", ["avi", "mp4", "mkv", "mpg", "mpeg"]),
-        ("--fit", [.. Constants.FitModes]),
-        ("--crop-anchor", [.. Constants.CropAnchors]),
-        ("--pad-color", ["black", "white", "gray", "0x808080"]),
-        ("--scale-algo", [.. Constants.ScaleAlgorithmAliases.Keys.OrderBy(x => x, StringComparer.Ordinal)]),
-        ("--scale-flags", [.. Constants.ScaleAlgorithmAliases.Keys.OrderBy(x => x, StringComparer.Ordinal)]),
-        ("--deinterlace", ["off", .. Constants.DeinterlaceFilters]),
-        ("--hwaccel", ["off", "auto", "cuda", "vaapi", "qsv", "d3d11va", "dxva2", "vdpau", "vulkan"]),
-        ("--deint-mode", ["send_frame", "send_field"]),
-        ("--deint-parity", ["auto", "tff", "bff"]),
-        ("--x264-preset", ["ultrafast", "veryfast", "faster", "fast", "medium", "slow", "slower"]),
-        ("--x264-tune", ["film", "animation", "grain", "stillimage", "fastdecode", "zerolatency"]),
-        ("--x264-profile", ["baseline", "main", "high", "high10", "high422", "high444"]),
-        ("--x264-level", ["3.0", "3.1", "4.0", "4.1", "5.0", "5.1"]),
-        ("--audio-mode", ["inline", "separate", "auto"]),
-        ("--lang", ["en", "zh"]),
-        ("--completion", ["bash", "zsh", "fish", "powershell"]),
-        ("--parallel", ["1", "2", "4", "8"]),
-        ("--ffmpeg", ["@FILE"]), ("--ffprobe", ["@FILE"]),
-        // Available, not All: only the ids installable on this platform are
-        // worth completing, and All would list "btbn" twice.
-        ("--ffmpeg-source", ["path", .. FFmpeg.FfmpegCatalog.Available.Select(d => d.Id).Distinct()]),
-        ("--ffmpeg-download", [.. FFmpeg.FfmpegCatalog.Available.Select(d => d.Id).Distinct()]),
-        ("--ffmpeg-archive", ["@FILE"]),
-        ("--ffmpeg-delete", [.. FFmpeg.FfmpegCatalog.Available.Select(d => d.Id).Distinct()]),
-        ("--play", ["off", "ffplay", "external"]),
-        ("--player", ["@FILE"]),
-        ("--proxy", ["http://127.0.0.1:10808", "http://127.0.0.1:7890", "socks5://127.0.0.1:10808"]),
-        // v7.9: subtitles. --subtitle / --subtitle-codec take free text / names
-        // outside a fixed list, so --subtitle completes as a file (paths with
-        // spaces are the common case).
-        ("--subtitle", ["@FILE"]),
-        ("--subtitle-stream", []),
-        ("--subtitle-mode", [.. Constants.SubtitleModes]),
-        // Codecs the container table knows about, unioned: which of them muxes
-        // depends on the output container, which completion cannot know yet.
-        ("--subtitle-codec",
-            [.. Constants.SubtitleCodecsByContainer.Values.SelectMany(v => v).Distinct(StringComparer.Ordinal)]),
-        // v7.6: post-processing. --recompress-args takes free text, so it
-        // completes as a file (paths with spaces are the common case).
-        // (--recompress itself is a bare flag and lives in FlagOptions.)
-        ("--recompress-args", ["@FILE"]),
-        ("--recompress-container", ["mp4", "mkv", "avi", "flv"]),
-        ("--era", [.. PostProcess.EraPresets.All.Select(p => p.Id)]),
-        // v7.9.1: settings-file conversion. --save-config takes a path; the
-        // --emit-args=FILE form completes as a bare flag.
-        ("--save-config", ["@FILE"]),
-    ];
-
-    private const string FileMarker = "@FILE";
-
-    private static bool IsFileValues(string[] values) =>
-        values.Length == 1 && values[0] == FileMarker;
-
-    private static bool HasChoices(string[] values) =>
-        values.Length > 0 && !IsFileValues(values);
-
-    private static readonly string[] FlagOptions =
-    [
-        "-h", "--help", "--no-crop", "--deint-marked-only", "--no-cuda",
-        "--list-filters", "--list-streams", "--quiet", "--no-cui", "--cpu-info",
-        "--ffmpeg-list", "--emit-args", "--recompress", "--no-recompress",
-    ];
-
-    private static string[] Resolve(string[] values, IEnumerable<string> encoders)
-    {
-        if (values.Length == 1 && values[0] == "@ENCODERS") return [.. encoders.OrderBy(x => x, StringComparer.Ordinal)];
-        return values;
-    }
+    private static string[] Resolve(string[] choices, string[] encoders) =>
+        choices.Length == 1 && choices[0] == OptionCatalog.EncodersMarker ? encoders : choices;
 
     public static string Generate(string shell, IEnumerable<string> encoders, string exeName = "LiveArchiveEncoder")
     {
@@ -122,24 +41,32 @@ public static class Completion
         sb.Append("# bash completion for ").Append(exe).Append("  (generated)\n");
         sb.Append("#   LiveArchiveEncoder --completion bash > /etc/bash_completion.d/").Append(exe.ToLowerInvariant()).Append('\n');
         sb.Append('_').Append(exe.ToLowerInvariant()).Append("_opts='");
-        sb.Append(string.Join(' ', FlagOptions.Concat(ValueOptions.Select(o => o.Flag))));
+        sb.Append(string.Join(' ', OptionCatalog.All.Select(o => o.Name)));
         sb.Append("'\n\n");
         sb.Append('_').Append(exe.ToLowerInvariant()).Append("() {\n");
         sb.Append("    local cur prev\n");
         sb.Append("    cur=\"${COMP_WORDS[COMP_CWORD]}\"\n");
         sb.Append("    prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n\n");
         sb.Append("    case \"$prev\" in\n");
-        foreach ((string flag, string[] values) in ValueOptions)
+        foreach (OptionCatalog.Spec option in OptionCatalog.ValueOptions)
         {
-            // No known choices (numbers, timecodes): leave it to the caller's
-            // default completion instead of emitting an empty -W list.
-            if (!HasChoices(values) && !IsFileValues(values)) continue;
+            if (option.OptionKind == OptionCatalog.Kind.File)
+            {
+                sb.Append("        ").Append(option.Name).Append(")\n");
+                sb.Append("            COMPREPLY=( $(compgen -f -- \"$cur\") )\n");
+                sb.Append("            return 0\n            ;;\n");
+                continue;
+            }
 
-            sb.Append("        ").Append(flag).Append(")\n");
-            sb.Append(IsFileValues(values)
-                ? "            COMPREPLY=( $(compgen -f -- \"$cur\") )\n"
-                : "            COMPREPLY=( $(compgen -W \""
-                  + string.Join(' ', Resolve(values, encoders)) + "\" -- \"$cur\") )\n");
+            // No known choices (numbers, timecodes, codec names): leave it to the
+            // caller's default completion instead of emitting an empty -W list.
+            string[] choices = Resolve(option.Choices, encoders);
+            if (choices.Length == 0) continue;
+
+            sb.Append("        ").Append(option.Name).Append(")\n");
+            sb.Append("            COMPREPLY=( $(compgen -W \"")
+              .Append(string.Join(' ', choices))
+              .Append("\" -- \"$cur\") )\n");
             sb.Append("            return 0\n            ;;\n");
         }
         sb.Append("    esac\n\n");
@@ -163,19 +90,25 @@ public static class Completion
         sb.Append("#   LiveArchiveEncoder --completion zsh > \"${fpath[1]}/_").Append(exe.ToLowerInvariant()).Append("\"\n\n");
         sb.Append('_').Append(exe.ToLowerInvariant()).Append("() {\n");
         sb.Append("    local -a opts\n    opts=(\n");
-        foreach (string flag in FlagOptions) sb.Append("        '").Append(flag).Append("'\n");
-        foreach ((string flag, string[] values) in ValueOptions)
+        foreach (OptionCatalog.Spec option in OptionCatalog.All)
         {
-            if (IsFileValues(values))
+            if (option.OptionKind == OptionCatalog.Kind.Flag)
             {
-                sb.Append("        '").Append(flag).Append(":file:_files'\n");
+                sb.Append("        '").Append(option.Name).Append("'\n");
                 continue;
             }
-            string valueList = string.Join(' ', Resolve(values, encoders));
+
+            if (option.OptionKind == OptionCatalog.Kind.File)
+            {
+                sb.Append("        '").Append(option.Name).Append(":file:_files'\n");
+                continue;
+            }
+
+            string valueList = string.Join(' ', Resolve(option.Choices, encoders));
             if (valueList.Length == 0)
-                sb.Append("        '").Append(flag).Append(":value:'\n");
+                sb.Append("        '").Append(option.Name).Append(":value:'\n");
             else
-                sb.Append("        '").Append(flag).Append(":value:(").Append(valueList).Append(")'\n");
+                sb.Append("        '").Append(option.Name).Append(":value:(").Append(valueList).Append(")'\n");
         }
         sb.Append("        '*:file:_files'\n    )\n");
         sb.Append("    _arguments $opts\n}\n");
@@ -190,22 +123,28 @@ public static class Completion
         sb.Append("#   LiveArchiveEncoder --completion fish > ~/.config/fish/completions/")
           .Append(exe.ToLowerInvariant()).Append(".fish\n\n");
         sb.Append("complete -c ").Append(exe).Append(" -f\n\n");
-        foreach (string flag in FlagOptions)
+        // Every option by name, not only the bare switches. bash, zsh and
+        // PowerShell all finish their completer with "any option not matched
+        // above", so an option with no value table is still suggested there --
+        // fish has no such fallback, and until v7.9.8.6 a free-text option such as
+        // --threads or --net-test was simply absent from the generated script.
+        foreach (OptionCatalog.Spec option in OptionCatalog.All)
         {
-            sb.Append("complete -c ").Append(exe).Append(" -f -a '").Append(flag).Append("'\n");
+            sb.Append("complete -c ").Append(exe).Append(" -f -a '").Append(option.Name).Append("'\n");
         }
-        foreach ((string flag, string[] values) in ValueOptions)
+        foreach (OptionCatalog.Spec option in OptionCatalog.ValueOptions)
         {
-            if (IsFileValues(values))
+            if (option.OptionKind == OptionCatalog.Kind.File)
             {
                 sb.Append("complete -c ").Append(exe).Append(" -f -a '(__fish_complete_path)' -n \"__fish_seen_subcommand_from ")
-                  .Append(flag).Append("\"\n");
+                  .Append(option.Name).Append("\"\n");
                 continue;
             }
-            string valueList = string.Join(' ', Resolve(values, encoders));
+
+            string valueList = string.Join(' ', Resolve(option.Choices, encoders));
             if (valueList.Length == 0) continue;
-            sb.Append("complete -c ").Append(exe).Append(" -f -a '").Append(valueList).Append("' -n \"__fish_seen_subcommand_from ")
-              .Append(flag).Append("\"\n");
+            sb.Append("complete -c ").Append(exe).Append(" -f -a '").Append(valueList)
+              .Append("' -n \"__fish_seen_subcommand_from ").Append(option.Name).Append("\"\n");
         }
         return sb.ToString();
     }
@@ -221,19 +160,20 @@ public static class Completion
         sb.Append("    $prev = $null\n    $elements = $commandAst.CommandElements\n");
         sb.Append("    if ($elements.Count -gt 1) { $prev = [string]$elements[-1] }\n\n");
         sb.Append("    $map = @{\n");
-        foreach ((string flag, string[] values) in ValueOptions)
+        foreach (OptionCatalog.Spec option in OptionCatalog.ValueOptions)
         {
             // No fixed choices: let PowerShell fall back to its own file/argument
             // completion rather than offering an empty list.
-            if (!HasChoices(values)) continue;
-            string list = string.Join(",", Resolve(values, encoders).Select(v => $"'{Escape(v)}'"));
-            sb.Append("        '").Append(flag).Append("' = @(").Append(list).Append(")\n");
+            string[] choices = Resolve(option.Choices, encoders);
+            if (choices.Length == 0) continue;
+            string list = string.Join(",", choices.Select(v => $"'{Escape(v)}'"));
+            sb.Append("        '").Append(option.Name).Append("' = @(").Append(list).Append(")\n");
         }
         sb.Append("    }\n\n");
         sb.Append("    if ($prev -and $map.ContainsKey($prev)) {\n");
         sb.Append("        $map[$prev] | Where-Object { $_ -like \"$wordToComplete*\" }\n        return\n    }\n\n");
-        sb.Append("    @(").Append(string.Join(",", FlagOptions.Concat(ValueOptions.Select(o => o.Flag))
-            .Select(f => $"'{Escape(f)}'"))).Append(") | Where-Object { $_ -like \"$wordToComplete*\" }\n}\n");
+        sb.Append("    @(").Append(string.Join(",", OptionCatalog.All.Select(o => $"'{Escape(o.Name)}'")))
+          .Append(") | Where-Object { $_ -like \"$wordToComplete*\" }\n}\n");
         return sb.ToString();
     }
 

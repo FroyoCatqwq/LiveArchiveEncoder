@@ -103,69 +103,32 @@ public static class ParallelEncoder
                     try
                     {
                         string shardPath = Path.Combine(stageDir, $"s{i:D3}.mkv");
-                        var shardOptions = new RealtimeOptions
+                        // v7.9.8.6: `with` copies every field, so a knob added to
+                        // RealtimeOptions later reaches the shards without anyone
+                        // remembering to list it here -- the hand-written copy this
+                        // replaces had already lost the per-rung bitrates once and
+                        // the NNEDI3 weights path once, the second time making
+                        // `--deinterlace nnedi --parallel 4` fail outright.
+                        var shardOptions = o with
                         {
-                            FFmpeg = o.FFmpeg,
-                            FFprobe = o.FFprobe,
-                            SourcePath = o.SourcePath,
                             DestinationPath = shardPath,
                             Encoder = staging,
-                            Fps = o.Fps,
-                            FpsLevels = o.FpsLevels,
-                            // v7.9.6: the shard options used to drop the pinned
-                            // per-rung thresholds, so --parallel silently fell
-                            // back to the derived ones.
-                            FpsLevelKbps = o.FpsLevelKbps,
-                            Quality = o.Quality,
-                            Threads = o.Threads,
-                            LimitKbps = o.LimitKbps,
-                            RecoverKbps = o.RecoverKbps,
-                            WindowSeconds = o.WindowSeconds,
-                            BufferFrames = o.BufferFrames,
-                            AudioEncoder = o.AudioEncoder,
-                            AudioKbps = o.AudioKbps,
-                            AudioChannels = o.AudioChannels,
-                            AudioRate = o.AudioRate,
-                            // Every shard re-enters RunSingle, which probes
-                            // again: the picks have to survive the round trip.
-                            VideoStream = o.VideoStream,
-                            AudioStream = o.AudioStream,
-                            Subtitles = o.Subtitles,
-                            AvailableSubtitleEncoders = o.AvailableSubtitleEncoders,
-                            Hwaccel = o.Hwaccel,
-                            Width = o.Width,
-                            Height = o.Height,
-                            FitMode = o.FitMode,
-                            CropAnchor = o.CropAnchor,
-                            PadColor = o.PadColor,
-                            ScaleAlgo = o.ScaleAlgo,
-                            PixFmt = o.PixFmt,
-                            ColorRange = o.ColorRange,
-                            ColorSpace = o.ColorSpace,
-                            ColorPrimaries = o.ColorPrimaries,
-                            ColorTransfer = o.ColorTransfer,
-                            Dither = o.Dither,
-                            Deinterlace = o.Deinterlace,
-                            DeintMode = o.DeintMode,
-                            DeintParity = o.DeintParity,
-                            DeintMarkedOnly = o.DeintMarkedOnly,
-                            X264Preset = o.X264Preset,
-                            X264Tune = o.X264Tune,
-                            X264Profile = o.X264Profile,
-                            X264Level = o.X264Level,
                             StartSeconds = ranges[i].Start,
                             EndSeconds = ranges[i].End,
-                            AvailableFilters = o.AvailableFilters,
-                            AvailableScaleAlgorithms = o.AvailableScaleAlgorithms,
                             // Shards are quiet; the caller prints one summary.
                             Verbose = false,
-                            AudioMode = o.AudioMode,
                             // Never recurse into sharding a shard.
                             Parallel = 1,
                             Progress = (done, target) => progress.Report(i, done, target),
                         };
                         results[i] = RealtimeEncoder.RunSingle(shardOptions, cancellationToken);
                         progress.Finish(i, results[i].Slots);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        // Not a shard failure: reporting it as one turned a Ctrl+C
+                        // into "shard encoding failed: ... The operation was canceled."
+                        throw;
                     }
                     catch (Exception ex)
                     {
@@ -187,7 +150,7 @@ public static class ParallelEncoder
                 o.FFmpeg, "-hide_banner", "-loglevel", "error",
                 "-f", "concat", "-safe", "0", "-i", listPath,
                 "-c", "copy", "-y", joinedPath,
-            ], timeoutSeconds: Math.Max(120, (int)span * 2));
+            ], timeoutSeconds: Math.Max(120, (int)span * 2), cancellationToken: cancellationToken);
 
             if (join.ExitCode != 0)
             {
@@ -224,7 +187,8 @@ public static class ParallelEncoder
                     remuxArgs.AddRange(["-fps_mode", "passthrough", "-r", ArgsBuilder.FpsArg(o.Fps)]);
                 remuxArgs.AddRange(["-y", part.FullName]);
 
-                CaptureResult remux = ProcessRunner.Run(remuxArgs, timeoutSeconds: Math.Max(120, (int)span * 2));
+                CaptureResult remux = ProcessRunner.Run(remuxArgs,
+                    timeoutSeconds: Math.Max(120, (int)span * 2), cancellationToken: cancellationToken);
 
                 if (remux.ExitCode != 0)
                 {

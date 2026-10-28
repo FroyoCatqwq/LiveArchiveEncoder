@@ -184,7 +184,7 @@ public static partial class Cui
                     ChooseEncoder(c, encoders, audioAvailable, ffmpeg);
                     break;
                 case "4":
-                    EditSettings(c, availableFilters, availableScaleAlgorithms, ffmpeg);
+                    EditSettings(c, availableFilters, availableScaleAlgorithms, audioAvailable, ffmpeg);
                     break;
                 case "5":
                     try
@@ -1419,7 +1419,7 @@ public static partial class Cui
 
     private static void EditSettings(
         Config c, HashSet<string> availableFilters, HashSet<string> availableScaleAlgorithms,
-        string ffmpeg)
+        HashSet<string> audioAvailable, string ffmpeg)
     {
         var deintOptions = new List<string> { "off" };
         deintOptions.AddRange(Constants.DeinterlaceFilters.Where(f => availableFilters.Contains(f)));
@@ -1707,7 +1707,7 @@ public static partial class Cui
                         EditRungBitrates(c);
                         break;
                     case "28":
-                        EditContainer(c);
+                        EditContainer(c, audioAvailable);
                         break;
                     case "29":
                         string anchorRaw = ReadRaw(L.T("param.prompt.cropanchor",
@@ -1773,7 +1773,7 @@ public static partial class Cui
     /// combinations that actually mux are offered (mpeg1/2video gain AVI,
     /// libx264 gains AVI and Matroska).
     /// </summary>
-    private static void EditContainer(Config c)
+    private static void EditContainer(Config c, HashSet<string> audioAvailable)
     {
         if (c.Encoder is null)
         {
@@ -1824,8 +1824,13 @@ public static partial class Cui
         if (c.AudioEncoder is { Length: > 0 } current
             && !AudioCatalog.SupportsContainer(current, resolved.FormatName))
         {
-            Console.WriteLine(L.T("audio.replaced", current, resolved.FormatName));
-            c.AudioEncoder = null;
+            // v7.9.8.6: this said "picking another" and then only cleared the
+            // field, so the run produced a video with no audio track at all. The
+            // replacement is now actually chosen, from what this build can mux.
+            c.AudioEncoder = EncoderMath.ChooseAudioEncoder(resolved.FormatName, audioAvailable);
+            Console.WriteLine(c.AudioEncoder is null
+                ? L.T("audio.none", resolved.FormatName)
+                : L.T("audio.replaced", current, resolved.FormatName, c.AudioEncoder));
         }
         (c.AudioRate, c.AudioChannels, c.AudioKbps) = AudioCatalog.Effective(
             c.AudioEncoder, c.AudioRate, c.AudioChannels, c.AudioKbps, resolved.FormatName);
@@ -1977,16 +1982,34 @@ public static partial class Cui
         return Ask().Trim();
     }
 
+    /// <summary>
+    /// Read a number, or keep <paramref name="fallback"/>.
+    ///
+    /// This used to be a bare <c>Parse</c>, and the menu loop has no catch above
+    /// it: typing "abc", "3,5" or a number too large for an int took the whole
+    /// process down with a stack trace and threw away everything the user had
+    /// typed into the wizard so far. A wrong keystroke in a menu is not a crash.
+    /// </summary>
     private static double ReadDouble(string prompt, double fallback)
     {
         string raw = ReadRaw(prompt);
-        return raw.Length > 0 ? double.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture) : fallback;
+        if (raw.Length == 0) return fallback;
+        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
+            return value;
+
+        Console.WriteLine(L.T("param.badvalue", raw));
+        return fallback;
     }
 
     private static int ReadInt(string prompt, int fallback)
     {
         string raw = ReadRaw(prompt);
-        return raw.Length > 0 ? int.Parse(raw, CultureInfo.InvariantCulture) : fallback;
+        if (raw.Length == 0) return fallback;
+        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
+            return value;
+
+        Console.WriteLine(L.T("param.badvalue", raw));
+        return fallback;
     }
 
     private static void StartEncoding(
@@ -2177,6 +2200,7 @@ public static partial class Cui
             // Keep the settings file in step even if the encode is interrupted.
             Persist(c);
 
+            Console.WriteLine(L.T("note.realtime"));
             Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
             Console.WriteLine();
             Report.PrintResult(c.OutputPath.FullName, result);
@@ -2321,6 +2345,15 @@ public static partial class Cui
                 c.H264Impl = NextH264(c.H264Impl);
                 Console.WriteLine(L.T("era.h264.set", c.H264Impl ?? L.T("era.h264.auto")));
                 return;
+        }
+
+        // The list above is numbered, so the number has to work. It indexed
+        // nothing before: typing what the screen showed produced "unknown era
+        // preset '3'", while the year list one level down did accept numbers.
+        if (int.TryParse(pick, NumberStyles.Integer, CultureInfo.InvariantCulture, out int groupIndex)
+            && groupIndex >= 1 && groupIndex <= groups.Count)
+        {
+            pick = groups[groupIndex - 1].Site;
         }
 
         // A site name lists its years and asks which one; a full id applies as is.
@@ -2502,6 +2535,10 @@ public static partial class Cui
 
         Console.WriteLine($"\n== {(creating ? L.T("era.custom.new") : existing!.Id)} ==");
         string id = ReadRaw(L.T("era.custom.id", existing?.Id ?? "my_2008")).Trim();
+        // The prompt shows the id in [brackets] and every other prompt in this
+        // wizard treats blank as "keep what is shown". Blank used to fail the id
+        // check and abandon the guide, edits included.
+        if (id.Length == 0) id = existing?.Id ?? "my_2008";
         string normalised = Configuration.EraConfigMap.NormaliseId(id);
         if (normalised.Length == 0)
         {

@@ -470,10 +470,10 @@ public static class Cli
                 // --lang wins; without it the stored preference is preserved so a
                 // CLI run never silently resets the language chosen in the UI.
                 Language = args.Language ?? stored.Language,
-                FfmpegSource = args.FfmpegSource,
                 FfmpegProxy = args.FfmpegProxy,
-                Play = args.Play,
-                PlayerPath = args.PlayerPath,
+                // Play / PlayerPath / FfmpegSource are decided by
+                // MergeStoredPreferences below, which is the only place that knows
+                // whether the run named them or whether the file did.
                 Recompress = recompress,
                 EraPreset = era?.Id ?? (args.Era is null ? stored.EraPreset : null),
                 EraNative = eraNative,
@@ -482,6 +482,14 @@ public static class Cli
                 // saving the settings file keeps them.
                 CustomEras = [.. EraPresets.Custom],
             };
+            // v7.9.8.6: a CLI run owns only what it was told on the command line.
+            // The snapshot is written back at the end of the run, so building it
+            // from scratch here meant one encode silently reset the shell's
+            // recompress chain, subtitle defaults, GitHub front, NNEDI3 weights
+            // path, auto-update switch, toolchain source and player choice -- the
+            // last two because their command-line defaults are real values and so
+            // look like a decision.
+            MergeStoredPreferences(config, stored, args);
             Validation.ValidateCommonConfig(config);
             if (config.EndTimeSeconds is not null && config.EndTimeSeconds <= config.StartTimeSeconds)
                 throw new ArgumentException("end time must be later than start time");
@@ -570,7 +578,14 @@ public static class Cli
         // Remember the run so the next interactive session starts from it. A CLI
         // invocation must never fail because the settings file could not be
         // written, so the result is ignored.
-        ConfigStore.Save(ConfigStore.Capture(config));
+        UserConfig snapshot = ConfigStore.Capture(config);
+        // v7.9.8.6: the stored recompress chain is one thing a run must not adopt --
+        // "no second pass unless --recompress says so" is older and stronger than
+        // "remember the last run". Merging it into the live Config made every plain
+        // encode re-encode its own output, which the e2e suite caught at once; on
+        // disk, though, the chain the user configured has to survive.
+        if (!args.TouchedRecompress) snapshot.Recompress = stored.Recompress;
+        ConfigStore.Save(snapshot);
 
         // v7.9.8.3: nnedi needs a weights file, and "which file" is a question
         // only this layer can answer (an explicit flag, then the settings file,
@@ -652,10 +667,15 @@ public static class Cli
             EndSeconds = config.EndTimeSeconds,
             AvailableFilters = availableFilters,
             AvailableScaleAlgorithms = availableScaleAlgorithms,
-                Verbose = !args.Quiet,
-                AudioMode = args.AudioMode,
-                Parallel = parallel,
-            };
+            Verbose = !args.Quiet,
+            AudioMode = args.AudioMode,
+            Parallel = parallel,
+        };
+
+        // v7.9.8.6: realtime pacing is the most misread thing about this tool --
+        // nothing in the progress line says "this runs at the source's speed", so
+        // a long programme reads as a hung process. Said once, before it starts.
+        if (!args.Quiet) Console.WriteLine(L.T("note.realtime"));
 
         Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
         if (!args.Quiet) Report.PrintResult(dst.FullName, result);
@@ -861,6 +881,64 @@ public static class Cli
     /// today's output. The interactive shell keeps its own state; a CLI run
     /// writes exactly what it was given.
     /// </summary>
+    /// <summary>
+    /// Fold the user's saved preferences into a <see cref="Config"/> built for this
+    /// run. Each field is guarded by whatever proves the run spoke about it, so
+    /// "the flag was not given" keeps the stored value rather than overwriting it
+    /// with a default that only looks like a decision.
+    /// </summary>
+    internal static void MergeStoredPreferences(Config c, UserConfig stored, CliOptions args)
+    {
+        // null = the flag was not used. "" is --no-gh-proxy, a real instruction.
+        c.GhProxy = args.GhProxy ?? stored.GhProxy;
+        c.NnediWeights = args.NnediWeights ?? stored.NnediWeights;
+        c.FfmpegProxy = args.FfmpegProxy ?? stored.FfmpegProxy;
+        c.AutoUpdateCheck = stored.AutoUpdateCheck;
+        c.EraAspect = args.EraAspect ?? stored.EraAspect;
+
+        c.FfmpegSource = args.FfmpegSourceExplicit ? args.FfmpegSource : stored.FfmpegSource;
+
+        if (args.PlayExplicit)
+        {
+            c.Play = args.Play;
+            c.PlayerPath = args.PlayerPath;
+        }
+        else
+        {
+            c.Play = Player.ParseMode(stored.PlayMode);
+            c.PlayerPath = stored.PlayerPath;
+        }
+
+        if (args.TouchedSubtitles)
+        {
+            c.Subtitles = SubtitlesForRun(stored.Subtitles, args);
+        }
+        else
+        {
+            // The run named no file and no stream, so the stored request stands --
+            // except for the shape, which a bare --subtitle-aspect does change.
+            // (Aliasing stored here is fine: it is a snapshot read once and cloned
+            // by ConfigStore.Capture on the way out.)
+            c.Subtitles = stored.Subtitles;
+            if (args.SubtitleAspect is { Length: > 0 } shape) c.Subtitles.BoxAspect = shape;
+        }
+    }
+
+    /// <summary>
+    /// The subtitle block this run asked for, laid over the stored one so a flag
+    /// that names one field does not discard the rest.
+    /// </summary>
+    private static SubtitleConfig SubtitlesForRun(SubtitleConfig saved, CliOptions args) => new()
+    {
+        Mode = args.SubtitleMode,
+        Files = [.. args.SubtitleFiles],
+        Stream = args.SubtitleStream,
+        Codec = args.SubtitleCodec ?? saved.Codec,
+        FontDir = args.SubtitleFontDir ?? saved.FontDir,
+        FallbackFont = args.SubtitleFont ?? saved.FallbackFont,
+        BoxAspect = args.SubtitleAspect ?? saved.BoxAspect,
+    };
+
     private static (RecompressSettings Settings, string? Error) ResolveRecompress(
         CliOptions args, PostProcess.EraPreset? era, bool eraNative, (int W, int H)? eraSize = null,
         string? h264Impl = null)

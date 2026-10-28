@@ -29,7 +29,8 @@ public static class L
             + "(AlmaLinux 8 / RHEL 8). The AOT archive is built against the "
             + "release host's glibc -- take the JIT archive on anything older.",
         ["app.impairments"] = "Impairments",
-        ["app.impairments.value"] = "handled separately by frame_damage.py",
+        ["app.impairments.value"] = "not handled here: this tool encodes, it does not damage. "
+            + "Glitch/block artefacts are a separate project, not a hidden switch",
 
         ["banner.executable"] = "Executable",
         ["banner.btbn"] = "BtbN default",
@@ -155,6 +156,9 @@ public static class L
         ["sub.fonts.heading"] = "Fonts this subtitle file asks for:",
         ["sub.fonts.import"] = "Import a font file or directory",
         ["sub.fonts.required"] = "  {0}  ->  {1}",
+        // v7.9.8.6: the "not found" branch printed the key name itself -- this line
+        // never existed, in either table.
+        ["sub.fonts.missing"] = "  {0}  ->  (not found; the text will be substituted)",
         ["sub.fonts.nofile"] = "Pick a subtitle file first (item 2). SRT/VTT name no font at all, "
             + "so only the fallback applies to them.",
         ["sub.fonts.importprompt"] = "Font file or directory to import into {0} (blank = skip): ",
@@ -238,7 +242,7 @@ public static class L
         ["audio.rateadjusted"] = "Sample rate {0} is not supported; using {1}.",
         ["audio.channelsadjusted"] = "{0} channels is not supported; using {1}.",
         ["audio.kbpsadjusted"] = "{0} kbps is outside what this encoder takes at this rate; using {1} kbps.",
-        ["audio.replaced"] = "'{0}' does not fit the new container '{1}'; picking another.",
+        ["audio.replaced"] = "'{0}' does not fit the new container '{1}'; using '{2}' instead.",
         ["encoder.rescanok"] = "Rescan complete: {0} legacy video encoders detected.",
 
         ["output.prompt"] = "Output file path (blank=auto): ",
@@ -365,6 +369,12 @@ public static class L
         ["param.prompt.end"] = "end time [{0}] (HH:MM:SS[.mmm], or 'end' for source end): ",
 
         ["start.confirm"] = "\nStart encoding? [Y/n]: ",
+        // v7.9.8.6: the one thing every first-time user gets wrong. Nothing else
+        // on screen says the run is paced by the source, so a long programme reads
+        // as a hung process; and the .part suffix looks like a failed output.
+        ["note.realtime"] = "NOTE: realtime-paced -- the encode runs at the source's own speed, so a "
+            + "10-minute range takes about 10 minutes of wall clock (--parallel N shortens it, at "
+            + "the cost of shards). The output keeps a '.part' in its name until it is verified.",
 
         ["note.fpsunsupported"] = "NOTE: {0} does not support {1} fps; using {2} fps.",
         ["note.specialsizes"] = "NOTE: {0} requires a special frame size; using {1}x{2}.",
@@ -770,7 +780,7 @@ public static class L
         ["env.os.glibc"] = "glibc {0}；文档最低要求是 {1}（AlmaLinux 8 / RHEL 8）。"
             + "AOT 产物是按发布机的 glibc 链接的，更老的系统请用 JIT 产物。",
         ["app.impairments"] = "损坏处理",
-        ["app.impairments.value"] = "由 frame_damage.py 单独负责",
+        ["app.impairments.value"] = "本工具不处理：这里只做编码。花屏、色块这类损坏效果属于另一个独立项目，不是藏起来的开关",
 
         ["banner.executable"] = "可执行文件",
         ["banner.btbn"] = "BtbN 默认",
@@ -885,6 +895,7 @@ public static class L
         ["sub.fonts.heading"] = "这个字幕文件要求的字体：",
         ["sub.fonts.import"] = "导入字体文件或目录",
         ["sub.fonts.required"] = "  {0}  ->  {1}",
+        ["sub.fonts.missing"] = "  {0}  ->  （未找到，文字会被替换）",
         ["sub.fonts.nofile"] = "请先在第 2 项选一个字幕文件。SRT/VTT 本身不指定字体，只有替代字体对它们生效。",
         ["sub.fonts.importprompt"] = "要导入 {0} 的字体文件或目录（留空跳过）：",
         ["sub.fonts.imported"] = "已拷入 {0} 个文件到 {1}（{2} 个已存在）。",
@@ -967,7 +978,7 @@ public static class L
         ["audio.rateadjusted"] = "采样率 {0} 不受支持，已改用 {1}。",
         ["audio.channelsadjusted"] = "{0} 声道不受支持，已改用 {1}。",
         ["audio.kbpsadjusted"] = "{0} kbps 超出该编码器在当前采样率下的范围，已改用 {1} kbps。",
-        ["audio.replaced"] = "“{0}”不适用于新容器“{1}”，已重新选择。",
+        ["audio.replaced"] = "“{0}”不适用于新容器“{1}”，已改用“{2}”。",
         ["encoder.rescanok"] = "重新扫描完成：检测到 {0} 个复古视频编码器。",
 
         ["output.prompt"] = "输出文件路径（留空=自动）: ",
@@ -1093,6 +1104,8 @@ public static class L
         ["param.prompt.end"] = "终点时间 [{0}]（HH:MM:SS[.mmm]，或 end 表示到片尾）: ",
 
         ["start.confirm"] = "\n开始编码？[Y/n]: ",
+        ["note.realtime"] = "注意：实时节奏——编码按素材本身的时长跑，10 分钟的片段就要等约 10 分钟"
+            + "（--parallel N 能缩短，代价是分片）。输出在通过校验前，文件名里一直带 '.part'。",
 
         ["note.fpsunsupported"] = "注意：{0} 不支持 {1} fps，改用 {2} fps。",
         ["note.specialsizes"] = "注意：{0} 需要特殊的帧尺寸，改用 {1}x{2}。",
