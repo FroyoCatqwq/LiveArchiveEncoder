@@ -125,4 +125,27 @@ public sealed class DomainTests
         await Assert.That(defaults.Fps).IsEqualTo(Constants.DefaultFps);
         await Assert.That(defaults.FpsLevels.Count).IsEqualTo(Constants.DefaultFpsLevels.Length);
     }
+
+    /// <summary>
+    /// The second-pass catalogue: which codecs exist, what container each can be
+    /// written into, and which pairings the muxer refuses. A preset is only as
+    /// good as this table.
+    /// </summary>
+    [Test]
+    public async Task TheRecompressCatalogueRejectsImpossiblePairings()
+    {
+        await Assert.That(RecompressCodecs.FindVideo("libx264")).IsNotNull();
+        await Assert.That(RecompressCodecs.FindVideo("nope")).IsNull();
+        await Assert.That(RecompressCodecs.IsCopyAudio("copy")).IsTrue();
+        await Assert.That(RecompressCodecs.IsCopyAudio("aac")).IsFalse();
+
+        // H.264 + AAC is the sane mp4 pairing, so a container is offered.
+        string? container = RecompressCodecs.DefaultContainer("libx264", "aac");
+        await Assert.That(container).IsNotNull();
+        await Assert.That(RecompressCodecs.ValidateContainer("libx264", "aac", container!)).IsNull();
+
+        // A container that cannot hold the pair must be reported, not silently
+        // accepted and then fail inside FFmpeg minutes later.
+        await Assert.That(RecompressCodecs.ValidateContainer("libx264", "aac", "not-a-container")).IsNotNull();
+    }
 }
