@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests for Lae.Media. Unlike Lae.Tests.Core these are allowed to touch the
+    disk; that is the point: the settings store's whole job is file behaviour,
+    and faking a filesystem here would test the fake.
+
+    Every test works inside its own temporary folder and never touches the
+    developer's real settings. v7's e2e suite learned this the expensive way: it
+    had been writing %LOCALAPPDATA%, so one test's leftovers silently became the
+    next test's starting point.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>Lae.Tests.Media</RootNamespace>
+    <AssemblyName>Lae.Tests.Media</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
+    <PackageReference Include="TUnit" Version="1.75.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lae.Media\Lae.Media.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="TUnit.Core" />
+    <Using Include="TUnit.Assertions" />
+  </ItemGroup>
+
+</Project>

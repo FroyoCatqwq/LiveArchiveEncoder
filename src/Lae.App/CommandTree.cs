@@ -27,7 +27,7 @@ namespace Lae.App;
 public static class CommandTree
 {
     /// <summary>Builds the root command with every implemented subcommand attached.</summary>
-    public static RootCommand Build()
+    public static RootCommand Build(AppHost host)
     {
         var root = new RootCommand(
             "LiveArchiveEncoder — re-encode footage at the pace a 1998 archive box would have.");
@@ -59,6 +59,8 @@ public static class CommandTree
 
         root.Subcommands.Add(VersionCommand());
         root.Subcommands.Add(BuildRepl(root));
+        root.Subcommands.Add(Commands.ConfigCommand.Build(host.Settings));
+        root.Subcommands.Add(Commands.SetupCommand.Build(host.Settings));
 
         return root;
     }

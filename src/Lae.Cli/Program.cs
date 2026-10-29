@@ -5,7 +5,7 @@ using Lae.App;
 // this file stays small enough to read in one screen — v7's counterpart was 542
 // lines of linear branches with 48 bare returns.
 
-ParseResult parsed = CommandTree.Build().Parse(args);
+ParseResult parsed = CommandTree.Build(AppHost.CreateDefault()).Parse(args);
 
 // System.CommandLine answers a parse error with 1; this program's contract says
 // a usage error is 2, so the mapping is explicit rather than inherited.
