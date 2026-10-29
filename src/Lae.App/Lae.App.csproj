@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Lae.App — the composition root and the command surface.
+
+    Owns: the System.CommandLine tree (single source of truth for both shell
+    completion and the REPL), exit codes, settings load/save, and the hand-built
+    composition root that wires Core/Media/Encoding/Plugins together.
+
+    This is the only assembly allowed to reference all four below it, and the
+    only one that touches the presentation libraries.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>Lae.App</RootNamespace>
+    <AssemblyName>Lae.App</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lae.Core\Lae.Core.csproj" />
+    <ProjectReference Include="..\Lae.Media\Lae.Media.csproj" />
+    <ProjectReference Include="..\Lae.Encoding\Lae.Encoding.csproj" />
+    <ProjectReference Include="..\Lae.Plugins\Lae.Plugins.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- System.CommandLine supplies parsing, help generation and the shell
+         completion scripts. Spectre.Console supplies rendering only. These two
+         are deliberately not merged: Spectre.Console.Cli has no tab completion,
+         and System.CommandLine has no table/progress rendering. -->
+    <PackageReference Include="System.CommandLine" Version="2.0.14" />
+    <PackageReference Include="Spectre.Console" Version="0.57.2" />
+    <!-- PrettyPrompt drives the `lae repl` prompt: syntax highlighting and an
+         inline completion menu backed by the same command tree. -->
+    <PackageReference Include="PrettyPrompt" Version="6.0.5" />
+  </ItemGroup>
+
+</Project>

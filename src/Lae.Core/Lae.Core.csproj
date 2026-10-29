@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Lae.Core — the domain. Everything here is pure computation and data.
+
+    HARD RULE (enforced by tests/Lae.Tests.Architecture): no Console, no
+    File/FileStream, no Process, no HttpClient. If a type needs any of those,
+    it belongs in Lae.Media (I/O plumbing) or Lae.App (host adapters), not here.
+    The payoff is that every rule in this assembly can be tested in
+    milliseconds with no fixture and no fake.
+
+    TargetFramework is written out rather than taken from $(LaeTfm): v8 targets
+    net11.0 only, while the v7 tree still in src/LiveArchiveEncoder keeps
+    building for net10.0 during the migration.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>Lae.Core</RootNamespace>
+    <AssemblyName>Lae.Core</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

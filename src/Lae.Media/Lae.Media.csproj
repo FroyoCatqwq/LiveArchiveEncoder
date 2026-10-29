@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Lae.Media — everything that talks to the outside world on the media side:
+    FFmpeg discovery, capability probing, process launching, pipe reading,
+    remote sources (HTTP/SMB), toolchain download and NNEDI3 weights.
+
+    Depends on Lae.Core only. Knows nothing about encoding policy, commands or
+    the console.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>Lae.Media</RootNamespace>
+    <AssemblyName>Lae.Media</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lae.Core\Lae.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Lae.Cli — the executable. Program.cs is deliberately small: parse, dispatch,
+    map the one exception type to an exit code. Everything else lives in Lae.App.
+
+    AssemblyName stays LiveArchiveEncoder so the shipped binary, the zip layout
+    and the self-update asset names are unchanged from v7.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Lae.Cli</RootNamespace>
+    <AssemblyName>LiveArchiveEncoder</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <PublishSingleFile>false</PublishSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lae.App\Lae.App.csproj" />
+  </ItemGroup>
+
+</Project>

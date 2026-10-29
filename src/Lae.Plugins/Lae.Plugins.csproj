@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Lae.Plugins — third-party extension protocol. Discovery, handshake, invoke,
+    output verification, and the declarative chain the host executes.
+
+    Depends on Lae.Core only: the protocol types live in Core (they are part of
+    the public contract), while spawning and stream handling live here.
+
+    Plugins are separate processes in any language; nothing is loaded in-proc,
+    so a crashing plugin costs one exit code, not the whole encode.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>Lae.Plugins</RootNamespace>
+    <AssemblyName>Lae.Plugins</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lae.Core\Lae.Core.csproj" />
+  </ItemGroup>
+
+</Project>

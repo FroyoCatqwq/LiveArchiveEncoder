@@ -1,0 +1,26 @@
+<Solution>
+  <!--
+    The v8 solution. v7's LiveArchiveEncoder.V7.slnx is deliberately still here:
+    during the migration the old tree stays buildable so the domain code being
+    moved can be read side by side. It is deleted at v8.0.0.
+
+    Only projects are listed. v7's slnx enumerated every .cs file, which meant
+    editing the solution to add a file; that is a chore with no payoff.
+  -->
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="global.json" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Lae.Core/Lae.Core.csproj" />
+    <Project Path="src/Lae.Media/Lae.Media.csproj" />
+    <Project Path="src/Lae.Encoding/Lae.Encoding.csproj" />
+    <Project Path="src/Lae.Plugins/Lae.Plugins.csproj" />
+    <Project Path="src/Lae.App/Lae.App.csproj" />
+    <Project Path="src/Lae.Cli/Lae.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lae.Tests.Core/Lae.Tests.Core.csproj" />
+    <Project Path="tests/Lae.Tests.Architecture/Lae.Tests.Architecture.csproj" />
+  </Folder>
+</Solution>

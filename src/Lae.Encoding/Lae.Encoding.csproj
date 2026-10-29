@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Lae.Encoding — the pipeline. Plan (pure) / Launch / Pump / Drain / Verify.
+
+    Depends on Lae.Core + Lae.Media. Does not print anything: progress is
+    reported through the callback the caller supplies, which is what makes the
+    rate-control logic testable with a fake clock.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>Lae.Encoding</RootNamespace>
+    <AssemblyName>Lae.Encoding</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lae.Core\Lae.Core.csproj" />
+    <ProjectReference Include="..\Lae.Media\Lae.Media.csproj" />
+  </ItemGroup>
+
+</Project>
