@@ -17,4 +17,25 @@ if (parsed.Errors.Count > 0)
     return ExitCodes.Usage;
 }
 
-return await parsed.InvokeAsync();
+try
+{
+    return await parsed.InvokeAsync();
+}
+catch (OperationCanceledException)
+{
+    // Ctrl+C is not a failure, and it is not a stack trace either.
+    Console.Error.WriteLine("Interrupted.");
+    return ExitCodes.Interrupted;
+}
+catch (Exception exc)
+{
+    // The backstop. Every command is supposed to report its own problems as a
+    // sentence with an exit code -- EncodePlan.Create is written to return a
+    // verdict rather than throw, for exactly this reason -- but a program that
+    // meets an unexpected exception should still say one line and exit, not
+    // pour a stack trace over the terminal and leave the user to guess whether
+    // their file is half-written. This is the same lesson v7 learned from a
+    // menu that died on a mistyped number.
+    Console.Error.WriteLine($"ERROR: {exc.Message}");
+    return ExitCodes.Failed;
+}

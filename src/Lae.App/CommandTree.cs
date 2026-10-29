@@ -61,6 +61,7 @@ public static class CommandTree
         root.Subcommands.Add(BuildRepl(root));
         root.Subcommands.Add(Commands.ConfigCommand.Build(host.Settings));
         root.Subcommands.Add(Commands.SetupCommand.Build(host.Settings));
+        root.Subcommands.Add(Commands.EncodeCommand.Build(host.Settings));
 
         return root;
     }

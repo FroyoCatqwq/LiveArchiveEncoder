@@ -1,0 +1,289 @@
+using Lae.Core;
+using Lae.Core.Settings;
+
+namespace Lae.Tests.Core;
+
+/// <summary>
+/// The planning step: request + source + encoder, in; two FFmpeg command lines, out.
+///
+/// <para>This is the part of v7 that could only be tested by running a real
+/// encode, because deciding and spawning lived in the same 465-line method. Here
+/// the decisions are a pure function, so the argument layout can be pinned
+/// exactly -- which is what lets the v7-vs-v8 comparison matrix compare commands
+/// before it compares pixels.</para>
+/// </summary>
+public sealed class EncodePlanTests
+{
+    private static EncoderInfo Encoder(string name = "mpeg4", string ext = "avi", string format = "avi") => new()
+    {
+        Name = name,
+        Extension = ext,
+        FormatName = format,
+        Codec = name,
+        Family = "mpeg4",
+    };
+
+    private static SourceInfo Source(bool audio = true) => new()
+    {
+        DurationSeconds = 300,
+        Width = 640,
+        Height = 480,
+        PixelFormat = "yuv420p",
+        HasAudio = audio,
+        AudioRate = 48000,
+        AudioChannels = 2,
+        Streams = audio
+            ? [
+                new SourceStream(0, "video", "h264", null, null, new StreamInfo { Width = 640, Height = 480 }),
+                new SourceStream(1, "audio", "aac", "jpn", null),
+            ]
+            : [new SourceStream(0, "video", "h264", null, null, new StreamInfo { Width = 640, Height = 480 })],
+    };
+
+    private static EncodeRequest Request(EncodeDefaults? encode = null) => new()
+    {
+        SourcePath = "/media/in.mkv",
+        DestinationPath = "/media/out.avi",
+        Encode = encode ?? new EncodeDefaults { Encoder = "mpeg4", Quality = 8 },
+    };
+
+    /// <summary>
+    /// Finds a contiguous run of arguments. Pinning a whole command line would
+    /// break on every unrelated addition; pinning the order of the parts that
+    /// matter is what catches a real regression.
+    /// </summary>
+    private static bool HasRun(IReadOnlyList<string> args, params string[] expected)
+    {
+        for (int start = 0; start + expected.Length <= args.Count; start++)
+        {
+            bool match = true;
+            for (int i = 0; i < expected.Length; i++)
+            {
+                if (args[start + i] != expected[i]) { match = false; break; }
+            }
+            if (match) return true;
+        }
+        return false;
+    }
+
+    [Test]
+    public async Task APlainRunProducesTwoCommandsThatAgree()
+    {
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(plan.TransportPixelFormat).IsEqualTo("yuv420p");
+        // The archive default frame size, not a modern one.
+        await Assert.That(plan.Width).IsEqualTo(Constants.DefaultWidth);
+        await Assert.That(plan.Height).IsEqualTo(Constants.DefaultHeight);
+        await Assert.That(plan.Container).IsEqualTo("avi");
+        await Assert.That(plan.Muxer).IsEqualTo("avi");
+        await Assert.That(plan.SpanSeconds).IsEqualTo(300.0);
+
+        // The decoder writes raw frames; the encoder reads them. Both sides must
+        // name the same format and size or the pipe is meaningless.
+        await Assert.That(HasRun(plan.DecoderArgs, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-f", "rawvideo", "-pix_fmt", "yuv420p")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-s:v", "256x192")).IsTrue();
+
+        // The encoder side reads the pipe, then encodes, then names the muxer.
+        await Assert.That(HasRun(plan.EncoderArgs, "-i", "pipe:0")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-c:v", "mpeg4")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-q:v", "8")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-f", "avi", "/media/out.avi")).IsTrue();
+
+        // No audio in the source: no second read, no audio map.
+        await Assert.That(plan.HasAudio).IsFalse();
+        await Assert.That(plan.EncoderArgs.Contains("-c:a")).IsFalse();
+    }
+
+    /// <summary>
+    /// Seeking happens on the decoder's input (<c>-ss</c> before <c>-i</c>, which
+    /// decodes from the requested point instead of discarding frames), and the
+    /// length is capped after the input.
+    /// </summary>
+    [Test]
+    public async Task TheTrimRangeLandsInTheRightPlaces()
+    {
+        EncodeRequest request = Request() with { StartSeconds = 60, EndSeconds = 200 };
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+
+        await Assert.That(plan.SpanSeconds).IsEqualTo(140.0);
+        await Assert.That(HasRun(plan.DecoderArgs, "-ss", "60.000000", "-i", "/media/in.mkv")).IsTrue();
+        await Assert.That(HasRun(plan.DecoderArgs, "-i", "/media/in.mkv", "-t", "140.000000")).IsTrue();
+    }
+
+    /// <summary>
+    /// The pipe carries video only, so audio is read from the source a second
+    /// time inside the encoder. Both the input and the map have to be there or
+    /// the output is silent.
+    /// </summary>
+    [Test]
+    public async Task AudioIsReadASecondTimeAndMapped()
+    {
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: true), Encoder());
+
+        await Assert.That(plan.HasAudio).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-i", "pipe:0", "-i", "/media/in.mkv")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-map", "0:v:0")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-map", "1:a")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-c:a", "libmp3lame")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-ac", "1")).IsTrue();
+    }
+
+    /// <summary>A named stream is addressed by its absolute index, the number the user typed.</summary>
+    [Test]
+    public async Task AStreamPickBecomesAnAbsoluteMap()
+    {
+        EncodeRequest request = Request() with { VideoStream = 2, AudioStream = 3 };
+        var source = new SourceInfo
+        {
+            DurationSeconds = 60,
+            Width = 640,
+            Height = 480,
+            HasAudio = true,
+            AudioRate = 48000,
+            AudioChannels = 2,
+            Streams =
+            [
+                new SourceStream(0, "video", "h264", null, null, new StreamInfo()),
+                new SourceStream(1, "audio", "aac", null, null),
+                new SourceStream(2, "video", "mjpeg", null, null, new StreamInfo()),
+                new SourceStream(3, "audio", "ac3", null, null),
+            ],
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, source, Encoder());
+
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(HasRun(plan.DecoderArgs, "-map", "0:2")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-map", "1:3")).IsTrue();
+    }
+
+    /// <summary>A stale index that names the wrong kind of stream is a refusal, not a guess.</summary>
+    [Test]
+    public async Task APickOfTheWrongKindIsRefused()
+    {
+        EncodeRequest request = Request() with { VideoStream = 1 };
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: true), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(string.Join('\n', plan.Problems).Contains("not video", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>
+    /// An explicit container the encoder cannot write is refused with the legal
+    /// list. Silently substituting the default would produce a file whose
+    /// extension contradicts its contents.
+    /// </summary>
+    [Test]
+    public async Task AnImpossibleContainerNamesTheAlternatives()
+    {
+        EncodeRequest request = Request() with { Encode = new EncodeDefaults { Encoder = "mpeg4", Container = "flv" } };
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        string joined = string.Join('\n', plan.Problems);
+        await Assert.That(joined.Contains("cannot write 'flv'", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(joined.Contains("avi", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [Test]
+    public async Task AChosenContainerSelectsItsMuxer()
+    {
+        EncodeRequest request = Request() with { Encode = new EncodeDefaults { Encoder = "mpeg4", Container = "mkv" } };
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(plan.Container).IsEqualTo("mkv");
+        await Assert.That(plan.Muxer).IsEqualTo("matroska");
+        await Assert.That(HasRun(plan.EncoderArgs, "-f", "matroska", "/media/out.avi")).IsTrue();
+    }
+
+    /// <summary>
+    /// Unwired features are refused rather than ignored. A run that quietly
+    /// dropped a subtitle request would produce a file that looks finished and is
+    /// missing the thing the user asked for.
+    /// </summary>
+    [Test]
+    public async Task UnwiredFeaturesAreRefusedNotIgnored()
+    {
+        EncodeRequest subtitles = Request() with
+        {
+            Encode = new EncodeDefaults { Encoder = "mpeg4", Subtitles = new SubtitleDefaults { Files = ["/s/a.ass"] } },
+        };
+        EncodeRequest recompress = Request() with
+        {
+            Encode = new EncodeDefaults
+            {
+                Encoder = "mpeg4",
+                Recompress = new RecompressChain { Enabled = true, Passes = [new RecompressPass("-c:v copy", "mp4")] },
+            },
+        };
+
+        await Assert.That(EncodePlan.Create(subtitles, Source(), Encoder()).IsRunnable).IsFalse();
+        await Assert.That(EncodePlan.Create(recompress, Source(), Encoder()).IsRunnable).IsFalse();
+    }
+
+    /// <summary>
+    /// A frame size the transport format cannot represent is rounded, and said
+    /// out loud. The pacing loop counts pipe bytes using this size, so it has to
+    /// be the size FFmpeg actually emits.
+    /// </summary>
+    [Test]
+    public async Task AnIllegalFrameSizeIsRoundedAndReported()
+    {
+        EncodeRequest request = Request() with
+        {
+            Encode = new EncodeDefaults { Encoder = "mpeg4", Width = 321, Height = 241 },
+        };
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+
+        await Assert.That(plan.Width % 2).IsEqualTo(0);
+        await Assert.That(plan.Height % 2).IsEqualTo(0);
+        await Assert.That(plan.Notes.Count).IsGreaterThan(0);
+        await Assert.That(string.Join('\n', plan.Notes).Contains("321x241", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>The pacing target and the pipe frame size are what the pump needs to know.</summary>
+    [Test]
+    public async Task FrameCountAndSizeMatchThePlan()
+    {
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+
+        // 300 s at 13 fps.
+        await Assert.That(plan.TargetFrames).IsEqualTo(3900L);
+        // yuv420p is 1.5 bytes per pixel at whatever size the plan settled on.
+        await Assert.That(plan.FrameSize).IsEqualTo(plan.Width * plan.Height * 3 / 2);
+
+        await Assert.That(plan.DecodeCommand("ffmpeg")[0]).IsEqualTo("ffmpeg");
+        await Assert.That(plan.DecodeCommand("ffmpeg").Count).IsEqualTo(plan.DecoderArgs.Count + 1);
+    }
+
+    /// <summary>
+    /// A CRF encoder is pinned to the ceiling with VBV; a bitrate-only encoder is
+    /// told a bitrate and nothing else. Both were measured the hard way.
+    /// </summary>
+    [Test]
+    public async Task TheQualityFlagsFollowTheEncoderScale()
+    {
+        EncodeRequest request = Request() with
+        {
+            Encode = new EncodeDefaults { Encoder = "libx264", Quality = 20, LimitKbps = 480 },
+        };
+
+        EncodePlan plan = EncodePlan.Create(
+            request, Source(audio: false), Encoder("libx264", "mp4", "mp4"));
+
+        await Assert.That(HasRun(plan.EncoderArgs, "-crf", "20")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-maxrate", "480k")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-bufsize", "960k")).IsTrue();
+
+        // VBV stays off the mpeg family: a fixed quantiser and a tight buffer are
+        // contradictory requests, and FFmpeg reports "rc buffer underflow" on
+        // every frame while overshooting anyway.
+        EncodePlan mpeg = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+        await Assert.That(mpeg.EncoderArgs.Contains("-maxrate")).IsFalse();
+        await Assert.That(mpeg.EncoderArgs.Contains("-bufsize")).IsFalse();
+    }
+}

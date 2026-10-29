@@ -45,6 +45,16 @@ public sealed record EncodeRequest
     public bool Verbose { get; init; } = true;
 
     /// <summary>
+    /// The NNEDI3 weights file to use when <c>nnedi</c> is the deinterlacer.
+    ///
+    /// <para>Resolved by the host rather than stored with the encode parameters:
+    /// the file lives wherever the toolchain put it, and a run that names
+    /// <c>nnedi</c> without weights is a refusal with instructions, never a
+    /// silent fallback to a cheaper filter.</para>
+    /// </summary>
+    public string? NnediWeights { get; init; }
+
+    /// <summary>
     /// The length this run covers, when both ends are known. Null while the
     /// source has not been probed -- a request may legitimately be built before
     /// the duration is known, because the CLI has to validate paths first.
