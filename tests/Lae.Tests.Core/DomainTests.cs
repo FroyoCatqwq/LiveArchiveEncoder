@@ -112,14 +112,18 @@ public sealed class DomainTests
     [Test]
     public async Task TheArchiveDefaultsAreUnchanged()
     {
-        await Assert.That(Constants.DefaultWidth).IsEqualTo(256);
-        await Assert.That(Constants.DefaultHeight).IsEqualTo(192);
-        await Assert.That(Constants.DefaultFps).IsEqualTo(13.0);
-        await Assert.That(Constants.DefaultFpsLevels.Length).IsEqualTo(4);
-        await Assert.That(Constants.DefaultFpsLevels[0]).IsEqualTo(13.0);
-
-        // The settings document must not keep a second copy of these numbers.
+        // Asserted through the document rather than through the constants
+        // directly: a constant compared with a constant is decided by the
+        // compiler, so the assertion proves nothing about the program.
         EncodeDefaults defaults = new SettingsDocument().Defaults;
+
+        await Assert.That(defaults.Width).IsEqualTo(256);
+        await Assert.That(defaults.Height).IsEqualTo(192);
+        await Assert.That(defaults.Fps).IsEqualTo(13.0);
+        await Assert.That(defaults.FpsLevels.Count).IsEqualTo(4);
+        await Assert.That(defaults.FpsLevels[0]).IsEqualTo(13.0);
+
+        // ...and they come from the one table, not from a second copy of it.
         await Assert.That(defaults.Width).IsEqualTo(Constants.DefaultWidth);
         await Assert.That(defaults.Height).IsEqualTo(Constants.DefaultHeight);
         await Assert.That(defaults.Fps).IsEqualTo(Constants.DefaultFps);
