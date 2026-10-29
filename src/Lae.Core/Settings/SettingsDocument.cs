@@ -134,10 +134,10 @@ public sealed record EncodeDefaults
 
     public string? AudioEncoder { get; init; } = "libmp3lame";
 
-    public double Fps { get; init; } = 13.0;
+    public double Fps { get; init; } = Constants.DefaultFps;
 
     /// <summary>Adaptive ladder, highest rung first.</summary>
-    public IReadOnlyList<double> FpsLevels { get; init; } = [13.0, 8.0, 5.0, 3.0];
+    public IReadOnlyList<double> FpsLevels { get; init; } = [.. Constants.DefaultFpsLevels];
 
     /// <summary>
     /// Per-rung bitrate thresholds, keyed by FPS rather than by position so
@@ -172,9 +172,9 @@ public sealed record EncodeDefaults
     /// <summary>Audio sample rate; null keeps the source's.</summary>
     public int? AudioRate { get; init; }
 
-    public int Width { get; init; } = 320;
+    public int Width { get; init; } = Constants.DefaultWidth;
 
-    public int Height { get; init; } = 240;
+    public int Height { get; init; } = Constants.DefaultHeight;
 
     /// <summary>"crop" fills the frame and discards the overflow, "fit" pads, "stretch" distorts.</summary>
     public string FitMode { get; init; } = "crop";

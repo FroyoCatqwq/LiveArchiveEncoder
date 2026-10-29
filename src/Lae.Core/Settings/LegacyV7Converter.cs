@@ -100,7 +100,7 @@ public static class LegacyV7Converter
             Encoder = Clean(old.Encoder),
             Container = Clean(old.Container),
             AudioEncoder = Clean(old.AudioEncoder) ?? "libmp3lame",
-            Fps = Positive(old.Fps, 13.0),
+            Fps = Positive(old.Fps, Constants.DefaultFps),
             FpsLevels = Ladder(old.FpsLevels, notes),
             FpsThresholds = Thresholds(old.FpsLevelKbps),
             LimitKbps = Positive(old.Limit, 200.0),
@@ -112,8 +112,8 @@ public static class LegacyV7Converter
             AudioKbps = Clamp(old.AudioKbps, 8, 512, 32),
             AudioChannels = Clamp(old.AudioChannels, 1, 8, 1),
             AudioRate = old.AudioRate is > 0 ? old.AudioRate : null,
-            Width = Positive(old.Width, 320),
-            Height = Positive(old.Height, 240),
+            Width = Positive(old.Width, Constants.DefaultWidth),
+            Height = Positive(old.Height, Constants.DefaultHeight),
             FitMode = FitMode(old, notes),
             CropAnchor = Clean(old.CropAnchor) ?? "center",
             PadColor = Clean(old.PadColor) ?? "black",
@@ -326,7 +326,7 @@ public static class LegacyV7Converter
     /// </summary>
     private static IReadOnlyList<double> Ladder(List<double?>? levels, List<string> notes)
     {
-        if (levels is not { Count: > 0 }) return [13.0, 8.0, 5.0, 3.0];
+        if (levels is not { Count: > 0 }) return [.. Constants.DefaultFpsLevels];
 
         var values = new List<double>(levels.Count);
         foreach (double? raw in levels)
@@ -348,7 +348,7 @@ public static class LegacyV7Converter
         if (ladder.Count == 0)
         {
             notes.Add("the frame-rate ladder was empty after cleaning; using the built-in four rungs");
-            return [13.0, 8.0, 5.0, 3.0];
+            return [.. Constants.DefaultFpsLevels];
         }
 
         if (ladder.Count != values.Count)
