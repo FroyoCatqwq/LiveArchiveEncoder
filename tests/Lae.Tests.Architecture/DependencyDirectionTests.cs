@@ -147,4 +147,73 @@ public sealed partial class DependencyDirectionTests
             }
         }
     }
+
+    [GeneratedRegex(@"\b(Process\.Start|new\s+Process\s*\()")]
+    private static partial Regex ProcessSpawn();
+
+    [GeneratedRegex(@"\bnew\s+Thread\s*\(")]
+    private static partial Regex ThreadSpawn();
+
+    /// <summary>
+    /// Every child process goes through <c>Lae.Media/Processes/ChildProcess</c>.
+    ///
+    /// <para>Not tidiness: that type is the only one that drains stderr and kills
+    /// the whole tree, and a second spawn site is a second thing that can hang an
+    /// encode on a full pipe or leave two FFmpeg children behind after a Ctrl+C.
+    /// v7 had four. The rule is worth a test because the next <c>lae toolchain
+    /// install</c> will want to run a program, and the obvious way to write it is
+    /// the wrong one.</para>
+    /// </summary>
+    [Test]
+    public async Task ProcessesAreOnlyStartedThroughChildProcess()
+    {
+        List<string> offenders = [];
+
+        foreach (string assembly in new[] { "Lae.Core", "Lae.App", "Lae.Cli", "Lae.Plugins", "Lae.Encoding" })
+        {
+            foreach (string file in SourceFiles(assembly))
+            {
+                string[] lines = File.ReadAllLines(file);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (ProcessSpawn().IsMatch(lines[i]))
+                        offenders.Add($"{assembly}/{Path.GetFileName(file)}:{i + 1}: {lines[i].Trim()}");
+                }
+            }
+        }
+
+        await Assert.That(offenders).IsEmpty()
+            .Because("spawn through Lae.Media/Processes/ChildProcess; it owns stderr draining and tree kill");
+    }
+
+    /// <summary>
+    /// The pacing thread belongs to <see cref="Lae.Core"/>'s pump and to nothing
+    /// else above it.
+    ///
+    /// <para>A thread started by a command is a thread nobody joins, and the
+    /// encoding pipeline already has exactly one place where a second thread is
+    /// justified -- the producer that reads the decoder pipe. Everything else
+    /// above that line is meant to be a pure function.</para>
+    /// </summary>
+    [Test]
+    public async Task OnlyThePipelineStartsThreads()
+    {
+        List<string> offenders = [];
+
+        foreach (string assembly in new[] { "Lae.App", "Lae.Cli" })
+        {
+            foreach (string file in SourceFiles(assembly))
+            {
+                string[] lines = File.ReadAllLines(file);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (ThreadSpawn().IsMatch(lines[i]))
+                        offenders.Add($"{assembly}/{Path.GetFileName(file)}:{i + 1}: {lines[i].Trim()}");
+                }
+            }
+        }
+
+        await Assert.That(offenders).IsEmpty()
+            .Because("the host does not own threads; the pump in Lae.Core does");
+    }
 }
