@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Help;
 using Lae.Core;
+using Lae.Core.Localization;
 
 namespace Lae.App;
 
@@ -29,12 +30,13 @@ public static class CommandTree
     /// <summary>Builds the root command with every implemented subcommand attached.</summary>
     public static RootCommand Build(AppHost host)
     {
-        var root = new RootCommand(
-            "LiveArchiveEncoder — re-encode footage at the pace a 1998 archive box would have.");
+        IMessages messages = host.Messages;
+
+        var root = new RootCommand(messages["root.desc"]);
 
         var versionOption = new Option<bool>("--version")
         {
-            Description = "Print the version and exit.",
+            Description = messages["version.opt.version"],
         };
 
         // System.CommandLine installs its own --version, which prints the
@@ -48,6 +50,12 @@ public static class CommandTree
 
         root.Options.Add(versionOption);
 
+        // The help option is the library's, so its sentence is the library's --
+        // in English, inside an otherwise Chinese --help. It is one property to
+        // set, and leaving it would make the translated screen look half done.
+        foreach (HelpOption help in root.Options.OfType<HelpOption>())
+            help.Description = messages["root.opt.help"];
+
         // No subcommand: print help and succeed. v7 opened its interactive menu
         // here; v8 has no menu, so the honest answer is the usage text.
         root.SetAction((ParseResult parseResult) =>
@@ -57,20 +65,20 @@ public static class CommandTree
             return ExitCodes.Ok;
         });
 
-        root.Subcommands.Add(VersionCommand(host));
-        root.Subcommands.Add(BuildRepl(root));
-        root.Subcommands.Add(Commands.ConfigCommand.Build(host.Settings, host.Terminal));
-        root.Subcommands.Add(Commands.PresetCommand.Build(host.Settings, host.Terminal));
-        root.Subcommands.Add(Commands.SetupCommand.Build(host.Settings, host.Terminal));
-        root.Subcommands.Add(Commands.EncodeCommand.Build(host.Settings, host.Terminal, host.History));
-        root.Subcommands.Add(Commands.HistoryCommand.Build(host.History, host.Terminal, host.Messages));
+        root.Subcommands.Add(VersionCommand(host, messages));
+        root.Subcommands.Add(BuildRepl(root, messages));
+        root.Subcommands.Add(Commands.ConfigCommand.Build(host.Settings, host.Terminal, messages));
+        root.Subcommands.Add(Commands.PresetCommand.Build(host.Settings, host.Terminal, messages));
+        root.Subcommands.Add(Commands.SetupCommand.Build(host.Settings, host.Terminal, messages));
+        root.Subcommands.Add(Commands.EncodeCommand.Build(host.Settings, host.Terminal, host.History, messages));
+        root.Subcommands.Add(Commands.HistoryCommand.Build(host.History, host.Terminal, messages));
 
         return root;
     }
 
-    private static Command VersionCommand(AppHost host)
+    private static Command VersionCommand(AppHost host, IMessages messages)
     {
-        var command = new Command("version", "Print the version and exit.");
+        var command = new Command("version", messages["version.desc"]);
         command.SetAction(_ => PrintVersion(host));
         return command;
     }
@@ -90,16 +98,15 @@ public static class CommandTree
     /// the v7 <c>Cui.Ask()</c> lesson: on EOF the menu loop repainted on every
     /// read and produced 96 MB of text in seconds.</para>
     /// </summary>
-    private static Command BuildRepl(RootCommand root)
+    private static Command BuildRepl(RootCommand root, IMessages messages)
     {
-        var command = new Command("repl", "Interactive prompt with inline completion.");
+        var command = new Command("repl", messages["repl.desc"]);
 
         command.SetAction(async (ParseResult _, CancellationToken cancellationToken) =>
         {
             if (Console.IsInputRedirected || Console.IsOutputRedirected)
             {
-                Console.Error.WriteLine(
-                    "ERROR: 'repl' needs an interactive terminal; stdin or stdout is redirected.");
+                Console.Error.WriteLine(messages["repl.needsTerminal"]);
                 return ExitCodes.Usage;
             }
 

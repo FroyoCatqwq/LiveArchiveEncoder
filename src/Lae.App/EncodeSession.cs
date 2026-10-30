@@ -1,6 +1,7 @@
 using Lae.App.Ui;
 using Lae.Core;
 using Lae.Core.History;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
 using Lae.Encoding;
 using Lae.Media.Toolchain;
@@ -44,14 +45,16 @@ public static partial class EncodeSession
         if (overrides.RecompressOnly)
             return RunChainOnly(input, overrides, settings, dependencies, terminal, dryRun, token);
 
+        IMessages messages = dependencies.Messages;
+
         // The request comes first, because it is the only step that can be wrong
         // without touching the machine. Reporting "no such encoder" before "there
         // is no FFmpeg here" is the difference between a user fixing their typing
         // and a user reinstalling their toolchain.
-        (EncodeRequest? request, string? requestError) = BuildRequest(input, overrides, settings);
+        (EncodeRequest? request, string? requestError) = BuildRequest(input, overrides, settings, messages);
         if (request is null)
         {
-            terminal.ErrorLine($"ERROR: {requestError}");
+            terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = requestError }));
             return ExitCodes.Usage;
         }
 
@@ -60,15 +63,16 @@ public static partial class EncodeSession
         ToolchainProbeResult tools = dependencies.ProbeToolchain(ToolchainDirectory(settings));
         if (tools.Ffmpeg is not { } ffmpeg || tools.Ffprobe is null)
         {
-            foreach (string line in tools.Missing()) terminal.ErrorLine($"ERROR: missing {line}");
-            terminal.ErrorLine("Run 'lae setup' for what to do about it.");
+            foreach (string line in tools.Missing())
+                terminal.ErrorLine(messages.Format("encode.error.missingTool", new { tool = line }));
+            terminal.ErrorLine(messages["encode.error.runSetup"]);
             return ExitCodes.Failed;
         }
 
         (SourceInfo? source, string? probeError) = dependencies.ProbeSource(tools.Ffprobe, input);
         if (source is null)
         {
-            terminal.ErrorLine($"ERROR: cannot read '{input}': {probeError}");
+            terminal.ErrorLine(messages.Format("encode.error.cannotRead", new { path = input, detail = probeError }));
             return ExitCodes.Failed;
         }
 
@@ -87,11 +91,12 @@ public static partial class EncodeSession
         TrackPreparation track = PrepareTrack(request, source, ffmpeg, dependencies, dryRun);
         if (track.Request is null)
         {
-            terminal.ErrorLine($"ERROR: {track.Message}");
+            terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = track.Message }));
             return track.Failure;
         }
 
-        if (track.Note is { } note) terminal.ErrorLine($"note: {note}");
+        if (track.Note is { } note)
+            terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
 
         try
         {
@@ -99,7 +104,7 @@ public static partial class EncodeSession
         }
         finally
         {
-            if (track.Temporary is { } temporary) DiscardTemporary(temporary, terminal);
+            if (track.Temporary is { } temporary) DiscardTemporary(temporary, terminal, messages);
         }
     }
 
@@ -170,7 +175,7 @@ public static partial class EncodeSession
             SubtitleTrack.Note(request.SourcePath, index, codec), ExitCodes.Ok, null);
     }
 
-    private static void DiscardTemporary(string path, ITerminal terminal)
+    private static void DiscardTemporary(string path, ITerminal terminal, IMessages messages)
     {
         try
         {
@@ -182,7 +187,8 @@ public static partial class EncodeSession
             // The run is over either way; leaving a note beats throwing out of a
             // finally block, which would replace the real result with a cleanup
             // failure nobody asked about.
-            terminal.ErrorLine($"note: could not remove {path}: {exc.Message}");
+            terminal.ErrorLine(
+                messages.Format("encode.note.discardFailed", new { path, detail = exc.Message }));
         }
     }
 
@@ -201,18 +207,20 @@ public static partial class EncodeSession
         bool dryRun,
         CancellationToken token)
     {
+        IMessages messages = dependencies.Messages;
         (List<EncoderInfo> encoders, string? listError) = dependencies.ListEncoders(ffmpeg);
         if (listError is not null)
         {
-            terminal.ErrorLine($"ERROR: {listError}");
+            terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = listError }));
             return ExitCodes.Failed;
         }
 
         EncoderInfo? encoder = EncoderCatalog.Find(encoders, request.Encode.Encoder);
         if (encoder is null)
         {
-            terminal.ErrorLine($"ERROR: this FFmpeg build has no encoder named '{request.Encode.Encoder}'.");
-            terminal.ErrorLine("Try one of: mpeg4, mpeg1video, flv, libx264.");
+            terminal.ErrorLine(
+                messages.Format("encode.error.noEncoder", new { name = request.Encode.Encoder }));
+            terminal.ErrorLine(messages["encode.error.encoderSuggestions"]);
             return ExitCodes.Usage;
         }
 
@@ -220,15 +228,17 @@ public static partial class EncodeSession
 
         // Notes are commentary, not the answer, so they go to stderr: a dry run
         // piped to a file has to contain the two command lines and nothing else.
-        foreach (string note in plan.Notes) terminal.ErrorLine($"note: {note}");
+        foreach (string note in plan.Notes)
+            terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
 
         if (!plan.IsRunnable)
         {
-            foreach (string problem in plan.Problems) terminal.ErrorLine($"ERROR: {problem}");
+            foreach (string problem in plan.Problems)
+                terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = problem }));
             return ExitCodes.Usage;
         }
 
-        PrintPlan(plan, source, ffmpeg, terminal);
+        PrintPlan(plan, source, ffmpeg, terminal, messages);
 
         // The post chain is planned and checked before anything is spawned. A
         // fragment with "-i" in it, or a codec that cannot be written to the
@@ -236,15 +246,17 @@ public static partial class EncodeSession
         // full-length capture that then ends in a refusal.
         RecompressPlan post = RecompressPlan.Create(request.Encode.Recompress, plan.DestinationPath);
 
-        foreach (string note in post.Notes) terminal.ErrorLine($"note: {note}");
+        foreach (string note in post.Notes)
+            terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
 
         if (!post.IsRunnable)
         {
-            foreach (string problem in post.Problems) terminal.ErrorLine($"ERROR: {problem}");
+            foreach (string problem in post.Problems)
+                terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = problem }));
             return ExitCodes.Usage;
         }
 
-        if (post.Any) PrintChain(post, ffmpeg, terminal);
+        if (post.Any) PrintChain(post, ffmpeg, terminal, messages);
 
         if (dryRun) return ExitCodes.Ok;
 
@@ -255,14 +267,14 @@ public static partial class EncodeSession
         long? sourceBytes = SourceSize(request.SourcePath);
 
         LiveRun run;
-        using (var progress = new LiveProgress(terminal))
+        using (var progress = new LiveProgress(terminal, messages))
         {
             try
             {
                 run = dependencies.Runner.Run(
                     plan, ffmpeg,
                     (done, total) => progress.Report(done, total),
-                    note => terminal.ErrorLine($"note: {note}"),
+                    note => terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note })),
                     token);
             }
             catch (OperationCanceledException)
@@ -280,11 +292,17 @@ public static partial class EncodeSession
             }
 
             progress.Finish(
-                $"[{run.Pump.Seconds,7:F1}s] {run.Pump.Frames} frames written"
-                + (run.Pump.Repeated > 0 ? $" ({run.Pump.Repeated} repeated)" : ""));
+                messages.Format("encode.result.framesWritten", new
+                {
+                    seconds = Number(run.Pump.Seconds, "F1").PadLeft(7),
+                    frames = run.Pump.Frames,
+                })
+                + (run.Pump.Repeated > 0
+                    ? messages.Format("encode.result.framesRepeated", new { repeated = run.Pump.Repeated })
+                    : ""));
         }
 
-        PrintResult(run, terminal);
+        PrintResult(run, terminal, messages);
 
         // Recorded against the capture, not against the chain below: the recording
         // is the thing this row is about, and a failed hop is reported on its own

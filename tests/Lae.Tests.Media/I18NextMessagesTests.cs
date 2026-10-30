@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Lae.Core.Localization;
 using Lae.Media.Localization;
 
@@ -29,7 +30,7 @@ public sealed class I18NextMessagesTests
 
         await Assert.That(messages.Language).IsEqualTo(LanguageChoice.Chinese);
         await Assert.That(messages["history.empty"]).IsEqualTo("还没有任何运行记录。");
-        await Assert.That(messages["history.limit"]).Contains("正整数");
+        await Assert.That(messages["history.limitWarn"]).Contains("正整数");
     }
 
     /// <summary>
@@ -41,9 +42,9 @@ public sealed class I18NextMessagesTests
     public async Task PlaceholdersAreFilledInBothLanguages()
     {
         string english = I18NextMessages.Create("en")
-            .Get("history.total", new { runs = 3, path = "/home/x/history.db" });
+            .Format("history.total", new { runs = 3, path = "/home/x/history.db" });
         string chinese = I18NextMessages.Create("zh")
-            .Get("history.total", new { runs = 3, path = "/home/x/history.db" });
+            .Format("history.total", new { runs = 3, path = "/home/x/history.db" });
 
         await Assert.That(english).IsEqualTo("3 run(s) recorded at /home/x/history.db");
         await Assert.That(chinese).Contains("3");
@@ -77,5 +78,59 @@ public sealed class I18NextMessagesTests
         // reported and the words spoken agree.
         await Assert.That(messages.Language).IsEqualTo(LanguageChoice.English);
         await Assert.That(messages["history.empty"]).IsEqualTo("No runs recorded yet.");
+    }
+
+    /// <summary>
+    /// Both resource files carry the same keys.
+    ///
+    /// <para>This is the failure the fallback mechanism hides: a key added to
+    /// <c>en</c> and forgotten in <c>zh</c> does not throw, does not print a key
+    /// name, and does not look broken -- it prints an English sentence in the
+    /// middle of a Chinese one. Nobody notices that in review, and nobody notices
+    /// it in a test that only checks the keys it remembers.</para>
+    /// </summary>
+    [Test]
+    public async Task BothLocalesCarryTheSameKeys()
+    {
+        HashSet<string> english = Keys("en");
+        HashSet<string> chinese = Keys("zh");
+
+        List<string> missingInChinese = [.. english.Except(chinese).Order(StringComparer.Ordinal)];
+        List<string> missingInEnglish = [.. chinese.Except(english).Order(StringComparer.Ordinal)];
+
+        await Assert.That(missingInChinese.Count).IsEqualTo(0)
+            .Because("zh is missing: " + string.Join(", ", missingInChinese));
+        await Assert.That(missingInEnglish.Count).IsEqualTo(0)
+            .Because("en is missing: " + string.Join(", ", missingInEnglish));
+        await Assert.That(english.Count).IsGreaterThan(50);
+    }
+
+    /// <summary>
+    /// Every dotted path that ends in a string, which is what a translator sees as
+    /// one row. Objects are walked; anything else at a leaf is a structural
+    /// mistake and is reported as the leaf it is.
+    /// </summary>
+    private static HashSet<string> Keys(string language)
+    {
+        Stream stream = typeof(I18NextMessages).Assembly
+            .GetManifestResourceStream($"lae.locales.{language}.translation.json")
+            ?? throw new InvalidOperationException($"no embedded resources for '{language}'");
+
+        using var document = JsonDocument.Parse(stream);
+
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        Walk(document.RootElement, "", keys);
+        return keys;
+    }
+
+    private static void Walk(JsonElement element, string prefix, HashSet<string> keys)
+    {
+        foreach (JsonProperty property in element.EnumerateObject())
+        {
+            string path = prefix.Length == 0 ? property.Name : $"{prefix}.{property.Name}";
+
+            if (property.Value.ValueKind == JsonValueKind.Object) Walk(property.Value, path, keys);
+            else keys.Add(path);
+        }
     }
 }

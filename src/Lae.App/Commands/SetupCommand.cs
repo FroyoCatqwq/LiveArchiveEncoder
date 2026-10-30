@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Lae.App.Ui;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
 using Lae.Media.Toolchain;
 
@@ -21,17 +22,15 @@ namespace Lae.App.Commands;
 /// </summary>
 public static class SetupCommand
 {
-    public static Command Build(ISettingsStore store, ITerminal terminal)
+    public static Command Build(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
-        var command = new Command(
-            "setup",
-            "Check that FFmpeg and ffprobe are available. Exits 1 when they are not.");
+        var command = new Command("setup", messages["setup.desc"]);
 
         command.SetAction(_ =>
         {
             SettingsDocument settings = store.Load();
             ToolchainProbeResult probe = ToolchainProbe.Probe(EncodeSession.ToolchainDirectory(settings));
-            return SetupReport.Run(settings, store.Location, probe, terminal);
+            return SetupReport.Run(settings, store.Location, probe, terminal, messages);
         });
 
         return command;
@@ -45,11 +44,16 @@ public static class SetupCommand
 /// the whole value of the command, and v7 shipped a version of it that pointed at
 /// a menu entry that did not exist. A test with a probe result of "nothing found"
 /// catches that class of mistake without needing a machine without FFmpeg.</para>
+///
+/// <para>The first four labels are left alone: they are field names, aligned into
+/// a column, and a translated <c>ffmpeg</c> would no longer name the program the
+/// user is being told to install.</para>
 /// </summary>
 public static class SetupReport
 {
     public static int Run(
-        SettingsDocument settings, string settingsPath, ToolchainProbeResult probe, ITerminal terminal)
+        SettingsDocument settings, string settingsPath, ToolchainProbeResult probe, ITerminal terminal,
+        IMessages messages)
     {
         terminal.Line($"Settings   {settingsPath}");
 
@@ -59,26 +63,27 @@ public static class SetupReport
         string? directory = EncodeSession.ToolchainDirectory(settings);
         terminal.Line($"Source     {settings.Toolchain.FfmpegSource}"
             + (directory is null ? "" : $" ({directory})"));
-        terminal.Line($"ffmpeg     {probe.Ffmpeg ?? "(not found)"}");
-        terminal.Line($"ffprobe    {probe.Ffprobe ?? "(not found)"}");
+        terminal.Line($"ffmpeg     {probe.Ffmpeg ?? messages["setup.notFound"]}");
+        terminal.Line($"ffprobe    {probe.Ffprobe ?? messages["setup.notFound"]}");
 
         if (probe.Complete)
         {
             terminal.Line();
-            terminal.Line("Ready. Try: lae encode <input> --dry-run");
+            terminal.Line(messages["setup.ready"]);
             return ExitCodes.Ok;
         }
 
         terminal.Line();
-        terminal.Line("Missing:");
+        terminal.Line(messages["setup.missing"]);
         foreach (string line in probe.Missing()) terminal.Line($"  - {line}");
 
+        // The advice is one sentence broken over two lines in the resource file:
+        // the break belongs to the layout, not to the sentence, so it is kept
+        // where a translator can move it.
         terminal.Line();
-        terminal.Line("To fix it: put ffmpeg and ffprobe on PATH (or point toolchain.ffmpegPath at");
-        terminal.Line("a build), then run 'lae setup' again.");
+        foreach (string line in messages["setup.fix"].Split('\n')) terminal.Line(line);
         terminal.Line();
-        terminal.Line("A download command is planned for the plugin milestone; this build does not");
-        terminal.Line("fetch anything.");
+        foreach (string line in messages["setup.noDownload"].Split('\n')) terminal.Line(line);
 
         return ExitCodes.Failed;
     }

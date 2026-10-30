@@ -1,7 +1,9 @@
 using Lae.Core;
 using Lae.Core.History;
+using Lae.Core.Localization;
 using Lae.Encoding;
 using Lae.Media.Ffmpeg;
+using Lae.Media.Localization;
 using Lae.Media.Toolchain;
 
 namespace Lae.App;
@@ -63,6 +65,18 @@ public sealed record EncodeDependencies
     /// </summary>
     public IRunHistory History { get; init; } = NullRunHistory.Instance;
 
+    /// <summary>
+    /// The language this run speaks.
+    ///
+    /// <para>Here rather than as another parameter of <see cref="EncodeSession.Run"/>
+    /// because it is the same kind of thing as the rest of this record: something
+    /// the host supplies and the session only calls. <c>required</c> on purpose --
+    /// a default would let one forgotten wiring step print key names at a user,
+    /// which is the one failure mode of a keyed resource file that nobody notices
+    /// in a test.</para>
+    /// </summary>
+    public required IMessages Messages { get; init; }
+
     public static EncodeDependencies Default { get; } = new()
     {
         ProbeToolchain = ToolchainProbe.Probe,
@@ -72,5 +86,6 @@ public sealed record EncodeDependencies
             => FfmpegTools.ExtractSubtitle(ffmpeg, source, index, destination),
         Runner = new LiveEncodeRunner(),
         RunRecompress = RecompressRun.Run,
+        Messages = I18NextMessages.Create(LanguageChoice.English),
     };
 }

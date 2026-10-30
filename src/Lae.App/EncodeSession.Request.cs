@@ -1,4 +1,5 @@
 using Lae.Core;
+using Lae.Core.Localization;
 using Lae.Core.Presets;
 using Lae.Core.Settings;
 
@@ -22,7 +23,7 @@ public static partial class EncodeSession
     /// keeps a scripted run predictable.</para>
     /// </summary>
     public static (EncodeRequest? Request, string? Error) BuildRequest(
-        string input, EncodeOverrides overrides, SettingsDocument settings)
+        string input, EncodeOverrides overrides, SettingsDocument settings, IMessages messages)
     {
         // Order: stored defaults, then the preset, then the command line. Each
         // layer may only overwrite what it actually spells, which is what makes
@@ -32,7 +33,7 @@ public static partial class EncodeSession
         if (overrides.Preset is { Length: > 0 } presetId)
         {
             if (PresetCatalog.Find(settings, presetId) is not { } preset)
-                return (null, $"there is no preset named '{presetId}'; run 'lae preset list'");
+                return (null, messages.Format("encode.error.presetMissing", new { id = presetId }));
 
             encode = PresetCatalog.Apply(preset, encode);
         }
@@ -54,8 +55,7 @@ public static partial class EncodeSession
         // "burn" and the burned track would simply not be there.
         if (overrides.SubtitleTrack is not null && overrides.SubtitleCopyTracks is { Count: > 0 })
         {
-            return (null, "--subtitle-track burns one track and --subtitle-copy carries others; "
-                         + "they are different jobs, pick one");
+            return (null, messages["encode.error.subtitleMix"]);
         }
 
         if (overrides.SubtitleFiles is { Count: > 0 }
@@ -86,7 +86,7 @@ public static partial class EncodeSession
         // --recompress is one more transcode, in the order written;
         // --recompress-container is paired by position, and a hop without one
         // derives its container from the codec it names.
-        (RecompressChain? chain, string? chainError) = BuildChain(overrides);
+        (RecompressChain? chain, string? chainError) = BuildChain(overrides, messages);
         if (chainError is not null) return (null, chainError);
         if (chain is not null) encode = encode with { Recompress = chain };
 
@@ -139,7 +139,7 @@ public static partial class EncodeSession
         if (overrides.Size is { } size)
         {
             if (!TryParseSize(size, out int width, out int height))
-                return (null, $"--size wants WIDTHxHEIGHT, got '{size}'");
+                return (null, messages.Format("encode.error.size", new { value = size }));
 
             encode = encode with { Width = width, Height = height };
         }
@@ -171,7 +171,7 @@ public static partial class EncodeSession
     /// runs the same chain against a file that already exists, and a second copy of
     /// the pairing rules is how the two would drift apart.</para>
     /// </summary>
-    public static (RecompressChain? Chain, string? Error) BuildChain(EncodeOverrides overrides)
+    public static (RecompressChain? Chain, string? Error) BuildChain(EncodeOverrides overrides, IMessages messages)
     {
         if (overrides.RecompressArgs is not { Count: > 0 } passes) return (null, null);
 
@@ -179,8 +179,8 @@ public static partial class EncodeSession
 
         if (containers.Length > passes.Count)
         {
-            return (null, $"{containers.Length} containers were given for {passes.Count} passes; "
-                        + "there is nothing for the extra one to belong to");
+            return (null, messages.Format(
+                "encode.error.containerPairing", new { given = containers.Length, passes = passes.Count }));
         }
 
         return (new RecompressChain

@@ -1,8 +1,192 @@
 {
+  "root": {
+    "desc": "LiveArchiveEncoder — re-encode footage at the pace a 1998 archive box would have.",
+    "opt": {
+      "help": "Show help and usage information"
+    }
+  },
+  "version": {
+    "desc": "Print the version and exit.",
+    "opt": {
+      "version": "Print the version and exit."
+    }
+  },
+  "repl": {
+    "desc": "Interactive prompt with inline completion.",
+    "needsTerminal": "ERROR: 'repl' needs an interactive terminal; stdin or stdout is redirected."
+  },
+  "encode": {
+    "desc": "Re-encode one source at archive pace.",
+    "arg": {
+      "input": "The source to re-encode."
+    },
+    "opt": {
+      "out": "Output path. Defaults to the source name with the encoder's extension.",
+      "encoder": "Video encoder, e.g. mpeg4, libx264, flv. Defaults to the stored one.",
+      "container": "Container extension, e.g. avi, mkv, mp4. Defaults to the encoder's own.",
+      "from": "Start offset in seconds.",
+      "to": "End offset in seconds.",
+      "quality": "Quality in the encoder's own scale (2..31 for the mpeg family, 0..51 for x264).",
+      "size": "Output frame size as WIDTHxHEIGHT.",
+      "preset": "Start from one of your stored presets; 'lae preset list' shows them.",
+      "limit": "Bitrate ceiling in kbps. The ladder drops frames rather than exceed it.",
+      "recover": "Bitrate the ladder climbs back from; defaults to 75% of the ceiling.",
+      "fpsLevels": "Ladder as FPS[,FPS[:drop[:rise]]...], e.g. 13,8,5,3 or 13,8:150:110.",
+      "dryRun": "Print the two FFmpeg command lines and stop.",
+      "subtitleFile": "Burn this .srt/.ass into the picture; repeat for more than one.",
+      "subtitleTrack": "Burn the embedded subtitle track with this absolute index.",
+      "subtitleCopy": "Carry this subtitle track into the output as a stream; repeat for more than one.",
+      "subtitleBox": "Shape the text is laid out in: source, 4:3 or 16:9.",
+      "subtitleFont": "Font family forced over whatever the subtitle file asks for.",
+      "fontsDir": "Extra folder libass may look in for fonts.",
+      "recompress": "One FFmpeg fragment for a post-encode pass; repeat for a chain (a 2007 portal first, then the 2011 one).",
+      "recompressContainer": "Container for a post-encode pass, paired by position with --recompress.",
+      "recompressOnly": "Run the chain against the existing file and skip the capture entirely."
+    },
+    "plan": {
+      "source": "source",
+      "output": "output",
+      "span": "span",
+      "quality": "quality",
+      "ladder": "ladder",
+      "frame": "frame",
+      "decoder": "decoder:",
+      "encoder": "encoder:",
+      "sourceValue": "{{width}}x{{height}} {{pixFmt}}, {{seconds}}s, audio {{rate}}Hz x{{channels}}",
+      "sourceValueSilent": "{{width}}x{{height}} {{pixFmt}}, {{seconds}}s, no audio",
+      "outputValue": "{{width}}x{{height}} {{pixFmt}}, {{container}} ({{muxer}}), {{fps}} fps",
+      "spanValue": "{{seconds}}s -> {{frames}} frames",
+      "qualityCrf": "crf {{value}}",
+      "qualityQv": "q:v {{value}}",
+      "qualityBitrate": "no quality knob; the ceiling is the only dial",
+      "ladderValue": "{{rungs}} fps, down at {{down}} kbps, up at {{up}} kbps, over {{window}}s",
+      "ladderOff": "off (single rung or no bitrate ceiling)",
+      "frameValue": "{{bytes}} bytes on the pipe"
+    },
+    "result": {
+      "written": "written",
+      "size": "size",
+      "pacing": "pacing",
+      "motion": "motion",
+      "sizeValue": "{{size}}, {{kbps}} kbps over {{seconds}}s",
+      "pacingValue": "{{frames}} slots in {{seconds}}s ({{fps}} fps), fresh {{fresh}}, repeated {{repeated}}",
+      "motionValue": "ended at {{fps}} fps{{rung}}, {{dropped}} decoded frames dropped",
+      "motionRung": " (rung {{rung}})",
+      "framesWritten": "[{{seconds}}s] {{frames}} frames written",
+      "framesRepeated": " ({{repeated}} repeated)"
+    },
+    "progress": {
+      "of": "[{{elapsed}}s] {{done}}/{{total}} frames ({{percent}}%)",
+      "only": "[{{elapsed}}s] {{done}} frames"
+    },
+    "chain": {
+      "header": "recompress:",
+      "written": "recompress {{name}}",
+      "recordingUntouched": "the recording is untouched: {{path}}"
+    },
+    "error": {
+      "generic": "ERROR: {{detail}}",
+      "missingTool": "ERROR: missing {{tool}}",
+      "runSetup": "Run 'lae setup' for what to do about it.",
+      "cannotRead": "ERROR: cannot read '{{path}}': {{detail}}",
+      "noEncoder": "ERROR: this FFmpeg build has no encoder named '{{name}}'.",
+      "encoderSuggestions": "Try one of: mpeg4, mpeg1video, flv, libx264.",
+      "presetMissing": "there is no preset named '{{id}}'; run 'lae preset list'",
+      "subtitleMix": "--subtitle-track burns one track and --subtitle-copy carries others; they are different jobs, pick one",
+      "containerPairing": "{{given}} containers were given for {{passes}} passes; there is nothing for the extra one to belong to",
+      "size": "--size wants WIDTHxHEIGHT, got '{{value}}'",
+      "fpsLevels": "ERROR: --fps-levels: {{detail}}",
+      "recompressOnlyNeedsChain": "ERROR: --recompress-only needs at least one --recompress",
+      "noFile": "ERROR: there is no file at '{{path}}'"
+    },
+    "note": {
+      "prefixed": "note: {{text}}",
+      "discardFailed": "note: could not remove {{path}}: {{detail}}"
+    }
+  },
+  "config": {
+    "desc": "Show, locate or migrate the settings file.",
+    "path": {
+      "desc": "Print the settings file path and exit."
+    },
+    "show": {
+      "desc": "Print the effective settings as key = value lines.",
+      "toml": "Print the document as TOML, in the shape the store would write it."
+    },
+    "migrate": {
+      "desc": "Convert an older config file (v7 JSON or v8 JSON) into settings.toml.",
+      "dryRun": "Report what would change without writing anything.",
+      "noFileStore": "ERROR: this build has no settings file to migrate.",
+      "previousAuto": "{{path}} is the previous v8 file; it is converted automatically on the next read.",
+      "nothing": "No v7 settings found at {{path}}; nothing to migrate.",
+      "notWritten": "ERROR: {{path}} was not written; the v7 file is still the only copy.",
+      "wrote": "Wrote {{path}}",
+      "notV7": "ERROR: {{path}} is not a v7 settings file.",
+      "unparsable": "ERROR: {{path}} could not be parsed.",
+      "wouldWrite": "Would write {{path}} (schema {{schema}})",
+      "presetsCarried": "Custom presets carried over: {{count}}"
+    },
+    "unset": "(unset)"
+  },
+  "preset": {
+    "desc": "List, inspect, add or remove your own encode presets.",
+    "arg": {
+      "id": "Preset id.",
+      "newId": "Id for the preset: letters, digits, '-', '_' or '.'."
+    },
+    "opt": {
+      "label": "Human name to show in a list.",
+      "note": "Free-form reminder.",
+      "encoder": "Video encoder, e.g. mpeg4.",
+      "container": "Container extension, e.g. avi.",
+      "size": "Frame size as WIDTHxHEIGHT.",
+      "fps": "Base frame rate.",
+      "limit": "Bitrate ceiling in kbps.",
+      "window": "Bitrate averaging window in seconds.",
+      "quality": "Quality in the encoder's own scale (2..31 for the mpeg family, 0..51 for x264).",
+      "keep": "Fill every unspecified field from the current defaults instead of leaving it open."
+    },
+    "list": {
+      "desc": "Print every stored preset.",
+      "empty": "no presets; 'lae preset add <id> --encoder mpeg4 --size 320x240' makes one"
+    },
+    "show": {
+      "desc": "Print one preset, field by field.",
+      "missing": "ERROR: there is no preset named '{{id}}'.",
+      "seeList": "Run 'lae preset list' to see the ones you have.",
+      "applies": "applies    {{text}}"
+    },
+    "add": {
+      "desc": "Store a preset, or replace the one with this id.",
+      "stored": "stored {{id}}: {{text}}",
+      "useIt": "use it with: lae encode <source> --preset {{id}}"
+    },
+    "remove": {
+      "desc": "Delete a preset.",
+      "removed": "removed {{id}}"
+    },
+    "writeFailed": "ERROR: could not write {{path}}: {{detail}}"
+  },
+  "setup": {
+    "desc": "Check that FFmpeg and ffprobe are available. Exits 1 when they are not.",
+    "notFound": "(not found)",
+    "ready": "Ready. Try: lae encode <input> --dry-run",
+    "missing": "Missing:",
+    "fix": "To fix it: put ffmpeg and ffprobe on PATH (or point toolchain.ffmpegPath at\na build), then run 'lae setup' again.",
+    "noDownload": "A download command is planned for the plugin milestone; this build does not\nfetch anything."
+  },
   "history": {
+    "desc": "Show what previous runs did.",
+    "limitWarn": "ERROR: --limit wants a positive number of rows.",
     "header": "   id  started          result     encoder/container  kbps  in → out",
     "empty": "No runs recorded yet.",
     "total": "{{runs}} run(s) recorded at {{path}}",
-    "limit": "--limit wants a positive number of rows."
+    "list": {
+      "desc": "Print the most recent runs, newest first.",
+      "limitOpt": "How many rows to print."
+    },
+    "path": {
+      "desc": "Print where the history is kept."
+    }
   }
 }

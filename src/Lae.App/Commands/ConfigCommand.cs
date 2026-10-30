@@ -1,6 +1,6 @@
 using System.CommandLine;
-using System.Text.Json;
 using Lae.App.Ui;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
 using Lae.Media.Settings;
 
@@ -13,21 +13,26 @@ namespace Lae.App.Commands;
 /// printed a JSON document to stdout and left the user to work out where it was
 /// supposed to go. <c>path</c> answers "where is it", <c>show</c> answers "what
 /// is in it", <c>migrate</c> answers "what happened to my v7 file".</para>
+///
+/// <para><b>The keys are not translated.</b> <c>defaults.encoder</c> is the name
+/// the TOML file uses and the name <c>grep</c> looks for; showing a Chinese label
+/// there would break the one property this output has. Only the remarks around
+/// them are translated.</para>
 /// </summary>
 public static class ConfigCommand
 {
-    public static Command Build(ISettingsStore store, ITerminal terminal)
+    public static Command Build(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
-        var command = new Command("config", "Show, locate or migrate the settings file.");
-        command.Subcommands.Add(PathCommand(store, terminal));
-        command.Subcommands.Add(ShowCommand(store, terminal));
-        command.Subcommands.Add(MigrateCommand(store, terminal));
+        var command = new Command("config", messages["config.desc"]);
+        command.Subcommands.Add(PathCommand(store, terminal, messages));
+        command.Subcommands.Add(ShowCommand(store, terminal, messages));
+        command.Subcommands.Add(MigrateCommand(store, terminal, messages));
         return command;
     }
 
-    private static Command PathCommand(ISettingsStore store, ITerminal terminal)
+    private static Command PathCommand(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
-        var command = new Command("path", "Print the settings file path and exit.");
+        var command = new Command("path", messages["config.path.desc"]);
         command.SetAction(_ =>
         {
             terminal.Line(store.Location);
@@ -36,13 +41,13 @@ public static class ConfigCommand
         return command;
     }
 
-    private static Command ShowCommand(ISettingsStore store, ITerminal terminal)
+    private static Command ShowCommand(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
-        var command = new Command("show", "Print the effective settings as key = value lines.");
+        var command = new Command("show", messages["config.show.desc"]);
 
         var tomlOption = new Option<bool>("--toml")
         {
-            Description = "Print the document as TOML, in the shape the store would write it.",
+            Description = messages["config.show.toml"],
         };
         command.Options.Add(tomlOption);
 
@@ -62,48 +67,48 @@ public static class ConfigCommand
             // One flat list rather than nested blocks: this output is meant to be
             // greppable, and `lae config show | grep quality` is a more likely
             // question than `| jq .defaults.quality`.
-            Emit(terminal, "schemaVersion", document.SchemaVersion);
-            Emit(terminal, "toolchain.ffmpegSource", document.Toolchain.FfmpegSource);
-            Emit(terminal, "toolchain.ffmpegPath", document.Toolchain.FfmpegPath);
-            Emit(terminal, "toolchain.nnediWeights", document.Toolchain.NnediWeights);
-            Emit(terminal, "network.proxy", document.Network.Proxy);
-            Emit(terminal, "network.githubFront", document.Network.GithubFront);
-            Emit(terminal, "ui.language", document.Ui.Language);
-            Emit(terminal, "ui.playMode", document.Ui.PlayMode);
-            Emit(terminal, "ui.playerPath", document.Ui.PlayerPath);
-            Emit(terminal, "ui.checkForUpdates", document.Ui.CheckForUpdates);
+            Emit(terminal, messages, "schemaVersion", document.SchemaVersion);
+            Emit(terminal, messages, "toolchain.ffmpegSource", document.Toolchain.FfmpegSource);
+            Emit(terminal, messages, "toolchain.ffmpegPath", document.Toolchain.FfmpegPath);
+            Emit(terminal, messages, "toolchain.nnediWeights", document.Toolchain.NnediWeights);
+            Emit(terminal, messages, "network.proxy", document.Network.Proxy);
+            Emit(terminal, messages, "network.githubFront", document.Network.GithubFront);
+            Emit(terminal, messages, "ui.language", document.Ui.Language);
+            Emit(terminal, messages, "ui.playMode", document.Ui.PlayMode);
+            Emit(terminal, messages, "ui.playerPath", document.Ui.PlayerPath);
+            Emit(terminal, messages, "ui.checkForUpdates", document.Ui.CheckForUpdates);
 
             EncodeDefaults d = document.Defaults;
-            Emit(terminal, "defaults.encoder", d.Encoder);
-            Emit(terminal, "defaults.container", d.Container);
-            Emit(terminal, "defaults.audioEncoder", d.AudioEncoder);
-            Emit(terminal, "defaults.fps", d.Fps);
-            Emit(terminal, "defaults.fpsLevels", string.Join(',', d.FpsLevels));
-            Emit(terminal, "defaults.limitKbps", d.LimitKbps);
-            Emit(terminal, "defaults.recoverKbps", d.RecoverKbps);
-            Emit(terminal, "defaults.windowSeconds", d.WindowSeconds);
-            Emit(terminal, "defaults.quality", d.Quality);
-            Emit(terminal, "defaults.threads", d.Threads);
-            Emit(terminal, "defaults.bufferFrames", d.BufferFrames);
-            Emit(terminal, "defaults.audioKbps", d.AudioKbps);
-            Emit(terminal, "defaults.audioChannels", d.AudioChannels);
-            Emit(terminal, "defaults.audioRate", d.AudioRate);
-            Emit(terminal, "defaults.size", $"{d.Width}x{d.Height}");
-            Emit(terminal, "defaults.fitMode", d.FitMode);
-            Emit(terminal, "defaults.cropAnchor", d.CropAnchor);
-            Emit(terminal, "defaults.padColor", d.PadColor);
-            Emit(terminal, "defaults.scaleAlgo", d.ScaleAlgo);
-            Emit(terminal, "defaults.pixFmt", d.PixFmt);
-            Emit(terminal, "defaults.dither", d.Dither);
-            Emit(terminal, "defaults.deinterlace", d.Deinterlace.Filter);
-            Emit(terminal, "defaults.hwaccel", d.Hwaccel);
-            Emit(terminal, "defaults.parallel", d.Parallel);
-            Emit(terminal, "defaults.subtitles.mode", d.Subtitles.Mode);
-            Emit(terminal, "defaults.subtitles.files", d.Subtitles.Files.Count);
-            Emit(terminal, "defaults.recompress.enabled", d.Recompress.Enabled);
-            Emit(terminal, "defaults.recompress.passes", d.Recompress.Active().Count);
-            Emit(terminal, "customPresets", document.CustomPresets.Count);
-            Emit(terminal, "plugins", document.Plugins.Count);
+            Emit(terminal, messages, "defaults.encoder", d.Encoder);
+            Emit(terminal, messages, "defaults.container", d.Container);
+            Emit(terminal, messages, "defaults.audioEncoder", d.AudioEncoder);
+            Emit(terminal, messages, "defaults.fps", d.Fps);
+            Emit(terminal, messages, "defaults.fpsLevels", string.Join(',', d.FpsLevels));
+            Emit(terminal, messages, "defaults.limitKbps", d.LimitKbps);
+            Emit(terminal, messages, "defaults.recoverKbps", d.RecoverKbps);
+            Emit(terminal, messages, "defaults.windowSeconds", d.WindowSeconds);
+            Emit(terminal, messages, "defaults.quality", d.Quality);
+            Emit(terminal, messages, "defaults.threads", d.Threads);
+            Emit(terminal, messages, "defaults.bufferFrames", d.BufferFrames);
+            Emit(terminal, messages, "defaults.audioKbps", d.AudioKbps);
+            Emit(terminal, messages, "defaults.audioChannels", d.AudioChannels);
+            Emit(terminal, messages, "defaults.audioRate", d.AudioRate);
+            Emit(terminal, messages, "defaults.size", $"{d.Width}x{d.Height}");
+            Emit(terminal, messages, "defaults.fitMode", d.FitMode);
+            Emit(terminal, messages, "defaults.cropAnchor", d.CropAnchor);
+            Emit(terminal, messages, "defaults.padColor", d.PadColor);
+            Emit(terminal, messages, "defaults.scaleAlgo", d.ScaleAlgo);
+            Emit(terminal, messages, "defaults.pixFmt", d.PixFmt);
+            Emit(terminal, messages, "defaults.dither", d.Dither);
+            Emit(terminal, messages, "defaults.deinterlace", d.Deinterlace.Filter);
+            Emit(terminal, messages, "defaults.hwaccel", d.Hwaccel);
+            Emit(terminal, messages, "defaults.parallel", d.Parallel);
+            Emit(terminal, messages, "defaults.subtitles.mode", d.Subtitles.Mode);
+            Emit(terminal, messages, "defaults.subtitles.files", d.Subtitles.Files.Count);
+            Emit(terminal, messages, "defaults.recompress.enabled", d.Recompress.Enabled);
+            Emit(terminal, messages, "defaults.recompress.passes", d.Recompress.Active().Count);
+            Emit(terminal, messages, "customPresets", document.CustomPresets.Count);
+            Emit(terminal, messages, "plugins", document.Plugins.Count);
 
             return ExitCodes.Ok;
         });
@@ -111,13 +116,13 @@ public static class ConfigCommand
         return command;
     }
 
-    private static Command MigrateCommand(ISettingsStore store, ITerminal terminal)
+    private static Command MigrateCommand(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
-        var command = new Command("migrate", "Convert an older config file (v7 JSON or v8 JSON) into settings.toml.");
+        var command = new Command("migrate", messages["config.migrate.desc"]);
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Report what would change without writing anything.",
+            Description = messages["config.migrate.dryRun"],
         };
         command.Options.Add(dryRunOption);
 
@@ -127,7 +132,7 @@ public static class ConfigCommand
             // in-memory store has nothing older to convert.
             if (store is not TomlSettingsStore files)
             {
-                terminal.ErrorLine("ERROR: this build has no settings file to migrate.");
+                terminal.ErrorLine(messages["config.migrate.noFileStore"]);
                 return ExitCodes.Failed;
             }
 
@@ -139,8 +144,8 @@ public static class ConfigCommand
                 // user's settings. Saying so here is cheaper than a second code
                 // path that could disagree with the store.
                 terminal.Line(File.Exists(location.PreviousFile)
-                    ? $"{location.PreviousFile} is the previous v8 file; it is converted automatically on the next read."
-                    : $"No v7 settings found at {location.LegacyFile}; nothing to migrate.");
+                    ? messages.Format("config.migrate.previousAuto", new { path = location.PreviousFile })
+                    : messages.Format("config.migrate.nothing", new { path = location.LegacyFile }));
                 return ExitCodes.Ok;
             }
 
@@ -159,37 +164,40 @@ public static class ConfigCommand
                 // must not do: the user would delete the v7 file.
                 if (!File.Exists(location.File))
                 {
-                    terminal.ErrorLine($"ERROR: {location.File} was not written; the v7 file is still the only copy.");
+                    terminal.ErrorLine(messages.Format("config.migrate.notWritten", new { path = location.File }));
                     return ExitCodes.Failed;
                 }
 
-                terminal.Line($"Wrote {location.File}");
+                terminal.Line(messages.Format("config.migrate.wrote", new { path = location.File }));
                 return ExitCodes.Ok;
             }
 
             string json = File.ReadAllText(location.LegacyFile);
             if (!LegacyV7Converter.LooksLikeV7(json))
             {
-                terminal.ErrorLine($"ERROR: {location.LegacyFile} is not a v7 settings file.");
+                terminal.ErrorLine(messages.Format("config.migrate.notV7", new { path = location.LegacyFile }));
                 return ExitCodes.Usage;
             }
 
             if (LegacyV7Converter.Parse(json) is not { } old)
             {
-                terminal.ErrorLine($"ERROR: {location.LegacyFile} could not be parsed.");
+                terminal.ErrorLine(messages.Format("config.migrate.unparsable", new { path = location.LegacyFile }));
                 return ExitCodes.Usage;
             }
 
             MigrationOutcome outcome = LegacyV7Converter.Convert(old);
-            terminal.Line($"Would write {location.File} (schema {outcome.Document.SchemaVersion})");
+            terminal.Line(messages.Format(
+                "config.migrate.wouldWrite",
+                new { path = location.File, schema = outcome.Document.SchemaVersion }));
             foreach (string note in outcome.Notes) terminal.Line($"  {note}");
-            terminal.Line($"Custom presets carried over: {outcome.Document.CustomPresets.Count}");
+            terminal.Line(messages.Format(
+                "config.migrate.presetsCarried", new { count = outcome.Document.CustomPresets.Count }));
             return ExitCodes.Ok;
         });
 
         return command;
     }
 
-    private static void Emit(ITerminal terminal, string key, object? value)
-        => terminal.Line($"{key} = {value?.ToString() ?? "(unset)"}");
+    private static void Emit(ITerminal terminal, IMessages messages, string key, object? value)
+        => terminal.Line($"{key} = {value?.ToString() ?? messages["config.unset"]}");
 }

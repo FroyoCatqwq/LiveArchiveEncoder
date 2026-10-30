@@ -29,15 +29,15 @@ public static class HistoryCommand
 {
     public static Command Build(IRunHistory history, ITerminal terminal, IMessages messages)
     {
-        var command = new Command("history", "Show what previous runs did.");
+        var command = new Command("history", messages["history.desc"]);
         command.Subcommands.Add(ListCommand(history, terminal, messages));
-        command.Subcommands.Add(PathCommand(history, terminal));
+        command.Subcommands.Add(PathCommand(history, terminal, messages));
         return command;
     }
 
-    private static Command PathCommand(IRunHistory history, ITerminal terminal)
+    private static Command PathCommand(IRunHistory history, ITerminal terminal, IMessages messages)
     {
-        var command = new Command("path", "Print where the history is kept.");
+        var command = new Command("path", messages["history.path.desc"]);
         command.SetAction(_ =>
         {
             terminal.Line(history.Location);
@@ -48,11 +48,11 @@ public static class HistoryCommand
 
     private static Command ListCommand(IRunHistory history, ITerminal terminal, IMessages messages)
     {
-        var command = new Command("list", "Print the most recent runs, newest first.");
+        var command = new Command("list", messages["history.list.desc"]);
 
         var limitOption = new Option<int>("--limit")
         {
-            Description = "How many rows to print.",
+            Description = messages["history.list.limitOpt"],
             DefaultValueFactory = _ => 20,
         };
         command.Options.Add(limitOption);
@@ -62,7 +62,7 @@ public static class HistoryCommand
             int limit = parseResult.GetValue(limitOption);
             if (limit < 1)
             {
-                terminal.ErrorLine($"ERROR: {messages["history.limit"]}");
+                terminal.ErrorLine(messages["history.limitWarn"]);
                 return ExitCodes.Usage;
             }
 
@@ -79,7 +79,7 @@ public static class HistoryCommand
             // The total goes last: it answers "how many in all" without a second
             // command, and it is the number that grows while --limit stays fixed.
             terminal.Line();
-            terminal.Line(messages.Get("history.total", new { runs = history.Count(), path = history.Location }));
+            terminal.Line(messages.Format("history.total", new { runs = history.Count(), path = history.Location }));
             return ExitCodes.Ok;
         });
 

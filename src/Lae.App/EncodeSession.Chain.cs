@@ -1,5 +1,6 @@
 using Lae.App.Ui;
 using Lae.Core;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
 using Lae.Encoding;
 using Lae.Media.Toolchain;
@@ -36,18 +37,23 @@ public static partial class EncodeSession
         bool dryRun,
         CancellationToken token)
     {
-        (RecompressChain? chain, string? chainError) = BuildChain(overrides);
+        IMessages messages = dependencies.Messages;
+
+        (RecompressChain? chain, string? chainError) = BuildChain(overrides, messages);
         if (chain is null)
         {
-            terminal.ErrorLine($"ERROR: {chainError ?? "--recompress-only needs at least one --recompress"}");
+            terminal.ErrorLine(chainError is null
+                ? messages["encode.error.recompressOnlyNeedsChain"]
+                : messages.Format("encode.error.generic", new { detail = chainError }));
             return ExitCodes.Usage;
         }
 
         ToolchainProbeResult tools = dependencies.ProbeToolchain(ToolchainDirectory(settings));
         if (tools.Ffmpeg is not { } ffmpeg)
         {
-            foreach (string line in tools.Missing()) terminal.ErrorLine($"ERROR: missing {line}");
-            terminal.ErrorLine("Run 'lae setup' for what to do about it.");
+            foreach (string line in tools.Missing())
+                terminal.ErrorLine(messages.Format("encode.error.missingTool", new { tool = line }));
+            terminal.ErrorLine(messages["encode.error.runSetup"]);
             return ExitCodes.Failed;
         }
 
@@ -55,21 +61,23 @@ public static partial class EncodeSession
         // rather than an FFmpeg diagnostic about a file it could not open.
         if (!File.Exists(input))
         {
-            terminal.ErrorLine($"ERROR: there is no file at '{input}'");
+            terminal.ErrorLine(messages.Format("encode.error.noFile", new { path = input }));
             return ExitCodes.Usage;
         }
 
         RecompressPlan plan = RecompressPlan.Create(chain, input);
 
-        foreach (string note in plan.Notes) terminal.ErrorLine($"note: {note}");
+        foreach (string note in plan.Notes)
+            terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
 
         if (!plan.IsRunnable)
         {
-            foreach (string problem in plan.Problems) terminal.ErrorLine($"ERROR: {problem}");
+            foreach (string problem in plan.Problems)
+                terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = problem }));
             return ExitCodes.Usage;
         }
 
-        PrintChain(plan, ffmpeg, terminal);
+        PrintChain(plan, ffmpeg, terminal, messages);
         if (dryRun) return ExitCodes.Ok;
 
         double span = tools.Ffprobe is { } ffprobe
@@ -79,16 +87,10 @@ public static partial class EncodeSession
         RecompressOutcome outcome = dependencies.RunRecompress(
             plan, ffmpeg,
             TimeSpan.FromSeconds(Math.Max(300.0, span * 4.0 + 120.0)),
-            note => terminal.ErrorLine($"note: {note}"),
+            note => terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note })),
             token);
 
-        foreach (string path in outcome.Written)
-            terminal.Line($"recompress {Path.GetFileName(path)}");
-
-        if (!outcome.Failed) return ExitCodes.Ok;
-
-        terminal.ErrorLine($"ERROR: {outcome.Error}");
-        return ExitCodes.Failed;
+        return ReportOutcome(outcome, plan, terminal, messages);
     }
 
     /// <summary>
@@ -109,19 +111,41 @@ public static partial class EncodeSession
         // its input, and killing it at the capture's own duration would be a
         // timeout dressed up as a failure.
         TimeSpan budget = TimeSpan.FromSeconds(Math.Max(300.0, span * 4.0 + 120.0));
+        IMessages messages = dependencies.Messages;
 
         RecompressOutcome outcome = dependencies.RunRecompress(
             plan, ffmpeg, budget,
-            note => terminal.ErrorLine($"note: {note}"),
+            note => terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note })),
             token);
 
+        return ReportOutcome(outcome, plan, terminal, messages, withRecording: true);
+    }
+
+    /// <summary>
+    /// What the chain produced, hop by hop, and what to exit with.
+    ///
+    /// <para>Shared by both entry points because the exit-code policy is the same
+    /// in both: a failed hop keeps the hops that succeeded, leaves the recording
+    /// untouched, and still exits 1 -- the user asked for a chain and did not get
+    /// one.</para>
+    /// </summary>
+    private static int ReportOutcome(
+        RecompressOutcome outcome, RecompressPlan plan, ITerminal terminal, IMessages messages,
+        bool withRecording = false)
+    {
         foreach (string path in outcome.Written)
-            terminal.Line($"recompress {Path.GetFileName(path)}");
+            terminal.Line(messages.Format("encode.chain.written", new { name = Path.GetFileName(path) }));
 
         if (!outcome.Failed) return ExitCodes.Ok;
 
-        terminal.ErrorLine($"ERROR: {outcome.Error}");
-        terminal.ErrorLine($"the recording is untouched: {plan.LivePath}");
+        terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = outcome.Error }));
+
+        // In a normal run the recording is the thing worth keeping, and saying so
+        // is what stops someone deleting it while cleaning up a failed chain. In
+        // --recompress-only there is no recording of this run's making.
+        if (withRecording)
+            terminal.ErrorLine(messages.Format("encode.chain.recordingUntouched", new { path = plan.LivePath }));
+
         return ExitCodes.Failed;
     }
 }

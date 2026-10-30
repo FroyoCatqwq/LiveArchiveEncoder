@@ -24,7 +24,7 @@ public interface IMessages
     /// The text for a key, with <c>{{name}}</c> placeholders filled from
     /// <paramref name="values"/> (an anonymous object).
     /// </summary>
-    string Get(string key, object? values = null);
+    string Format(string key, object? values = null);
 }
 
 /// <summary>
@@ -42,7 +42,7 @@ public sealed class KeyMessages(string language = "en") : IMessages
 
     public string this[string key] => key;
 
-    public string Get(string key, object? values = null) => key;
+    public string Format(string key, object? values = null) => key;
 }
 
 /// <summary>

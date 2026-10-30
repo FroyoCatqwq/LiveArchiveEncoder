@@ -1,6 +1,7 @@
 using System.Globalization;
 using Lae.App.Ui;
 using Lae.Core;
+using Lae.Core.Localization;
 using Lae.Encoding;
 
 namespace Lae.App;
@@ -13,18 +14,67 @@ namespace Lae.App;
 /// result has to use the terms the user asked the question in, and a dry run
 /// must put the command lines on stdout while every comment about them goes to
 /// stderr. Keeping the three together is what makes that rule visible.</para>
+///
+/// <para><b>Numbers and paths are not translated; labels and sentences are.</b>
+/// The numbers are formatted here, before the sentence sees them, because a
+/// placeholder is a hole in a sentence and alignment rules are not portable --
+/// <c>{{seconds}}</c> arrives already padded to the width the column needs, and
+/// the translator never has to know that.</para>
 /// </summary>
 public static partial class EncodeSession
 {
+    /// <summary>
+    /// The width every label in the plan and in the result occupies, so the
+    /// values form a column. A label longer than this -- which a translation can
+    /// well be -- gets a single space instead of being cut.
+    /// </summary>
+    private const int LabelWidth = 11;
+
+    private static void Field(ITerminal terminal, IMessages messages, string key, string value)
+        => terminal.Line(Label(messages[key]) + value);
+
+    private static string Label(string text) => text.Length >= LabelWidth ? text + " " : text.PadRight(LabelWidth);
+
+    private static string Number(double value, string format)
+        => value.ToString(format, CultureInfo.InvariantCulture);
+
     /// <summary>The plan, in the terms the user asked the question in.</summary>
-    private static void PrintPlan(EncodePlan plan, SourceInfo source, string ffmpeg, ITerminal terminal)
+    private static void PrintPlan(
+        EncodePlan plan, SourceInfo source, string ffmpeg, ITerminal terminal, IMessages messages)
     {
-        terminal.Line($"source     {source.Width}x{source.Height} {source.PixelFormat}"
-                    + $", {source.DurationSeconds:G6}s"
-                    + (source.HasAudio ? $", audio {source.AudioRate}Hz x{source.AudioChannels}" : ", no audio"));
-        terminal.Line($"output     {plan.Width}x{plan.Height} {plan.TransportPixelFormat}"
-                    + $", {plan.Container} ({plan.Muxer}), {plan.Fps:G6} fps");
-        terminal.Line($"span       {plan.SpanSeconds:G6}s -> {plan.TargetFrames} frames");
+        Field(terminal, messages, "encode.plan.source", source.HasAudio
+            ? messages.Format("encode.plan.sourceValue", new
+            {
+                width = source.Width,
+                height = source.Height,
+                pixFmt = source.PixelFormat,
+                seconds = Number(source.DurationSeconds, "G6"),
+                rate = source.AudioRate,
+                channels = source.AudioChannels,
+            })
+            : messages.Format("encode.plan.sourceValueSilent", new
+            {
+                width = source.Width,
+                height = source.Height,
+                pixFmt = source.PixelFormat,
+                seconds = Number(source.DurationSeconds, "G6"),
+            }));
+
+        Field(terminal, messages, "encode.plan.output", messages.Format("encode.plan.outputValue", new
+        {
+            width = plan.Width,
+            height = plan.Height,
+            pixFmt = plan.TransportPixelFormat,
+            container = plan.Container,
+            muxer = plan.Muxer,
+            fps = Number(plan.Fps, "G6"),
+        }));
+
+        Field(terminal, messages, "encode.plan.span", messages.Format("encode.plan.spanValue", new
+        {
+            seconds = Number(plan.SpanSeconds, "G6"),
+            frames = plan.TargetFrames,
+        }));
 
         // The quality number is the one setting whose meaning changes with the
         // encoder -- the same 8 is "quite good" in the mpeg family and "nearly
@@ -32,11 +82,14 @@ public static partial class EncodeSession
         // than a bare number the reader has to interpret.
         string quality = EncoderMath.ScaleOf(plan.Encode.Encoder) switch
         {
-            EncoderMath.QualityScale.Crf => $"crf {plan.Encode.Quality}",
-            EncoderMath.QualityScale.Bitrate => "no quality knob; the ceiling is the only dial",
-            _ => $"q:v {plan.Encode.Quality}",
+            EncoderMath.QualityScale.Crf
+                => messages.Format("encode.plan.qualityCrf", new { value = plan.Encode.Quality }),
+            EncoderMath.QualityScale.Bitrate
+                => messages["encode.plan.qualityBitrate"],
+            _
+                => messages.Format("encode.plan.qualityQv", new { value = plan.Encode.Quality }),
         };
-        terminal.Line($"quality    {quality}");
+        Field(terminal, messages, "encode.plan.quality", quality);
 
         // The ladder is the one part of the plan the user cannot see in the
         // command lines -- it changes what goes down the pipe, not what FFmpeg is
@@ -44,21 +97,26 @@ public static partial class EncodeSession
         // whole story.
         if (plan.BuildLadder() is { } ladder)
         {
-            terminal.Line($"ladder     {string.Join(" > ", ladder.Rungs.Select(r => r.Fps.ToString("G4", CultureInfo.InvariantCulture)))} fps"
-                        + $", down at {plan.Encode.LimitKbps:G4} kbps"
-                        + $", up at {LadderPolicy.RecoverKbps(plan.Encode):G4} kbps"
-                        + $", over {plan.Encode.WindowSeconds:G4}s");
+            Field(terminal, messages, "encode.plan.ladder", messages.Format("encode.plan.ladderValue", new
+            {
+                rungs = string.Join(" > ", ladder.Rungs.Select(r => Number(r.Fps, "G4"))),
+                down = Number(plan.Encode.LimitKbps, "G4"),
+                up = Number(LadderPolicy.RecoverKbps(plan.Encode), "G4"),
+                window = Number(plan.Encode.WindowSeconds, "G4"),
+            }));
         }
         else
         {
-            terminal.Line("ladder     off (single rung or no bitrate ceiling)");
+            Field(terminal, messages, "encode.plan.ladder", messages["encode.plan.ladderOff"]);
         }
 
-        terminal.Line($"frame      {plan.FrameSize} bytes on the pipe");
+        Field(terminal, messages, "encode.plan.frame",
+            messages.Format("encode.plan.frameValue", new { bytes = plan.FrameSize }));
+
         terminal.Line();
-        terminal.Line("decoder:");
+        terminal.Line(messages["encode.plan.decoder"]);
         terminal.Line("  " + Quote(plan.DecodeCommand(ffmpeg)));
-        terminal.Line("encoder:");
+        terminal.Line(messages["encode.plan.encoder"]);
         terminal.Line("  " + Quote(plan.EncodeCommand(ffmpeg)));
     }
 
@@ -67,10 +125,10 @@ public static partial class EncodeSession
     /// pasted into a shell, so the chain has to be in it: a plan that shows the
     /// capture and hides three transcodes is not the plan.
     /// </summary>
-    private static void PrintChain(RecompressPlan plan, string ffmpeg, ITerminal terminal)
+    private static void PrintChain(RecompressPlan plan, string ffmpeg, ITerminal terminal, IMessages messages)
     {
         terminal.Line();
-        terminal.Line("recompress:");
+        terminal.Line(messages["encode.chain.header"]);
         foreach (RecompressStep step in plan.Steps)
             terminal.Line($"  {Quote(step.Command(ffmpeg, step.OutputPath))}");
     }
@@ -79,26 +137,41 @@ public static partial class EncodeSession
     /// What came out, in the terms the archive cares about: how long it ran
     /// against the span it covered, and what bitrate the result actually is.
     /// </summary>
-    private static void PrintResult(LiveRun run, ITerminal terminal)
+    private static void PrintResult(LiveRun run, ITerminal terminal, IMessages messages)
     {
         string size = run.OutputBytes >= 1024 * 1024
-            ? $"{run.OutputBytes / 1024.0 / 1024.0:F2} MiB"
-            : $"{run.OutputBytes / 1024.0:F0} KiB";
+            ? Number(run.OutputBytes / 1024.0 / 1024.0, "F2") + " MiB"
+            : Number(run.OutputBytes / 1024.0, "F0") + " KiB";
 
         terminal.Line();
-        terminal.Line($"written    {run.OutputPath}");
-        terminal.Line($"size       {size}, {run.AverageKbps:F0} kbps over {run.SpanSeconds:G4}s");
-        terminal.Line($"pacing     {run.Pump.Frames} slots in {run.Pump.Seconds:F2}s "
-                    + $"({run.Pump.EffectiveFps:F2} fps), "
-                    + $"fresh {run.Pump.Fresh}, repeated {run.Pump.Repeated}");
+        Field(terminal, messages, "encode.result.written", run.OutputPath);
+        Field(terminal, messages, "encode.result.size", messages.Format("encode.result.sizeValue", new
+        {
+            size,
+            kbps = Number(run.AverageKbps, "F0"),
+            seconds = Number(run.SpanSeconds, "G4"),
+        }));
+        Field(terminal, messages, "encode.result.pacing", messages.Format("encode.result.pacingValue", new
+        {
+            seconds = Number(run.Pump.Seconds, "F2"),
+            frames = run.Pump.Frames,
+            fps = Number(run.Pump.EffectiveFps, "F2"),
+            fresh = run.Pump.Fresh,
+            repeated = run.Pump.Repeated,
+        }));
 
         // Only worth a line when it actually happened: a run that stayed on the
         // top rung is the normal case, and saying so on every encode is noise.
         if (run.Pump.FinalRung > 0 || run.Pump.Dropped > 0)
         {
-            terminal.Line($"motion     ended at {run.Pump.MotionFps:G4} fps"
-                        + (run.Pump.FinalRung > 0 ? $" (rung {run.Pump.FinalRung})" : "")
-                        + $", {run.Pump.Dropped} decoded frames dropped");
+            Field(terminal, messages, "encode.result.motion", messages.Format("encode.result.motionValue", new
+            {
+                fps = Number(run.Pump.MotionFps, "G4"),
+                rung = run.Pump.FinalRung > 0
+                    ? messages.Format("encode.result.motionRung", new { rung = run.Pump.FinalRung })
+                    : "",
+                dropped = run.Pump.Dropped,
+            }));
         }
     }
 

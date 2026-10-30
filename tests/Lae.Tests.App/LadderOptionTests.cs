@@ -2,7 +2,9 @@ using System.CommandLine;
 using Lae.App;
 using Lae.App.Ui;
 using Lae.Core;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
+using Lae.Media.Localization;
 
 namespace Lae.Tests.App;
 
@@ -17,6 +19,9 @@ namespace Lae.Tests.App;
 /// </summary>
 public sealed class LadderOptionTests
 {
+    /// <summary>The sentences a user actually sees; the assertions below quote them.</summary>
+    private static readonly IMessages En = I18NextMessages.Create("en");
+
     private static SettingsDocument Stored() => new()
     {
         Defaults = new EncodeDefaults { Encoder = "mpeg4", LimitKbps = 200, RecoverKbps = 150 },
@@ -28,7 +33,7 @@ public sealed class LadderOptionTests
         (EncodeRequest? request, string? error) = EncodeSession.BuildRequest(
             "/media/in.mkv",
             new EncodeOverrides { LimitKbps = 60, RecoverKbps = 40 },
-            Stored());
+            Stored(), En);
 
         await Assert.That(error).IsNull();
         await Assert.That(request!.Encode.LimitKbps).IsEqualTo(60.0);
@@ -57,7 +62,7 @@ public sealed class LadderOptionTests
                     FpsLevels = [13, 8, 5, 3],
                     FpsThresholds = [new FpsThreshold(5, 999, 888)],
                 },
-            });
+            }, En);
 
         await Assert.That(string.Join(',', request!.Encode.FpsLevels)).IsEqualTo("13,8");
         await Assert.That(request.Encode.FpsThresholds.Count).IsEqualTo(2);

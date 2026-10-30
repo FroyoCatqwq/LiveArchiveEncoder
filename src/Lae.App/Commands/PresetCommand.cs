@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Globalization;
 using Lae.App.Ui;
 using Lae.Core;
+using Lae.Core.Localization;
 using Lae.Core.Presets;
 using Lae.Core.Settings;
 
@@ -20,29 +21,33 @@ namespace Lae.App.Commands;
 /// <para>Every subcommand prints its own answer and returns an exit code; the
 /// store is written only when something actually changed, so a listing can never
 /// create a settings file as a side effect.</para>
+///
+/// <para><b>Field labels stay as they are.</b> <c>encoder</c>, <c>ceiling</c>,
+/// <c>quality</c> are the words the settings file uses; translating them would
+/// make <c>preset show</c> stop being a readable form of the TOML it describes.</para>
 /// </summary>
 public static class PresetCommand
 {
-    public static Command Build(ISettingsStore store, ITerminal terminal)
+    public static Command Build(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
-        var command = new Command("preset", "List, inspect, add or remove your own encode presets.");
-        command.Subcommands.Add(ListCommand(store, terminal));
-        command.Subcommands.Add(ShowCommand(store, terminal));
-        command.Subcommands.Add(AddCommand(store, terminal));
-        command.Subcommands.Add(RemoveCommand(store, terminal));
+        var command = new Command("preset", messages["preset.desc"]);
+        command.Subcommands.Add(ListCommand(store, terminal, messages));
+        command.Subcommands.Add(ShowCommand(store, terminal, messages));
+        command.Subcommands.Add(AddCommand(store, terminal, messages));
+        command.Subcommands.Add(RemoveCommand(store, terminal, messages));
         return command;
     }
 
-    private static Command ListCommand(ISettingsStore store, ITerminal terminal)
+    private static Command ListCommand(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
-        var command = new Command("list", "Print every stored preset.");
+        var command = new Command("list", messages["preset.list.desc"]);
 
         command.SetAction(_ =>
         {
             IReadOnlyList<CustomPreset> presets = PresetCatalog.All(store.Load());
             if (presets.Count == 0)
             {
-                terminal.Line("no presets; 'lae preset add <id> --encoder mpeg4 --size 320x240' makes one");
+                terminal.Line(messages["preset.list.empty"]);
                 return ExitCodes.Ok;
             }
 
@@ -61,19 +66,20 @@ public static class PresetCommand
         return command;
     }
 
-    private static Command ShowCommand(ISettingsStore store, ITerminal terminal)
+    private static Command ShowCommand(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
-        var idArgument = new Argument<string>("id") { Description = "Preset id." };
+        var idArgument = new Argument<string>("id") { Description = messages["preset.arg.id"] };
 
-        var command = new Command("show", "Print one preset, field by field.") { idArgument };
+        var command = new Command("show", messages["preset.show.desc"]) { idArgument };
 
         command.SetAction((ParseResult parseResult) =>
         {
             SettingsDocument document = store.Load();
             if (PresetCatalog.Find(document, parseResult.GetValue(idArgument)) is not { } preset)
             {
-                terminal.ErrorLine($"ERROR: there is no preset named '{parseResult.GetValue(idArgument)}'.");
-                terminal.ErrorLine("Run 'lae preset list' to see the ones you have.");
+                terminal.ErrorLine(messages.Format(
+                    "preset.show.missing", new { id = parseResult.GetValue(idArgument) }));
+                terminal.ErrorLine(messages["preset.show.seeList"]);
                 return ExitCodes.Usage;
             }
 
@@ -119,9 +125,12 @@ public static class PresetCommand
             // the values above are really about.
             EncodeDefaults applied = PresetCatalog.Apply(preset, document.Defaults);
             terminal.Line();
-            terminal.Line($"applies    {applied.Encoder ?? "mpeg4"} {applied.Width}x{applied.Height}"
-                        + $" {Number(applied.Fps)} fps, ceiling {Number(applied.LimitKbps)} kbps,"
-                        + $" quality {applied.Quality}");
+            terminal.Line(messages.Format("preset.show.applies", new
+            {
+                text = $"{applied.Encoder ?? "mpeg4"} {applied.Width}x{applied.Height}"
+                     + $" {Number(applied.Fps)} fps, ceiling {Number(applied.LimitKbps)} kbps,"
+                     + $" quality {applied.Quality}",
+            }));
 
             return ExitCodes.Ok;
         });
@@ -129,31 +138,31 @@ public static class PresetCommand
         return command;
     }
 
-    private static Command AddCommand(ISettingsStore store, ITerminal terminal)
+    private static Command AddCommand(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
         var idArgument = new Argument<string>("id")
         {
-            Description = "Id for the preset: letters, digits, '-', '_' or '.'.",
+            Description = messages["preset.arg.newId"],
         };
 
-        var labelOption = new Option<string?>("--label") { Description = "Human name to show in a list." };
-        var noteOption = new Option<string?>("--note") { Description = "Free-form reminder." };
-        var encoderOption = new Option<string?>("--encoder") { Description = "Video encoder, e.g. mpeg4." };
-        var containerOption = new Option<string?>("--container") { Description = "Container extension, e.g. avi." };
-        var sizeOption = new Option<string?>("--size") { Description = "Frame size as WIDTHxHEIGHT." };
-        var fpsOption = new Option<double?>("--fps") { Description = "Base frame rate." };
-        var limitOption = new Option<double?>("--limit") { Description = "Bitrate ceiling in kbps." };
-        var windowOption = new Option<double?>("--window") { Description = "Bitrate averaging window in seconds." };
+        var labelOption = new Option<string?>("--label") { Description = messages["preset.opt.label"] };
+        var noteOption = new Option<string?>("--note") { Description = messages["preset.opt.note"] };
+        var encoderOption = new Option<string?>("--encoder") { Description = messages["preset.opt.encoder"] };
+        var containerOption = new Option<string?>("--container") { Description = messages["preset.opt.container"] };
+        var sizeOption = new Option<string?>("--size") { Description = messages["preset.opt.size"] };
+        var fpsOption = new Option<double?>("--fps") { Description = messages["preset.opt.fps"] };
+        var limitOption = new Option<double?>("--limit") { Description = messages["preset.opt.limit"] };
+        var windowOption = new Option<double?>("--window") { Description = messages["preset.opt.window"] };
         var qualityOption = new Option<int?>("--quality")
         {
-            Description = "Quality in the encoder's own scale (2..31 for the mpeg family, 0..51 for x264).",
+            Description = messages["preset.opt.quality"],
         };
         var keepOption = new Option<bool>("--keep")
         {
-            Description = "Fill every unspecified field from the current defaults instead of leaving it open.",
+            Description = messages["preset.opt.keep"],
         };
 
-        var command = new Command("add", "Store a preset, or replace the one with this id.")
+        var command = new Command("add", messages["preset.add.desc"])
         {
             idArgument, labelOption, noteOption, encoderOption, containerOption,
             sizeOption, fpsOption, limitOption, windowOption, qualityOption, keepOption,
@@ -171,7 +180,7 @@ public static class PresetCommand
             {
                 if (!EncodeSession.TryParseSize(size, out int w, out int h))
                 {
-                    terminal.ErrorLine($"ERROR: --size wants WIDTHxHEIGHT, got '{size}'");
+                    terminal.ErrorLine(messages.Format("encode.error.size", new { value = size }));
                     return ExitCodes.Usage;
                 }
 
@@ -221,24 +230,29 @@ public static class PresetCommand
             PresetChange change = PresetCatalog.Put(document, preset);
             if (!change.Ok)
             {
-                terminal.ErrorLine($"ERROR: {change.Error}");
+                terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = change.Error }));
                 return ExitCodes.Usage;
             }
 
-            if (Persist(store, terminal, change.Document!) is { } failed) return failed;
+            if (Persist(store, terminal, change.Document!, messages) is { } failed) return failed;
 
-            terminal.Line($"stored {PresetCatalog.NormaliseId(preset.Id)}: {PresetCatalog.Describe(preset)}");
-            terminal.Line($"use it with: lae encode <source> --preset {PresetCatalog.NormaliseId(preset.Id)}");
+            terminal.Line(messages.Format("preset.add.stored", new
+            {
+                id = PresetCatalog.NormaliseId(preset.Id),
+                text = PresetCatalog.Describe(preset),
+            }));
+            terminal.Line(messages.Format(
+                "preset.add.useIt", new { id = PresetCatalog.NormaliseId(preset.Id) }));
             return ExitCodes.Ok;
         });
 
         return command;
     }
 
-    private static Command RemoveCommand(ISettingsStore store, ITerminal terminal)
+    private static Command RemoveCommand(ISettingsStore store, ITerminal terminal, IMessages messages)
     {
-        var idArgument = new Argument<string>("id") { Description = "Preset id." };
-        var command = new Command("remove", "Delete a preset.") { idArgument };
+        var idArgument = new Argument<string>("id") { Description = messages["preset.arg.id"] };
+        var command = new Command("remove", messages["preset.remove.desc"]) { idArgument };
 
         command.SetAction((ParseResult parseResult) =>
         {
@@ -246,13 +260,13 @@ public static class PresetCommand
             PresetChange change = PresetCatalog.Remove(document, parseResult.GetValue(idArgument));
             if (!change.Ok)
             {
-                terminal.ErrorLine($"ERROR: {change.Error}");
+                terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = change.Error }));
                 return ExitCodes.Usage;
             }
 
-            if (Persist(store, terminal, change.Document!) is { } failed) return failed;
+            if (Persist(store, terminal, change.Document!, messages) is { } failed) return failed;
 
-            terminal.Line($"removed {parseResult.GetValue(idArgument)}");
+            terminal.Line(messages.Format("preset.remove.removed", new { id = parseResult.GetValue(idArgument) }));
             return ExitCodes.Ok;
         });
 
@@ -266,11 +280,13 @@ public static class PresetCommand
     /// both worlds: the user believes the preset exists, and the next run has
     /// never heard of it.</para>
     /// </summary>
-    private static int? Persist(ISettingsStore store, ITerminal terminal, SettingsDocument document)
+    private static int? Persist(
+        ISettingsStore store, ITerminal terminal, SettingsDocument document, IMessages messages)
     {
         if (store.TrySave(document) is not { } error) return null;
 
-        terminal.ErrorLine($"ERROR: could not write {store.Location}: {error}");
+        terminal.ErrorLine(messages.Format(
+            "preset.writeFailed", new { path = store.Location, detail = error }));
         return ExitCodes.Failed;
     }
 

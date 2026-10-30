@@ -2,7 +2,9 @@ using Lae.App;
 using Lae.App.Commands;
 using Lae.App.Ui;
 using Lae.Core;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
+using Lae.Media.Localization;
 using Lae.Media.Toolchain;
 
 namespace Lae.Tests.App;
@@ -17,6 +19,9 @@ namespace Lae.Tests.App;
 /// </summary>
 public sealed class EncodeRequestBuildingTests
 {
+    /// <summary>The sentences a user actually sees; the assertions below quote them.</summary>
+    private static readonly IMessages En = I18NextMessages.Create("en");
+
     private static SettingsDocument Stored() => new()
     {
         Defaults = new EncodeDefaults
@@ -44,7 +49,7 @@ public sealed class EncodeRequestBuildingTests
     public async Task NoOutputIsLeftForThePlanToName()
     {
         (EncodeRequest? request, string? error) = EncodeSession.BuildRequest(
-            "/media/clips/talk.mkv", new EncodeOverrides(), Stored());
+            "/media/clips/talk.mkv", new EncodeOverrides(), Stored(), En);
 
         await Assert.That(error).IsNull();
         await Assert.That(request!.DestinationPath).IsNull();
@@ -54,7 +59,7 @@ public sealed class EncodeRequestBuildingTests
     public async Task AnExplicitOutputIsTakenVerbatim()
     {
         (EncodeRequest? request, _) = EncodeSession.BuildRequest(
-            "/media/clips/talk.mkv", new EncodeOverrides { Output = "/tmp/out.mkv" }, Stored());
+            "/media/clips/talk.mkv", new EncodeOverrides { Output = "/tmp/out.mkv" }, Stored(), En);
 
         await Assert.That(request!.DestinationPath).IsEqualTo("/tmp/out.mkv");
     }
@@ -69,7 +74,7 @@ public sealed class EncodeRequestBuildingTests
     public async Task SwitchingTheEncoderCarriesTheQualityNumberAcrossScales()
     {
         (EncodeRequest? request, _) = EncodeSession.BuildRequest(
-            "/media/in.mkv", new EncodeOverrides { Encoder = "libx264" }, Stored());
+            "/media/in.mkv", new EncodeOverrides { Encoder = "libx264" }, Stored(), En);
 
         await Assert.That(request!.Encode.Encoder).IsEqualTo("libx264");
 
@@ -85,7 +90,7 @@ public sealed class EncodeRequestBuildingTests
     public async Task RestatingQualityKeepsTheNumberTheUserTyped()
     {
         (EncodeRequest? request, _) = EncodeSession.BuildRequest(
-            "/media/in.mkv", new EncodeOverrides { Encoder = "libx264", Quality = 20 }, Stored());
+            "/media/in.mkv", new EncodeOverrides { Encoder = "libx264", Quality = 20 }, Stored(), En);
 
         await Assert.That(request!.Encode.Quality).IsEqualTo(20);
     }
@@ -108,7 +113,7 @@ public sealed class EncodeRequestBuildingTests
         };
 
         (EncodeRequest? request, _) = EncodeSession.BuildRequest(
-            "/media/in.mkv", new EncodeOverrides { Preset = "small", Encoder = "libx264" }, settings);
+            "/media/in.mkv", new EncodeOverrides { Preset = "small", Encoder = "libx264" }, settings, En);
 
         await Assert.That(request!.Encode.Encoder).IsEqualTo("libx264");
 
@@ -122,7 +127,7 @@ public sealed class EncodeRequestBuildingTests
         (EncodeRequest? request, _) = EncodeSession.BuildRequest(
             "/media/in.mkv",
             new EncodeOverrides { Container = "mkv", Quality = 3, Size = "256X192", From = 12, To = 30 },
-            Stored());
+            Stored(), En);
 
         await Assert.That(request!.Encode.Container).IsEqualTo("mkv");
         await Assert.That(request.Encode.Quality).IsEqualTo(3);
@@ -140,7 +145,7 @@ public sealed class EncodeRequestBuildingTests
     [Test]
     public async Task StoredSubtitlesAndRecompressNeverLeakIntoARun()
     {
-        (EncodeRequest? request, _) = EncodeSession.BuildRequest("/media/in.mkv", new EncodeOverrides(), Stored());
+        (EncodeRequest? request, _) = EncodeSession.BuildRequest("/media/in.mkv", new EncodeOverrides(), Stored(), En);
 
         await Assert.That(request!.Encode.Subtitles.Any).IsFalse();
         await Assert.That(request.Encode.Recompress.Enabled).IsFalse();
@@ -175,6 +180,9 @@ public sealed class EncodeRequestBuildingTests
 /// </summary>
 public sealed class SetupReportTests
 {
+    /// <summary>The sentences a user actually sees; the assertions below quote them.</summary>
+    private static readonly IMessages En = I18NextMessages.Create("en");
+
     private static SettingsDocument Settings(string? path = null)
         => new() { Toolchain = new ToolchainSettings { FfmpegSource = "path", FfmpegPath = path } };
 
@@ -184,7 +192,7 @@ public sealed class SetupReportTests
         var terminal = new BufferedTerminal();
         var probe = new ToolchainProbeResult { Ffmpeg = "/usr/bin/ffmpeg", Ffprobe = "/usr/bin/ffprobe" };
 
-        int code = SetupReport.Run(Settings(), "/home/x/settings.json", probe, terminal);
+        int code = SetupReport.Run(Settings(), "/home/x/settings.json", probe, terminal, En);
 
         await Assert.That(code).IsEqualTo(ExitCodes.Ok);
         await Assert.That(terminal.OutputLines.Any(l => l.Contains("Ready.", StringComparison.Ordinal))).IsTrue();
@@ -201,7 +209,7 @@ public sealed class SetupReportTests
     {
         var terminal = new BufferedTerminal();
 
-        int code = SetupReport.Run(Settings(), "/home/x/settings.json", new ToolchainProbeResult(), terminal);
+        int code = SetupReport.Run(Settings(), "/home/x/settings.json", new ToolchainProbeResult(), terminal, En);
 
         await Assert.That(code).IsEqualTo(ExitCodes.Failed);
 
@@ -223,7 +231,7 @@ public sealed class SetupReportTests
         var terminal = new BufferedTerminal();
         var probe = new ToolchainProbeResult { Ffmpeg = "/opt/ff/bin/ffmpeg" };
 
-        SetupReport.Run(Settings("/opt/ff"), "/home/x/settings.json", probe, terminal);
+        SetupReport.Run(Settings("/opt/ff"), "/home/x/settings.json", probe, terminal, En);
 
         await Assert.That(terminal.OutputLines.Any(l => l.Contains("/opt/ff", StringComparison.Ordinal))).IsTrue();
     }

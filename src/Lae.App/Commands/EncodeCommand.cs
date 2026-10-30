@@ -2,6 +2,7 @@ using System.CommandLine;
 using Lae.App.Ui;
 using Lae.Core;
 using Lae.Core.History;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
 
 namespace Lae.App.Commands;
@@ -15,103 +16,107 @@ namespace Lae.App.Commands;
 /// options and translates them into an <see cref="EncodeOverrides"/>; every
 /// decision moved to <see cref="EncodeSession"/>, which takes a terminal and a
 /// set of dependencies and can therefore be driven by a test.</para>
+///
+/// <para><b>Option text is translated at build time.</b> That is why the
+/// <paramref name="messages"/> parameter exists: <c>--help</c> is fixed when the
+/// tree is built, so the language has to be known before then. It is, because the
+/// host reads the settings once for exactly this reason.</para>
 /// </summary>
 public static class EncodeCommand
 {
-    public static Command Build(ISettingsStore store, ITerminal terminal, IRunHistory history)
+    public static Command Build(ISettingsStore store, ITerminal terminal, IRunHistory history, IMessages messages)
     {
         var inputArgument = new Argument<string>("input")
         {
-            Description = "The source to re-encode.",
+            Description = messages["encode.arg.input"],
         };
 
         var outOption = new Option<string?>("--out")
         {
-            Description = "Output path. Defaults to the source name with the encoder's extension.",
+            Description = messages["encode.opt.out"],
         };
         var encoderOption = new Option<string?>("--encoder")
         {
-            Description = "Video encoder, e.g. mpeg4, libx264, flv. Defaults to the stored one.",
+            Description = messages["encode.opt.encoder"],
         };
         var containerOption = new Option<string?>("--container")
         {
-            Description = "Container extension, e.g. avi, mkv, mp4. Defaults to the encoder's own.",
+            Description = messages["encode.opt.container"],
         };
         var fromOption = new Option<double?>("--from")
         {
-            Description = "Start offset in seconds.",
+            Description = messages["encode.opt.from"],
         };
         var toOption = new Option<double?>("--to")
         {
-            Description = "End offset in seconds.",
+            Description = messages["encode.opt.to"],
         };
         var qualityOption = new Option<int?>("--quality")
         {
-            Description = "Quality in the encoder's own scale (2..31 for the mpeg family, 0..51 for x264).",
+            Description = messages["encode.opt.quality"],
         };
         var sizeOption = new Option<string?>("--size")
         {
-            Description = "Output frame size as WIDTHxHEIGHT.",
+            Description = messages["encode.opt.size"],
         };
         var presetOption = new Option<string?>("--preset")
         {
-            Description = "Start from one of your stored presets; 'lae preset list' shows them.",
+            Description = messages["encode.opt.preset"],
         };
         var limitOption = new Option<double?>("--limit")
         {
-            Description = "Bitrate ceiling in kbps. The ladder drops frames rather than exceed it.",
+            Description = messages["encode.opt.limit"],
         };
         var recoverOption = new Option<double?>("--recover")
         {
-            Description = "Bitrate the ladder climbs back from; defaults to 75% of the ceiling.",
+            Description = messages["encode.opt.recover"],
         };
         var levelsOption = new Option<string?>("--fps-levels")
         {
-            Description = "Ladder as FPS[,FPS[:drop[:rise]]...], e.g. 13,8,5,3 or 13,8:150:110.",
+            Description = messages["encode.opt.fpsLevels"],
         };
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Print the two FFmpeg command lines and stop.",
+            Description = messages["encode.opt.dryRun"],
         };
         var subtitleOption = new Option<string[]>("--subtitle-file")
         {
-            Description = "Burn this .srt/.ass into the picture; repeat for more than one.",
+            Description = messages["encode.opt.subtitleFile"],
         };
         var subtitleTrackOption = new Option<int?>("--subtitle-track")
         {
-            Description = "Burn the embedded subtitle track with this absolute index.",
+            Description = messages["encode.opt.subtitleTrack"],
         };
         var subtitleCopyOption = new Option<int[]>("--subtitle-copy")
         {
-            Description = "Carry this subtitle track into the output as a stream; repeat for more than one.",
+            Description = messages["encode.opt.subtitleCopy"],
         };
         var subtitleBoxOption = new Option<string?>("--subtitle-box")
         {
-            Description = "Shape the text is laid out in: source, 4:3 or 16:9.",
+            Description = messages["encode.opt.subtitleBox"],
         };
         var subtitleFontOption = new Option<string?>("--subtitle-font")
         {
-            Description = "Font family forced over whatever the subtitle file asks for.",
+            Description = messages["encode.opt.subtitleFont"],
         };
         var fontsDirOption = new Option<string?>("--fonts-dir")
         {
-            Description = "Extra folder libass may look in for fonts.",
+            Description = messages["encode.opt.fontsDir"],
         };
         var recompressOption = new Option<string[]>("--recompress")
         {
-            Description = "One FFmpeg fragment for a post-encode pass; repeat for a chain "
-                        + "(a 2007 portal first, then the 2011 one).",
+            Description = messages["encode.opt.recompress"],
         };
         var recompressContainerOption = new Option<string[]>("--recompress-container")
         {
-            Description = "Container for a post-encode pass, paired by position with --recompress.",
+            Description = messages["encode.opt.recompressContainer"],
         };
         var recompressOnlyOption = new Option<bool>("--recompress-only")
         {
-            Description = "Run the chain against the existing file and skip the capture entirely.",
+            Description = messages["encode.opt.recompressOnly"],
         };
 
-        var command = new Command("encode", "Re-encode one source at archive pace.")
+        var command = new Command("encode", messages["encode.desc"])
         {
             inputArgument,
             outOption,
@@ -150,7 +155,7 @@ public static class EncodeCommand
 
                 if (error is not null)
                 {
-                    terminal.ErrorLine($"ERROR: --fps-levels: {error}");
+                    terminal.ErrorLine(messages.Format("encode.error.fpsLevels", new { detail = error }));
                     return ExitCodes.Usage;
                 }
 
@@ -190,7 +195,7 @@ public static class EncodeCommand
                 parseResult.GetValue(inputArgument)!,
                 overrides,
                 store.Load(),
-                EncodeDependencies.Default with { History = history },
+                EncodeDependencies.Default with { History = history, Messages = messages },
                 terminal,
                 parseResult.GetValue(dryRunOption),
                 Interrupt.Token);

@@ -1,8 +1,192 @@
 {
+  "root": {
+    "desc": "LiveArchiveEncoder — 按 1998 年归档机柜的节奏重新编码素材。",
+    "opt": {
+      "help": "显示帮助和用法"
+    }
+  },
+  "version": {
+    "desc": "打印版本号后退出。",
+    "opt": {
+      "version": "打印版本号后退出。"
+    }
+  },
+  "repl": {
+    "desc": "带行内补全的交互式提示符。",
+    "needsTerminal": "ERROR: 'repl' 需要交互式终端；stdin 或 stdout 被重定向了。"
+  },
+  "encode": {
+    "desc": "以归档节奏重新编码一个素材。",
+    "arg": {
+      "input": "要重新编码的素材。"
+    },
+    "opt": {
+      "out": "产物路径。不给就放在素材旁边，扩展名取编码器自己的。",
+      "encoder": "视频编码器，例如 mpeg4、libx264、flv。默认用设置里存的那个。",
+      "container": "容器扩展名，例如 avi、mkv、mp4。默认用编码器自己的。",
+      "from": "起点，单位秒。",
+      "to": "终点，单位秒。",
+      "quality": "质量，用编码器自己的刻度（mpeg 家族 2..31，x264 0..51）。",
+      "size": "输出画幅，写成 宽x高。",
+      "preset": "从你保存的预设开始；'lae preset list' 列出全部。",
+      "limit": "码率上限，单位 kbps。阶梯宁可丢帧也不越过它。",
+      "recover": "阶梯回升的门槛；默认是上限的 75%。",
+      "fpsLevels": "阶梯写成 帧率[,帧率[:降[:升]]...]，例如 13,8,5,3 或 13,8:150:110。",
+      "dryRun": "打印两条 FFmpeg 命令行后停止。",
+      "subtitleFile": "把这条 .srt/.ass 烧进画面；多条就重复给。",
+      "subtitleTrack": "烧录绝对序号为这个值的内嵌字幕轨。",
+      "subtitleCopy": "把这条字幕轨作为字幕流带进产物；多条就重复给。",
+      "subtitleBox": "字幕排版用的画幅：source、4:3 或 16:9。",
+      "subtitleFont": "强制使用的字体族，覆盖字幕文件自己的要求。",
+      "fontsDir": "libass 额外查找字体的目录。",
+      "recompress": "二次压缩的一趟 FFmpeg 参数；多趟就重复给（先 2007 年的门户，再 2011 年的）。",
+      "recompressContainer": "某一趟的容器，按位置与 --recompress 配对。",
+      "recompressOnly": "对已有文件跑链，完全跳过采集。"
+    },
+    "plan": {
+      "source": "来源",
+      "output": "输出",
+      "span": "时长",
+      "quality": "质量",
+      "ladder": "阶梯",
+      "frame": "帧",
+      "decoder": "解码:",
+      "encoder": "编码:",
+      "sourceValue": "{{width}}x{{height}} {{pixFmt}}，{{seconds}}s，音频 {{rate}}Hz x{{channels}}",
+      "sourceValueSilent": "{{width}}x{{height}} {{pixFmt}}，{{seconds}}s，无音频",
+      "outputValue": "{{width}}x{{height}} {{pixFmt}}，{{container}}（{{muxer}}），{{fps}} fps",
+      "spanValue": "{{seconds}}s -> {{frames}} 帧",
+      "qualityCrf": "crf {{value}}",
+      "qualityQv": "q:v {{value}}",
+      "qualityBitrate": "没有质量旋钮；上限是唯一能拧的东西",
+      "ladderValue": "{{rungs}} fps，高于 {{down}} kbps 降档，低于 {{up}} kbps 升档，窗口 {{window}}s",
+      "ladderOff": "关闭（只有一档或没有码率上限）",
+      "frameValue": "管道上每帧 {{bytes}} 字节"
+    },
+    "result": {
+      "written": "产物",
+      "size": "大小",
+      "pacing": "节奏",
+      "motion": "动态",
+      "sizeValue": "{{size}}，{{seconds}}s 内 {{kbps}} kbps",
+      "pacingValue": "{{seconds}}s 内 {{frames}} 个槽（{{fps}} fps），新帧 {{fresh}}，重复 {{repeated}}",
+      "motionValue": "结束于 {{fps}} fps{{rung}}，丢弃 {{dropped}} 个解码帧",
+      "motionRung": "（第 {{rung}} 档）",
+      "framesWritten": "[{{seconds}}s] 写入 {{frames}} 帧",
+      "framesRepeated": "（{{repeated}} 帧重复）"
+    },
+    "progress": {
+      "of": "[{{elapsed}}s] {{done}}/{{total}} 帧（{{percent}}%）",
+      "only": "[{{elapsed}}s] {{done}} 帧"
+    },
+    "chain": {
+      "header": "二次压缩:",
+      "written": "二次压缩 {{name}}",
+      "recordingUntouched": "录像没有被改动：{{path}}"
+    },
+    "error": {
+      "generic": "ERROR: {{detail}}",
+      "missingTool": "ERROR: 缺少 {{tool}}",
+      "runSetup": "运行 'lae setup' 看看该怎么办。",
+      "cannotRead": "ERROR: 读不了 '{{path}}'：{{detail}}",
+      "noEncoder": "ERROR: 这个 FFmpeg 构建里没有名为 '{{name}}' 的编码器。",
+      "encoderSuggestions": "可以试试：mpeg4、mpeg1video、flv、libx264。",
+      "presetMissing": "没有名为 '{{id}}' 的预设；运行 'lae preset list'",
+      "subtitleMix": "--subtitle-track 烧一条轨，--subtitle-copy 把别的轨带走；这是两件事，选一个",
+      "containerPairing": "给了 {{given}} 个容器，但只有 {{passes}} 趟；多出来的那个没有归宿",
+      "size": "--size 要的是 宽x高，收到的是 '{{value}}'",
+      "fpsLevels": "ERROR: --fps-levels: {{detail}}",
+      "recompressOnlyNeedsChain": "ERROR: --recompress-only 至少需要一个 --recompress",
+      "noFile": "ERROR: '{{path}}' 处没有文件"
+    },
+    "note": {
+      "prefixed": "note: {{text}}",
+      "discardFailed": "note: 删不掉 {{path}}：{{detail}}"
+    }
+  },
+  "config": {
+    "desc": "查看、定位或迁移设置文件。",
+    "path": {
+      "desc": "打印设置文件路径后退出。"
+    },
+    "show": {
+      "desc": "把生效的设置按 键 = 值 逐行打印。",
+      "toml": "把文档按存储会写出的形状打成 TOML。"
+    },
+    "migrate": {
+      "desc": "把旧配置文件（v7 JSON 或 v8 JSON）转成 settings.toml。",
+      "dryRun": "只报告会改什么，不写任何东西。",
+      "noFileStore": "ERROR: 这个构建没有可迁移的设置文件。",
+      "previousAuto": "{{path}} 是上一个 v8 文件；下次读取时会自动转换。",
+      "nothing": "在 {{path}} 没找到 v7 设置，没有可迁移的。",
+      "notWritten": "ERROR: {{path}} 没有被写出；v7 文件仍是唯一的副本。",
+      "wrote": "已写入 {{path}}",
+      "notV7": "ERROR: {{path}} 不是 v7 设置文件。",
+      "unparsable": "ERROR: {{path}} 解析不了。",
+      "wouldWrite": "将写入 {{path}}（schema {{schema}}）",
+      "presetsCarried": "带过来的自定义预设：{{count}}"
+    },
+    "unset": "（未设置）"
+  },
+  "preset": {
+    "desc": "列出、查看、添加或删除你自己的编码预设。",
+    "arg": {
+      "id": "预设 id。",
+      "newId": "预设的 id：字母、数字、'-'、'_' 或 '.'。"
+    },
+    "opt": {
+      "label": "列表里显示的名字。",
+      "note": "随手写的备注。",
+      "encoder": "视频编码器，例如 mpeg4。",
+      "container": "容器扩展名，例如 avi。",
+      "size": "画幅，写成 宽x高。",
+      "fps": "基准帧率。",
+      "limit": "码率上限，单位 kbps。",
+      "window": "码率平均窗口，单位秒。",
+      "quality": "质量，用编码器自己的刻度（mpeg 家族 2..31，x264 0..51）。",
+      "keep": "没写明的字段全部用当前默认值填满，而不是留空。"
+    },
+    "list": {
+      "desc": "打印所有已保存的预设。",
+      "empty": "还没有预设；'lae preset add <id> --encoder mpeg4 --size 320x240' 可以建一个"
+    },
+    "show": {
+      "desc": "逐个字段打印一个预设。",
+      "missing": "ERROR: 没有名为 '{{id}}' 的预设。",
+      "seeList": "运行 'lae preset list' 看看你有哪些。",
+      "applies": "应用　　{{text}}"
+    },
+    "add": {
+      "desc": "保存一个预设，或替换同 id 的那个。",
+      "stored": "已保存 {{id}}：{{text}}",
+      "useIt": "用法：lae encode <source> --preset {{id}}"
+    },
+    "remove": {
+      "desc": "删除一个预设。",
+      "removed": "已删除 {{id}}"
+    },
+    "writeFailed": "ERROR: 写不了 {{path}}：{{detail}}"
+  },
+  "setup": {
+    "desc": "检查 FFmpeg 和 ffprobe 是否可用。缺东西时退出码 1。",
+    "notFound": "（未找到）",
+    "ready": "就绪。试试：lae encode <input> --dry-run",
+    "missing": "缺少：",
+    "fix": "修法：把 ffmpeg 和 ffprobe 放进 PATH（或让 toolchain.ffmpegPath 指向\n一个构建），然后重新运行 'lae setup'。",
+    "noDownload": "下载命令排在插件里程碑；这个构建不下载任何东西。"
+  },
   "history": {
+    "desc": "查看之前的运行都做了什么。",
+    "limitWarn": "ERROR: --limit 需要一个正整数。",
     "header": "   id  开始               结果       编码器/容器        码率  源 → 产物",
     "empty": "还没有任何运行记录。",
     "total": "共 {{runs}} 次运行，记录在 {{path}}",
-    "limit": "--limit 需要一个正整数。"
+    "list": {
+      "desc": "打印最近的运行，最新的在前。",
+      "limitOpt": "打印多少行。"
+    },
+    "path": {
+      "desc": "打印历史记录所在位置。"
+    }
   }
 }

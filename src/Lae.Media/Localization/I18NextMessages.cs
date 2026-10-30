@@ -41,7 +41,7 @@ public sealed class I18NextMessages : IMessages
 
     public string this[string key] => _i18n.T(key);
 
-    public string Get(string key, object? values = null)
+    public string Format(string key, object? values = null)
         => values is null ? _i18n.T(key) : _i18n.T(key, values);
 
     /// <summary>

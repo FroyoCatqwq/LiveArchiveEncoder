@@ -2,7 +2,9 @@ using System.CommandLine;
 using Lae.App;
 using Lae.App.Ui;
 using Lae.Core;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
+using Lae.Media.Localization;
 
 namespace Lae.Tests.App;
 
@@ -18,6 +20,9 @@ namespace Lae.Tests.App;
 /// </summary>
 public sealed class PresetCommandTests
 {
+    /// <summary>The sentences a user actually sees; the assertions below quote them.</summary>
+    private static readonly IMessages En = I18NextMessages.Create("en");
+
     private static (AppHost Host, BufferedTerminal Terminal) Build(SettingsDocument? stored = null)
     {
         var terminal = new BufferedTerminal();
@@ -116,7 +121,7 @@ public sealed class PresetCommandTests
         (EncodeRequest? request, string? error) = EncodeSession.BuildRequest(
             "/media/in.mkv",
             new EncodeOverrides { Preset = "small" },
-            stored);
+            stored, En);
 
         await Assert.That(error).IsNull();
         await Assert.That(request!.Encode.Width).IsEqualTo(160);
@@ -124,7 +129,7 @@ public sealed class PresetCommandTests
         (EncodeRequest? overridden, _) = EncodeSession.BuildRequest(
             "/media/in.mkv",
             new EncodeOverrides { Preset = "small", Size = "640x480" },
-            stored);
+            stored, En);
 
         await Assert.That(overridden!.Encode.Width).IsEqualTo(640);
     }
@@ -133,7 +138,7 @@ public sealed class PresetCommandTests
     public async Task AnUnknownPresetIsAUsageErrorNotAFallback()
     {
         (EncodeRequest? request, string? error) = EncodeSession.BuildRequest(
-            "/media/in.mkv", new EncodeOverrides { Preset = "typo" }, WithDefaults());
+            "/media/in.mkv", new EncodeOverrides { Preset = "typo" }, WithDefaults(), En);
 
         // Silently encoding with the defaults would produce a file the user did
         // not ask for and could not explain.

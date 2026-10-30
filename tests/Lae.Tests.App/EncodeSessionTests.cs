@@ -3,6 +3,7 @@ using Lae.App.Ui;
 using Lae.Core;
 using Lae.Core.Settings;
 using Lae.Encoding;
+using Lae.Media.Localization;
 using Lae.Media.Toolchain;
 
 namespace Lae.Tests.App;
@@ -97,6 +98,11 @@ public sealed class EncodeSessionTests
                     Written = [.. plan.Steps.Select(s => s.OutputPath)],
                 };
             },
+
+            // The real English resources, not a stub that echoes keys: the tests
+            // below quote the sentence a user reads, and a stub would let a
+            // misplaced placeholder pass as "the message was printed".
+            Messages = I18NextMessages.Create("en"),
         };
 
         public LiveRun Run(

@@ -57,8 +57,17 @@ M2 收尾的两件事：配置文件的格式定下来，以及程序终于开�
   散落的 `locales/` 目录会是用户包里第一个丢的东西。
 - 抽象在 `Lae.Core`（`IMessages` + `LanguageChoice`，纯逻辑可单测），实现在 `Lae.Media`
   （i18next + 资源读取），和 `ISettingsStore`／`TomlSettingsStore` 同一套分法。
-- **本轮只完整翻译了 `lae history`**，其余命令仍是英文；剩余约 90 条字符串的清单和"怎么加一条"
-  写在 [`v8-i18n.md`](v8-i18n.md)。先做一个命令是为了出问题时能分清是机制错了还是某条键错。
+- **App 层已全部翻译**：`encode` 的计划/结果/进度/错误、`config`、`preset`、`setup`、`history`，
+  以及 `--help` 的每一行（含 `-h` 自己那一行）。`IMessages` 通过 `EncodeDependencies` 进会话，
+  通过 `CommandTree` 进每个命令的构造——`--help` 是构建命令树时定下的，所以语言必须在那个
+  时刻已确定，而主机的第一次设置读取就是为它。
+- **故意不翻**：`config show` 的键名、`preset show`/`setup`/`history` 的字段标签（它们是
+  `settings.toml` 里的名字，也是 `grep` 要找的字面量）、FFmpeg 命令行本身。
+- **`Lae.Core` 里生成的句子仍是英文**（计划被拒的理由等约 50 条）：要翻得把 `IMessages` 变成
+  那些纯函数的参数，生产代码 8 个调用点、测试 59 个。留作下一轮，清单在
+  [`v8-i18n.md`](v8-i18n.md)。
+- 新增测试：**两个语言的键集必须相同**（回退机制会把"漏译"变成中文里夹一句英文，不报错），
+  以及 e2e 断言**两种语言打出的 FFmpeg 命令行逐字节相同**（翻译只能改措辞，不能改参数）。
 
 ---
 
