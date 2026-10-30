@@ -30,7 +30,7 @@ public sealed record SettingsDocument
     /// A file with an older number is migrated on read; a newer one is refused
     /// rather than half-understood.
     /// </summary>
-    public const int CurrentSchemaVersion = 10;
+    public const int CurrentSchemaVersion = 11;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 

@@ -40,20 +40,22 @@ public static class ConfigCommand
     {
         var command = new Command("show", "Print the effective settings as key = value lines.");
 
-        var jsonOption = new Option<bool>("--json")
+        var tomlOption = new Option<bool>("--toml")
         {
-            Description = "Print the stored document as JSON instead.",
+            Description = "Print the document as TOML, in the shape the store would write it.",
         };
-        command.Options.Add(jsonOption);
+        command.Options.Add(tomlOption);
 
         command.SetAction((ParseResult parseResult) =>
         {
             SettingsDocument document = store.Load();
 
-            if (parseResult.GetValue(jsonOption))
+            if (parseResult.GetValue(tomlOption))
             {
-                terminal.Line(JsonSerializer.Serialize(
-                    document, SettingsJsonContext.Default.SettingsDocument));
+                // The point of this switch is "give me a file I could save": it is
+                // the same renderer the store uses for a new file, so what is
+                // printed is what the program would have written.
+                terminal.Line(TomlSettingsStore.Render(document));
                 return ExitCodes.Ok;
             }
 
@@ -111,7 +113,7 @@ public static class ConfigCommand
 
     private static Command MigrateCommand(ISettingsStore store, ITerminal terminal)
     {
-        var command = new Command("migrate", "Convert a v7 config.json into a v8 settings.json.");
+        var command = new Command("migrate", "Convert an older config file (v7 JSON or v8 JSON) into settings.toml.");
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
@@ -123,7 +125,7 @@ public static class ConfigCommand
         {
             // Migration only means anything for the file-backed store; an
             // in-memory store has nothing older to convert.
-            if (store is not FileSettingsStore files)
+            if (store is not TomlSettingsStore files)
             {
                 terminal.ErrorLine("ERROR: this build has no settings file to migrate.");
                 return ExitCodes.Failed;
@@ -132,7 +134,13 @@ public static class ConfigCommand
             SettingsLocation location = SettingsLocation.Resolve();
             if (!File.Exists(location.LegacyFile))
             {
-                terminal.Line($"No v7 settings found at {location.LegacyFile}; nothing to migrate.");
+                // The v8 JSON file needs no command: the store converts it on the
+                // first read, because leaving it unread would silently reset the
+                // user's settings. Saying so here is cheaper than a second code
+                // path that could disagree with the store.
+                terminal.Line(File.Exists(location.PreviousFile)
+                    ? $"{location.PreviousFile} is the previous v8 file; it is converted automatically on the next read."
+                    : $"No v7 settings found at {location.LegacyFile}; nothing to migrate.");
                 return ExitCodes.Ok;
             }
 

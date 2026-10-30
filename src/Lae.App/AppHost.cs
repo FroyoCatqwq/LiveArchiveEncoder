@@ -29,7 +29,7 @@ public sealed class AppHost
     public static AppHost CreateDefault()
         => new()
         {
-            Settings = new FileSettingsStore(SettingsLocation.Resolve()),
+            Settings = new TomlSettingsStore(SettingsLocation.Resolve()),
             Terminal = new SystemTerminal(),
         };
 

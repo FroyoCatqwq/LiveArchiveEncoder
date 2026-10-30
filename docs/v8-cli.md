@@ -72,10 +72,46 @@ lae encode in.mp4 --preset portal-2006 --limit 120     # 命令行永远赢
 ```
 lae config path      # 设置文件在哪
 lae config show      # 每个字段一行，值以运行期为准
-lae config migrate   # 读 v7 的 config.json，写 settings.json，留 config.v7.backup.json
+lae config show --toml   # 按存储格式打印整份文档，可以直接存成 settings.toml
+lae config migrate   # 把旧文件（v7 的 config.json、v8 早前的 settings.json）转成 settings.toml
 ```
 
-`LAE_CONFIG_DIR` 可以指定别的目录（便携安装、e2e 测试都靠它）。v7 的文件**从不删除**。
+`LAE_CONFIG_DIR` 可以指定别的目录（便携安装、e2e 测试都靠它）。旧文件**从不删除**：
+v7 的 `config.json` 原地不动（v7 可能仍是用户手上唯一的构建），v8 早前的 `settings.json`
+连同备份 `settings.v8-backup.json` 一起留着，只是不再读它。
+
+### 配置文件是 TOML
+
+```toml
+# 那年的播放器缓冲只有几十秒，200 kbps 是能连续播的上限
+[defaults]
+quality = 9
+limitKbps = 200.0
+fpsLevels = [15, 12, 8, 5]
+
+# 老站点的味道：320x240、4:3 的方框
+[defaults.subtitles]
+boxAspect = "4:3"     # 必须带引号：裸写 4:3 是语法错误，不是"243"
+
+[[customPresets]]
+id = "portal-2006"
+label = "2006 门户"
+encoder = "mpeg4"
+liveQv = 6
+```
+
+四条规则，都来自踩过的坑：
+
+1. **没写的键取默认值。** 两行配置也是一个合法文件，升级不需要迁移脚本补新键。
+2. **未知键是错误，不是忽略。** `qualityy = 5` 会让程序拒绝读取并说出这个键的名字——
+   JSON 时代拼错会被静默丢弃，用户以为改生效了。
+3. **程序只改它拥有的那一段。** 目前程序会写文件只有两条路：`preset add/remove`
+   （重写 `[[customPresets]]` 块）和迁移（生成整份文件）。其余字节——注释、空行、
+   表格顺序——一个字都不动。所以你手写的注释不会因为加了预设而消失。
+4. **预设必须是 `[[customPresets]]` 块**，不能写成 `customPresets = [...]` 单值。
+   单值没法就地替换，追加一个块又会产生重复定义，程序会明确拒绝而不是写出一个读不回来的文件。
+
+`--out` 那类参数不受影响：配置只影响默认值，命令行永远优先。
 
 ### `lae setup`
 
