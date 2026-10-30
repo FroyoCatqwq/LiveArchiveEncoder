@@ -49,6 +49,14 @@ public sealed class EncodeSessionTests
         public Action<EncodePlan, string>? OnRun { get; init; }
         public bool Ran { get; private set; }
 
+        /// <summary>What the post chain should answer; the default pretends every hop succeeded.</summary>
+        public Func<RecompressPlan, RecompressOutcome>? OnRecompress { get; init; }
+
+        /// <summary>The chain the session handed over, so a test can read what it planned.</summary>
+        public RecompressPlan? Chain { get; private set; }
+
+        public TimeSpan ChainBudget { get; private set; }
+
         public EncodeDependencies Build() => new()
         {
             ProbeToolchain = _ => ToolchainPresent
@@ -59,6 +67,18 @@ public sealed class EncodeSessionTests
                 : (null, "no such stream"),
             ListEncoders = _ => (Encoders, EncoderListError),
             Runner = this,
+            RunRecompress = (plan, _, budget, _, token) =>
+            {
+                Chain = plan;
+                ChainBudget = budget;
+                token.ThrowIfCancellationRequested();
+
+                return OnRecompress?.Invoke(plan) ?? new RecompressOutcome
+                {
+                    FinalPath = plan.FinalPath,
+                    Written = [.. plan.Steps.Select(s => s.OutputPath)],
+                };
+            },
         };
 
         public LiveRun Run(
@@ -198,6 +218,180 @@ public sealed class EncodeSessionTests
         await Assert.That(output.Contains("written", StringComparison.Ordinal)).IsTrue();
         await Assert.That(output.Contains("/media/out.avi", StringComparison.Ordinal)).IsTrue();
         await Assert.That(output.Contains("pacing", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>
+    /// The chain is part of the plan or it is not the plan. A dry run that shows
+    /// the capture and hides three transcodes would be pasted into a shell by
+    /// someone who then wonders where the files came from.
+    /// </summary>
+    [Test]
+    public async Task ADryRunShowsEveryHopOfTheChain()
+    {
+        var deps = new Deps();
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.avi",
+            RecompressArgs = ["-c:v libx264 -crf 30", "-c:v libvpx-vp9 -crf 34"],
+        };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides, dryRun: true);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+        await Assert.That(deps.Ran).IsFalse();
+
+        string output = string.Join('\n', terminal.OutputLines);
+        await Assert.That(output.Contains("recompress:", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(output.Contains("out_web.mp4", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(output.Contains("out_web2.webm", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(output.Contains("-nostdin", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>
+    /// The container comes from the codec unless the user named one, and the
+    /// second hop reads the first hop's product rather than the recording.
+    /// </summary>
+    [Test]
+    public async Task AChainIsNumberedFromTheRecordingAndFeedsItself()
+    {
+        var deps = new Deps();
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.avi",
+            RecompressArgs = ["-c:v libx264 -crf 30", "-c:v libvpx-vp9 -crf 34"],
+        };
+
+        (int code, _) = Run(deps, overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+        await Assert.That(deps.Chain).IsNotNull();
+
+        // Compared by name, not by full path: the plan keeps the path it was
+        // handed, and every platform spells a rooted path slightly differently.
+        RecompressPlan chain = deps.Chain!;
+        await Assert.That(chain.Steps.Count).IsEqualTo(2);
+        await Assert.That(Path.GetFileName(chain.Steps[0].InputPath)).IsEqualTo("out.avi");
+        await Assert.That(Path.GetFileName(chain.Steps[0].OutputPath)).IsEqualTo("out_web.mp4");
+        await Assert.That(Path.GetFileName(chain.Steps[1].InputPath)).IsEqualTo("out_web.mp4");
+        await Assert.That(Path.GetFileName(chain.Steps[1].OutputPath)).IsEqualTo("out_web2.webm");
+        await Assert.That(chain.Steps[1].Container).IsEqualTo("webm");
+    }
+
+    [Test]
+    public async Task AFinishedChainReportsEveryProduct()
+    {
+        var deps = new Deps();
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.avi",
+            RecompressArgs = ["-c:v libx264 -crf 30"],
+        };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+
+        string output = string.Join('\n', terminal.OutputLines);
+        await Assert.That(output.Contains("recompress out_web.mp4", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>
+    /// A hop that fails does not take the recording with it, but it is still a
+    /// failure: a script that reads exit 0 must not go on to publish a chain that
+    /// stopped at its first hop.
+    /// </summary>
+    [Test]
+    public async Task AFailedHopFailsTheRunAndSaysTheRecordingSurvived()
+    {
+        var deps = new Deps
+        {
+            OnRecompress = plan => new RecompressOutcome
+            {
+                FinalPath = plan.LivePath,
+                Written = [],
+                FailedStep = 1,
+                Error = "pass 1 (mp4) failed: FFmpeg exited with code 1; Unknown encoder 'libx264'",
+            },
+        };
+
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.avi",
+            RecompressArgs = ["-c:v libx264 -crf 30"],
+        };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Failed);
+        await Assert.That(deps.Ran).IsTrue();
+
+        string errors = string.Join('\n', terminal.ErrorLines);
+        await Assert.That(errors.Contains("Unknown encoder", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(errors.Contains("the recording is untouched", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>
+    /// The stored chain is not this run's business. v7.9.8.6 shipped a release
+    /// that merged it in, and every plain encode silently recompressed itself.
+    /// </summary>
+    [Test]
+    public async Task TheStoredChainIsNeverRunUnasked()
+    {
+        var settings = new SettingsDocument
+        {
+            Defaults = new EncodeDefaults
+            {
+                Recompress = new RecompressChain
+                {
+                    Enabled = true,
+                    Passes = [new RecompressPass("-c:v libx264 -crf 30", "mp4")],
+                },
+            },
+        };
+
+        var deps = new Deps();
+        (int code, _) = Run(deps, settings: settings);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+        await Assert.That(deps.Chain).IsNull();
+    }
+
+    [Test]
+    public async Task AContainerWithoutAPassIsAUsageError()
+    {
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.avi",
+            RecompressArgs = ["-c:v libx264 -crf 30"],
+            RecompressContainers = ["mp4", "webm"],
+        };
+
+        (int code, BufferedTerminal terminal) = Run(new Deps(), overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Usage);
+        await Assert.That(terminal.ErrorLines.Any(l => l.Contains("nothing for the extra one", StringComparison.Ordinal))).IsTrue();
+    }
+
+    /// <summary>
+    /// A chain that cannot be honoured is a usage error before anything is
+    /// spawned: "-i" in a fragment would add a second input, and the refusal has
+    /// to cost a sentence rather than a full capture.
+    /// </summary>
+    [Test]
+    public async Task AChainThatCannotRunFailsBeforeTheCapture()
+    {
+        var deps = new Deps();
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.avi",
+            RecompressArgs = ["-i /media/other.mkv -c:v libx264"],
+        };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Usage);
+        await Assert.That(deps.Ran).IsFalse();
+        await Assert.That(terminal.ErrorLines.Any(l => l.Contains("'-i' is not allowed", StringComparison.Ordinal))).IsTrue();
     }
 
     /// <summary>

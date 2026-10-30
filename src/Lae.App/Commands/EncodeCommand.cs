@@ -88,6 +88,15 @@ public static class EncodeCommand
         {
             Description = "Extra folder libass may look in for fonts.",
         };
+        var recompressOption = new Option<string[]>("--recompress")
+        {
+            Description = "One FFmpeg fragment for a post-encode pass; repeat for a chain "
+                        + "(a 2007 portal first, then the 2011 one).",
+        };
+        var recompressContainerOption = new Option<string[]>("--recompress-container")
+        {
+            Description = "Container for a post-encode pass, paired by position with --recompress.",
+        };
 
         var command = new Command("encode", "Re-encode one source at archive pace.")
         {
@@ -107,6 +116,8 @@ public static class EncodeCommand
             subtitleBoxOption,
             subtitleFontOption,
             fontsDirOption,
+            recompressOption,
+            recompressContainerOption,
             dryRunOption,
         };
 
@@ -152,6 +163,8 @@ public static class EncodeCommand
                 SubtitleBox = parseResult.GetValue(subtitleBoxOption),
                 SubtitleFont = parseResult.GetValue(subtitleFontOption),
                 FontsDir = parseResult.GetValue(fontsDirOption),
+                RecompressArgs = parseResult.GetValue(recompressOption),
+                RecompressContainers = parseResult.GetValue(recompressContainerOption),
             };
 
             return EncodeSession.Run(

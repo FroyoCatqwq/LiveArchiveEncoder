@@ -325,23 +325,38 @@ public sealed class EncodePlanTests
     }
 
     /// <summary>
-    /// Unwired features are refused rather than ignored. A run that quietly
-    /// dropped a recompress request would produce a file that looks finished and
-    /// is missing the thing the user asked for.
+    /// The recompress chain does not belong to the live plan and must not disturb
+    /// it: the hops run after the recording exists, read it, and never appear in
+    /// either of the two capture command lines.
+    ///
+    /// <para>v7.9.8.6 shipped the opposite mistake -- the stored chain was merged
+    /// into the run, so every plain encode silently recompressed itself. What is
+    /// asserted here is that arming a chain changes nothing about the capture;
+    /// <c>RecompressPlan</c> is what turns it into work.</para>
     /// </summary>
     [Test]
-    public async Task UnwiredFeaturesAreRefusedNotIgnored()
+    public async Task AnArmedChainDoesNotDisturbTheLivePlan()
     {
-        EncodeRequest recompress = Request() with
+        EncodeRequest plain = Request() with
         {
-            Encode = new EncodeDefaults
+            Encode = new EncodeDefaults { Encoder = "mpeg4" },
+        };
+
+        EncodeRequest armed = plain with
+        {
+            Encode = plain.Encode with
             {
-                Encoder = "mpeg4",
                 Recompress = new RecompressChain { Enabled = true, Passes = [new RecompressPass("-c:v copy", "mp4")] },
             },
         };
 
-        await Assert.That(EncodePlan.Create(recompress, Source(), Encoder()).IsRunnable).IsFalse();
+        EncodePlan before = EncodePlan.Create(plain, Source(), Encoder());
+        EncodePlan after = EncodePlan.Create(armed, Source(), Encoder());
+
+        await Assert.That(after.IsRunnable).IsTrue();
+        await Assert.That(after.DestinationPath).IsEqualTo(before.DestinationPath);
+        await Assert.That(after.DecoderArgs.SequenceEqual(before.DecoderArgs)).IsTrue();
+        await Assert.That(after.EncoderArgs.SequenceEqual(before.EncoderArgs)).IsTrue();
     }
 
     /// <summary>

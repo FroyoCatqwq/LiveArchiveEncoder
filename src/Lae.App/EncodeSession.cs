@@ -52,6 +52,15 @@ public sealed record EncodeOverrides
 
     /// <summary>Extra directory libass may look in.</summary>
     public string? FontsDir { get; init; }
+
+    /// <summary>
+    /// One FFmpeg fragment per post-encode hop, in order. Empty means no chain:
+    /// the chain is never taken from the settings, only from the command line.
+    /// </summary>
+    public IReadOnlyList<string>? RecompressArgs { get; init; }
+
+    /// <summary>Container per hop, paired by position with <see cref="RecompressArgs"/>.</summary>
+    public IReadOnlyList<string>? RecompressContainers { get; init; }
 }
 
 /// <summary>
@@ -87,12 +96,22 @@ public sealed record EncodeDependencies
 
     public required IEncodeRunner Runner { get; init; }
 
+    /// <summary>
+    /// Runs the post-encode chain. A delegate rather than a call to
+    /// <see cref="RecompressRun"/> because the session is exercised without
+    /// FFmpeg, and the exit-code policy around a failed hop is exactly what needs
+    /// a test.
+    /// </summary>
+    public required Func<RecompressPlan, string, TimeSpan, Action<string>?, CancellationToken, RecompressOutcome>
+        RunRecompress { get; init; }
+
     public static EncodeDependencies Default { get; } = new()
     {
         ProbeToolchain = ToolchainProbe.Probe,
         ProbeSource = (ffprobe, path) => FfmpegTools.ProbeSource(ffprobe, path),
         ListEncoders = ffmpeg => FfmpegTools.ListEncoders(ffmpeg),
         Runner = new LiveEncodeRunner(),
+        RunRecompress = RecompressRun.Run,
     };
 }
 
@@ -185,6 +204,23 @@ public static class EncodeSession
         }
 
         PrintPlan(plan, source, tools.Ffmpeg, terminal);
+
+        // The post chain is planned and checked before anything is spawned. A
+        // fragment with "-i" in it, or a codec that cannot be written to the
+        // container asked for, has to cost a sentence now -- not after a
+        // full-length capture that then ends in a refusal.
+        RecompressPlan post = RecompressPlan.Create(request.Encode.Recompress, plan.DestinationPath);
+
+        foreach (string note in post.Notes) terminal.ErrorLine($"note: {note}");
+
+        if (!post.IsRunnable)
+        {
+            foreach (string problem in post.Problems) terminal.ErrorLine($"ERROR: {problem}");
+            return ExitCodes.Usage;
+        }
+
+        if (post.Any) PrintChain(post, tools.Ffmpeg, terminal);
+
         if (dryRun) return ExitCodes.Ok;
 
         using var progress = new LiveProgress(terminal);
@@ -199,7 +235,44 @@ public static class EncodeSession
             + (run.Pump.Repeated > 0 ? $" ({run.Pump.Repeated} repeated)" : ""));
 
         PrintResult(run, terminal);
-        return ExitCodes.Ok;
+
+        return post.Any
+            ? RunChain(post, tools.Ffmpeg, plan.SpanSeconds, dependencies, terminal, token)
+            : ExitCodes.Ok;
+    }
+
+    /// <summary>
+    /// The hops after the recording: what a site would have done to the upload.
+    ///
+    /// <para>A failed hop keeps everything that was already written and leaves
+    /// the recording untouched, but the exit code is still 1: the user asked for
+    /// a chain and did not get one. Saying "done" over a half-finished chain is
+    /// how a script ends up publishing the wrong product.</para>
+    /// </summary>
+    private static int RunChain(
+        RecompressPlan plan, string ffmpeg, double span,
+        EncodeDependencies dependencies, ITerminal terminal, CancellationToken token)
+    {
+        // A hop is a plain transcode, not a realtime one, so the budget is not
+        // derived from the clock the pump kept. Generous on purpose: a VP9 or
+        // AV1 hop on a small machine is slower than the capture that produced
+        // its input, and killing it at the capture's own duration would be a
+        // timeout dressed up as a failure.
+        TimeSpan budget = TimeSpan.FromSeconds(Math.Max(300.0, span * 4.0 + 120.0));
+
+        RecompressOutcome outcome = dependencies.RunRecompress(
+            plan, ffmpeg, budget,
+            note => terminal.ErrorLine($"note: {note}"),
+            token);
+
+        foreach (string path in outcome.Written)
+            terminal.Line($"recompress {Path.GetFileName(path)}");
+
+        if (!outcome.Failed) return ExitCodes.Ok;
+
+        terminal.ErrorLine($"ERROR: {outcome.Error}");
+        terminal.ErrorLine($"the recording is untouched: {plan.LivePath}");
+        return ExitCodes.Failed;
     }
 
     /// <summary>
@@ -250,6 +323,34 @@ public static class EncodeSession
                     BoxAspect = overrides.SubtitleBox ?? "source",
                     FallbackFont = overrides.SubtitleFont,
                     FontDir = overrides.FontsDir,
+                },
+            };
+        }
+
+        // The chain is armed by naming a hop and by nothing else. Each
+        // --recompress is one more transcode, in the order written;
+        // --recompress-container is paired by position, and a hop without one
+        // derives its container from the codec it names.
+        if (overrides.RecompressArgs is { Count: > 0 } passes)
+        {
+            string[] containers = overrides.RecompressContainers is { Count: > 0 } given ? [.. given] : [];
+
+            if (containers.Length > passes.Count)
+            {
+                return (null, $"{containers.Length} containers were given for {passes.Count} passes; "
+                             + "there is nothing for the extra one to belong to");
+            }
+
+            encode = encode with
+            {
+                Recompress = new RecompressChain
+                {
+                    Enabled = true,
+                    Passes =
+                    [
+                        .. passes.Select((args, index) =>
+                            new RecompressPass(args, index < containers.Length ? containers[index] : "")),
+                    ],
                 },
             };
         }
@@ -388,6 +489,19 @@ public static class EncodeSession
         terminal.Line("  " + Quote(plan.DecodeCommand(ffmpeg)));
         terminal.Line("encoder:");
         terminal.Line("  " + Quote(plan.EncodeCommand(ffmpeg)));
+    }
+
+    /// <summary>
+    /// The post-encode hops, one command line each. A dry run exists to be
+    /// pasted into a shell, so the chain has to be in it: a plan that shows the
+    /// capture and hides three transcodes is not the plan.
+    /// </summary>
+    private static void PrintChain(RecompressPlan plan, string ffmpeg, ITerminal terminal)
+    {
+        terminal.Line();
+        terminal.Line("recompress:");
+        foreach (RecompressStep step in plan.Steps)
+            terminal.Line($"  {Quote(step.Command(ffmpeg, step.OutputPath))}");
     }
 
     /// <summary>

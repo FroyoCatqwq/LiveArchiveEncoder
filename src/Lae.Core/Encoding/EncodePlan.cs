@@ -146,10 +146,11 @@ public sealed record EncodePlan
         problems.AddRange(burn.Problems);
         notes.AddRange(burn.Notes);
 
-        // The recompress chain is still refused: it is a second transcode of this
-        // run's own output, and wiring it means owning a pass loop, not a flag.
-        if (request.Encode.Recompress.Enabled)
-            problems.Add("the recompress chain is not wired into the v8 pipeline yet; drop --recompress for now");
+        // The recompress chain is not part of this plan: it runs after the
+        // recording exists, reads it, and never touches it. It is planned by
+        // RecompressPlan against this plan's destination, and it is checked
+        // before anything is spawned so a bad chain costs a sentence rather than
+        // a full-length capture followed by a refusal.
 
         string? pickProblem = source.CheckPick(request.VideoStream, "video", "--video-stream")
                            ?? source.CheckPick(request.AudioStream, "audio", "--audio-stream");
