@@ -70,12 +70,54 @@ public static class FfmpegTools
     }
 
     /// <summary>
+    /// Unwraps one embedded subtitle track into a file libass can read.
+    ///
+    /// <para>This is the step that makes "burn the subtitle track that is already
+    /// in the container" possible at all: the burn filter takes a file name, and
+    /// there is no argument that points it at a stream. The caller gets a path
+    /// back and owns deleting it -- the same extract, use, remove shape a shell
+    /// one-liner would have, except the removal happens on the failure path too.
+    /// </para>
+    /// </summary>
+    /// <returns>The reason it failed, or null when the file is there and not empty.</returns>
+    public static string? ExtractSubtitle(
+        string ffmpeg, string source, int index, string destination,
+        CancellationToken cancellationToken = default)
+    {
+        List<string> command = SubtitleTrack.ExtractCommand(ffmpeg, source, index, destination);
+
+        // Reading the whole file to reach the last subtitle packet is normal for
+        // MPEG-PS, so this gets the probe's budget rather than a short one.
+        (_, string error, int exitCode) = Run(
+            command[0], [.. command.Skip(1)], ProbeTimeoutSeconds, cancellationToken);
+
+        if (exitCode != 0)
+        {
+            string reason = error.Trim();
+            return $"could not unwrap subtitle track {index}: "
+                 + (reason.Length > 0 ? reason : $"ffmpeg exited with code {exitCode}");
+        }
+
+        var written = new FileInfo(destination);
+        written.Refresh();
+
+        // A container can carry an empty track, and burning one produces a run
+        // that looks correct and has no captions on it -- which is exactly the
+        // failure the zero-frame rule exists to prevent on the video side.
+        if (!written.Exists || written.Length == 0)
+            return $"subtitle track {index} carries no text; nothing would be burned";
+
+        return null;
+    }
+
+    /// <summary>
     /// Runs a tool to completion and returns its streams.
     ///
     /// <para>Both pipes are drained concurrently with the wait. Reading one and
     /// then the other deadlocks as soon as the tool fills the second buffer,
     /// which for <c>ffmpeg -encoders</c> is a real possibility on a build with
     /// many encoders, and for ffprobe on a source with many streams.</para>
+    /// </summary>
     /// </summary>
     private static (string Output, string Error, int ExitCode) Run(
         string executable, IReadOnlyList<string> args, int timeoutSeconds, CancellationToken cancellationToken)

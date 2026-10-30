@@ -29,14 +29,18 @@ public sealed class EncodeSessionTests
         Family = "mpeg4",
     };
 
-    private static SourceInfo SourceInfo() => new()
+    private static SourceInfo SourceInfo(params SourceStream[] extra) => new()
     {
         DurationSeconds = 10,
         Width = 640,
         Height = 480,
         PixelFormat = "yuv420p",
         HasAudio = false,
-        Streams = [new SourceStream(0, "video", "h264", null, null, new StreamInfo { Width = 640, Height = 480 })],
+        Streams =
+        [
+            new SourceStream(0, "video", "h264", null, null, new StreamInfo { Width = 640, Height = 480 }),
+            .. extra,
+        ],
     };
 
     /// <summary>The dependencies, with each one replaceable by a test.</summary>
@@ -46,6 +50,15 @@ public sealed class EncodeSessionTests
         public bool SourceReadable { get; init; } = true;
         public string? EncoderListError { get; init; }
         public List<EncoderInfo> Encoders { get; init; } = [Mpeg4()];
+
+        /// <summary>What the probe should report; tests that need a subtitle track say so here.</summary>
+        public SourceInfo ProbedSource { get; init; } = SourceInfo();
+
+        /// <summary>What the unwrap should answer; the default is "it worked".</summary>
+        public Func<string, string?>? OnExtract { get; init; }
+
+        /// <summary>The unwrap call the session made, so a test can read the index and the path.</summary>
+        public (string Ffmpeg, string Source, int Index, string Destination)? Unwrapped { get; private set; }
         public Action<EncodePlan, string>? OnRun { get; init; }
         public bool Ran { get; private set; }
 
@@ -63,9 +76,14 @@ public sealed class EncodeSessionTests
                 ? new ToolchainProbeResult { Ffmpeg = "/usr/bin/ffmpeg", Ffprobe = "/usr/bin/ffprobe" }
                 : new ToolchainProbeResult(),
             ProbeSource = (_, _) => SourceReadable
-                ? (SourceInfo(), null)
+                ? (ProbedSource, null)
                 : (null, "no such stream"),
             ListEncoders = _ => (Encoders, EncoderListError),
+            ExtractSubtitle = (ffmpeg, source, index, destination) =>
+            {
+                Unwrapped = (ffmpeg, source, index, destination);
+                return OnExtract?.Invoke(destination);
+            },
             Runner = this,
             RunRecompress = (plan, _, budget, _, token) =>
             {
@@ -393,6 +411,151 @@ public sealed class EncodeSessionTests
         await Assert.That(deps.Ran).IsFalse();
         await Assert.That(terminal.ErrorLines.Any(l => l.Contains("'-i' is not allowed", StringComparison.Ordinal))).IsTrue();
     }
+
+    /// <summary>
+    /// An embedded text track is unwrapped and then burned like any other file.
+    /// The burn has to show up on the <em>decoder</em> side, because that is what
+    /// the whole subtitle design rests on: the encoder command line is identical
+    /// with and without captions.
+    /// </summary>
+    [Test]
+    public async Task AnEmbeddedTextTrackIsUnwrappedAndBurned()
+    {
+        var deps = new Deps { ProbedSource = SourceInfo(Subtitle(2, "subrip")) };
+        var overrides = new EncodeOverrides { Output = "/media/out.avi", SubtitleTrack = 2 };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+        await Assert.That(deps.Unwrapped).IsNotNull();
+        await Assert.That(deps.Unwrapped!.Value.Index).IsEqualTo(2);
+        await Assert.That(deps.Unwrapped!.Value.Source).IsEqualTo(Source);
+
+        string output = string.Join('\n', terminal.OutputLines);
+        await Assert.That(output.Contains("subtitles=filename=", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(output).Contains(Path.GetFileName(deps.Unwrapped!.Value.Destination)!);
+
+        // The encoder side is untouched: a burn is a picture, not a stream.
+        int encoderAt = output.IndexOf("encoder:", StringComparison.Ordinal);
+        await Assert.That(encoderAt).IsGreaterThan(0);
+        await Assert.That(output[encoderAt..].Contains("subtitles", StringComparison.Ordinal)).IsFalse();
+    }
+
+    /// <summary>
+    /// A dry run promises two command lines and no processes. An unwrap is a
+    /// process that writes a file, so the plan names the path that would be used
+    /// and stops there.
+    /// </summary>
+    [Test]
+    public async Task ADryRunNamesTheUnwrappedTrackWithoutUnwrappingIt()
+    {
+        var deps = new Deps { ProbedSource = SourceInfo(Subtitle(2, "subrip")) };
+        var overrides = new EncodeOverrides { Output = "/media/out.avi", SubtitleTrack = 2 };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides, dryRun: true);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+        await Assert.That(deps.Unwrapped).IsNull();
+        await Assert.That(deps.Ran).IsFalse();
+
+        string output = string.Join('\n', terminal.OutputLines);
+        await Assert.That(output.Contains("lae-subs-2-", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(output.Contains("subtitles=filename=", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>
+    /// A bitmap track is pictures of text: there is nothing for libass to lay out,
+    /// and no argument recovers it. Refusing before the unwrap costs nothing;
+    /// refusing after costs a full pass over the file.
+    /// </summary>
+    [Test]
+    public async Task ABitmapTrackIsRefusedBeforeAnythingIsUnwrapped()
+    {
+        var deps = new Deps { ProbedSource = SourceInfo(Subtitle(3, "hdmv_pgs_subtitle")) };
+        var overrides = new EncodeOverrides { Output = "/media/out.avi", SubtitleTrack = 3 };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Usage);
+        await Assert.That(deps.Unwrapped).IsNull();
+        await Assert.That(deps.Ran).IsFalse();
+        await Assert.That(terminal.ErrorLines.Any(l => l.Contains("bitmap", StringComparison.Ordinal))).IsTrue();
+    }
+
+    [Test]
+    public async Task ATrackThatIsNotASubtitleIsAUsageError()
+    {
+        var deps = new Deps { ProbedSource = SourceInfo(Subtitle(2, "subrip")) };
+        var overrides = new EncodeOverrides { Output = "/media/out.avi", SubtitleTrack = 0 };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Usage);
+        await Assert.That(deps.Unwrapped).IsNull();
+        await Assert.That(terminal.ErrorLines.Any(l => l.Contains("that stream is video", StringComparison.Ordinal))).IsTrue();
+    }
+
+    /// <summary>
+    /// An unwrap that cannot produce text is this machine's failure (1), not the
+    /// user's typing (2): an empty track is a property of the recording.
+    /// </summary>
+    [Test]
+    public async Task AnUnwrapThatProducesNothingIsAFailure()
+    {
+        var deps = new Deps
+        {
+            ProbedSource = SourceInfo(Subtitle(2, "subrip")),
+            OnExtract = _ => "subtitle track 2 carries no text; nothing would be burned",
+        };
+
+        var overrides = new EncodeOverrides { Output = "/media/out.avi", SubtitleTrack = 2 };
+        (int code, BufferedTerminal terminal) = Run(deps, overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Failed);
+        await Assert.That(deps.Ran).IsFalse();
+        await Assert.That(terminal.ErrorLines.Any(l => l.Contains("carries no text", StringComparison.Ordinal))).IsTrue();
+    }
+
+    /// <summary>
+    /// The unwrapped copy is deleted whatever the run did -- including when the run
+    /// threw. A subtitle file left beside the recording is a side effect nobody
+    /// asked for, and the next run would find a mystery file.
+    /// </summary>
+    [Test]
+    public async Task TheUnwrappedCopyIsDeletedAfterTheRun()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "lae-test-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(folder);
+
+        string? written = null;
+        try
+        {
+            var deps = new Deps
+            {
+                ProbedSource = SourceInfo(Subtitle(2, "subrip")),
+                OnExtract = destination =>
+                {
+                    File.WriteAllText(destination, "[Script Info]\n");
+                    written = destination;
+                    return null;
+                },
+            };
+
+            var overrides = new EncodeOverrides { Output = Path.Combine(folder, "out.avi"), SubtitleTrack = 2 };
+            (int code, _) = Run(deps, overrides);
+
+            await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+            await Assert.That(written).IsNotNull();
+            await Assert.That(File.Exists(written!)).IsFalse();
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    private static SourceStream Subtitle(int index, string codec)
+        => new(index, "subtitle", codec, "chi", null);
 
     /// <summary>
     /// A cancel is not a failure and must not be reported as one: it has to reach

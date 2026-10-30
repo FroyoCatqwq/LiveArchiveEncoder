@@ -137,6 +137,21 @@ public sealed record EncodeRequest
         if (Encode.Parallel < 1) problems.Add("the shard count must be at least 1");
         if (Encode.Threads < 1) problems.Add("the encoder thread count must be at least 1");
 
+        // Sharding was measured and rejected, and the rejection is not "it was
+        // slow": the wall clock *is* the pacing, so N shards each pacing in
+        // realtime finish in the same wall-clock time as one, and each pays its
+        // own probe and startup on top. Measured 2026-10-17: a 20 s source at
+        // --parallel 4 took 2.33 s against 1.85 s for a single unthrottled pass,
+        // and the only encoder whose marginal cost would justify it (roqvideo)
+        // is the one whose container concatenation destroys. The setting survives
+        // because a settings file may still say 4; saying so beats running
+        // single-threaded and letting the number look honoured.
+        if (Encode.Parallel > 1)
+        {
+            problems.Add($"parallel {Encode.Parallel} is not available in v8: the pacing is the clock, "
+                       + "so N shards finish in the same wall time as one; set parallel to 1");
+        }
+
         // A window of zero is not "measure instantly", it is a division by zero
         // one layer down: the ladder's window refuses to be constructed at all,
         // and the exception arrives after both children have been started. A

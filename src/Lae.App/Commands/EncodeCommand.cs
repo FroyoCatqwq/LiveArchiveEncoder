@@ -76,6 +76,10 @@ public static class EncodeCommand
         {
             Description = "Burn this .srt/.ass into the picture; repeat for more than one.",
         };
+        var subtitleTrackOption = new Option<int?>("--subtitle-track")
+        {
+            Description = "Burn the embedded subtitle track with this absolute index.",
+        };
         var subtitleBoxOption = new Option<string?>("--subtitle-box")
         {
             Description = "Shape the text is laid out in: source, 4:3 or 16:9.",
@@ -113,6 +117,7 @@ public static class EncodeCommand
             recoverOption,
             levelsOption,
             subtitleOption,
+            subtitleTrackOption,
             subtitleBoxOption,
             subtitleFontOption,
             fontsDirOption,
@@ -160,6 +165,7 @@ public static class EncodeCommand
                 FpsLevels = levels,
                 FpsThresholds = thresholds,
                 SubtitleFiles = parseResult.GetValue(subtitleOption),
+                SubtitleTrack = parseResult.GetValue(subtitleTrackOption),
                 SubtitleBox = parseResult.GetValue(subtitleBoxOption),
                 SubtitleFont = parseResult.GetValue(subtitleFontOption),
                 FontsDir = parseResult.GetValue(fontsDirOption),

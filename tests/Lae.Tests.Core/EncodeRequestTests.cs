@@ -74,6 +74,27 @@ public sealed class EncodeRequestTests
     }
 
     /// <summary>
+    /// Sharding is refused rather than ignored. It was measured and rejected, and
+    /// the reason is structural: the wall clock is the pacing, so N shards each
+    /// pacing in realtime finish in the same time as one. A settings file that
+    /// says 4 must not look honoured by a run that quietly ignored it.
+    /// </summary>
+    [Test]
+    public async Task ShardingIsRefusedWithItsReason()
+    {
+        EncodeDefaults encode = Sample().Encode with { Parallel = 4 };
+        IReadOnlyList<string> problems = (Sample() with { Encode = encode }).Validate();
+
+        await Assert.That(problems.Count).IsEqualTo(1);
+        await Assert.That(problems[0]).Contains("parallel 4");
+        await Assert.That(problems[0]).Contains("set parallel to 1");
+
+        // One shard is the default and is not a problem.
+        await Assert.That((Sample() with { Encode = Sample().Encode with { Parallel = 1 } }).Validate().Count)
+            .IsEqualTo(0);
+    }
+
+    /// <summary>
     /// The override must be a copy, not a rebuild: every field the caller did not
     /// mention has to survive. This is the check that would have caught the
     /// dropped <c>NnediWeights</c> in v7.9.8.6.

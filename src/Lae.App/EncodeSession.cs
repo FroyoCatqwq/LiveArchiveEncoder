@@ -44,6 +44,9 @@ public sealed record EncodeOverrides
     /// <summary>Sidecar subtitle files to burn, in order. Empty means none.</summary>
     public IReadOnlyList<string>? SubtitleFiles { get; init; }
 
+    /// <summary>Absolute index of an embedded subtitle track to burn.</summary>
+    public int? SubtitleTrack { get; init; }
+
     /// <summary>Shape the burned text is laid out in: "source", "4:3" or "16:9".</summary>
     public string? SubtitleBox { get; init; }
 
@@ -94,6 +97,14 @@ public sealed record EncodeDependencies
 
     public required Func<string, (List<EncoderInfo> Encoders, string? Error)> ListEncoders { get; init; }
 
+    /// <summary>
+    /// Unwraps one embedded subtitle track into a file, or explains why it could
+    /// not. A delegate because the session is tested without FFmpeg and the
+    /// interesting part -- refusing a bitmap track, deleting the file afterwards --
+    /// is on this side of the call.
+    /// </summary>
+    public required Func<string, string, int, string, string?> ExtractSubtitle { get; init; }
+
     public required IEncodeRunner Runner { get; init; }
 
     /// <summary>
@@ -110,6 +121,8 @@ public sealed record EncodeDependencies
         ProbeToolchain = ToolchainProbe.Probe,
         ProbeSource = (ffprobe, path) => FfmpegTools.ProbeSource(ffprobe, path),
         ListEncoders = ffmpeg => FfmpegTools.ListEncoders(ffmpeg),
+        ExtractSubtitle = (ffmpeg, source, index, destination)
+            => FfmpegTools.ExtractSubtitle(ffmpeg, source, index, destination),
         Runner = new LiveEncodeRunner(),
         RunRecompress = RecompressRun.Run,
     };
@@ -153,7 +166,7 @@ public static class EncodeSession
         // The toolchain comes next: "no FFmpeg" is a setup problem with its own
         // command, not an encode failure, and it must not be reported as one.
         ToolchainProbeResult tools = dependencies.ProbeToolchain(ToolchainDirectory(settings));
-        if (tools.Ffmpeg is null || tools.Ffprobe is null)
+        if (tools.Ffmpeg is not { } ffmpeg || tools.Ffprobe is null)
         {
             foreach (string line in tools.Missing()) terminal.ErrorLine($"ERROR: missing {line}");
             terminal.ErrorLine("Run 'lae setup' for what to do about it.");
@@ -171,12 +184,130 @@ public static class EncodeSession
         // which is exactly what the host knows and Lae.Core does not. A path that
         // does not exist is not an error -- libass falls back to the system -- so
         // the check is "is it there", not "must be".
-        if (FindFontsDirectory(settings.Defaults.Subtitles.FontDir, tools.Ffmpeg) is { } fonts)
+        if (FindFontsDirectory(settings.Defaults.Subtitles.FontDir, ffmpeg) is { } fonts)
         {
             request = request with { FontsDirectory = fonts };
         }
 
-        (List<EncoderInfo> encoders, string? listError) = dependencies.ListEncoders(tools.Ffmpeg);
+        // An embedded track cannot be burned where it is: the filter wants a file.
+        // The host unwraps it here, the plan then sees an ordinary subtitle file,
+        // and the copy is deleted whether the run succeeded or not.
+        TrackPreparation track = PrepareTrack(request, source, ffmpeg, dependencies, dryRun);
+        if (track.Request is null)
+        {
+            terminal.ErrorLine($"ERROR: {track.Message}");
+            return track.Failure;
+        }
+
+        if (track.Note is { } note) terminal.ErrorLine($"note: {note}");
+
+        try
+        {
+            return Execute(track.Request, source, ffmpeg, dependencies, terminal, dryRun, token);
+        }
+        finally
+        {
+            if (track.Temporary is { } temporary) DiscardTemporary(temporary, terminal);
+        }
+    }
+
+    /// <summary>What preparing an embedded track ended in: a request, or a reason and a code.</summary>
+    private sealed record TrackPreparation(
+        EncodeRequest? Request, string? Temporary, string? Note, int Failure, string? Message)
+    {
+        public static TrackPreparation Done(EncodeRequest request) => new(request, null, null, ExitCodes.Ok, null);
+
+        public static TrackPreparation Refused(int failure, string message) => new(null, null, null, failure, message);
+    }
+
+    /// <summary>
+    /// Turns "burn track 3" into "burn this file".
+    ///
+    /// <para>Three things can go wrong and each of them is the user's to fix: a
+    /// stream index that is not a subtitle track, a bitmap track that has no text
+    /// to lay out, and an unwrap that FFmpeg refuses. All three come back as a
+    /// sentence before anything is encoded -- the whole reason this happens before
+    /// the plan rather than inside it.</para>
+    ///
+    /// <para>A dry run is told not to unwrap. It promises two command lines and no
+    /// processes, and an extraction is a process that writes a file; the plan it
+    /// prints names the path that <em>would</em> be used, which is exactly what a
+    /// plan is for.</para>
+    /// </summary>
+    private static TrackPreparation PrepareTrack(
+        EncodeRequest request, SourceInfo source, string ffmpeg,
+        EncodeDependencies dependencies, bool dryRun)
+    {
+        if (request.Encode.Subtitles.Stream is not { } index) return TrackPreparation.Done(request);
+
+        if (source.CheckPick(index, "subtitle", "--subtitle-track") is { } pickProblem)
+            return TrackPreparation.Refused(ExitCodes.Usage, pickProblem);
+
+        string? codec = source.Streams.First(s => s.Index == index).Codec;
+        if (SubtitleTrack.Problem(codec, index) is { } codecProblem)
+            return TrackPreparation.Refused(ExitCodes.Usage, codecProblem);
+
+        // Beside the output, because the source may be a read-only mount or a
+        // share: the folder that is about to be written to is the one folder this
+        // run knows is writable.
+        string output = request.DestinationPath
+            ?? EncodeRequest.DeriveDestination(request.SourcePath, "subs");
+        string temporary = SubtitleTrack.TemporaryPath(output, index, Guid.NewGuid().ToString("N")[..8]);
+
+        if (!dryRun
+            && dependencies.ExtractSubtitle(ffmpeg, request.SourcePath, index, temporary) is { } failure)
+        {
+            return TrackPreparation.Refused(ExitCodes.Failed, failure);
+        }
+
+        EncodeRequest prepared = request with
+        {
+            Encode = request.Encode with
+            {
+                Subtitles = request.Encode.Subtitles with
+                {
+                    Mode = "burn",
+                    Stream = null,
+                    Files = [temporary],
+                },
+            },
+        };
+
+        return new TrackPreparation(
+            prepared, dryRun ? null : temporary,
+            SubtitleTrack.Note(request.SourcePath, index, codec), ExitCodes.Ok, null);
+    }
+
+    private static void DiscardTemporary(string path, ITerminal terminal)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            // The run is over either way; leaving a note beats throwing out of a
+            // finally block, which would replace the real result with a cleanup
+            // failure nobody asked about.
+            terminal.ErrorLine($"note: could not remove {path}: {exc.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Everything after the request is known good: plan, report, run, and the
+    /// hops that follow. Split from <see cref="Run"/> so the unwrapped subtitle
+    /// track has one place to be deleted, whatever the outcome.
+    /// </summary>
+    private static int Execute(
+        EncodeRequest request,
+        SourceInfo source,
+        string ffmpeg,
+        EncodeDependencies dependencies,
+        ITerminal terminal,
+        bool dryRun,
+        CancellationToken token)
+    {
+        (List<EncoderInfo> encoders, string? listError) = dependencies.ListEncoders(ffmpeg);
         if (listError is not null)
         {
             terminal.ErrorLine($"ERROR: {listError}");
@@ -203,7 +334,7 @@ public static class EncodeSession
             return ExitCodes.Usage;
         }
 
-        PrintPlan(plan, source, tools.Ffmpeg, terminal);
+        PrintPlan(plan, source, ffmpeg, terminal);
 
         // The post chain is planned and checked before anything is spawned. A
         // fragment with "-i" in it, or a codec that cannot be written to the
@@ -219,13 +350,13 @@ public static class EncodeSession
             return ExitCodes.Usage;
         }
 
-        if (post.Any) PrintChain(post, tools.Ffmpeg, terminal);
+        if (post.Any) PrintChain(post, ffmpeg, terminal);
 
         if (dryRun) return ExitCodes.Ok;
 
         using var progress = new LiveProgress(terminal);
         LiveRun run = dependencies.Runner.Run(
-            plan, tools.Ffmpeg,
+            plan, ffmpeg,
             (done, total) => progress.Report(done, total),
             note => terminal.ErrorLine($"note: {note}"),
             token);
@@ -237,7 +368,7 @@ public static class EncodeSession
         PrintResult(run, terminal);
 
         return post.Any
-            ? RunChain(post, tools.Ffmpeg, plan.SpanSeconds, dependencies, terminal, token)
+            ? RunChain(post, ffmpeg, plan.SpanSeconds, dependencies, terminal, token)
             : ExitCodes.Ok;
     }
 
@@ -312,14 +443,20 @@ public static class EncodeSession
         // session had open is not this run's business. Only the command line can
         // turn burning on, which also means a scripted run cannot start drawing
         // captions because of something in a settings file.
-        if (overrides.SubtitleFiles is { Count: > 0 } subtitleFiles)
+        //
+        // A sidecar file and an embedded track are two ways of naming the same
+        // thing, and naming both is refused by EncodeRequest.Validate rather than
+        // silently preferring one: two subtitle layers with no way to tell which
+        // is which is worse than a sentence.
+        if (overrides.SubtitleFiles is { Count: > 0 } || overrides.SubtitleTrack is not null)
         {
             encode = encode with
             {
                 Subtitles = new SubtitleDefaults
                 {
                     Mode = "burn",
-                    Files = [.. subtitleFiles.Where(f => !string.IsNullOrWhiteSpace(f))],
+                    Files = [.. (overrides.SubtitleFiles ?? []).Where(f => !string.IsNullOrWhiteSpace(f))],
+                    Stream = overrides.SubtitleTrack,
                     BoxAspect = overrides.SubtitleBox ?? "source",
                     FallbackFont = overrides.SubtitleFont,
                     FontDir = overrides.FontsDir,
