@@ -142,6 +142,26 @@ public sealed record EncodePlan
         (string container, string muxer) = ResolveContainer(request.Encode.Container, encoder, problems);
         string destination = request.DestinationPath ?? EncodeRequest.DeriveDestination(request.SourcePath, container);
 
+        // A named output has to agree with the container the plan settled on.
+        //
+        // <para>This is the same failure <see cref="ResolveContainer"/> refuses one
+        // paragraph up, arriving through the other door: `--encoder flv --out
+        // clip.avi` wrote an FLV stream into a file called .avi, and the run
+        // reported success. Some players sniff and cope, some trust the extension
+        // and refuse, and either way the archive has a file that lies about
+        // itself. Found by running the built binary against a real source and
+        // reading the command line it printed.</para>
+        if (request.DestinationPath is { } named)
+        {
+            string extension = Path.GetExtension(named).TrimStart('.').ToLowerInvariant();
+            if (extension.Length > 0 && !string.Equals(extension, container, StringComparison.Ordinal))
+            {
+                problems.Add(
+                    $"'{Path.GetFileName(named)}' is named .{extension} but {encoder.Name} writes {container}; "
+                    + $"rename it to .{container} or ask for --container {extension} with an encoder that can write it");
+            }
+        }
+
         problems.AddRange(request.Validate(destination));
 
         // Carried subtitle tracks need the container before they can be checked:

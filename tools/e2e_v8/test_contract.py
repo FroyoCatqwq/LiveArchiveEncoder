@@ -7,6 +7,8 @@ script sees, and it is cheaper to check than a wrong frame.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from conftest import Work
@@ -16,8 +18,15 @@ def test_version_prints_one_line_and_succeeds(work: Work):
     result = work.run("version")
 
     assert result.returncode == 0
-    assert result.stdout.strip() == "8.0.0-alpha.0"
     assert result.stderr == ""
+
+    # The shape, not the number. Pinning the string here meant every milestone
+    # tag broke a test that is about "one line, no prefix, parseable" rather than
+    # about which milestone it is -- and a suite that has to be edited to cut a
+    # release is a suite people learn to edit before reading.
+    lines = result.stdout.strip().splitlines()
+    assert len(lines) == 1
+    assert re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", lines[0]), lines[0]
 
 
 def test_no_arguments_prints_usage_and_succeeds(work: Work):

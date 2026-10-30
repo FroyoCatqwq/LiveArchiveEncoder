@@ -262,12 +262,13 @@ public sealed class EncodePlanTests
     public async Task AChosenContainerSelectsItsMuxer()
     {
         EncodeRequest request = Request() with { Encode = new EncodeDefaults { Encoder = "mpeg4", Container = "mkv" } };
+        request = request with { DestinationPath = "/media/out.mkv" };
         EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
 
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(plan.Container).IsEqualTo("mkv");
         await Assert.That(plan.Muxer).IsEqualTo("matroska");
-        await Assert.That(HasRun(plan.EncoderArgs, "-f", "matroska", "/media/out.avi")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-f", "matroska", "/media/out.mkv")).IsTrue();
     }
 
     /// <summary>
@@ -563,6 +564,9 @@ public sealed class EncodePlanTests
     {
         EncodeRequest request = Request() with
         {
+            // The name has to agree with the container: a plan that wrote
+            // matroska into out.avi is what the mismatch check refuses now.
+            DestinationPath = "/media/out.mkv",
             Encode = new EncodeDefaults
             {
                 Encoder = "mpeg4",
@@ -672,5 +676,46 @@ public sealed class EncodePlanTests
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(plan.Container).IsEqualTo("mov");
         await Assert.That(plan.Muxer).IsEqualTo("mov");
+    }
+
+    /// <summary>
+    /// A named output whose extension contradicts the container is refused.
+    ///
+    /// <para><c>--encoder flv --out clip.avi</c> used to write an FLV stream into
+    /// a file called .avi and report success: the same lie about a file that
+    /// <see cref="EncodePlan.ResolveContainer"/> refuses when it comes from the
+    /// container side. Found by running the built binary against a real source and
+    /// reading the command line it printed.</para>
+    /// </summary>
+    [Test]
+    public async Task AnOutputNameThatContradictsTheContainerIsRefused()
+    {
+        EncodeRequest request = Request() with
+        {
+            DestinationPath = "/media/out.avi",
+            Encode = new EncodeDefaults { Encoder = "flv", Quality = 8 },
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("flv", "flv", "flv"));
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems.Any(p => p.Contains("out.avi", StringComparison.Ordinal))).IsTrue();
+    }
+
+    /// <summary>Asking for the container that matches the name is the way through.</summary>
+    [Test]
+    public async Task MatchingContainerAndNameRunWithoutAWord()
+    {
+        EncodeRequest request = Request() with
+        {
+            DestinationPath = "/media/out.avi",
+            Encode = new EncodeDefaults { Encoder = "flv", Quality = 8, Container = "avi" },
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("flv", "flv", "flv"));
+
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(plan.Container).IsEqualTo("avi");
+        await Assert.That(plan.Muxer).IsEqualTo("avi");
     }
 }
