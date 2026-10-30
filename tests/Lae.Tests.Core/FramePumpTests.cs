@@ -105,34 +105,45 @@ public sealed class FramePumpTests
     }
 
     /// <summary>
-    /// The cadence itself. Forty slots at 100 fps is 400 ms of wall clock; if the
-    /// pump lands far outside that, the output file is the right length in frames
-    /// and the wrong length in seconds, and every duration in the archive is off.
+    /// The cadence itself. Two hundred slots at 100 fps is 2 s of wall clock; if
+    /// the pump lands far outside that, the output file is the right length in
+    /// frames and the wrong length in seconds, and every duration in the archive
+    /// is off.
     ///
-    /// <para>The window is generous on purpose (a loaded CI machine overshoots),
-    /// but tight enough to catch a sleep granularity problem: without the 1 ms
-    /// timer a 10 ms slot overshoots by ~40%.</para>
+    /// <para>The band is +/-10% of two seconds, which is a stall budget of 200 ms:
+    /// lateness here is bounded by the worst single deschedule, not accumulated,
+    /// because every deadline is absolute. A shorter window makes the same band a
+    /// test of thread scheduling -- forty slots at 400 ms failed the moment the
+    /// suite ran beside three copies of itself. What the band still catches: a
+    /// pump without the 1 ms timer overshoots by 40%, and one that adds an
+    /// interval to "now" instead of to the baseline accumulates about 17% over a
+    /// run this long.</para>
     /// </summary>
     [Test]
     public async Task HoldsTheRequestedCadence()
     {
         const int frameSize = 4;
-        const int target = 40;
+        const int target = 200;
 
-        using var source = new MemoryStream(Script(200, frameSize));
+        using var source = new MemoryStream(Script(400, frameSize));
         using var sink = new MemoryStream();
 
         var spec = new PumpSpec { Fps = 100, FrameSize = frameSize, TargetFrames = target };
         PumpStats stats = FramePump.Run(source, sink, spec, null, null, CancellationToken.None);
 
-        await Assert.That(stats.Seconds).IsBetween(0.36, 0.48)
-            .Because($"{stats.Frames} slots at 100 fps is 0.40 s, not {stats.Seconds:F3} s");
+        await Assert.That(stats.Seconds).IsBetween(1.98, 2.20)
+            .Because($"{stats.Frames} slots at 100 fps is 2.00 s, not {stats.Seconds:F3} s");
     }
 
     /// <summary>
     /// A source shorter than the requested span keeps the last frame on screen
     /// for the remaining slots. That is what a live capture does, and it is what
     /// keeps the output exactly as long as <c>-t</c> asked for.
+    ///
+    /// <para>20 fps, not 200: at 5 ms per slot the producer had 40 ms to publish
+    /// three frames and report the end of the stream, so the test was measuring
+    /// the scheduler. The pacing loop pays one slot per interval whatever the
+    /// interval is; nothing here needs a fast one.</para>
     /// </summary>
     [Test]
     public async Task FillsTheTargetWithTheLastFrameWhenTheSourceEndsEarly()
@@ -142,7 +153,7 @@ public sealed class FramePumpTests
         using var source = new MemoryStream(Script(3, frameSize));
         using var sink = new MemoryStream();
 
-        var spec = new PumpSpec { Fps = 200, FrameSize = frameSize, TargetFrames = 8 };
+        var spec = new PumpSpec { Fps = 20, FrameSize = frameSize, TargetFrames = 8 };
         PumpStats stats = FramePump.Run(source, sink, spec, null, null, CancellationToken.None);
 
         await Assert.That(stats.Frames).IsEqualTo(8);
