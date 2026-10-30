@@ -12,6 +12,12 @@ Interrupt.Install();
 
 ParseResult parsed = CommandTree.Build(AppHost.CreateDefault()).Parse(args);
 
+// System.CommandLine installs its own catch around the action and answers with
+// exit 1. That would make this program's two documented outcomes unreachable:
+// Ctrl+C is 130, and an unexpected failure is 1 with a one-line error rather
+// than whatever the parser decided to print. Both live below instead.
+parsed.InvocationConfiguration.EnableDefaultExceptionHandler = false;
+
 // System.CommandLine answers a parse error with 1; this program's contract says
 // a usage error is 2, so the mapping is explicit rather than inherited.
 if (parsed.Errors.Count > 0)
