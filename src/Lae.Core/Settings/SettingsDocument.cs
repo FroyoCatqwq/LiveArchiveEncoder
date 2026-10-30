@@ -299,6 +299,17 @@ public sealed record SubtitleDefaults
     /// <summary>Absolute index of an embedded track; null means none picked.</summary>
     public int? Stream { get; init; }
 
+    /// <summary>
+    /// Absolute indices of subtitle tracks to carry into the output as streams of
+    /// their own, for "copy" mode.
+    ///
+    /// <para>A list rather than one index because the files this feature exists
+    /// for carry several: a WEB-DL with simplified and traditional Chinese plus
+    /// Japanese is three tracks, and carrying one of them is not what the user
+    /// asked for.</para>
+    /// </summary>
+    public IReadOnlyList<int> CopyTracks { get; init; } = [];
+
     /// <summary>Explicit codec for copy mode; null picks one per container.</summary>
     public string? Codec { get; init; }
 
@@ -311,9 +322,9 @@ public sealed record SubtitleDefaults
     /// <summary>Shape the burned text is laid out in: "source", "4:3" or "16:9".</summary>
     public string BoxAspect { get; init; } = "source";
 
-    /// <summary>Files and an embedded track are mutually exclusive; this reports whether either is set.</summary>
+    /// <summary>Files, an embedded track and a carried track are mutually exclusive; reports whether any is set.</summary>
     [JsonIgnore]
-    public bool Any => Mode != "off" && (Files.Count > 0 || Stream is not null);
+    public bool Any => Mode != "off" && (Files.Count > 0 || Stream is not null || CopyTracks.Count > 0);
 }
 
 /// <summary>One hop of the "upload it to a video site" chain.</summary>

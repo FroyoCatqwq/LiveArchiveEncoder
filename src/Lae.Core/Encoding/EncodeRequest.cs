@@ -165,10 +165,16 @@ public sealed record EncodeRequest
 
         // Files and an embedded track are mutually exclusive: libass would burn
         // one and the muxer would carry the other, and the result has two
-        // subtitle layers with no way to tell which is which.
-        if (Encode.Subtitles.Files.Count > 0 && Encode.Subtitles.Stream is not null)
+        // subtitle layers with no way to tell which is which. A carried track is
+        // the same argument one step further -- three ways of saying "subtitles",
+        // and the run has to pick one.
+        int sources = (Encode.Subtitles.Files.Count > 0 ? 1 : 0)
+                    + (Encode.Subtitles.Stream is not null ? 1 : 0)
+                    + (Encode.Subtitles.CopyTracks.Count > 0 ? 1 : 0);
+        if (sources > 1)
         {
-            problems.Add("pick either subtitle files or an embedded track, not both");
+            problems.Add("pick one: subtitle files to burn, one track to burn, "
+                       + "or tracks to carry -- not several at once");
         }
 
         return problems;

@@ -94,6 +94,11 @@ public sealed class SubtitleChainTests
     /// and a map on the encoder side. Refusing is the honest answer -- a file
     /// that looks finished and has no captions is not.
     /// </summary>
+    /// <summary>
+    /// The host rewrites "burn track 3" into "burn this file" before the plan
+    /// exists, so reaching the chain with a stream index means a caller skipped
+    /// that step. The refusal names the flag that does it.
+    /// </summary>
     [Test]
     public async Task AnEmbeddedTrackIsRefusedWithTheWayForward()
     {
@@ -101,18 +106,28 @@ public sealed class SubtitleChainTests
         SubtitleBurn burn = SubtitleChain.Build(settings, 0, null);
 
         await Assert.That(burn.Problems.Count).IsEqualTo(1);
-        await Assert.That(burn.Problems[0].Contains("--subtitle-file", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(burn.Problems[0].Contains("--subtitle-track", StringComparison.Ordinal)).IsTrue();
         await Assert.That(burn.Filter.Length).IsEqualTo(0);
     }
 
+    /// <summary>
+    /// Copy mode draws nothing, so the chain has nothing to build -- but a copy
+    /// request with no track named is a request that would produce a file with no
+    /// subtitles on it, and that is worth saying out loud.
+    /// </summary>
     [Test]
-    public async Task CopyingIsRefusedBecauseThePipelineHasOneVideoStream()
+    public async Task CopyModeDrawsNothingAndNeedsATrackNamed()
     {
-        SubtitleDefaults settings = new() { Mode = "copy", Files = ["/subs/a.srt"] };
-        SubtitleBurn burn = SubtitleChain.Build(settings, 0, null);
+        SubtitleBurn named = SubtitleChain.Build(
+            new SubtitleDefaults { Mode = "copy", CopyTracks = [2] }, 0, null);
 
-        await Assert.That(burn.Problems.Count).IsEqualTo(1);
-        await Assert.That(burn.Problems[0].Contains("burn", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(named.Problems.Count).IsEqualTo(0);
+        await Assert.That(named.Filter.Length).IsEqualTo(0);
+
+        SubtitleBurn unnamed = SubtitleChain.Build(new SubtitleDefaults { Mode = "copy" }, 0, null);
+
+        await Assert.That(unnamed.Problems.Count).IsEqualTo(1);
+        await Assert.That(unnamed.Problems[0].Contains("--subtitle-copy", StringComparison.Ordinal)).IsTrue();
     }
 
     [Test]

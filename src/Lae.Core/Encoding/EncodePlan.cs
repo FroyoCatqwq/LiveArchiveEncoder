@@ -74,6 +74,14 @@ public sealed record EncodePlan
     /// <summary>Choices worth telling the user about, e.g. a rounded frame size.</summary>
     public IReadOnlyList<string> Notes { get; init; } = [];
 
+    /// <summary>
+    /// Subtitle tracks carried into the output as streams of their own. Empty for
+    /// every run that does not ask for them, which is every run that burns.
+    /// </summary>
+    public IReadOnlyList<SubtitleCarry> SubtitleTracks { get; init; } = [];
+
+    public bool HasSubtitleTracks => SubtitleTracks.Count > 0;
+
     /// <summary>Reasons this plan cannot run. Empty means it can.</summary>
     public IReadOnlyList<string> Problems { get; init; } = [];
 
@@ -135,6 +143,28 @@ public sealed record EncodePlan
         string destination = request.DestinationPath ?? EncodeRequest.DeriveDestination(request.SourcePath, container);
 
         problems.AddRange(request.Validate(destination));
+
+        // Carried subtitle tracks need the container before they can be checked:
+        // Matroska keeps a PGS track as it is, MP4 can only hold text, and an AVI
+        // has no subtitle muxer at all. Deciding that here -- rather than letting
+        // the muxer refuse two seconds into the run -- is the whole point of
+        // planning before spawning.
+        IReadOnlyList<SubtitleCarry> carries = [];
+        if (request.Encode.Subtitles.Mode == "copy" && request.Encode.Subtitles.CopyTracks.Count > 0)
+        {
+            (IReadOnlyList<SubtitleCarry> resolved, IReadOnlyList<string> carryProblems) =
+                SubtitleCopy.Resolve(container, source, request.Encode.Subtitles.CopyTracks);
+
+            problems.AddRange(carryProblems);
+            carries = resolved;
+
+            if (resolved.Count > 0)
+            {
+                notes.Add("carrying subtitle " + (resolved.Count == 1 ? "track " : "tracks ")
+                        + string.Join(", ", resolved.Select(t => t.Index))
+                        + $" as {resolved[0].Codec} into {container}");
+            }
+        }
 
         // Subtitles are burned on the decoder side, into the frames that go down
         // the pipe: the encoder then needs no knowledge of them, and a run with
@@ -249,7 +279,7 @@ public sealed record EncodePlan
             request, source, filter, transport, span, problems);
 
         List<string> encoderArgsOut = BuildEncoderArgs(
-            request, source, encoder, transport, width, height, hasAudio, muxer, span ?? 0, destination, problems);
+            request, source, encoder, transport, width, height, hasAudio, carries, muxer, span ?? 0, destination, problems);
 
         return new EncodePlan
         {
@@ -267,6 +297,7 @@ public sealed record EncodePlan
             EncoderArgs = encoderArgsOut,
             Notes = notes,
             Problems = problems,
+            SubtitleTracks = carries,
         };
     }
 
@@ -347,10 +378,17 @@ public sealed record EncodePlan
 
     private static List<string> BuildEncoderArgs(
         EncodeRequest request, SourceInfo source, EncoderInfo encoder, string transport,
-        int width, int height, bool hasAudio, string muxer, double span, string destination,
+        int width, int height, bool hasAudio, IReadOnlyList<SubtitleCarry> carries,
+        string muxer, double span, string destination,
         List<string> problems)
     {
         EncodeDefaults e = request.Encode;
+
+        // One second input serves both jobs. The decoder pipe carries video only,
+        // so audio and any carried subtitle track are read from the source again --
+        // and a run that carries subtitles needs that input whether or not there
+        // is an audio track.
+        bool secondInput = hasAudio || carries.Count > 0;
 
         var cmd = new List<string>
         {
@@ -378,7 +416,7 @@ public sealed record EncodePlan
             "-i", "pipe:0",
         };
 
-        if (hasAudio)
+        if (secondInput)
         {
             // The audio track is read from the source a second time, because the
             // decoder pipe carries video only.
@@ -392,6 +430,13 @@ public sealed record EncodePlan
         // nothing.
         cmd.AddRange(["-map", "0:v:0"]);
         if (hasAudio) cmd.AddRange(["-map", AudioMap(1, request.AudioStream)]);
+
+        // Carried subtitle tracks come out of the same second input, by absolute
+        // stream index. One -c:s covers them all: SubtitleCopy refuses a set that
+        // would need two, so the shared value is the honest answer.
+        foreach (SubtitleCarry track in carries)
+            cmd.AddRange(["-map", $"{1}:{track.Index}"]);
+        if (carries.Count > 0) cmd.AddRange(["-c:s", carries[0].Codec]);
 
         cmd.AddRange(["-c:v", encoder.Name]);
         cmd.AddRange(ArgsBuilder.VideoQualityArgs(encoder.Name, e.Quality, e.LimitKbps));
@@ -448,12 +493,13 @@ public sealed record EncodePlan
         // Cap the output at the span the run covers.
         //
         // The video side stops on its own: the pump stops writing and the pipe
-        // ends. The audio side does not -- it is a second read of the source that
+        // ends. The second input does not -- it is a read of the source that
         // started at -ss and would otherwise run to the end of the file, so a
         // 1 s excerpt came out as a 3 s file whose picture was 1 s of it and
-        // whose container duration followed the audio. Found by the end-to-end
-        // comparison of a trimmed run against its own source, not by reading it.
-        if (hasAudio && span > 0) cmd.AddRange(["-t", ArgsBuilder.FloatArg(span)]);
+        // whose container duration followed the second input. Found by the
+        // end-to-end comparison of a trimmed run against its own source, not by
+        // reading it.
+        if (secondInput && span > 0) cmd.AddRange(["-t", ArgsBuilder.FloatArg(span)]);
 
         // Write every packet out as it is produced.
         //

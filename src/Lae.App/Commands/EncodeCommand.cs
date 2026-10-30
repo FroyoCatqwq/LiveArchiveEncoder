@@ -80,6 +80,10 @@ public static class EncodeCommand
         {
             Description = "Burn the embedded subtitle track with this absolute index.",
         };
+        var subtitleCopyOption = new Option<int[]>("--subtitle-copy")
+        {
+            Description = "Carry this subtitle track into the output as a stream; repeat for more than one.",
+        };
         var subtitleBoxOption = new Option<string?>("--subtitle-box")
         {
             Description = "Shape the text is laid out in: source, 4:3 or 16:9.",
@@ -101,6 +105,10 @@ public static class EncodeCommand
         {
             Description = "Container for a post-encode pass, paired by position with --recompress.",
         };
+        var recompressOnlyOption = new Option<bool>("--recompress-only")
+        {
+            Description = "Run the chain against the existing file and skip the capture entirely.",
+        };
 
         var command = new Command("encode", "Re-encode one source at archive pace.")
         {
@@ -118,11 +126,13 @@ public static class EncodeCommand
             levelsOption,
             subtitleOption,
             subtitleTrackOption,
+            subtitleCopyOption,
             subtitleBoxOption,
             subtitleFontOption,
             fontsDirOption,
             recompressOption,
             recompressContainerOption,
+            recompressOnlyOption,
             dryRunOption,
         };
 
@@ -166,11 +176,13 @@ public static class EncodeCommand
                 FpsThresholds = thresholds,
                 SubtitleFiles = parseResult.GetValue(subtitleOption),
                 SubtitleTrack = parseResult.GetValue(subtitleTrackOption),
+                SubtitleCopyTracks = parseResult.GetValue(subtitleCopyOption),
                 SubtitleBox = parseResult.GetValue(subtitleBoxOption),
                 SubtitleFont = parseResult.GetValue(subtitleFontOption),
                 FontsDir = parseResult.GetValue(fontsDirOption),
                 RecompressArgs = parseResult.GetValue(recompressOption),
                 RecompressContainers = parseResult.GetValue(recompressContainerOption),
+                RecompressOnly = parseResult.GetValue(recompressOnlyOption),
             };
 
             return EncodeSession.Run(

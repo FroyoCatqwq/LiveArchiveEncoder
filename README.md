@@ -44,6 +44,14 @@ exactly what v6.3.3 would have produced.
 > fallen **43 options** behind -- and every run says the one thing nobody guesses:
 > it runs at the source's pace.
 
+> **v8 is a ground-up rewrite on `v8-milestone`.** Everything above describes
+> v7, which is what `main` ships: the same program, one binary, an interactive
+> menu. v8 is six assemblies with a dependency direction, no menu, a real CLI and
+> no built-in era presets. Its usage is a separate document --
+> [`docs/v8-cli.md`](docs/v8-cli.md) -- because the two command lines are not
+> compatible and a README that described both would describe neither. Nothing
+> here is a v8 promise until v8.0.0 lands.
+
 > **v7.9.8.5:** the program updates itself. `--update` downloads the newest release,
 > checks it against the `sha256:` digest GitHub recorded at upload, runs the
 > downloaded build's `--version` to prove it starts and is not older, then hands

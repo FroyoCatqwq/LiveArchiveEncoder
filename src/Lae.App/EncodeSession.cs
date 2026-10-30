@@ -47,6 +47,9 @@ public sealed record EncodeOverrides
     /// <summary>Absolute index of an embedded subtitle track to burn.</summary>
     public int? SubtitleTrack { get; init; }
 
+    /// <summary>Absolute indices of subtitle tracks to carry into the output.</summary>
+    public IReadOnlyList<int>? SubtitleCopyTracks { get; init; }
+
     /// <summary>Shape the burned text is laid out in: "source", "4:3" or "16:9".</summary>
     public string? SubtitleBox { get; init; }
 
@@ -64,6 +67,12 @@ public sealed record EncodeOverrides
 
     /// <summary>Container per hop, paired by position with <see cref="RecompressArgs"/>.</summary>
     public IReadOnlyList<string>? RecompressContainers { get; init; }
+
+    /// <summary>
+    /// Run the chain against <c>input</c> and nothing else: no capture, no encoder
+    /// choice, no probe of its own beyond the length.
+    /// </summary>
+    public bool RecompressOnly { get; init; }
 }
 
 /// <summary>
@@ -152,6 +161,12 @@ public static class EncodeSession
         bool dryRun,
         CancellationToken token)
     {
+        // --recompress-only is a different job from a capture: no encoder to choose,
+        // no span to pace, no video plan. Branching before BuildRequest keeps the
+        // two from sharing state they should not.
+        if (overrides.RecompressOnly)
+            return RunChainOnly(input, overrides, settings, dependencies, terminal, dryRun, token);
+
         // The request comes first, because it is the only step that can be wrong
         // without touching the machine. Reporting "no such encoder" before "there
         // is no FFmpeg here" is the difference between a user fixing their typing
@@ -373,6 +388,81 @@ public static class EncodeSession
     }
 
     /// <summary>
+    /// Runs the chain against a file that is already on disk.
+    ///
+    /// <para>The reason it exists: tuning a chain is iterative, and paying for the
+    /// capture every time makes people stop tuning. It is the same plan and the
+    /// same runner as a normal run's tail -- only the capture is missing.</para>
+    ///
+    /// <para>The length is probed anyway, because a hop's deadline is derived from
+    /// it. A source that will not probe is not a reason to refuse: the chain gets
+    /// the floor value and FFmpeg's own verdict is the report.</para>
+    /// </summary>
+    private static int RunChainOnly(
+        string input,
+        EncodeOverrides overrides,
+        SettingsDocument settings,
+        EncodeDependencies dependencies,
+        ITerminal terminal,
+        bool dryRun,
+        CancellationToken token)
+    {
+        (RecompressChain? chain, string? chainError) = BuildChain(overrides);
+        if (chain is null)
+        {
+            terminal.ErrorLine($"ERROR: {chainError ?? "--recompress-only needs at least one --recompress"}");
+            return ExitCodes.Usage;
+        }
+
+        ToolchainProbeResult tools = dependencies.ProbeToolchain(ToolchainDirectory(settings));
+        if (tools.Ffmpeg is not { } ffmpeg)
+        {
+            foreach (string line in tools.Missing()) terminal.ErrorLine($"ERROR: missing {line}");
+            terminal.ErrorLine("Run 'lae setup' for what to do about it.");
+            return ExitCodes.Failed;
+        }
+
+        // A path that is not there is the user's typo, and it costs a sentence
+        // rather than an FFmpeg diagnostic about a file it could not open.
+        if (!File.Exists(input))
+        {
+            terminal.ErrorLine($"ERROR: there is no file at '{input}'");
+            return ExitCodes.Usage;
+        }
+
+        RecompressPlan plan = RecompressPlan.Create(chain, input);
+
+        foreach (string note in plan.Notes) terminal.ErrorLine($"note: {note}");
+
+        if (!plan.IsRunnable)
+        {
+            foreach (string problem in plan.Problems) terminal.ErrorLine($"ERROR: {problem}");
+            return ExitCodes.Usage;
+        }
+
+        PrintChain(plan, ffmpeg, terminal);
+        if (dryRun) return ExitCodes.Ok;
+
+        double span = tools.Ffprobe is { } ffprobe
+            ? dependencies.ProbeSource(ffprobe, input).Info?.DurationSeconds ?? 0
+            : 0;
+
+        RecompressOutcome outcome = dependencies.RunRecompress(
+            plan, ffmpeg,
+            TimeSpan.FromSeconds(Math.Max(300.0, span * 4.0 + 120.0)),
+            note => terminal.ErrorLine($"note: {note}"),
+            token);
+
+        foreach (string path in outcome.Written)
+            terminal.Line($"recompress {Path.GetFileName(path)}");
+
+        if (!outcome.Failed) return ExitCodes.Ok;
+
+        terminal.ErrorLine($"ERROR: {outcome.Error}");
+        return ExitCodes.Failed;
+    }
+
+    /// <summary>
     /// The hops after the recording: what a site would have done to the upload.
     ///
     /// <para>A failed hop keeps everything that was already written and leaves
@@ -417,6 +507,37 @@ public static class EncodeSession
     /// command line -- that rule is older than the settings file and it is what
     /// keeps a scripted run predictable.</para>
     /// </summary>
+    /// <summary>
+    /// The recompress chain this command line asked for, or null when it asked for
+    /// none.
+    ///
+    /// <para>Shared by the two entry points on purpose: <c>--recompress-only</c>
+    /// runs the same chain against a file that already exists, and a second copy of
+    /// the pairing rules is how the two would drift apart.</para>
+    /// </summary>
+    public static (RecompressChain? Chain, string? Error) BuildChain(EncodeOverrides overrides)
+    {
+        if (overrides.RecompressArgs is not { Count: > 0 } passes) return (null, null);
+
+        string[] containers = overrides.RecompressContainers is { Count: > 0 } given ? [.. given] : [];
+
+        if (containers.Length > passes.Count)
+        {
+            return (null, $"{containers.Length} containers were given for {passes.Count} passes; "
+                        + "there is nothing for the extra one to belong to");
+        }
+
+        return (new RecompressChain
+        {
+            Enabled = true,
+            Passes =
+            [
+                .. passes.Select((args, index) =>
+                    new RecompressPass(args, index < containers.Length ? containers[index] : "")),
+            ],
+        }, null);
+    }
+
     public static (EncodeRequest? Request, string? Error) BuildRequest(
         string input, EncodeOverrides overrides, SettingsDocument settings)
     {
@@ -448,15 +569,33 @@ public static class EncodeSession
         // thing, and naming both is refused by EncodeRequest.Validate rather than
         // silently preferring one: two subtitle layers with no way to tell which
         // is which is worse than a sentence.
-        if (overrides.SubtitleFiles is { Count: > 0 } || overrides.SubtitleTrack is not null)
+        // Three ways of naming subtitles, and mixing them is not a preference --
+        // it is two runs the user asked for at once. Said here rather than left to
+        // the later layer, because "carry" would otherwise quietly win over
+        // "burn" and the burned track would simply not be there.
+        if (overrides.SubtitleTrack is not null && overrides.SubtitleCopyTracks is { Count: > 0 })
         {
+            return (null, "--subtitle-track burns one track and --subtitle-copy carries others; "
+                         + "they are different jobs, pick one");
+        }
+
+        if (overrides.SubtitleFiles is { Count: > 0 }
+            || overrides.SubtitleTrack is not null
+            || overrides.SubtitleCopyTracks is { Count: > 0 })
+        {
+            // Three ways of naming subtitles, one mode each. A carried track is not
+            // a burn: it stays a stream, which is the only thing that works for a
+            // bitmap track and the only thing that keeps the original cue timing.
+            bool carrying = overrides.SubtitleCopyTracks is { Count: > 0 };
+
             encode = encode with
             {
                 Subtitles = new SubtitleDefaults
                 {
-                    Mode = "burn",
+                    Mode = carrying ? "copy" : "burn",
                     Files = [.. (overrides.SubtitleFiles ?? []).Where(f => !string.IsNullOrWhiteSpace(f))],
-                    Stream = overrides.SubtitleTrack,
+                    Stream = carrying ? null : overrides.SubtitleTrack,
+                    CopyTracks = carrying ? [.. overrides.SubtitleCopyTracks!.Distinct()] : [],
                     BoxAspect = overrides.SubtitleBox ?? "source",
                     FallbackFont = overrides.SubtitleFont,
                     FontDir = overrides.FontsDir,
@@ -468,29 +607,9 @@ public static class EncodeSession
         // --recompress is one more transcode, in the order written;
         // --recompress-container is paired by position, and a hop without one
         // derives its container from the codec it names.
-        if (overrides.RecompressArgs is { Count: > 0 } passes)
-        {
-            string[] containers = overrides.RecompressContainers is { Count: > 0 } given ? [.. given] : [];
-
-            if (containers.Length > passes.Count)
-            {
-                return (null, $"{containers.Length} containers were given for {passes.Count} passes; "
-                             + "there is nothing for the extra one to belong to");
-            }
-
-            encode = encode with
-            {
-                Recompress = new RecompressChain
-                {
-                    Enabled = true,
-                    Passes =
-                    [
-                        .. passes.Select((args, index) =>
-                            new RecompressPass(args, index < containers.Length ? containers[index] : "")),
-                    ],
-                },
-            };
-        }
+        (RecompressChain? chain, string? chainError) = BuildChain(overrides);
+        if (chainError is not null) return (null, chainError);
+        if (chain is not null) encode = encode with { Recompress = chain };
 
         // The encoder moves first, and the quality number moves with it. A stored
         // 8 means a 2004 stream's -q:v 8; handed to libx264 unchanged it becomes

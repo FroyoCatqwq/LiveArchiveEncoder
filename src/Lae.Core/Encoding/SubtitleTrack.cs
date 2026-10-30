@@ -40,14 +40,16 @@ public static class SubtitleTrack
     /// <para>An unknown codec is allowed through: a build newer than this list may
     /// know a text format this list does not, and FFmpeg's own verdict -- a
     /// refusal naming the conversion -- is more accurate than a guess made here.
-    /// Bitmap formats are refused by name because no argument can recover them.</para>
+    /// Bitmap formats are refused by name because no argument can recover them,
+    /// and the refusal names the thing that does work: carrying the track into the
+    /// output, which is what a WEB-DL's PGS tracks are for.</para>
     /// </summary>
     public static string? Problem(string? codec, int index)
     {
         if (!IsBitmap(codec)) return null;
 
         return $"subtitle track {index} is a bitmap format ({codec}): there is no text to lay out, "
-             + "so it cannot be burned; pick a text track instead";
+             + $"so it cannot be burned; carry it with --subtitle-copy {index} into an mkv instead";
     }
 
     /// <summary>

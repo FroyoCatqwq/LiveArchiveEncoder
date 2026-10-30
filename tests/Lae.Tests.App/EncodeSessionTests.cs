@@ -554,6 +554,120 @@ public sealed class EncodeSessionTests
         }
     }
 
+    /// <summary>
+    /// Carrying a track does not touch the source: it is a map from the second
+    /// input, so nothing is unwrapped and nothing has to be deleted afterwards.
+    /// </summary>
+    [Test]
+    public async Task CarryingATrackMapsItWithoutUnwrappingAnything()
+    {
+        var deps = new Deps { ProbedSource = SourceInfo(Subtitle(2, "hdmv_pgs_subtitle")) };
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.mkv",
+            Container = "mkv",
+            SubtitleCopyTracks = [2],
+        };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides, dryRun: true);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+        await Assert.That(deps.Unwrapped).IsNull();
+
+        string output = string.Join('\n', terminal.OutputLines);
+        await Assert.That(output.Contains("-c:s copy", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(output.Contains("-map 1:2", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>Three ways to say "subtitles"; a run picks one.</summary>
+    [Test]
+    public async Task BurningAndCarryingAtOnceIsAUsageError()
+    {
+        var deps = new Deps
+        {
+            ProbedSource = SourceInfo(Subtitle(2, "subrip"), Subtitle(3, "hdmv_pgs_subtitle")),
+        };
+
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.avi",
+            SubtitleTrack = 2,
+            SubtitleCopyTracks = [3],
+        };
+
+        (int code, BufferedTerminal terminal) = Run(deps, overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Usage);
+        await Assert.That(deps.Ran).IsFalse();
+        await Assert.That(terminal.ErrorLines.Any(l => l.Contains("pick one", StringComparison.Ordinal))).IsTrue();
+    }
+
+    /// <summary>
+    /// <c>--recompress-only</c> skips the capture: no encoder is chosen, the fake
+    /// runner never runs, and the file named on the command line is what the chain
+    /// reads.
+    /// </summary>
+    [Test]
+    public async Task RecompressOnlySkipsTheCaptureEntirely()
+    {
+        string file = Path.Combine(Path.GetTempPath(), "lae-only-" + Guid.NewGuid().ToString("N")[..8] + ".avi");
+        File.WriteAllBytes(file, [0]);
+
+        try
+        {
+            var deps = new Deps();
+            var overrides = new EncodeOverrides
+            {
+                RecompressOnly = true,
+                RecompressArgs = ["-c:v libx264 -crf 30"],
+            };
+
+            var terminal = new BufferedTerminal();
+            int code = EncodeSession.Run(
+                file, overrides, new SettingsDocument(), deps.Build(), terminal, dryRun: true, CancellationToken.None);
+
+            await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+            await Assert.That(deps.Ran).IsFalse();
+
+            string output = string.Join('\n', terminal.OutputLines);
+            await Assert.That(output.Contains("recompress:", StringComparison.Ordinal)).IsTrue();
+            await Assert.That(output.Contains("_web.mp4", StringComparison.Ordinal)).IsTrue();
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Test]
+    public async Task RecompressOnlyWithoutAChainIsAUsageError()
+    {
+        var overrides = new EncodeOverrides { RecompressOnly = true };
+
+        (int code, BufferedTerminal terminal) = Run(new Deps(), overrides);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Usage);
+        await Assert.That(terminal.ErrorLines.Any(l => l.Contains("--recompress", StringComparison.Ordinal))).IsTrue();
+    }
+
+    [Test]
+    public async Task RecompressOnlyNeedsTheFileToExist()
+    {
+        var overrides = new EncodeOverrides
+        {
+            RecompressOnly = true,
+            RecompressArgs = ["-c:v libx264 -crf 30"],
+        };
+
+        var terminal = new BufferedTerminal();
+        int code = EncodeSession.Run(
+            "/media/not-there.avi", overrides, new SettingsDocument(), new Deps().Build(),
+            terminal, dryRun: false, CancellationToken.None);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Usage);
+        await Assert.That(terminal.ErrorLines.Any(l => l.Contains("there is no file", StringComparison.Ordinal))).IsTrue();
+    }
+
     private static SourceStream Subtitle(int index, string codec)
         => new(index, "subtitle", codec, "chi", null);
 

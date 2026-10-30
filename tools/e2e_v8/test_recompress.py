@@ -147,6 +147,29 @@ def test_a_dry_run_shows_the_whole_chain(work: Work, needs_ffmpeg):
     assert not (work.root / "out_web.mp4").exists()
 
 
+def test_a_chain_can_run_against_a_file_that_already_exists(work: Work, needs_ffmpeg):
+    """Tuning a chain should not cost a capture every time.
+
+    --recompress-only skips the run and works on the file named on the command
+    line, which must come out of it byte for byte the same.
+    """
+    source = work.source(seconds=1)
+    live = work.root / "live.avi"
+    assert work.run("encode", source, "--out", str(live)).returncode == 0
+
+    before = live.read_bytes()
+
+    result = work.run("encode", str(live),
+                      "--recompress", "-c:v mjpeg -q:v 4",
+                      "--recompress-container", "avi",
+                      "--recompress-only")
+
+    assert result.returncode == 0, result.stderr
+    assert (work.root / "live_web.avi").exists(), result.stdout
+    assert live.read_bytes() == before, "the recording must not be touched"
+    assert work.parts() == []
+
+
 def test_a_chain_the_muxer_cannot_hold_is_refused_before_encoding(work: Work, needs_ffmpeg):
     """The refusal has to come before the capture, not after it."""
     source = work.source(seconds=1, audio=False)

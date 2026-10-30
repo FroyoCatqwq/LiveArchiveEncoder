@@ -47,6 +47,20 @@ public sealed class EncodePlanTests
         Encode = encode ?? new EncodeDefaults { Encoder = "mpeg4", Quality = 8 },
     };
 
+    /// <summary>The same source, with subtitle tracks added at the given indices.</summary>
+    private static SourceInfo WithSubs(params (int Index, string Codec)[] tracks)
+    {
+        SourceInfo plain = Source();
+        return plain with
+        {
+            Streams =
+            [
+                .. plain.Streams,
+                .. tracks.Select(t => new SourceStream(t.Index, "subtitle", t.Codec, "chi", null)),
+            ],
+        };
+    }
+
     /// <summary>
     /// Finds a contiguous run of arguments. Pinning a whole command line would
     /// break on every unrelated addition; pinning the order of the parts that
@@ -499,5 +513,122 @@ public sealed class EncodePlanTests
         // And -y, or one killed run leaves a part file that blocks the next one.
         await Assert.That(plan.EncoderArgs[0]).IsEqualTo("-hide_banner");
         await Assert.That(plan.EncoderArgs.Contains("-y")).IsTrue();
+    }
+
+    /// <summary>
+    /// A carried track comes out of the second input, by absolute index, and one
+    /// <c>-c:s</c> covers the lot.
+    ///
+    /// <para>Matroska is the container that can hold a PGS track as it is, which is
+    /// the whole reason this path exists: libass cannot draw a bitmap track, and
+    /// re-encoding one into text is not a thing.</para>
+    /// </summary>
+    [Test]
+    public async Task ACarriedTrackBecomesAMapFromTheSecondInput()
+    {
+        EncodeRequest request = Request() with
+        {
+            DestinationPath = "/media/out.mkv",
+            Encode = new EncodeDefaults
+            {
+                Encoder = "mpeg4",
+                Quality = 8,
+                Container = "mkv",
+                Subtitles = new SubtitleDefaults { Mode = "copy", CopyTracks = [2, 3] },
+            },
+        };
+
+        EncodePlan plan = EncodePlan.Create(
+            request, WithSubs((2, "hdmv_pgs_subtitle"), (3, "hdmv_pgs_subtitle")), Encoder());
+
+        await Assert.That(plan.Problems.Count).IsEqualTo(0);
+        await Assert.That(plan.HasSubtitleTracks).IsTrue();
+        await Assert.That(plan.SubtitleTracks.Count).IsEqualTo(2);
+
+        await Assert.That(HasRun(plan.EncoderArgs, "-map", "1:2")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-map", "1:3")).IsTrue();
+        await Assert.That(HasRun(plan.EncoderArgs, "-c:s", "copy")).IsTrue();
+
+        // Two inputs: the pipe on 0, the source on 1.
+        await Assert.That(plan.EncoderArgs.Count(a => a == "-i")).IsEqualTo(2);
+    }
+
+    /// <summary>
+    /// A source with no audio still needs the second input when it carries a
+    /// track: the pipe holds video only. This is the line that would have been
+    /// forgotten.
+    /// </summary>
+    [Test]
+    public async Task CarryingATrackNeedsTheSourceEvenWithoutAudio()
+    {
+        EncodeRequest request = Request() with
+        {
+            Encode = new EncodeDefaults
+            {
+                Encoder = "mpeg4",
+                Quality = 8,
+                Container = "mkv",
+                Subtitles = new SubtitleDefaults { Mode = "copy", CopyTracks = [1] },
+            },
+        };
+
+        SourceInfo silent = Source(audio: false) with
+        {
+            Streams =
+            [
+                .. Source(audio: false).Streams,
+                new SourceStream(1, "subtitle", "subrip", "chi", null),
+            ],
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, silent, Encoder());
+
+        await Assert.That(plan.Problems.Count).IsEqualTo(0);
+        await Assert.That(plan.HasAudio).IsFalse();
+        await Assert.That(plan.EncoderArgs.Count(a => a == "-i")).IsEqualTo(2);
+        await Assert.That(HasRun(plan.EncoderArgs, "-map", "1:1")).IsTrue();
+    }
+
+    [Test]
+    public async Task ABitmapTrackCannotBeCarriedIntoMp4()
+    {
+        EncodeRequest request = Request() with
+        {
+            Encode = new EncodeDefaults
+            {
+                Encoder = "mpeg4",
+                Quality = 8,
+                Container = "mp4",
+                Subtitles = new SubtitleDefaults { Mode = "copy", CopyTracks = [2] },
+            },
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, WithSubs((2, "hdmv_pgs_subtitle")), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems.Any(p => p.Contains("mkv", StringComparison.Ordinal))).IsTrue();
+    }
+
+    /// <summary>
+    /// AVI has no subtitle muxer at all, and that is a different sentence from
+    /// "this codec does not fit": nothing about the track is the problem.
+    /// </summary>
+    [Test]
+    public async Task AnAviCannotCarryAnySubtitleTrack()
+    {
+        EncodeRequest request = Request() with
+        {
+            Encode = new EncodeDefaults
+            {
+                Encoder = "mpeg4",
+                Quality = 8,
+                Subtitles = new SubtitleDefaults { Mode = "copy", CopyTracks = [2] },
+            },
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, WithSubs((2, "subrip")), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems.Any(p => p.Contains("no subtitle muxer", StringComparison.Ordinal))).IsTrue();
     }
 }

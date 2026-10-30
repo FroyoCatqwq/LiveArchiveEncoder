@@ -43,6 +43,7 @@ lae encode clip.mkv --out clip.avi --encoder mpeg4 --quality 8 --limit 200
 | `--fps-levels` | 阶梯，`13,8,5,3` 或逐档阈值 `13,8:150:110,5` |
 | `--subtitle-file` | 烧录这个 `.srt`/`.ass`，可重复 |
 | `--subtitle-track` | 烧录**容器里**的那条字幕轨，值是 ffprobe 的绝对流序号 |
+| `--subtitle-copy` | 把那条字幕轨**原样带进产物**，不烧。可重复 |
 | `--subtitle-box` | 字幕排版用的画幅：`source`、`4:3`、`16:9` |
 | `--subtitle-font` | 强制字体族，盖过字幕文件自己写的 |
 | `--fonts-dir` | 额外字体目录（默认先找 FFmpeg 同级的 `fonts/`） |
@@ -104,19 +105,42 @@ v7 的行为被完整保留：**帧率是会掉的**。码率顶到上限就降�
 ```
 lae encode tape.mkv --subtitle-file chi.srt --subtitle-box 4:3
 lae encode tape.mkv --subtitle-track 2            # 烧容器里第 2 条轨
+lae encode tape.mkv --container mkv --subtitle-copy 2 --subtitle-copy 3
 ```
 
-**内嵌轨要先拆出来**。libass 吃的是文件名，没有任何参数能让它读一条流，所以
-`--subtitle-track` 会先把那条轨解成一个 `.ass` 放在产物旁边，烧完（或失败）再删掉。
-试运行不拆——它承诺的是两条命令行加零个进程，而拆轨是一次会写文件的进程。
+**烧录还是带走，不是同一个文件的两种偏好**：
 
-**位图字幕直接拒绝**：`hdmv_pgs_subtitle`、`dvd_subtitle` 这类是"文字的图片"，libass
-没有字可排，唯一的办法是解码成图再 overlay，那是另一件活。开跑前以退出码 2 拒掉，
-不会让你等一趟跑完才发现画面上什么都没有。
+| | 烧录 | 带走（copy） |
+| --- | --- | --- |
+| 需要什么样的轨 | **文本**轨（srt/ass/mov_text/webvtt） | 任何轨，包括位图 |
+| 产物里有什么 | 画面上多了一层字，字幕流没了 | 多了一条字幕流，画面不变 |
+| 能进哪些容器 | 跟烧录无关 | mkv 原样、mp4/mov 转 `mov_text`、webm 转 `webvtt`；avi/flv/mpg/rm/asf **没有字幕复用器** |
+| 时间码 | 被重新渲染（`setpts` 那对） | 原始 cue 时间不动 |
+
+**位图字幕（PGS/VobSub）只能带走，不能烧**。`hdmv_pgs_subtitle` 是"文字的图片"，
+libass 没有字可排；FFmpeg 也没有把位图轨烧进画面的滤镜。典型场景就是 WEB-DL 的
+`简繁日内封PGS`——它就是两条 PGS 轨，没有任何文本轨：
+
+```
+$ ffprobe -show_entries stream=index,codec_type,codec_name -of csv=p=0 in.mkv
+0,h264,video,1920,1080
+1,aac,audio,2
+2,hdmv_pgs_subtitle,subtitle,1920,1080
+3,hdmv_pgs_subtitle,subtitle,1920,1080
+
+$ lae encode in.mkv --container mkv --subtitle-copy 2 --subtitle-copy 3
+note: carrying subtitle tracks 2, 3 as copy into mkv
+```
+
+**内嵌轨要先拆出来**（仅烧录时）。libass 吃的是文件名，没有任何参数能让它读一条流，
+所以 `--subtitle-track` 会先把那条轨解成一个 `.ass` 放在产物旁边，烧完（或失败）再删掉。
+试运行不拆——它承诺的是两条命令行加零个进程，而拆轨是一次会写文件的进程。copy 模式
+不需要拆：它本来就是从第二个输入直接 map。
 
 **时间轴跟素材走**：`--from` 会让解码器把时间轴归零，而字幕文件（和拆出来的 `.ass`）
 还是原始时间，所以滤镜链两头各加一次 `setpts` 把时间顶上去再抬回来。少了后半段，整条
-编码会被重新计时。拆轨时**不能**加 `-ss`，加了就等于把要平移的量抵掉。
+编码会被重新计时。拆轨时**不能**加 `-ss`，加了就等于把要平移的量抵掉。copy 模式不受
+影响：第二条输入的 `-ss` 会同样作用在字幕包上。
 
 ## 二次压缩链
 
@@ -156,6 +180,16 @@ lae encode tape.avi --out tape_live.avi \
 `--dry-run` 会把每一趟的命令行也打出来，因为一份只显示采集、藏起三趟转码的计划，不是
 这次运行的计划。
 
+**只跑一条链**：`--recompress-only` 跳过采集，直接对已存在的文件跑链条。调参数时不用
+每次都重录一遍：
+
+```
+lae encode tape_live.avi --recompress "-c:v libx264 -crf 32" --recompress-only
+```
+
+它读的就是命令行里那个文件，产物仍然是 `tape_live_web.mp4`，输入文件**一个字节都不动**
+（端到端测试逐字节比过）。
+
 ## 分片并行：不做
 
 v8 没有 `--parallel`，设置文件里写了大于 1 会在**开跑之前**以退出码 2 拒掉，并说清楚
@@ -174,7 +208,8 @@ roqvideo，而 roq 恰恰是拼接会丢数据的那个容器。
 
 诚实列一下，这些都会**明确报错**（退出码 2），不会静默忽略：
 
-- 字幕 copy 模式（另起一条字幕流）
 - 插件宿主（`PluginRegistration` 已在设置里定义）
 - 自更新（退出码 3 的路径）
-- 单独跑一条链（`--recompress-only`，只对已有文件做二次压缩）
+
+M2 到此收齐：实时节奏、自适应阶梯、字幕（烧录 / 内嵌轨 / copy）、二次压缩链、
+`--recompress-only`。分片并行是**结论性不做**，理由见上一节。

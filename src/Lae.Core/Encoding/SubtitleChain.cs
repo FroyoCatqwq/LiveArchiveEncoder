@@ -63,23 +63,26 @@ public static class SubtitleChain
         if (subtitles.Mode == "off")
             return new SubtitleBurn("", default, problems, notes);
 
-        // An embedded track is an input, not a file: it has to be mapped, which
-        // gives the encoder a second input and changes both command lines. Until
-        // that exists, saying so is better than a file that silently has no
-        // subtitles on it.
+        // An embedded track is an input, not a file: it has to be unwrapped before
+        // the filter can see it, and that is the host's job (it is the only layer
+        // allowed to start a process). Reaching here means a caller skipped that
+        // step, so say which flag it came from rather than burning nothing.
         if (subtitles.Stream is { } track)
         {
             problems.Add(
-                $"burning the embedded subtitle track {track} is not wired yet; "
-                + "extract it to a file and pass that with --subtitle-file");
+                $"subtitle track {track} has to be unwrapped into a file before planning "
+                + "(that is what --subtitle-track does); nothing would be burned");
             return new SubtitleBurn("", default, problems, notes);
         }
 
         if (subtitles.Mode == "copy")
         {
-            problems.Add(
-                "copying subtitles as a separate stream is not wired yet; "
-                + "'burn' draws them into the picture and needs no second stream");
+            // Nothing to draw: a carried track is a stream of its own and the
+            // encoder command line is where it belongs, not the filter chain. All
+            // this side has to say is whether the request named anything.
+            if (subtitles.CopyTracks.Count == 0)
+                problems.Add("copy mode carries tracks into the output; name them with --subtitle-copy");
+
             return new SubtitleBurn("", default, problems, notes);
         }
 
