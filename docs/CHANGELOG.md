@@ -49,6 +49,24 @@ M2 收尾的两件事：配置文件的格式定下来，以及程序终于开�
 - 读取不创建数据库：没压过东西的机器上 `history list` 只说"还没有记录"。
 - 连接**不开池**：一行写入不需要池，而池化句柄会让文件在进程空闲时仍被占用。
 
+#### SQLite 的 glibc 下限：钉在 2.28（⚠ 安装包内容变化）
+
+`Microsoft.Data.Sqlite` 默认带捆绑的原生 SQLite，而 `SQLitePCLRaw` 从 **2.1.12** 起把
+`libe_sqlite3.so` 编译在 glibc 2.34/2.33 上。在 AlmaLinux / Rocky / RHEL **8**（glibc 2.28）上，
+结果是 `Unable to load shared library 'e_sqlite3' … version 'GLIBC_2.33' not found`——
+历史库根本打不开。这是两台测试机里的 **lae-linux** 抓到的，不是读代码发现的。
+
+- 现在钉 `Microsoft.Data.Sqlite` **10.0.10**（它依赖 `SQLitePCLRaw` 2.1.11，原生库只需 glibc 2.28），
+  并在 `Lae.Media.csproj` 里**显式**写一条 `SQLitePCLRaw.bundle_e_sqlite3` 2.1.11，
+  让决定这件事的版本号出现在 diff 里；不写的话，下次顺手升 `Microsoft.Data.Sqlite` 会静默把
+  门槛抬回去，而症状会出现在用户的日志里。
+- 实测数据：2.1.10 → GLIBC_2.28，2.1.11 → 2.28，**2.1.12 → 2.34**，2.1.13 → 2.33。
+- 同时把"打不开"变成**可降级**：原生库加载失败抛的是 `TypeInitializationException`（包着
+  `DllNotFoundException`），原来的 catch 列表里没有它，所以一条已经录完的编码会在写历史时崩掉。
+  现在所有 SQLite 失败都收敛到 `SqliteHistoryStore` 的 `TryOpen`，`Append` 返回原因、`Recent`/`Count`
+  返回空并记住原因，`IRunHistory.Problem` 让 `history list` 说出**为什么**空——
+  "从没压过"和"读不出来"是两件不同的事。
+
 ### 中英输出（I18Next.Net 2.0.0）
 
 - 语言按 `LAE_LANG` → `settings.toml` 的 `[ui] language` → `en` 决定；`zh-CN`/`zh_CN`/`ZH`

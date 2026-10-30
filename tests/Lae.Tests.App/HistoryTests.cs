@@ -25,6 +25,11 @@ public sealed class HistoryTests
 
         public string Location => "(fake)";
 
+        /// <summary>Set to pretend the store cannot answer at all.</summary>
+        public string? Failure { get; init; }
+
+        public string? Problem => Failure;
+
         public string? Append(RunRecord record)
         {
             Rows.Add(record with { Id = Rows.Count + 1 });
@@ -163,6 +168,32 @@ public sealed class HistoryTests
 
         await Assert.That(code).IsEqualTo(ExitCodes.Usage);
         await Assert.That(string.Join('\n', terminal.ErrorLines)).Contains("--limit");
+    }
+
+    /// <summary>
+    /// A store that cannot answer says why, and does not pretend the archive is
+    /// empty.
+    ///
+    /// <para>This is the difference the <c>Problem</c> member exists for: an empty
+    /// table means "you have never encoded anything", a broken database means
+    /// "there are rows and I could not read them". Printing the first when the
+    /// second is true is a lie the user would act on.</para>
+    /// </summary>
+    [Test]
+    public async Task AnUnreadableHistorySaysWhyInsteadOfAnEmptyList()
+    {
+        var terminal = new BufferedTerminal();
+
+        int code = CommandTree.Build(Host(new Fake { Failure = "no such table: runs" }, terminal))
+            .Parse(["history", "list"])
+            .Invoke();
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Failed);
+
+        string errors = string.Join('\n', terminal.ErrorLines);
+        await Assert.That(errors.Contains("no such table: runs", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(string.Join('\n', terminal.OutputLines)
+            .Contains("No runs recorded yet.", StringComparison.Ordinal)).IsFalse();
     }
 
     /// <summary>

@@ -18,8 +18,10 @@ namespace Lae.Media.History;
 /// is how you end up with a file nobody dares edit.</para>
 ///
 /// <para><b>Why the failure is returned rather than thrown.</b> A full disk here
-/// would otherwise fail an encode that already succeeded. The caller prints a note
-/// and the file on disk is untouched.</para>
+/// would otherwise fail an encode that already succeeded. That includes the
+/// coarsest failure of all -- the native library not loading at all, which is what
+/// a machine with an older glibc than the bundled SQLite was built for does. A
+/// history that cannot open is a history that says so, never a failed encode.</para>
 /// </summary>
 public sealed class SqliteHistoryStore(string path) : IRunHistory
 {
@@ -30,14 +32,19 @@ public sealed class SqliteHistoryStore(string path) : IRunHistory
     /// </summary>
     private bool _ready;
 
+    /// <summary>The first reason this store could not answer; sticky on purpose.</summary>
+    private string? _problem;
+
     public string Location => path;
+
+    public string? Problem => _problem;
 
     public string? Append(RunRecord record)
     {
-        try
-        {
-            using SqliteConnection connection = Open();
+        if (TryOpen(out string error) is not { } connection) return error;
 
+        using (connection)
+        {
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText = """
                 INSERT INTO runs (
@@ -70,38 +77,44 @@ public sealed class SqliteHistoryStore(string path) : IRunHistory
             Add(command, "$result", record.Result);
             Add(command, "$failure", record.Failure);
 
-            command.ExecuteNonQuery();
-            return null;
-        }
-        catch (Exception exc) when (exc is SqliteException or IOException or UnauthorizedAccessException
-                                        or InvalidOperationException or ArgumentException)
-        {
-            return exc.Message;
+            try
+            {
+                command.ExecuteNonQuery();
+                return null;
+            }
+            catch (Exception exc) when (IsEnvironmentFailure(exc))
+            {
+                return Remember(exc);
+            }
         }
     }
 
     public IReadOnlyList<RunRecord> Recent(int limit)
     {
         if (limit <= 0 || !File.Exists(path)) return [];
+        if (TryOpen(out _) is not { } connection) return [];
 
-        try
+        using (connection)
         {
-            using SqliteConnection connection = Open();
-            using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "SELECT * FROM runs ORDER BY id DESC LIMIT $limit;";
-            Add(command, "$limit", limit);
+            try
+            {
+                using SqliteCommand command = connection.CreateCommand();
+                command.CommandText = "SELECT * FROM runs ORDER BY id DESC LIMIT $limit;";
+                Add(command, "$limit", limit);
 
-            var records = new List<RunRecord>(Math.Min(limit, 256));
-            using SqliteDataReader reader = command.ExecuteReader();
-            while (reader.Read()) records.Add(Read(reader));
-            return records;
-        }
-        catch (Exception exc) when (exc is SqliteException or IOException or UnauthorizedAccessException
-                                        or InvalidOperationException)
-        {
-            // An unreadable history is not worth failing a command over; the
-            // caller shows an empty list and the file stays where it is.
-            return [];
+                var records = new List<RunRecord>(Math.Min(limit, 256));
+                using SqliteDataReader reader = command.ExecuteReader();
+                while (reader.Read()) records.Add(Read(reader));
+                return records;
+            }
+            catch (Exception exc) when (IsEnvironmentFailure(exc))
+            {
+                // An unreadable history is not worth failing a command over; the
+                // caller shows an empty list and the reason, and the file stays
+                // where it is.
+                Remember(exc);
+                return [];
+            }
         }
     }
 
@@ -111,63 +124,102 @@ public sealed class SqliteHistoryStore(string path) : IRunHistory
         // has never encoded anything should print "nothing yet", not a new empty
         // database beside the settings.
         if (!File.Exists(path)) return 0;
+        if (TryOpen(out _) is not { } connection) return 0;
 
-        try
+        using (connection)
         {
-            using SqliteConnection connection = Open();
-            using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM runs;";
-            return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
-        }
-        catch (Exception exc) when (exc is SqliteException or IOException or UnauthorizedAccessException
-                                        or InvalidOperationException)
-        {
-            return 0;
+            try
+            {
+                using SqliteCommand command = connection.CreateCommand();
+                command.CommandText = "SELECT COUNT(*) FROM runs;";
+                return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+            }
+            catch (Exception exc) when (IsEnvironmentFailure(exc))
+            {
+                Remember(exc);
+                return 0;
+            }
         }
     }
 
-    private SqliteConnection Open()
+    /// <summary>
+    /// Every way this can fail because of the machine rather than the data: a full
+    /// disk, a locked file, a path that is a directory -- and the loader's own
+    /// verdicts, which is the case this list exists for. <c>SQLitePCL</c>
+    /// initialises its provider in a static constructor, so a native library that
+    /// is missing, built for another architecture, or built against a newer glibc
+    /// arrives as <see cref="TypeInitializationException"/> wrapping
+    /// <see cref="DllNotFoundException"/> or <see cref="BadImageFormatException"/>.
+    /// </summary>
+    private static bool IsEnvironmentFailure(Exception exc)
+        => exc is SqliteException or IOException or UnauthorizedAccessException
+            or InvalidOperationException or ArgumentException or NotSupportedException
+            or DllNotFoundException or EntryPointNotFoundException
+            or BadImageFormatException or TypeInitializationException;
+
+    private string Remember(Exception exc)
     {
-        string? folder = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(folder)) Directory.CreateDirectory(folder);
+        _problem ??= exc.Message;
+        return exc.Message;
+    }
 
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+    /// <summary>
+    /// A connection with the table in place, or null and the reason. Null is the
+    /// normal answer on a machine whose SQLite cannot load at all.
+    /// </summary>
+    private SqliteConnection? TryOpen(out string error)
+    {
+        error = "";
+        SqliteConnection? connection = null;
+
+        try
         {
-            DataSource = path,
+            string? folder = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(folder)) Directory.CreateDirectory(folder);
 
-            // Read-write-create, and no shared cache: a second terminal running
-            // `lae history` while an encode writes must not deadlock the encode.
-            Mode = SqliteOpenMode.ReadWriteCreate,
+            connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
 
-            // No pooling. One row per encode does not need a pool, and a pooled
-            // handle keeps the file open after the run is over -- on Windows that
-            // is enough to make the user's backup tool skip it, or to make the
-            // file impossible to delete until the process exits. Opening SQLite
-            // costs microseconds; a locked file costs a support question.
-            Pooling = false,
-        }.ToString());
+                // Read-write-create, and no shared cache: a second terminal running
+                // `lae history` while an encode writes must not deadlock the encode.
+                Mode = SqliteOpenMode.ReadWriteCreate,
 
-        connection.Open();
+                // No pooling. One row per encode does not need a pool, and a pooled
+                // handle keeps the file open after the run is over -- on Windows that
+                // is enough to make the user's backup tool skip it, or to make the
+                // file impossible to delete until the process exits. Opening SQLite
+                // costs microseconds; a locked file costs a support question.
+                Pooling = false,
+            }.ToString());
 
-        using (SqliteCommand pragma = connection.CreateCommand())
-        {
-            // Wait for a concurrent writer instead of failing immediately. Three
-            // seconds is longer than a row insert and shorter than a user's
-            // patience.
-            pragma.CommandText = "PRAGMA busy_timeout = 3000;";
-            pragma.ExecuteNonQuery();
+            connection.Open();
+
+            using (SqliteCommand pragma = connection.CreateCommand())
+            {
+                // Wait for a concurrent writer instead of failing immediately. Three
+                // seconds is longer than a row insert and shorter than a user's
+                // patience.
+                pragma.CommandText = "PRAGMA busy_timeout = 3000;";
+                pragma.ExecuteNonQuery();
+            }
+
+            if (!_ready)
+            {
+                using SqliteCommand create = connection.CreateCommand();
+                create.CommandText = Schema;
+                create.ExecuteNonQuery();
+                _ready = true;
+            }
+
+            return connection;
         }
-
-        if (_ready) return connection;
-
-        using (SqliteCommand create = connection.CreateCommand())
+        catch (Exception exc) when (IsEnvironmentFailure(exc))
         {
-            create.CommandText = Schema;
-            create.ExecuteNonQuery();
+            connection?.Dispose();
+            error = Remember(exc);
+            return null;
         }
-
-        _ready = true;
-        return connection;
     }
 
     private static void Add(SqliteCommand command, string name, object? value)

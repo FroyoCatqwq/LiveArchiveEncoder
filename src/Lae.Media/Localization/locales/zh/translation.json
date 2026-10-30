@@ -180,6 +180,7 @@
     "limitWarn": "ERROR: --limit 需要一个正整数。",
     "header": "   id  开始               结果       编码器/容器        码率  源 → 产物",
     "empty": "还没有任何运行记录。",
+    "problem": "ERROR: 读不了历史数据库：{{detail}}",
     "total": "共 {{runs}} 次运行，记录在 {{path}}",
     "list": {
       "desc": "打印最近的运行，最新的在前。",

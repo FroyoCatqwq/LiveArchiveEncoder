@@ -30,9 +30,30 @@
     <EmbeddedResource Include="Localization\locales\zh\translation.json" LogicalName="lae.locales.zh.translation.json" />
   </ItemGroup>
 
+  <!--
+    Pinned on purpose, and the pin is the whole reason these two lines are not
+    one:
+
+    * Microsoft.Data.Sqlite 10.0.10 asks for SQLitePCLRaw 2.1.11, whose bundled
+      native library needs glibc 2.28. 2.1.12 and 2.1.13 are built against 2.34
+      and 2.33, which means the history database fails to load on AlmaLinux,
+      Rocky and RHEL 8: one of this project's two test machines, and a normal
+      home-server distribution. Measured with `objdump -T | grep GLIBC_`.
+
+    * The bundle reference is here so the version that decides that is visible in
+      this file. Without it, bumping Microsoft.Data.Sqlite would silently raise
+      the glibc floor again, and the failure would show up as a missing .so in a
+      user's log rather than as a diff.
+
+    Verified on glibc 2.28 (AlmaLinux 8.10) before bumping either number.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.11" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="I18Next.Net" Version="2.0.0" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="Tomlyn" Version="2.10.1" />
   </ItemGroup>
 

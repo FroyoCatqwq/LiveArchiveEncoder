@@ -99,6 +99,17 @@ public interface IRunHistory
 
     /// <summary>Where the history lives, for <c>lae history path</c>.</summary>
     string Location { get; }
+
+    /// <summary>
+    /// Why the store cannot answer, or null when it can.
+    ///
+    /// <para>Exists because "no rows" and "cannot read any rows" look identical in
+    /// a list, and they are not the same answer: one means the archive is new, the
+    /// other means the database could not be opened. The store records the reason
+    /// on its first failure and this is how a command can say it out loud instead
+    /// of printing an empty table that looks like truth.</para>
+    /// </summary>
+    string? Problem { get; }
 }
 
 /// <summary>
@@ -110,6 +121,8 @@ public sealed class NullRunHistory : IRunHistory
     public static NullRunHistory Instance { get; } = new();
 
     public string Location => "(none)";
+
+    public string? Problem => null;
 
     public string? Append(RunRecord record) => null;
 

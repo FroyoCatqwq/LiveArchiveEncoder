@@ -180,6 +180,7 @@
     "limitWarn": "ERROR: --limit wants a positive number of rows.",
     "header": "   id  started          result     encoder/container  kbps  in → out",
     "empty": "No runs recorded yet.",
+    "problem": "ERROR: the history database could not be read: {{detail}}",
     "total": "{{runs}} run(s) recorded at {{path}}",
     "list": {
       "desc": "Print the most recent runs, newest first.",

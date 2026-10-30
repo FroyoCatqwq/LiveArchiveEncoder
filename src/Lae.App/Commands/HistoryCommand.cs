@@ -67,6 +67,16 @@ public static class HistoryCommand
             }
 
             IReadOnlyList<RunRecord> runs = history.Recent(limit);
+
+            // "No rows" and "could not read any rows" print the same empty list,
+            // and they are not the same answer. The store keeps the reason; this
+            // is the one place it can be said out loud.
+            if (history.Problem is { } problem)
+            {
+                terminal.ErrorLine(messages.Format("history.problem", new { detail = problem }));
+                return ExitCodes.Failed;
+            }
+
             if (runs.Count == 0)
             {
                 terminal.Line(messages["history.empty"]);
