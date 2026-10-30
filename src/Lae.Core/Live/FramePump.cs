@@ -2,6 +2,47 @@ using System.Diagnostics;
 
 namespace Lae.Core;
 
+/// <summary>
+/// The bitrate feedback the pump reads, in one place.
+///
+/// <para><see cref="OutputBytes"/> is a delegate and not a file handle on
+/// purpose: the pump is in <c>Lae.Core</c>, which is not allowed to touch a
+/// disk. The caller hands in "how many bytes has the encoder written so far"
+/// and the pump stays a pure scheduler over two streams -- which is also what
+/// makes the ladder testable without FFmpeg, by passing a counter.</para>
+/// </summary>
+public sealed record LadderControl
+{
+    public required FpsLadder Ladder { get; init; }
+
+    public required BitrateWindow Window { get; init; }
+
+    /// <summary>
+    /// What the encoder has produced so far.
+    ///
+    /// <para>A delegate and not a file handle on purpose: the pump lives in
+    /// <c>Lae.Core</c>, which does not do I/O, and the caller already owns the
+    /// child process that knows the answer. It is also what makes the ladder
+    /// testable without FFmpeg -- a test hands in a counter.</para>
+    /// </summary>
+    public required Func<EncoderProgress> Progress { get; init; }
+
+    /// <summary>
+    /// Audio bitrate to subtract from the total: the ladder governs the picture,
+    /// and a 64 kbps audio track must not be mistaken for motion.
+    /// </summary>
+    public double AudioKbps { get; init; }
+
+    /// <summary>Called when the rung moves, so the run can say so.</summary>
+    public Action<LadderMove>? Moved { get; init; }
+}
+
+/// <summary>One rung change, in the terms a report needs.</summary>
+/// <param name="FromFps">Frame rate before the move.</param>
+/// <param name="ToFps">Frame rate after it.</param>
+/// <param name="Kbps">The measured video bitrate that caused it.</param>
+public readonly record struct LadderMove(double FromFps, double ToFps, double Kbps);
+
 /// <summary>What one pump run needs to know about its slot cadence.</summary>
 public sealed record PumpSpec
 {
@@ -16,6 +57,16 @@ public sealed record PumpSpec
     /// with the source.
     /// </summary>
     public long? TargetFrames { get; init; }
+
+    /// <summary>
+    /// The adaptive bitrate feedback, or null to hand the encoder every frame the
+    /// source produces.
+    ///
+    /// <para>Null is the honest default for a file-to-file run: the ladder exists
+    /// to imitate a server that had to stay under a ceiling, and turning it on
+    /// uninvited would silently change the output of every plain encode.</para>
+    /// </summary>
+    public LadderControl? Ladder { get; init; }
 
     /// <summary>
     /// How long one frame may sit unpicked in the encoder's input before the run
@@ -42,6 +93,15 @@ public sealed record PumpStats
 
     /// <summary>True when the source ended before the target slot count was reached.</summary>
     public required bool SourceEnded { get; init; }
+
+    /// <summary>Decoded frames thrown away because the ladder was throttling or the consumer lagged.</summary>
+    public long Dropped { get; init; }
+
+    /// <summary>The rung the run finished on; 0 means the ladder never moved.</summary>
+    public int FinalRung { get; init; }
+
+    /// <summary>Frame rate left after adaptation, when a ladder was in use.</summary>
+    public double MotionFps { get; init; }
 
     /// <summary>Frames per second actually achieved, against the requested cadence.</summary>
     public double EffectiveFps => Seconds > 0 ? Frames / Seconds : 0;
@@ -103,6 +163,18 @@ public static class FramePump
         long emitted = 0;
         long fresh = 0;
         long repeated = 0;
+        long discarded = 0;
+
+        // The cadence counter. At full rate it adds 1.0 per slot and always
+        // passes the threshold, so a run with no ladder behaves exactly as
+        // before; at 8 of 13 fps it passes on eight slots out of thirteen and
+        // the rest repeat the picture. This is how the throttle is expressed:
+        // not by writing fewer slots -- that would shorten the file -- but by
+        // handing the encoder a repeated frame, which costs almost nothing to
+        // encode and keeps the timeline intact.
+        double cadence = 1.0;
+        EncoderProgress produced = default;
+        LadderControl? control = spec.Ladder;
 
         try
         {
@@ -155,17 +227,33 @@ public static class FramePump
                     slot++;
                     FineTimer.WaitUntil(baseline + (slot * slotTicks));
 
-                    if (channel.TryTake(frame))
+                    // Ask the ladder whether this slot may carry a new picture.
+                    // Everything the throttle does lives in these four lines.
+                    bool wantsFresh = true;
+                    if (control is not null)
                     {
-                        fresh++;
+                        cadence += control.Ladder.CurrentFps / spec.Fps;
+                        wantsFresh = cadence >= 1.0;
+                        if (wantsFresh) cadence -= 1.0;
+                    }
+
+                    if (wantsFresh && control is not null)
+                    {
+                        // Throttled: take the newest and drop the rest, so the
+                        // encoder never receives a picture older than the one it
+                        // already has while the queue fills behind it.
+                        if (channel.TryTakeNewest(frame, out long stale)) { fresh++; discarded += stale; }
+                        else { if (target is null && channel.Completed) break; repeated++; }
+                    }
+                    else if (wantsFresh)
+                    {
+                        if (channel.TryTake(frame)) fresh++;
+                        else { if (target is null && channel.Completed) break; repeated++; }
                     }
                     else
                     {
-                        // Nothing waiting. With a target to fill the previous
-                        // frame is repeated, exactly as a capture card does while
-                        // the picture is unchanged; without one there is no
-                        // length to fill, so the run is over.
-                        if (target is null && channel.Completed) break;
+                        // Throttled and not this slot's turn: repeat. The frame
+                        // still in the buffer is the previous one by construction.
                         repeated++;
                     }
                 }
@@ -174,11 +262,17 @@ public static class FramePump
                 WriteFrame(sink, frame, spec.FrameSize, spec.WriteDeadline, token);
                 emitted++;
 
+                if (control is not null)
+                {
+                    produced = ObserveBitrate(control, produced);
+                }
+
                 if (progress is not null && emitted % 4 == 0) progress(emitted, spec.TargetFrames);
             }
 
             capture.Stop();
             capture.ThrowIfFailed();
+            discarded += channel.Dropped;
 
             return new PumpStats
             {
@@ -187,6 +281,9 @@ public static class FramePump
                 Repeated = repeated,
                 Seconds = FineTimer.SecondsSince(start),
                 SourceEnded = capture.Ended,
+                Dropped = discarded,
+                FinalRung = control?.Ladder.Rung ?? 0,
+                MotionFps = control?.Ladder.CurrentFps ?? spec.Fps,
             };
         }
         finally
@@ -194,6 +291,46 @@ public static class FramePump
             capture.Stop();
             FineTimer.Disable();
         }
+    }
+
+    /// <summary>
+    /// One bitrate reading: how much the muxer produced since the last slot,
+    /// folded into the window over the programme time it covers, and -- once the
+    /// window means something -- offered to the ladder.
+    ///
+    /// <para>Measured against the muxer's own <c>out_time</c>, not the wall clock.
+    /// The wall clock includes every moment this machine was busy elsewhere, and
+    /// dividing bytes by it reports a rate lower than the file's: on a loaded box
+    /// the ladder would never descend, and the output would quietly be over its
+    /// ceiling for the whole run.</para>
+    /// </summary>
+    private static EncoderProgress ObserveBitrate(
+        LadderControl control, EncoderProgress previous)
+    {
+        EncoderProgress now = control.Progress();
+        double media = now.MediaSeconds;
+
+        // Nothing written yet, or the muxer cannot report: no reading rather than
+        // a division by zero that would look like an infinite bitrate.
+        if (media <= previous.MediaSeconds) return now;
+
+        long delta = Math.Max(0, now.Bytes - previous.Bytes);
+        control.Window.Add(media, (int)Math.Min(delta, int.MaxValue));
+
+        // A window that is not yet full reports roughly double the real rate,
+        // because the divisor is the time covered. Waiting for it to fill costs
+        // the first window of the run and removes the false first drop.
+        if (media >= control.Window.WindowSeconds)
+        {
+            double video = Math.Max(0.0, control.Window.Kbps(media) - control.AudioKbps);
+            double before = control.Ladder.CurrentFps;
+            if (control.Ladder.Observe(video, media)) // the rung moved
+            {
+                control.Moved?.Invoke(new LadderMove(before, control.Ladder.CurrentFps, video));
+            }
+        }
+
+        return now;
     }
 
     /// <summary>

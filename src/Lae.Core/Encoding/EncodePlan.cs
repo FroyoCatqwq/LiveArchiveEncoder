@@ -50,6 +50,23 @@ public sealed record EncodePlan
     /// <summary>How much of the source this run covers.</summary>
     public required double SpanSeconds { get; init; }
 
+    /// <summary>
+    /// The parameters the plan was made from, carried whole.
+    ///
+    /// <para>Not a copy of the handful the arguments needed: the run also needs
+    /// the bitrate ceiling, the ladder and the window, and those are settings
+    /// the argument list never spells. Carrying the record means a field added
+    /// to the settings cannot be quietly missing here -- the same reason
+    /// <see cref="EncodeRequest"/> carries it instead of flattening it.</para>
+    /// </summary>
+    public EncodeDefaults Encode { get; init; } = new();
+
+    /// <summary>
+    /// The adaptive ladder this run should use, or null when there is nothing to
+    /// adapt -- one rung, or no bitrate ceiling asked for.
+    /// </summary>
+    public FpsLadder? BuildLadder() => LadderPolicy.FromDefaults(Encode);
+
     public required IReadOnlyList<string> DecoderArgs { get; init; }
 
     public required IReadOnlyList<string> EncoderArgs { get; init; }
@@ -208,6 +225,7 @@ public sealed record EncodePlan
             Muxer = muxer,
             DestinationPath = request.DestinationPath,
             SpanSeconds = span ?? 0,
+            Encode = request.Encode,
             DecoderArgs = decoder,
             EncoderArgs = encoderArgsOut,
             Notes = notes,
@@ -299,6 +317,13 @@ public sealed record EncodePlan
         var cmd = new List<string>
         {
             "-hide_banner", "-loglevel", "error",
+
+            // The rate ladder steers by what the muxer has actually written, and
+            // this is where that number comes from. It goes on stdout, which the
+            // encoder has free -- frames arrive on stdin and leave through the
+            // file -- and it is a global option, so it belongs before the inputs.
+            "-progress", "pipe:1",
+
             "-threads", Math.Max(1, e.Threads).ToString(CultureInfo.InvariantCulture),
             "-f", "rawvideo",
             "-pix_fmt", transport,

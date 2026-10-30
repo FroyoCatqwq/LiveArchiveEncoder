@@ -1,4 +1,5 @@
 using Lae.Core;
+using Lae.Core.Settings;
 
 namespace Lae.Tests.Core;
 
@@ -12,7 +13,24 @@ namespace Lae.Tests.Core;
 /// </summary>
 public sealed class FpsLadderTests
 {
-    private static FpsLadder Default() => new([13, 8, 5, 3], [200, 200, 200, 200]);
+    /// <summary>The shipped default: 13, 8, 5, 3 under a 200 kbps ceiling.</summary>
+    private static FpsLadder Default() => LadderPolicy.FromDefaults(new EncodeDefaults
+    {
+        FpsLevels = [13, 8, 5, 3],
+        LimitKbps = 200,
+        RecoverKbps = 150,
+    })!;
+
+    /// <summary>
+    /// A reading, one second after the previous one. The ladder holds still for a
+    /// fraction of a second after a move, so the tests have to walk a clock --
+    /// which is also what the pump does, in programme seconds.
+    /// </summary>
+    private static Func<double, bool> Reader(FpsLadder ladder)
+    {
+        double now = 0;
+        return kbps => ladder.Observe(kbps, now += 1.0);
+    }
 
     [Test]
     public async Task StartsAtFullRate()
@@ -28,7 +46,7 @@ public sealed class FpsLadderTests
     {
         FpsLadder ladder = Default();
 
-        await Assert.That(ladder.Observe(400)).IsTrue();
+        await Assert.That(Reader(ladder)(400)).IsTrue();
         await Assert.That(ladder.CurrentFps).IsEqualTo(8.0);
     }
 
@@ -43,32 +61,55 @@ public sealed class FpsLadderTests
     {
         FpsLadder ladder = Default();
 
-        ladder.Observe(9000);
+        Reader(ladder)(9000);
 
         await Assert.That(ladder.CurrentFps).IsEqualTo(8.0);
+    }
+
+    /// <summary>
+    /// And never twice inside the hold. v8's first real run with no hold walked
+    /// 13 > 8 > 5 > 3 in a quarter of a second, because one bitrate reading was
+    /// offered thirteen times a second.
+    /// </summary>
+    [Test]
+    public async Task CannotMoveTwiceWithinTheHold()
+    {
+        FpsLadder ladder = Default();
+
+        await Assert.That(ladder.Observe(9000, 0.00)).IsTrue();
+        await Assert.That(ladder.Observe(9000, 0.05)).IsFalse();
+        await Assert.That(ladder.Observe(9000, 0.10)).IsFalse();
+        await Assert.That(ladder.CurrentFps).IsEqualTo(8.0);
+
+        // Past the hold it may step again.
+        await Assert.That(ladder.Observe(9000, 0.25)).IsTrue();
+        await Assert.That(ladder.CurrentFps).IsEqualTo(5.0);
     }
 
     [Test]
     public async Task StopsAtTheLowestRung()
     {
         FpsLadder ladder = Default();
-        for (int i = 0; i < 10; i++) ladder.Observe(9000);
+        Func<double, bool> read = Reader(ladder);
+        for (int i = 0; i < 10; i++) read(9000);
 
         await Assert.That(ladder.CurrentFps).IsEqualTo(3.0);
     }
 
     /// <summary>
-    /// Climbing back needs a rate well under the ceiling. With the default 75%
-    /// floor, sitting exactly at the ceiling -- which is where a healthy encode
-    /// sits -- must not move the ladder in either direction, or it flaps.
+    /// Climbing back needs a rate well under the ceiling. Sitting exactly at the
+    /// ceiling -- which is where a healthy encode sits, since that is what the
+    /// ceiling is for -- must not move the ladder in either direction, or it
+    /// flaps and the picture pulses.
     /// </summary>
     [Test]
     public async Task DoesNotMoveRightAtTheCeiling()
     {
         FpsLadder ladder = Default();
-        ladder.Observe(400);
+        Func<double, bool> read = Reader(ladder);
+        read(400);
 
-        await Assert.That(ladder.Observe(200)).IsFalse();
+        await Assert.That(read(200)).IsFalse();
         await Assert.That(ladder.CurrentFps).IsEqualTo(8.0);
     }
 
@@ -76,9 +117,10 @@ public sealed class FpsLadderTests
     public async Task ClimbsWhenTheRateFallsWellBelow()
     {
         FpsLadder ladder = Default();
-        ladder.Observe(400);
+        Func<double, bool> read = Reader(ladder);
+        read(400);
 
-        await Assert.That(ladder.Observe(50)).IsTrue();
+        await Assert.That(read(50)).IsTrue();
         await Assert.That(ladder.CurrentFps).IsEqualTo(13.0);
     }
 
@@ -86,10 +128,112 @@ public sealed class FpsLadderTests
     public async Task ResetReturnsToFullRate()
     {
         FpsLadder ladder = Default();
-        ladder.Observe(400);
+        Reader(ladder)(400);
         ladder.Reset();
 
         await Assert.That(ladder.CurrentFps).IsEqualTo(13.0);
+    }
+}
+
+/// <summary>
+/// Turning settings into rungs. This is where v8 has to stay identical to v7:
+/// the same ceiling has to produce the same thresholds, or the comparison matrix
+/// stops comparing like with like.
+/// </summary>
+public sealed class LadderPolicyTests
+{
+    [Test]
+    public async Task DerivedThresholdsAreV7sMultipliers()
+    {
+        FpsLadder ladder = LadderPolicy.FromDefaults(new EncodeDefaults
+        {
+            FpsLevels = [13, 8, 5, 3],
+            LimitKbps = 200,
+            RecoverKbps = 150,
+        })!;
+
+        double[] drops = [.. ladder.Rungs.Select(r => r.DropAboveKbps)];
+
+        // Rung 0 can never be entered, so it is named infinite on purpose.
+        await Assert.That(double.IsPositiveInfinity(drops[0])).IsTrue();
+        await Assert.That(drops[1]).IsEqualTo(200.0);
+        await Assert.That(drops[2]).IsEqualTo(250.0);
+        await Assert.That(drops[3]).IsEqualTo(320.0);
+        await Assert.That(ladder.Rungs[3].RiseBelowKbps).IsEqualTo(150.0);
+    }
+
+    /// <summary>A rung's threshold is keyed by its frame rate, not by position.</summary>
+    [Test]
+    public async Task ConfiguredThresholdsWinOverTheDerivedOnes()
+    {
+        FpsLadder ladder = LadderPolicy.FromDefaults(new EncodeDefaults
+        {
+            FpsLevels = [13, 8, 5],
+            LimitKbps = 200,
+            RecoverKbps = 150,
+            FpsThresholds =
+            [
+                new FpsThreshold(8, 180, 120),
+                new FpsThreshold(5, 400, null),
+            ],
+        })!;
+
+        await Assert.That(ladder.Rungs[1].DropAboveKbps).IsEqualTo(180.0);
+        await Assert.That(ladder.Rungs[1].RiseBelowKbps).IsEqualTo(120.0);
+        await Assert.That(ladder.Rungs[2].DropAboveKbps).IsEqualTo(400.0);
+        await Assert.That(ladder.Rungs[2].RiseBelowKbps).IsEqualTo(150.0);
+    }
+
+    /// <summary>
+    /// A ladder with nothing to choose between is not a ladder. Returning null
+    /// rather than a one-rung object keeps the pump free of a throttle that can
+    /// never fire.
+    /// </summary>
+    [Test]
+    public async Task NoLadderWithoutTwoRungsOrACeiling()
+    {
+        await Assert.That(LadderPolicy.FromDefaults(new EncodeDefaults
+        {
+            FpsLevels = [13], LimitKbps = 200,
+        })).IsNull();
+
+        await Assert.That(LadderPolicy.FromDefaults(new EncodeDefaults
+        {
+            FpsLevels = [13, 8], LimitKbps = 0,
+        })).IsNull();
+    }
+
+    /// <summary>An unconfigured ladder must not be able to leave the top rung.</summary>
+    [Test]
+    public async Task TheTopRungIsNeverEnteredFromAbove()
+    {
+        FpsLadder ladder = LadderPolicy.FromDefaults(new EncodeDefaults
+        {
+            FpsLevels = [13, 8],
+            LimitKbps = 200,
+        })!;
+
+        await Assert.That(ladder.Observe(1e9, 1.0)).IsTrue();      // down to 8
+        await Assert.That(ladder.Observe(1e9, 9.0)).IsFalse();     // nowhere left to go
+        await Assert.That(ladder.CurrentFps).IsEqualTo(8.0);
+    }
+
+    /// <summary>
+    /// The holds are part of the ladder, not of the pump: a run that throttled
+    /// once per slot would fall to the floor before the second second of output
+    /// existed to justify it.
+    /// </summary>
+    [Test]
+    public async Task AHoldSeparatesTwoMoves()
+    {
+        FpsLadder ladder = LadderPolicy.FromDefaults(new EncodeDefaults
+        {
+            FpsLevels = [13, 8, 5],
+            LimitKbps = 200,
+        })!;
+
+        await Assert.That(ladder.DropHoldSeconds).IsBetween(0.1, 0.4);
+        await Assert.That(ladder.RiseHoldSeconds).IsBetween(0.5, 1.0);
     }
 }
 

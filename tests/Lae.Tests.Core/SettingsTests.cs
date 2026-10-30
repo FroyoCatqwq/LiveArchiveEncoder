@@ -261,9 +261,6 @@ public sealed class SettingsTests
         await Assert.That(d.X264.Profile).IsEqualTo("baseline");
         await Assert.That(d.X264.Level).IsEqualTo("3.1");
         await Assert.That(d.Parallel).IsEqualTo(4);
-        await Assert.That(d.LastEraPreset).IsEqualTo("sohu/2012");
-        await Assert.That(d.EraNative).IsFalse();
-        await Assert.That(d.EraAspect).IsEqualTo("16:9");
         await Assert.That(d.H264Impl).IsEqualTo("libopenh264");
 
         await Assert.That(d.Subtitles.Mode).IsEqualTo("copy");
@@ -382,6 +379,10 @@ public sealed class SettingsTests
     /// <summary>
     /// A stored preset is plain data: the id is a slug so it can be typed on a
     /// command line, and out-of-range numbers are clamped rather than trusted.
+    ///
+    /// <para>v8 has no built-in catalogue, so the old row's <c>site</c> and
+    /// <c>kind</c> have nowhere to live; they survive as the preset's label and
+    /// nothing else. The numbers are the user's own and are kept exactly.</para>
     /// </summary>
     [Test]
     public async Task CustomPresetsAreSluggedAndClamped()
@@ -390,7 +391,7 @@ public sealed class SettingsTests
         CustomPreset preset = outcome.Document.CustomPresets[0];
 
         await Assert.That(preset.Id).IsEqualTo("my_site/2012");
-        await Assert.That(preset.Kind).IsEqualTo("era");
+        await Assert.That(preset.Label).IsEqualTo("My Site 2012");
         await Assert.That(preset.RcCrf).IsEqualTo(28);
         await Assert.That(preset.RcWidth).IsEqualTo(320);
     }

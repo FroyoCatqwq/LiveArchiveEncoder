@@ -144,9 +144,6 @@ public static class LegacyV7Converter
             },
             // Never restore a nonsensical shard count from an older file.
             Parallel = Math.Max(1, old.Parallel ?? 1),
-            LastEraPreset = Clean(old.EraPreset),
-            EraNative = old.EraNative ?? true,
-            EraAspect = Clean(old.EraAspect) ?? "source",
             H264Impl = Clean(old.H264Impl),
             Subtitles = Subtitles(old.Subtitles),
             Recompress = Chain(old.Recompress),
@@ -256,6 +253,15 @@ public static class LegacyV7Converter
         return new RecompressChain { Enabled = old.Enabled, Passes = passes };
     }
 
+    /// <summary>
+    /// v7's user presets, carried over as names rather than as rows.
+    ///
+    /// <para>A v7 preset could point at a built-in era (<c>site</c> plus a
+    /// <c>kind</c> of "era" or "site"); v8 has no built-in table to point at, so
+    /// the two layers become one record and the site name becomes the label. The
+    /// numbers survive untouched -- those are the user's own, and dropping them
+    /// would lose real work -- but nothing else about the old shape does.</para>
+    /// </summary>
     private static IReadOnlyList<CustomPreset> CustomPresets(List<LegacyCustomEra?>? rows, List<string> notes)
     {
         if (rows is not { Count: > 0 }) return [];
@@ -275,11 +281,7 @@ public static class LegacyV7Converter
             presets.Add(new CustomPreset
             {
                 Id = id,
-                Site = Clean(row.Site),
-                Year = Clamp(row.Year, 0, 2100, 0),
-                Kind = string.Equals(row.Kind, "era", StringComparison.OrdinalIgnoreCase) ? "era" : "site",
-                YearFrom = Clamp(row.YearFrom, 1990, 2100, 2005),
-                YearTo = Clamp(row.YearTo, 1990, 2100, 2010),
+                Label = LegacyLabel(row),
                 Encoder = Clean(row.Encoder),
                 Width = row.Width is > 0 ? row.Width : null,
                 Height = row.Height is > 0 ? row.Height : null,
@@ -316,6 +318,21 @@ public static class LegacyV7Converter
         }
 
         return presets;
+    }
+
+    /// <summary>
+    /// The old row's human name, rebuilt from what v7 stored: a site, a year, or
+    /// both. It is only a label -- the preset's identity is the id -- so an
+    /// unnamed row simply has none.
+    /// </summary>
+    private static string? LegacyLabel(LegacyCustomEra row)
+    {
+        string? site = Clean(row.Site);
+        int year = row.Year is > 0 and < 2200 ? row.Year!.Value : 0;
+
+        if (site is { Length: > 0 } && year > 0) return $"{site} {year}";
+        if (site is { Length: > 0 }) return site;
+        return year > 0 ? year.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
     }
 
     /// <summary>

@@ -30,7 +30,7 @@ public sealed record SettingsDocument
     /// A file with an older number is migrated on read; a newer one is refused
     /// rather than half-understood.
     /// </summary>
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
@@ -42,7 +42,17 @@ public sealed record SettingsDocument
 
     public EncodeDefaults Defaults { get; init; } = new();
 
-    /// <summary>Presets the user wrote. Built-in rows live in code, not here.</summary>
+    /// <summary>
+    /// The presets there are. All of them.
+    ///
+    /// <para>v8 ships no catalogue. v7 carried 32 built-in rows -- five generic
+    /// eras plus 27 site-and-year combinations -- and they were the part of the
+    /// program that aged worst: a number that was right for one portal in 2006
+    /// went wrong the moment anyone looked at the file closely, and nothing in
+    /// the program could tell which row a user actually trusted. So the table is
+    /// gone, and a preset is something the user wrote down, named and can edit.
+    /// </para>
+    /// </summary>
     public IReadOnlyList<CustomPreset> CustomPresets { get; init; } = [];
 
     public IReadOnlyList<PluginRegistration> Plugins { get; init; } = [];
@@ -156,8 +166,12 @@ public sealed record EncodeDefaults
     public double WindowSeconds { get; init; } = 2.0;
 
     /// <summary>
-    /// Quality in the mpeg family's scale (2 = best). Converted by
-    /// <c>EncoderMath</c> when the chosen encoder reads CRF instead.
+    /// Quality, in the scale of whichever encoder is chosen: 2..31 for the mpeg
+    /// family, 0..51 for x264 and friends. The number moves with the encoder
+    /// through <c>EncoderMath.ConvertQuality</c>, and
+    /// <c>ArgsBuilder.VideoQualityArgs</c> is the only place that turns it into
+    /// flags. Reading it as one fixed scale was v7.9.8.2's bug: <c>-q:v 9</c>
+    /// handed to libx264 as a CRF came out at 2.5x the intended bitrate.
     /// </summary>
     public int Quality { get; init; } = 8;
 
@@ -205,16 +219,7 @@ public sealed record EncodeDefaults
     /// <summary>Shard count for the parallel pipeline; 1 disables it.</summary>
     public int Parallel { get; init; } = 1;
 
-    /// <summary>Last applied era preset id, or null when the defaults are custom.</summary>
-    public string? LastEraPreset { get; init; }
-
-    /// <summary>Render a preset with the codec the site actually served.</summary>
-    public bool EraNative { get; init; } = true;
-
-    /// <summary>Frame shape for a preset: "source", "4:3" or "16:9".</summary>
-    public string EraAspect { get; init; } = "source";
-
-    /// <summary>"libx264" or "libopenh264" where the preset names H.264; null asks the preset.</summary>
+    /// <summary>"libx264" or "libopenh264" where a preset asks for H.264; null leaves it to the encoder.</summary>
     public string? H264Impl { get; init; }
 
     public SubtitleDefaults Subtitles { get; init; } = new();
@@ -348,21 +353,21 @@ public sealed record RecompressChain
 /// regenerated from these numbers on load, so a stored preset can never carry a
 /// stale or hand-edited command. v7 settled on this shape after a preset saved
 /// by an older build produced arguments the newer build no longer understood.</para>
+///
+/// <para>Nothing in this record is required. A preset is a bundle of the values
+/// it overrides and nothing else, so an unset field means "leave the stored
+/// default alone" -- which is what makes a two-field preset useful instead of
+/// thirty-field boilerplate.</para>
 /// </summary>
 public sealed record CustomPreset
 {
+    /// <summary>Stable identifier the command line takes, e.g. <c>portal-2006</c>.</summary>
     public string Id { get; init; } = "";
 
-    public string? Site { get; init; }
+    /// <summary>What to call it in a list; falls back to the id.</summary>
+    public string? Label { get; init; }
 
-    public int Year { get; init; }
-
-    /// <summary>"era" (both layers) or "site" (second pass only).</summary>
-    public string Kind { get; init; } = "site";
-
-    public int YearFrom { get; init; } = 2005;
-
-    public int YearTo { get; init; } = 2010;
+    public string? Note { get; init; }
 
     public string? Encoder { get; init; }
 
@@ -419,11 +424,10 @@ public sealed record CustomPreset
 
     public string AudioCodec { get; init; } = "aac";
 
-    public string Container { get; init; } = "mp4";
+    /// <summary>Container for the second pass; null keeps whatever the encoder writes.</summary>
+    public string? Container { get; init; }
 
     public string? H264Impl { get; init; }
-
-    public string? Note { get; init; }
 }
 
 /// <summary>

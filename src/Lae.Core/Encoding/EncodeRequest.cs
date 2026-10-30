@@ -88,8 +88,11 @@ public sealed record EncodeRequest
         else if (!string.IsNullOrWhiteSpace(SourcePath) && SamePath(SourcePath, DestinationPath))
         {
             // Overwriting the source is not recoverable, and "it worked, but the
-            // original is gone" is not a thing to discover afterwards.
-            problems.Add("the output path is the input path");
+            // original is gone" is not a thing to discover afterwards. Saying how
+            // to proceed matters: the derived output name is the source name with
+            // the encoder's extension, so encoding an .avi to mpeg4 lands here on
+            // the first try and reads like a refusal of the whole command.
+            problems.Add("the output path is the input path; name a different output with --out");
         }
 
         if (StartSeconds < 0) problems.Add("the start offset cannot be negative");

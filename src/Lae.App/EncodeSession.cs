@@ -1,5 +1,6 @@
 using Lae.App.Ui;
 using Lae.Core;
+using Lae.Core.Presets;
 using Lae.Core.Settings;
 using Lae.Encoding;
 using Lae.Media.Ffmpeg;
@@ -22,8 +23,14 @@ public sealed record EncodeOverrides
 
     public int? Quality { get; init; }
 
+    /// <summary>Bitrate ceiling in kbps; the ladder descends when it is reached.</summary>
+    public double? LimitKbps { get; init; }
+
     /// <summary>WIDTHxHEIGHT as typed.</summary>
     public string? Size { get; init; }
+
+    /// <summary>Id of a stored preset to lay over the defaults before anything else.</summary>
+    public string? Preset { get; init; }
 }
 
 /// <summary>
@@ -175,15 +182,29 @@ public static class EncodeSession
     public static (EncodeRequest? Request, string? Error) BuildRequest(
         string input, EncodeOverrides overrides, SettingsDocument settings)
     {
-        EncodeDefaults encode = settings.Defaults with
+        // Order: stored defaults, then the preset, then the command line. Each
+        // layer may only overwrite what it actually spells, which is what makes
+        // "my preset, but at a smaller size" a one-word change.
+        EncodeDefaults encode = settings.Defaults;
+
+        if (overrides.Preset is { Length: > 0 } presetId)
         {
-            Encoder = overrides.Encoder ?? settings.Defaults.Encoder ?? "mpeg4",
+            if (PresetCatalog.Find(settings, presetId) is not { } preset)
+                return (null, $"there is no preset named '{presetId}'; run 'lae preset list'");
+
+            encode = PresetCatalog.Apply(preset, encode);
+        }
+
+        encode = encode with
+        {
+            Encoder = overrides.Encoder ?? encode.Encoder ?? "mpeg4",
             Recompress = new RecompressChain(),
             Subtitles = new SubtitleDefaults(),
         };
 
         if (overrides.Container is { } container) encode = encode with { Container = container };
         if (overrides.Quality is { } quality) encode = encode with { Quality = quality };
+        if (overrides.LimitKbps is { } limit) encode = encode with { LimitKbps = limit };
 
         if (overrides.Size is { } size)
         {
@@ -244,6 +265,21 @@ public static class EncodeSession
         terminal.Line($"output     {plan.Width}x{plan.Height} {plan.TransportPixelFormat}"
                     + $", {plan.Container} ({plan.Muxer}), {plan.Fps:G6} fps");
         terminal.Line($"span       {plan.SpanSeconds:G6}s -> {plan.TargetFrames} frames");
+
+        // The ladder is the one part of the plan the user cannot see in the
+        // command lines -- it changes what goes down the pipe, not what FFmpeg is
+        // told -- so a dry run has to name it or the two commands are not the
+        // whole story.
+        if (plan.BuildLadder() is { } ladder)
+        {
+            terminal.Line($"ladder     {string.Join(" > ", ladder.Rungs.Select(r => r.Fps.ToString("G4", System.Globalization.CultureInfo.InvariantCulture)))} fps"
+                        + $", ceiling {plan.Encode.LimitKbps:G4} kbps over {plan.Encode.WindowSeconds:G4}s");
+        }
+        else
+        {
+            terminal.Line("ladder     off (single rung or no bitrate ceiling)");
+        }
+
         terminal.Line($"frame      {plan.FrameSize} bytes on the pipe");
         terminal.Line();
         terminal.Line("decoder:");
@@ -268,6 +304,15 @@ public static class EncodeSession
         terminal.Line($"pacing     {run.Pump.Frames} slots in {run.Pump.Seconds:F2}s "
                     + $"({run.Pump.EffectiveFps:F2} fps), "
                     + $"fresh {run.Pump.Fresh}, repeated {run.Pump.Repeated}");
+
+        // Only worth a line when it actually happened: a run that stayed on the
+        // top rung is the normal case, and saying so on every encode is noise.
+        if (run.Pump.FinalRung > 0 || run.Pump.Dropped > 0)
+        {
+            terminal.Line($"motion     ended at {run.Pump.MotionFps:G4} fps"
+                        + (run.Pump.FinalRung > 0 ? $" (rung {run.Pump.FinalRung})" : "")
+                        + $", {run.Pump.Dropped} decoded frames dropped");
+        }
     }
 
     /// <summary>

@@ -96,7 +96,7 @@ public static class ConfigCommand
             Emit(terminal, "defaults.deinterlace", d.Deinterlace.Filter);
             Emit(terminal, "defaults.hwaccel", d.Hwaccel);
             Emit(terminal, "defaults.parallel", d.Parallel);
-            Emit(terminal, "defaults.lastEraPreset", d.LastEraPreset);
+            Emit(terminal, "defaults.h264Impl", d.H264Impl);
             Emit(terminal, "defaults.subtitles.mode", d.Subtitles.Mode);
             Emit(terminal, "defaults.subtitles.files", d.Subtitles.Files.Count);
             Emit(terminal, "defaults.recompress.enabled", d.Recompress.Enabled);

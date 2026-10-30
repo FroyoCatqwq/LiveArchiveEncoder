@@ -51,6 +51,14 @@ public static class EncodeCommand
         {
             Description = "Output frame size as WIDTHxHEIGHT.",
         };
+        var presetOption = new Option<string?>("--preset")
+        {
+            Description = "Start from one of your stored presets; 'lae preset list' shows them.",
+        };
+        var limitOption = new Option<double?>("--limit")
+        {
+            Description = "Bitrate ceiling in kbps. The ladder drops frames rather than exceed it.",
+        };
         var dryRunOption = new Option<bool>("--dry-run")
         {
             Description = "Print the two FFmpeg command lines and stop.",
@@ -66,6 +74,8 @@ public static class EncodeCommand
             toOption,
             qualityOption,
             sizeOption,
+            presetOption,
+            limitOption,
             dryRunOption,
         };
 
@@ -80,6 +90,8 @@ public static class EncodeCommand
                 To = parseResult.GetValue(toOption),
                 Quality = parseResult.GetValue(qualityOption),
                 Size = parseResult.GetValue(sizeOption),
+                Preset = parseResult.GetValue(presetOption),
+                LimitKbps = parseResult.GetValue(limitOption),
             };
 
             return EncodeSession.Run(

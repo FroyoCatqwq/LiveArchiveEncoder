@@ -1,5 +1,21 @@
 # 时代预设：站点 -> 年份
 
+> **v8 起，这张表不再随程序发布。** 内置的 32 行（5 个通用年代 + 27 个站点/年份）全部删除：
+> 它们是这个程序里老化最快的东西 —— 某个门户 2006 年的数字，换一个人细看就对不上，
+> 而程序里没有任何地方能说明用户到底信哪一行。
+>
+> v8 里"预设"是**你自己写下的一份设置**，用 `lae preset add` 建、`encode --preset` 用、
+> `preset remove` 删：
+>
+> ```
+> lae preset add portal-2006 --encoder mpeg4 --size 320x240 --limit 150 --quality 8
+> lae encode in.mp4 --out out.avi --preset portal-2006
+> lae preset list
+> ```
+>
+> 下面的表保留给 **v7**（`main` 分支仍在发布 v7）。想在 v8 里复刻其中某一行，把那一行的
+> 尺寸/帧率/码率填进 `preset add` 即可。
+
 > v7.9.7 起，预设不再是一份"时代"清单加一份"站点"清单，而是**一个站在一个年份**。
 > id 就是 `site/year`，例如 `youku/2007`、`bilibili/2012`、`generic/1998`。
 

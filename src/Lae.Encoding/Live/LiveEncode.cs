@@ -71,7 +71,7 @@ public static class LiveEncode
             {
                 encoder = ChildProcess.Start(
                     plan.WritingTo(partPath).EncodeCommand(ffmpeg),
-                    new ChildSpec { WriteInput = true });
+                    new ChildSpec { WriteInput = true, ReadOutput = true });
             }
             catch (Exception exc) when (exc is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
@@ -79,7 +79,11 @@ public static class LiveEncode
                 throw new InvalidOperationException($"could not start the encoder: {exc.Message}", exc);
             }
 
-            PumpStats stats = Pump(plan, decoder, encoder, progress, token);
+            // The encoder's stdout carries -progress reports instead of frames;
+            // the frames go in through stdin and out to the file.
+            using var progressTap = new ProgressTap(encoder.Output!);
+
+            PumpStats stats = Pump(plan, progressTap, decoder, encoder, progress, warn, token);
 
             // Closing the input is what tells the encoder the picture is over; it
             // then flushes its last packets and exits.
@@ -133,18 +137,31 @@ public static class LiveEncode
     }
 
     /// <summary>
-    /// The pump, with the one thing the generic loop cannot know: what "the run is
-    /// still alive" means for these two children.
+    /// The pump, with the two things the generic loop cannot know: what "the run
+    /// is still alive" means for these two children, and what the muxer has
+    /// produced.
     /// </summary>
     private static PumpStats Pump(
-        EncodePlan plan, ChildProcess decoder, ChildProcess encoder,
-        Action<long, long?>? progress, CancellationToken token)
+        EncodePlan plan, ProgressTap progressTap, ChildProcess decoder, ChildProcess encoder,
+        Action<long, long?>? progress, Action<string>? warn, CancellationToken token)
     {
+        FpsLadder? ladder = plan.BuildLadder();
+
         var spec = new PumpSpec
         {
             Fps = plan.Fps,
             FrameSize = plan.FrameSize,
             TargetFrames = plan.TargetFrames,
+            Ladder = ladder is null ? null : new LadderControl
+            {
+                Ladder = ladder,
+                Window = new BitrateWindow(plan.Encode.WindowSeconds),
+                Progress = () => progressTap.Current,
+                AudioKbps = plan.HasAudio ? plan.Encode.AudioKbps : 0,
+                Moved = move => warn?.Invoke(
+                    $"video {move.Kbps:F0} kbps over {plan.Encode.WindowSeconds:G4}s; "
+                    + $"motion fps {move.FromFps:G4} -> {move.ToFps:G4}"),
+            },
         };
 
         return FramePump.Run(

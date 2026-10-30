@@ -112,6 +112,39 @@ public sealed class FrameChannel
         }
     }
 
+    /// <summary>
+    /// Copy the newest waiting frame and throw away everything older.
+    ///
+    /// <para>This is what a throttled run wants. When the ladder has dropped to
+    /// 8 fps the consumer is going to skip five slots in thirteen, and the frames
+    /// it skips have to leave the queue or the producer backs up and every later
+    /// frame arrives late. Taking the newest keeps the picture current: a live
+    /// capture that showed a five-frame-old image would be showing the past.</para>
+    /// </summary>
+    public bool TryTakeNewest(Span<byte> destination, out long discarded)
+    {
+        if (destination.Length < FrameSize)
+        {
+            throw new ArgumentException(
+                $"destination is {destination.Length} bytes, channel needs {FrameSize}", nameof(destination));
+        }
+
+        discarded = 0;
+        lock (_gate)
+        {
+            if (_count == 0) return false;
+
+            int newest = (_head + _count - 1) % _slots.Length;
+            _slots[newest].AsSpan().CopyTo(destination);
+
+            discarded = _count - 1;
+            _dropped += discarded;
+            _count = 0;
+            _head = 0;
+            return true;
+        }
+    }
+
     /// <summary>The producer is done; the consumer may stop once the queue drains.</summary>
     public void Complete()
     {

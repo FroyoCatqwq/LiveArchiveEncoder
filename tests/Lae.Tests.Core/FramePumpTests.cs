@@ -1,4 +1,5 @@
 using Lae.Core;
+using Lae.Core.Settings;
 
 namespace Lae.Tests.Core;
 
@@ -234,5 +235,166 @@ public sealed class FramePumpTests
             if (disposing) _open.Dispose();
             base.Dispose(disposing);
         }
+    }
+}
+
+/// <summary>
+/// What the throttle does to the pipe.
+///
+/// <para>The behaviour worth pinning is not "the ladder moved" -- that is
+/// arithmetic, tested on its own -- but "a throttled run still writes every slot
+/// and spends most of them on the frame it already has". Those are different
+/// claims: a pump that stopped writing would produce a short file, and a pump
+/// that kept writing fresh frames would not lower the bitrate at all.</para>
+/// </summary>
+public sealed class FramePumpLadderTests
+{
+    private static byte[] Script(int frames, int frameSize)
+    {
+        byte[] bytes = new byte[frames * frameSize];
+        for (int i = 0; i < frames; i++) bytes.AsSpan(i * frameSize, frameSize).Fill((byte)i);
+        return bytes;
+    }
+
+    /// <summary>
+    /// The muxer, as the pump sees it: 40 kB written per report, and a tenth of
+    /// a second of programme per report. The rate is deliberately absurd (about
+    /// 3 Mbps), because the test is about what happens when the ceiling is
+    /// blown, not about how it is blown.
+    /// </summary>
+    private sealed class ByteCounter
+    {
+        private long _bytes;
+        private double _media;
+
+        public EncoderProgress Next()
+        {
+            _bytes += 40_000;
+            _media += 0.1;
+            return new EncoderProgress(_bytes, _media);
+        }
+    }
+
+    [Test]
+    public async Task WithNoLadderEverySlotCarriesWhatTheSourceProduced()
+    {
+        const int frameSize = 4;
+        const int fps = 40;
+        using var source = new MemoryStream(Script(200, frameSize));
+        using var sink = new MemoryStream();
+
+        var spec = new PumpSpec { Fps = fps, FrameSize = frameSize, TargetFrames = 20 };
+        PumpStats stats = FramePump.Run(source, sink, spec, null, null, CancellationToken.None);
+
+        // No ladder means no throttle: whatever the producer managed to hand over
+        // is what goes in, and the rung never moves. How many of the twenty slots
+        // caught a fresh frame depends on how the two threads were scheduled, so
+        // that is not a number to pin.
+        await Assert.That(stats.Fresh + stats.Repeated).IsEqualTo(20L);
+        await Assert.That(stats.FinalRung).IsEqualTo(0);
+        await Assert.That(stats.MotionFps).IsEqualTo(40.0);
+        await Assert.That(stats.Dropped).IsEqualTo(0L);
+    }
+
+    /// <summary>
+    /// Above the ceiling the pump keeps writing slots but stops taking new
+    /// pictures: the file stays the same length in seconds, the bitrate falls.
+    /// </summary>
+    [Test]
+    public async Task ABitrateAboveTheCeilingTradesFreshFramesForRepeats()
+    {
+        const int frameSize = 4;
+        const int fps = 40;
+        const int target = 40;
+
+        using var source = new MemoryStream(Script(400, frameSize));
+        using var sink = new MemoryStream();
+
+        var counter = new ByteCounter();
+        var moves = new List<LadderMove>();
+
+        FpsLadder ladder = LadderPolicy.FromDefaults(new EncodeDefaults
+        {
+            Fps = fps,
+            FpsLevels = [40, 10],
+            LimitKbps = 200,
+            RecoverKbps = 150,
+        })!;
+
+        var spec = new PumpSpec
+        {
+            Fps = fps,
+            FrameSize = frameSize,
+            TargetFrames = target,
+            Ladder = new LadderControl
+            {
+                Ladder = ladder,
+                Window = new BitrateWindow(0.2),
+                Progress = counter.Next,
+                Moved = moves.Add,
+            },
+        };
+
+        PumpStats stats = FramePump.Run(source, sink, spec, null, null, CancellationToken.None);
+
+        // The duration is untouched -- that is the whole point of throttling by
+        // repeating rather than by writing fewer slots.
+        await Assert.That(stats.Frames).IsEqualTo(target);
+        await Assert.That(sink.Length).IsEqualTo((long)target * frameSize);
+
+        await Assert.That(stats.FinalRung).IsEqualTo(1);
+        await Assert.That(stats.MotionFps).IsEqualTo(10.0);
+        await Assert.That(moves.Count).IsEqualTo(1);
+        await Assert.That(moves[0].ToFps).IsEqualTo(10.0);
+
+        // One fresh frame in four after the drop, against forty slots.
+        await Assert.That(stats.Fresh).IsLessThan(26L);
+        await Assert.That(stats.Repeated).IsGreaterThan(14L);
+    }
+
+    /// <summary>
+    /// Frames the ladder refuses to show have to leave the queue. A pump that
+    /// left them there would feed the encoder a picture from a quarter of a
+    /// second ago for the rest of the run.
+    /// </summary>
+    [Test]
+    public async Task SkippedFramesAreDroppedRatherThanQueued()
+    {
+        const int frameSize = 4;
+        const int fps = 40;
+
+        using var source = new MemoryStream(Script(400, frameSize));
+        using var sink = new MemoryStream();
+
+        var counter = new ByteCounter();
+
+        FpsLadder ladder = LadderPolicy.FromDefaults(new EncodeDefaults
+        {
+            Fps = fps,
+            FpsLevels = [40, 10],
+            LimitKbps = 200,
+        })!;
+
+        var spec = new PumpSpec
+        {
+            Fps = fps,
+            FrameSize = frameSize,
+            TargetFrames = 40,
+            Ladder = new LadderControl
+            {
+                Ladder = ladder,
+                Window = new BitrateWindow(0.2),
+                Progress = counter.Next,
+            },
+        };
+
+        PumpStats stats = FramePump.Run(source, sink, spec, null, null, CancellationToken.None);
+
+        await Assert.That(stats.Dropped).IsGreaterThan(0L);
+
+        // And the picture still moves forward: a run that kept its oldest frame
+        // would show block 0 for three quarters of the file.
+        byte[] all = sink.ToArray();
+        await Assert.That(all[^frameSize]).IsGreaterThan((byte)0);
     }
 }
