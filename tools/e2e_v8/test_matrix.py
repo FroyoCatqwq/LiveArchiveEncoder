@@ -7,11 +7,14 @@ The comparison is deliberately in two stages, cheapest first:
 2. the picture, as PSNR against the source.
 
 Stage 1 is the one that catches a wrong argument; stage 2 is the one that catches
-"the arguments were right and the frames were wrong". Comparing the two outputs
-pixel-for-pixel is not useful and not attempted: v7 repeats frames according to
-its adaptive ladder and v8 has not ported that yet, so the two files differ in
-*when* a frame is repeated, which costs about 20 dB of PSNR between them and none
-against the source.
+"the arguments were right and the frames were wrong".
+
+The three comparison tests run the two programs with the *ladder switched off*
+(v7's ceiling parked at 5000 kbps), which makes them a comparison of the encoder
+arguments alone. The ladder has its own test at the bottom, where both programs
+are told the same ceiling: that one compares decisions about which frames to
+repeat, and it is the only place the two are expected to agree on something
+timing-dependent.
 """
 
 from __future__ import annotations
@@ -21,10 +24,9 @@ import subprocess
 
 from conftest import FFPROBE, Work, duration, stream
 
-# v7's adaptive ladder drops the frame rate once the output passes its default
-# 200 kbps ceiling. v8 has no ladder until M2, so the comparison has to run v7
-# with a ceiling it will not reach -- otherwise it is comparing two different
-# features, not two implementations of one.
+# A ceiling v7 will never reach, so its adaptive ladder stays on the top rung and
+# the comparison is about the pipeline rather than about throttling. The ladder
+# itself is compared separately, at the end of this file.
 V7_ARGS = ["--encoder", "mpeg4", "--qv", "8", "--width", "256", "--height", "192",
            "--fps", "13", "--limit", "5000", "--recover", "4000"]
 
@@ -106,3 +108,49 @@ def test_v8_picture_is_as_close_to_the_source_as_v7_is(work: Work, needs_ffmpeg,
     # frame landing one slot apart costs a couple of dB against the source even
     # though both are faithful. A real quality regression is 10 dB, not 2.
     assert v8_psnr >= v7_psnr - 3.0, f"v7 {v7_psnr:.2f} dB, v8 {v8_psnr:.2f} dB"
+
+
+def test_the_two_ladders_reach_the_same_picture_size(work: Work, needs_ffmpeg, needs_v7):
+    """The only timing-dependent comparison in the suite.
+
+    Same source, same ceiling, same rungs, same quality. Both programs throttle
+    and both keep the programme the same length; the file sizes are allowed to
+    differ by a third, and it is worth being precise about why that much.
+
+    v7's first ladder reading on this material comes out at **1096 kbps** -- an
+    artefact of dividing a fresh run's opening bytes by a window that has barely
+    started -- so it fires three times in three slots and spends the next three
+    seconds at 3 fps. v8 reads 326 kbps at the same moment, because its
+    denominator is the programme span the bytes actually cover. The two therefore
+    disagree about *when* to throttle, not about the ceiling, and on a six-second
+    clip that shows up as roughly 20% in file size. A wrong ceiling, a ladder that
+    never fires, or one that never stops firing would all be far outside this
+    band; v8's earlier no-ladder build came out 13% above v7 on a long clip.
+    """
+    source = work.source(seconds=6)
+    v7_out = work.root / "v7.avi"
+    v8_out = work.root / "v8.avi"
+
+    v7 = work.run_v7("--encoder", "mpeg4", "--qv", "8", "--width", "256", "--height", "192",
+                     "--fps", "13", "--limit", "200", "--recover", "150",
+                     source, str(v7_out))
+    assert v7.returncode == 0, v7.stderr
+
+    v8 = work.run("encode", source, "--out", str(v8_out), "--encoder", "mpeg4",
+                  "--quality", "8", "--size", "256x192", "--limit", "200")
+    assert v8.returncode == 0, v8.stderr
+
+    # v8 says so on stderr when its rung moves; v7 only when the console is not
+    # quiet. Both must have moved, or this comparison is vacuous.
+    assert "motion fps" in v8.stderr, v8.stderr
+    assert "motion FPS" in v7.stdout, v7.stdout
+
+    v7_size, v8_size = v7_out.stat().st_size, v8_out.stat().st_size
+    assert v8_size <= v7_size * 1.35, f"v7 {v7_size} bytes, v8 {v8_size} bytes"
+    assert v8_size >= v7_size * 0.65, f"v7 {v7_size} bytes, v8 {v8_size} bytes"
+
+    # Whatever the ladders decided, the programme is the same length and the
+    # container rate is untouched: the ladder drops pictures, not time.
+    v7_probe, v8_probe = work.probe(str(v7_out)), work.probe(str(v8_out))
+    assert abs(duration(v7_probe) - duration(v8_probe)) <= 0.1
+    assert stream(v8_probe, "video")["r_frame_rate"] == "13/1"

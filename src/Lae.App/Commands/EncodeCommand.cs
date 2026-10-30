@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Lae.App.Ui;
+using Lae.Core;
 using Lae.Core.Settings;
 
 namespace Lae.App.Commands;
@@ -59,6 +60,14 @@ public static class EncodeCommand
         {
             Description = "Bitrate ceiling in kbps. The ladder drops frames rather than exceed it.",
         };
+        var recoverOption = new Option<double?>("--recover")
+        {
+            Description = "Bitrate the ladder climbs back from; defaults to 75% of the ceiling.",
+        };
+        var levelsOption = new Option<string?>("--fps-levels")
+        {
+            Description = "Ladder as FPS[,FPS[:drop[:rise]]...], e.g. 13,8,5,3 or 13,8:150:110.",
+        };
         var dryRunOption = new Option<bool>("--dry-run")
         {
             Description = "Print the two FFmpeg command lines and stop.",
@@ -76,11 +85,35 @@ public static class EncodeCommand
             sizeOption,
             presetOption,
             limitOption,
+            recoverOption,
+            levelsOption,
             dryRunOption,
         };
 
         command.SetAction((ParseResult parseResult) =>
         {
+            string? levelsText = parseResult.GetValue(levelsOption);
+            List<double>? levels = null;
+            List<FpsThreshold>? thresholds = null;
+
+            if (levelsText is not null)
+            {
+                (List<double> parsed, List<FpsRungSetting> settings, string? error) =
+                    EncoderMath.ParseLevelSpec(levelsText);
+
+                if (error is not null)
+                {
+                    terminal.ErrorLine($"ERROR: --fps-levels: {error}");
+                    return ExitCodes.Usage;
+                }
+
+                levels = parsed;
+                thresholds =
+                [
+                    .. settings.Select(s => new FpsThreshold(s.Fps, s.DropAboveKbps, s.RiseBelowKbps)),
+                ];
+            }
+
             var overrides = new EncodeOverrides
             {
                 Output = parseResult.GetValue(outOption),
@@ -92,6 +125,9 @@ public static class EncodeCommand
                 Size = parseResult.GetValue(sizeOption),
                 Preset = parseResult.GetValue(presetOption),
                 LimitKbps = parseResult.GetValue(limitOption),
+                RecoverKbps = parseResult.GetValue(recoverOption),
+                FpsLevels = levels,
+                FpsThresholds = thresholds,
             };
 
             return EncodeSession.Run(

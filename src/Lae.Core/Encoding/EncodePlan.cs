@@ -184,6 +184,19 @@ public sealed record EncodePlan
         if (encoder.Name == "amv" && !EncoderMath.UsesWholeFps(encoder.Name))
             problems.Add("internal error: amv must use whole frame rates");
 
+        // The ladder climbs back below the recovery point, so a recovery rate at
+        // or above the ceiling leaves it no gap to sit in: it would drop a rung,
+        // find itself under the rise threshold, and climb straight back for the
+        // rest of the run. Clamping is better than refusing -- the encode is
+        // still worth doing -- but it must be said out loud, because the number
+        // the user typed is not the number in use.
+        if (request.Encode.LimitKbps > 0 && request.Encode.RecoverKbps >= request.Encode.LimitKbps)
+        {
+            notes.Add($"recovery {ArgsBuilder.FloatArg(request.Encode.RecoverKbps)} kbps is not below the "
+                    + $"{ArgsBuilder.FloatArg(request.Encode.LimitKbps)} kbps ceiling; "
+                    + $"climbing back at {ArgsBuilder.FloatArg(LadderPolicy.RecoverKbps(request.Encode))} kbps");
+        }
+
         (string container, string muxer) = ResolveContainer(request.Encode.Container, encoder, problems);
 
         // Building the chain can refuse: nnedi without its weights, an unknown
@@ -416,6 +429,16 @@ public sealed record EncodePlan
         // whose container duration followed the audio. Found by the end-to-end
         // comparison of a trimmed run against its own source, not by reading it.
         if (hasAudio && span > 0) cmd.AddRange(["-t", ArgsBuilder.FloatArg(span)]);
+
+        // Write every packet out as it is produced.
+        //
+        // A muxer is allowed to hold packets and write them in a lump; the AVI
+        // muxer does exactly that, up to a couple of seconds at a time. That is
+        // invisible in the finished file and fatal to the ladder, which reads
+        // `-progress`'s total_size: the counter sits still for a second, reports
+        // 0 kbps, then jumps and reports 1000. Measured on a 14 s clip: the
+        // alternation drove the frame rate up and down four times.
+        cmd.AddRange(["-flush_packets", "1"]);
 
         cmd.AddRange(["-f", muxer, request.DestinationPath]);
         return cmd;

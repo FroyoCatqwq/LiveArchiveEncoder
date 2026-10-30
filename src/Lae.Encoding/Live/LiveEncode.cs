@@ -166,7 +166,7 @@ public static class LiveEncode
                 Progress = () => progressTap.Current,
                 AudioKbps = plan.HasAudio ? plan.Encode.AudioKbps : 0,
                 Moved = move => warn?.Invoke(
-                    $"video {move.Kbps:F0} kbps over {plan.Encode.WindowSeconds:G4}s; "
+                    $"video {move.Kbps:F0} kbps over {move.CoveredSeconds:G4}s; "
                     + $"motion fps {move.FromFps:G4} -> {move.ToFps:G4}"),
             },
         };

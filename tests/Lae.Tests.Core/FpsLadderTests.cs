@@ -235,19 +235,48 @@ public sealed class LadderPolicyTests
         await Assert.That(ladder.DropHoldSeconds).IsBetween(0.1, 0.4);
         await Assert.That(ladder.RiseHoldSeconds).IsBetween(0.5, 1.0);
     }
+
+    /// <summary>
+    /// A recovery rate at or above the ceiling leaves the ladder no gap: it drops
+    /// a rung, finds itself under the rise threshold, climbs straight back, and
+    /// the picture pulses for the whole run. Clamped to three quarters of the
+    /// ceiling, which is where v7's 150-of-200 sat.
+    /// </summary>
+    [Test]
+    public async Task RecoveryIsPulledBelowTheCeiling()
+    {
+        EncodeDefaults tight = new() { LimitKbps = 60, RecoverKbps = 150 };
+
+        await Assert.That(LadderPolicy.RecoverKbps(tight)).IsEqualTo(45.0);
+
+        FpsLadder ladder = LadderPolicy.FromDefaults(tight with { FpsLevels = [13, 8] })!;
+        await Assert.That(ladder.Rungs[1].RiseBelowKbps).IsEqualTo(45.0);
+    }
+
+    [Test]
+    public async Task ASensibleRecoveryRateIsLeftAlone()
+    {
+        EncodeDefaults sane = new() { LimitKbps = 200, RecoverKbps = 150 };
+
+        await Assert.That(LadderPolicy.RecoverKbps(sane)).IsEqualTo(150.0);
+    }
 }
 
 public sealed class BitrateWindowTests
 {
+    /// <summary>
+    /// 25 KB per half second is 400 kbps. The first sample is only the origin, so
+    /// the two that follow supply both the bytes and the span they took.
+    /// </summary>
     [Test]
-    public async Task ReportsTheRateOverTheWindow()
+    public async Task ReportsTheRateOverTheCoveredSpan()
     {
         var window = new BitrateWindow(2.0);
 
-        // 25 KB every 0.5 s is 400 kbps: 75 KB over the 1.5 s it covers.
-        for (int i = 1; i <= 3; i++) window.Add(i * 0.5, 25_000);
+        for (int i = 0; i <= 3; i++) window.Add(i * 0.5, 25_000);
 
-        await Assert.That(window.Kbps(1.5)).IsBetween(380.0, 420.0);
+        await Assert.That(window.CoveredSeconds).IsEqualTo(1.5);
+        await Assert.That(window.Kbps()).IsBetween(380.0, 420.0);
     }
 
     /// <summary>
@@ -261,7 +290,36 @@ public sealed class BitrateWindowTests
         window.Add(0.0, 200_000);
         window.Add(5.0, 1_000);
 
-        await Assert.That(window.Kbps(5.0)).IsLessThan(200.0);
+        await Assert.That(window.Kbps()).IsLessThan(200.0);
+    }
+
+    /// <summary>
+    /// The denominator is programme time, not arrivals. FFmpeg reports twice a
+    /// second; a report covering half a second that arrives a second late must
+    /// still be divided by the half second it describes, or the rate reads low and
+    /// the ladder never descends.
+    /// </summary>
+    [Test]
+    public async Task SparseReportsDoNotChangeTheRate()
+    {
+        var window = new BitrateWindow(4.0);
+
+        window.Add(0.0, 0);
+        window.Add(0.5, 25_000);
+        window.Add(1.0, 25_000);
+
+        // Same 25 KB per half second as above, but sampled coarsely.
+        await Assert.That(window.Kbps()).IsBetween(380.0, 420.0);
+    }
+
+    [Test]
+    public async Task OneSampleIsNotYetARate()
+    {
+        var window = new BitrateWindow(2.0);
+        window.Add(1.0, 900_000);
+
+        await Assert.That(window.Kbps()).IsEqualTo(0.0);
+        await Assert.That(window.CoveredSeconds).IsEqualTo(0.0);
     }
 
     [Test]

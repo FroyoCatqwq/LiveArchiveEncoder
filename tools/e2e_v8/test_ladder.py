@@ -8,7 +8,22 @@ ceiling is lowered, and it is still exactly as long.
 
 from __future__ import annotations
 
-from conftest import Work, duration, stream
+import subprocess
+from pathlib import Path
+
+from conftest import FFMPEG, Work, duration, stream
+
+
+def _static_plate(work: Work, seconds: float = 6.0) -> str:
+    """A source that compresses to almost nothing: bars, no motion, no audio."""
+    path = work.root / "bars.avi"
+    subprocess.run(
+        [FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+         "-i", f"smptebars=size=320x240:rate=25:duration={seconds}",
+         "-c:v", "mpeg4", "-q:v", "4", "-y", str(path)],
+        check=True, capture_output=True,
+    )
+    return str(path)
 
 
 def test_a_low_ceiling_costs_bitrate_and_not_length(work: Work, needs_ffmpeg):
@@ -61,9 +76,40 @@ def test_an_unknown_preset_is_refused_before_anything_starts(work: Work, needs_f
     source = work.source(seconds=1)
     output = work.root / "out.avi"
 
-    result = work.run("encode", source, "--preset", "no-such-thing", "--out", str(output))
+    result = work.run("encode", source, "--out", str(output), "--preset", "no-such-thing")
 
     assert result.returncode == 2, result.stderr
     assert "no preset named" in result.stderr
     assert not output.exists()
     assert work.parts() == []
+
+
+def test_a_compressible_source_is_never_throttled(work: Work, needs_ffmpeg):
+    """The other half of the ladder's contract.
+
+    Dropping frames on a picture that already fits is a worse failure than never
+    dropping at all: the output is visibly choppy for no reason, and the file is
+    not even smaller. Bars at 320x240 sit far under the ceiling, so the ladder
+    must stay on its top rung and the report must not mention motion at all.
+    """
+    source = _static_plate(work)
+    output = work.root / "bars_out.avi"
+
+    result = work.run("encode", source, "--out", str(output), "--limit", "200")
+
+    assert result.returncode == 0, result.stderr
+    assert "motion fps" not in result.stderr, result.stderr
+    assert "ended at" not in result.stdout, result.stdout
+    assert output.stat().st_size < 400_000
+
+
+def test_named_rungs_reach_the_plan(work: Work, needs_ffmpeg):
+    source = work.source(seconds=1)
+    output = work.root / "rungs.avi"
+
+    dry = work.run("encode", source, "--out", str(output), "--dry-run",
+                   "--limit", "120", "--fps-levels", "13,8,5")
+
+    assert dry.returncode == 0, dry.stderr
+    assert "13 > 8 > 5 fps" in dry.stdout, dry.stdout
+    assert "120 kbps" in dry.stdout, dry.stdout

@@ -26,6 +26,15 @@ public sealed record EncodeOverrides
     /// <summary>Bitrate ceiling in kbps; the ladder descends when it is reached.</summary>
     public double? LimitKbps { get; init; }
 
+    /// <summary>Bitrate the ladder climbs back from.</summary>
+    public double? RecoverKbps { get; init; }
+
+    /// <summary>Ladder rungs, when the command line named them.</summary>
+    public IReadOnlyList<double>? FpsLevels { get; init; }
+
+    /// <summary>Per-rung thresholds that came with the rungs.</summary>
+    public IReadOnlyList<FpsThreshold>? FpsThresholds { get; init; }
+
     /// <summary>WIDTHxHEIGHT as typed.</summary>
     public string? Size { get; init; }
 
@@ -205,6 +214,20 @@ public static class EncodeSession
         if (overrides.Container is { } container) encode = encode with { Container = container };
         if (overrides.Quality is { } quality) encode = encode with { Quality = quality };
         if (overrides.LimitKbps is { } limit) encode = encode with { LimitKbps = limit };
+        if (overrides.RecoverKbps is { } recover) encode = encode with { RecoverKbps = recover };
+
+        // The ladder is replaced whole, never merged: rungs and their thresholds
+        // are one list keyed by frame rate, and taking the new rungs while
+        // keeping the old thresholds would put a user's 150 kbps drop point on
+        // whichever rung happened to survive.
+        if (overrides.FpsLevels is { Count: > 0 } levels)
+        {
+            encode = encode with
+            {
+                FpsLevels = [.. levels],
+                FpsThresholds = overrides.FpsThresholds is { } thresholds ? [.. thresholds] : [],
+            };
+        }
 
         if (overrides.Size is { } size)
         {
@@ -273,7 +296,9 @@ public static class EncodeSession
         if (plan.BuildLadder() is { } ladder)
         {
             terminal.Line($"ladder     {string.Join(" > ", ladder.Rungs.Select(r => r.Fps.ToString("G4", System.Globalization.CultureInfo.InvariantCulture)))} fps"
-                        + $", ceiling {plan.Encode.LimitKbps:G4} kbps over {plan.Encode.WindowSeconds:G4}s");
+                        + $", down at {plan.Encode.LimitKbps:G4} kbps"
+                        + $", up at {LadderPolicy.RecoverKbps(plan.Encode):G4} kbps"
+                        + $", over {plan.Encode.WindowSeconds:G4}s");
         }
         else
         {

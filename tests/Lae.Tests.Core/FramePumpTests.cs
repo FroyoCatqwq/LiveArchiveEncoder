@@ -392,6 +392,14 @@ public sealed class FramePumpLadderTests
 
         await Assert.That(stats.Dropped).IsGreaterThan(0L);
 
+        // A skipped frame can only be counted once. The producer publishes one
+        // frame per slot, so the tally is the frames that were not taken -- which
+        // can never exceed the slots themselves. Counting the discards inside
+        // TryTakeNewest *and* reading the channel's total afterwards doubled it,
+        // and a report that claims more dropped frames than the file has is a
+        // report nobody can use to compare two runs.
+        await Assert.That(stats.Dropped).IsLessThan(stats.Frames);
+
         // And the picture still moves forward: a run that kept its oldest frame
         // would show block 0 for three quarters of the file.
         byte[] all = sink.ToArray();

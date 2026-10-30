@@ -342,4 +342,60 @@ public sealed class EncodePlanTests
         await Assert.That(mpeg.EncoderArgs.Contains("-maxrate")).IsFalse();
         await Assert.That(mpeg.EncoderArgs.Contains("-bufsize")).IsFalse();
     }
+
+    /// <summary>
+    /// The plan carries the ladder, and the ladder is built from the settings the
+    /// plan was made from -- the argument list never spells a ceiling, so this is
+    /// the only place the run could learn it.
+    /// </summary>
+    [Test]
+    public async Task TheLadderComesFromTheSettingsThePlanWasMadeFrom()
+    {
+        EncodeRequest request = Request() with
+        {
+            Encode = new EncodeDefaults
+            {
+                Encoder = "mpeg4", LimitKbps = 120, RecoverKbps = 90, FpsLevels = [13, 9, 4],
+            },
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+
+        await Assert.That(plan.BuildLadder()).IsNotNull();
+        await Assert.That(string.Join(',', plan.BuildLadder()!.Rungs.Select(r => r.Fps))).IsEqualTo("13,9,4");
+        await Assert.That(plan.BuildLadder()!.Rungs[1].DropAboveKbps).IsEqualTo(120.0);
+    }
+
+    /// <summary>
+    /// A recovery rate that is not below the ceiling is clamped, and the clamp is
+    /// reported: the ladder has no usable gap otherwise, and quietly using a
+    /// different number than the one typed is how a setting stops meaning
+    /// anything.
+    /// </summary>
+    [Test]
+    public async Task AnImpossibleRecoveryRateIsClampedAndReported()
+    {
+        EncodeRequest request = Request() with
+        {
+            Encode = new EncodeDefaults { Encoder = "mpeg4", LimitKbps = 60, RecoverKbps = 150 },
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+
+        await Assert.That(plan.BuildLadder()!.Rungs[1].RiseBelowKbps).IsEqualTo(45.0);
+        await Assert.That(string.Join('\n', plan.Notes).Contains("recovery", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>The encoder reports its own output on stdout, which is where the ladder reads it.</summary>
+    [Test]
+    public async Task TheEncoderIsAskedForItsProgressStream()
+    {
+        EncodePlan plan = EncodePlan.Create(Request(), Source(), Encoder());
+
+        await Assert.That(HasRun(plan.EncoderArgs, "-progress", "pipe:1")).IsTrue();
+
+        // And -y, or one killed run leaves a part file that blocks the next one.
+        await Assert.That(plan.EncoderArgs[0]).IsEqualTo("-hide_banner");
+        await Assert.That(plan.EncoderArgs.Contains("-y")).IsTrue();
+    }
 }

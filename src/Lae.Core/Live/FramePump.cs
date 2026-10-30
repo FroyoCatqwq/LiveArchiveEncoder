@@ -41,7 +41,12 @@ public sealed record LadderControl
 /// <param name="FromFps">Frame rate before the move.</param>
 /// <param name="ToFps">Frame rate after it.</param>
 /// <param name="Kbps">The measured video bitrate that caused it.</param>
-public readonly record struct LadderMove(double FromFps, double ToFps, double Kbps);
+/// <param name="CoveredSeconds">
+/// How much programme the reading covered. Worth reporting: early in a run this
+/// is less than the window, and a number with its span attached is a measurement
+/// rather than a claim.
+/// </param>
+public readonly record struct LadderMove(double FromFps, double ToFps, double Kbps, double CoveredSeconds);
 
 /// <summary>What one pump run needs to know about its slot cadence.</summary>
 public sealed record PumpSpec
@@ -163,7 +168,7 @@ public static class FramePump
         long emitted = 0;
         long fresh = 0;
         long repeated = 0;
-        long discarded = 0;
+        long discarded;
 
         // The cadence counter. At full rate it adds 1.0 per slot and always
         // passes the threshold, so a run with no ladder behaves exactly as
@@ -241,8 +246,11 @@ public static class FramePump
                     {
                         // Throttled: take the newest and drop the rest, so the
                         // encoder never receives a picture older than the one it
-                        // already has while the queue fills behind it.
-                        if (channel.TryTakeNewest(frame, out long stale)) { fresh++; discarded += stale; }
+                        // already has while the queue fills behind it. The count
+                        // of what was skipped comes from the channel's own tally
+                        // at the end -- counting it here as well double-counted
+                        // every skipped frame.
+                        if (channel.TryTakeNewest(frame, out _)) { fresh++; }
                         else { if (target is null && channel.Completed) break; repeated++; }
                     }
                     else if (wantsFresh)
@@ -272,7 +280,7 @@ public static class FramePump
 
             capture.Stop();
             capture.ThrowIfFailed();
-            discarded += channel.Dropped;
+            discarded = channel.Dropped;
 
             return new PumpStats
             {
@@ -317,16 +325,22 @@ public static class FramePump
         long delta = Math.Max(0, now.Bytes - previous.Bytes);
         control.Window.Add(media, (int)Math.Min(delta, int.MaxValue));
 
-        // A window that is not yet full reports roughly double the real rate,
-        // because the divisor is the time covered. Waiting for it to fill costs
-        // the first window of the run and removes the false first drop.
-        if (media >= control.Window.WindowSeconds)
+        // A rate needs bytes and time, nothing more. An earlier version waited
+        // for the window to fill before reading at all, which sounded careful and
+        // cost a third of a short clip: on six seconds of source the ladder did
+        // not look at anything until 2 s had gone by, so v8 spent those two
+        // seconds at full rate while v7 was already throttling, and the file came
+        // out 38% larger than v7's. The window is a smoothing device, not a
+        // warm-up: with a span denominator a half-second reading is a true
+        // half-second rate.
+        if (control.Window.CoveredSeconds > 0)
         {
-            double video = Math.Max(0.0, control.Window.Kbps(media) - control.AudioKbps);
+            double video = Math.Max(0.0, control.Window.Kbps() - control.AudioKbps);
             double before = control.Ladder.CurrentFps;
             if (control.Ladder.Observe(video, media)) // the rung moved
             {
-                control.Moved?.Invoke(new LadderMove(before, control.Ladder.CurrentFps, video));
+                control.Moved?.Invoke(new LadderMove(
+                    before, control.Ladder.CurrentFps, video, control.Window.CoveredSeconds));
             }
         }
 

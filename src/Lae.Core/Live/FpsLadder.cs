@@ -126,6 +126,32 @@ public sealed class FpsLadder
 public static class LadderPolicy
 {
     /// <summary>
+    /// The highest recovery rate that still leaves the ladder any hysteresis: a
+    /// quarter below the ceiling, which is where v7's 150-of-200 sat.
+    /// </summary>
+    public const double MaxRecoveryRatio = 0.75;
+
+    /// <summary>
+    /// The rate the ladder climbs back at, clamped so it stays below the ceiling.
+    ///
+    /// <para>A recovery rate at or above the ceiling is not a preference, it is a
+    /// ladder that cannot work: every reading sits under the rise threshold, so
+    /// the rung it just left is re-entered on the next observation and the output
+    /// pulses between two frame rates for the whole run. v7 could be configured
+    /// that way (<c>--limit 60 --recover 150</c>) and did exactly that.</para>
+    /// </summary>
+    public static double RecoverKbps(EncodeDefaults encode)
+    {
+        ArgumentNullException.ThrowIfNull(encode);
+        if (encode.LimitKbps <= 0) return encode.RecoverKbps;
+
+        double ceiling = encode.LimitKbps * MaxRecoveryRatio;
+        return encode.RecoverKbps > 0
+            ? Math.Min(encode.RecoverKbps, ceiling)
+            : ceiling;
+    }
+
+    /// <summary>
     /// The ladder for these settings, or null when there is nothing to adapt --
     /// one rung, or no ceiling to stay under.
     /// </summary>
@@ -151,7 +177,7 @@ public static class LadderPolicy
         ];
 
         return new FpsLadder(EncoderMath.BuildLadder(
-            encode.Fps, encode.FpsLevels, configured, encode.LimitKbps, encode.RecoverKbps));
+            encode.Fps, encode.FpsLevels, configured, encode.LimitKbps, RecoverKbps(encode)));
     }
 }
 
@@ -160,14 +186,25 @@ public static class LadderPolicy
 ///
 /// <para>A window, not an instant: one busy second of a static shot is not a
 /// reason to drop the frame rate, and a per-frame reading would react to the
-/// keyframes. Seconds are stored as (timestamp, bytes) pairs and expired on
-/// arrival, so memory is proportional to the window and not to the run.</para>
+/// keyframes. Samples are (media time, bytes, span) and are expired on arrival,
+/// so memory is proportional to the window and not to the run.</para>
+///
+/// <para>Each sample carries the programme time it took, and the rate is bytes
+/// over the sum of those spans -- not bytes over "how long ago this window
+/// started". The difference is what a sparse reporter does to the average. FFmpeg
+/// reports its own progress about twice a second; with an elapsed-time
+/// denominator, a report that covers 0.5 s of programme but arrives 1.5 s late
+/// would be divided by 1.5 and the rate would read a third low, which is exactly
+/// the direction that keeps the ladder from ever descending. v7 measured the
+/// media span too, and that is why its numbers were usable.</para>
 /// </summary>
 public sealed class BitrateWindow
 {
     private readonly double _seconds;
-    private readonly Queue<(double At, long Bytes)> _samples = new();
-    private long _totalBytes;
+    private readonly Queue<Sample> _samples = new();
+    private double _windowBytes;
+    private double _windowMedia;
+    private double _lastMedia;
     private int _totalFrames;
 
     public BitrateWindow(double seconds)
@@ -179,34 +216,44 @@ public sealed class BitrateWindow
     /// <summary>How much output has to accumulate before a reading means anything.</summary>
     public double WindowSeconds => _seconds;
 
-    /// <summary>Record a frame's worth of output.</summary>
-    public void Add(double now, int bytes)
+    /// <summary>Record what the muxer produced up to <paramref name="mediaNow"/>.</summary>
+    public void Add(double mediaNow, int bytes)
     {
-        _samples.Enqueue((now, bytes));
-        _totalBytes += bytes;
+        // The first sample is the origin, not a measurement: its bytes belong to
+        // the programme before the window opened, and counting them against a
+        // span of zero is what makes a fresh run look like a spike. Everything
+        // after it is a fair pair of (bytes, time taken).
+        bool origin = _totalFrames == 0;
+        double span = origin ? 0 : Math.Max(0, mediaNow - _lastMedia);
+        int counted = origin ? 0 : bytes;
+
+        _lastMedia = mediaNow;
         _totalFrames++;
 
-        while (_samples.Count > 1 && now - _samples.Peek().At > _seconds)
-            _totalBytes -= _samples.Dequeue().Bytes;
+        _samples.Enqueue(new Sample(mediaNow, counted, span));
+        _windowBytes += counted;
+        _windowMedia += span;
+
+        while (_samples.Count > 1 && mediaNow - _samples.Peek().At > _seconds)
+        {
+            Sample expired = _samples.Dequeue();
+            _windowBytes -= expired.Bytes;
+            _windowMedia -= expired.Span;
+        }
     }
 
     /// <summary>
-    /// Bitrate over the window so far, in kbps.
-    ///
-    /// <para>Divided by the window length, or by the programme time elapsed while
-    /// the window is still filling -- never by the span between the oldest and
-    /// newest sample, which is degenerate for a single sample and would turn one
-    /// burst of bytes into an astronomical rate.</para>
-    ///
-    /// <para>What this does not smooth is the muxer's own reporting: FFmpeg's
-    /// <c>total_size</c> moves in chunks, so a window can briefly hold two seconds
-    /// of bytes in one report. That is what the ladder's hold is for -- one move
-    /// per 0.2 s -- and it is the same shape v7 settled on.</para>
+    /// Programme time the window actually covers. One sample covers nothing yet,
+    /// which is why the ladder waits for this to reach the window rather than
+    /// trusting the first number that arrives.
     /// </summary>
-    public double Kbps(double now)
+    public double CoveredSeconds => _windowMedia;
+
+    /// <summary>Bitrate over the covered span, in kbps. Zero until there is a span.</summary>
+    public double Kbps()
     {
-        double span = Math.Min(_seconds, Math.Max(0.001, now));
-        return _totalBytes * 8.0 / span / 1000.0;
+        if (_windowMedia <= 0) return 0;
+        return _windowBytes * 8.0 / _windowMedia / 1000.0;
     }
 
     /// <summary>Frames seen, for the report.</summary>
@@ -215,7 +262,11 @@ public sealed class BitrateWindow
     public void Reset()
     {
         _samples.Clear();
-        _totalBytes = 0;
+        _windowBytes = 0;
+        _windowMedia = 0;
+        _lastMedia = 0;
         _totalFrames = 0;
     }
+
+    private readonly record struct Sample(double At, long Bytes, double Span);
 }
