@@ -39,6 +39,14 @@ public sealed record EncodePlan
     /// <summary>The muxer name for <c>-f</c>.</summary>
     public required string Muxer { get; init; }
 
+    /// <summary>
+    /// Where the encoder writes. It also ends the encoder argument list, because
+    /// a dry run exists to be pasted into a shell and tried; keeping the path in
+    /// two places is why <see cref="WritingTo"/> exists rather than a caller
+    /// editing the list by hand.
+    /// </summary>
+    public required string DestinationPath { get; init; }
+
     /// <summary>How much of the source this run covers.</summary>
     public required double SpanSeconds { get; init; }
 
@@ -57,12 +65,39 @@ public sealed record EncodePlan
     /// <summary>Bytes per raw frame on the pipe.</summary>
     public int FrameSize => PixelFormatUtil.RawFrameSize(Width, Height, TransportPixelFormat);
 
-    /// <summary>Frames this run should produce; the pacing loop's target.</summary>
-    public long TargetFrames => (long)Math.Round(SpanSeconds * Fps);
+    /// <summary>
+    /// Frames this run should produce; the pacing loop's target.
+    ///
+    /// <para>Rounded up, not to nearest. A constant-frame-rate trim of 2.5 s at
+    /// 13 fps is ended by the frame that starts at 2.46 s, so the encoder emits
+    /// 33 frames; asking the pump for 32 would hand it a file one frame short of
+    /// what <c>-t</c> would have produced.</para>
+    /// </summary>
+    public long TargetFrames => (long)Math.Ceiling(SpanSeconds * Fps - 1e-9);
 
     public List<string> DecodeCommand(string ffmpeg) => [ffmpeg, .. DecoderArgs];
 
     public List<string> EncodeCommand(string ffmpeg) => [ffmpeg, .. EncoderArgs];
+
+    /// <summary>
+    /// The same plan, writing somewhere else.
+    ///
+    /// <para>An encode writes to <c>name.part.ext</c> and is renamed only once it
+    /// has succeeded, so the run needs a copy of the plan aimed at that sibling.
+    /// Rebuilding the plan would redo every decision; replacing the last argument
+    /// is exact because the encoder command line ends with its output path by
+    /// construction.</para>
+    /// </summary>
+    public EncodePlan WritingTo(string destination)
+    {
+        if (EncoderArgs.Count == 0)
+            throw new InvalidOperationException("this plan has no encoder arguments to retarget");
+
+        string[] retargeted = [.. EncoderArgs];
+        retargeted[^1] = destination;
+
+        return this with { DestinationPath = destination, EncoderArgs = retargeted };
+    }
 
     /// <summary>
     /// Works out how to encode. Never throws for user input: everything that is
@@ -171,6 +206,7 @@ public sealed record EncodePlan
             HasAudio = hasAudio,
             Container = container,
             Muxer = muxer,
+            DestinationPath = request.DestinationPath,
             SpanSeconds = span ?? 0,
             DecoderArgs = decoder,
             EncoderArgs = encoderArgsOut,

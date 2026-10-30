@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests for Lae.Encoding: the code that runs FFmpeg for real.
+
+    These are allowed to start processes and write files, because that is what
+    the assembly under test does. The pump itself is covered in Lae.Tests.Core
+    with memory streams, so the tests here are the ones that can only be answered
+    by an actual encode: does a real source come out with the right frame count,
+    duration and stream set.
+
+    A missing FFmpeg skips rather than fails: the machine that builds the release
+    has one, but a developer machine is not required to.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>Lae.Tests.Encoding</RootNamespace>
+    <AssemblyName>Lae.Tests.Encoding</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
+    <PackageReference Include="TUnit" Version="1.75.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lae.Core\Lae.Core.csproj" />
+    <ProjectReference Include="..\..\src\Lae.Media\Lae.Media.csproj" />
+    <ProjectReference Include="..\..\src\Lae.Encoding\Lae.Encoding.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="TUnit.Core" />
+    <Using Include="TUnit.Assertions" />
+  </ItemGroup>
+
+</Project>

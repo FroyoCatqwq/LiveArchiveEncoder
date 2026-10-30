@@ -22,6 +22,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Lae.Tests.Core/Lae.Tests.Core.csproj" />
     <Project Path="tests/Lae.Tests.Media/Lae.Tests.Media.csproj" />
+    <Project Path="tests/Lae.Tests.Encoding/Lae.Tests.Encoding.csproj" />
     <Project Path="tests/Lae.Tests.Architecture/Lae.Tests.Architecture.csproj" />
   </Folder>
 </Solution>

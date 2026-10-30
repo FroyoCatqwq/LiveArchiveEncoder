@@ -5,6 +5,11 @@ using Lae.App;
 // this file stays small enough to read in one screen — v7's counterpart was 542
 // lines of linear branches with 48 bare returns.
 
+// Ctrl+C must mean "stop this run cleanly" for every command, not just encode:
+// installing the handler here is what turns it into a cancelled token instead of
+// the runtime killing the process with children still attached.
+Interrupt.Install();
+
 ParseResult parsed = CommandTree.Build(AppHost.CreateDefault()).Parse(args);
 
 // System.CommandLine answers a parse error with 1; this program's contract says

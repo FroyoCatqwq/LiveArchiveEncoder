@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Lae.Core;
 using Lae.Core.Settings;
+using Lae.Encoding;
 using Lae.Media.Ffmpeg;
 using Lae.Media.Toolchain;
 
@@ -9,11 +10,11 @@ namespace Lae.App.Commands;
 /// <summary>
 /// <c>lae encode</c> — one source, one output, one realtime pass.
 ///
-/// <para>What exists today is the planning half: the tool is found, the source is
-/// probed, the encoder is resolved and the two FFmpeg command lines are built.
-/// <c>--dry-run</c> prints them. The pumping half (pacing frames between the two
-/// processes) is the next piece of M1, and until it lands this command says so
-/// rather than pretending.</para>
+/// <para>Two halves, deliberately separate. The planning half finds the tool,
+/// probes the source, resolves the encoder and builds the two FFmpeg command
+/// lines; <c>--dry-run</c> prints them and stops. The pumping half hands those
+/// lines to <see cref="LiveEncode"/>, which owns nothing but process lifetime and
+/// failure reporting.</para>
 /// </summary>
 public static class EncodeCommand
 {
@@ -135,9 +136,24 @@ public static class EncodeCommand
 
             if (parseResult.GetValue(dryRunOption)) return ExitCodes.Ok;
 
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("ERROR: the encode pump is not wired yet; --dry-run is all this build can do.");
-            return ExitCodes.Failed;
+            // From here the run writes for real, so Ctrl+C has to mean "stop
+            // cleanly" rather than "die now with two children still running".
+            Interrupt.Install();
+
+            using var progress = new LiveProgress();
+            LiveRun run = LiveEncode.Run(
+                plan,
+                tools.Ffmpeg,
+                (done, total) => progress.Report(done, total),
+                note => Console.Error.WriteLine($"note: {note}"),
+                Interrupt.Token);
+
+            progress.Finish(
+                $"[{run.Pump.Seconds,7:F1}s] {run.Pump.Frames} frames written"
+                + (run.Pump.Repeated > 0 ? $" ({run.Pump.Repeated} repeated)" : ""));
+
+            PrintResult(run);
+            return ExitCodes.Ok;
         });
 
         return command;
@@ -236,6 +252,24 @@ public static class EncodeCommand
         Console.WriteLine("  " + Quote(plan.DecodeCommand(ffmpeg)));
         Console.WriteLine("encoder:");
         Console.WriteLine("  " + Quote(plan.EncodeCommand(ffmpeg)));
+    }
+
+    /// <summary>
+    /// What came out, in the terms the archive cares about: how long it ran
+    /// against the span it covered, and what bitrate the result actually is.
+    /// </summary>
+    private static void PrintResult(LiveRun run)
+    {
+        string size = run.OutputBytes >= 1024 * 1024
+            ? $"{run.OutputBytes / 1024.0 / 1024.0:F2} MiB"
+            : $"{run.OutputBytes / 1024.0:F0} KiB";
+
+        Console.WriteLine();
+        Console.WriteLine($"written    {run.OutputPath}");
+        Console.WriteLine($"size       {size}, {run.AverageKbps:F0} kbps over {run.SpanSeconds:G4}s");
+        Console.WriteLine($"pacing     {run.Pump.Frames} slots in {run.Pump.Seconds:F2}s "
+                        + $"({run.Pump.EffectiveFps:F2} fps), "
+                        + $"fresh {run.Pump.Fresh}, repeated {run.Pump.Repeated}");
     }
 
     /// <summary>
