@@ -179,17 +179,28 @@ public static class PresetCommand
                 height = h;
             }
 
-            int? quality = parseResult.GetValue(qualityOption);
-            (int qv, int crf) = quality is { } value
-                ? EncoderMath.QualityPair(encoder, value)
-                : (0, 0);
+            EncodeDefaults now = document.Defaults;
 
             // --keep is the "freeze what I have now" switch: a preset captured
             // from the current defaults is reproducible, one made of only three
             // overrides follows every later change to the defaults. Both are
             // legitimate, so the choice is explicit rather than guessed.
             bool keep = parseResult.GetValue(keepOption);
-            EncodeDefaults now = document.Defaults;
+
+            int? quality = parseResult.GetValue(qualityOption);
+            if (quality is null && keep)
+            {
+                // Quality carries the same trap as everywhere else: the stored
+                // number is in the stored encoder's scale, and the preset may name
+                // a different one. Freezing it without converting would store a
+                // -q:v 8 as a CRF 8 -- 2.5x the bitrate, the v7.9.8.2 bug in a new
+                // place.
+                quality = EncoderMath.ConvertQuality(now.Encoder ?? encoder, encoder, now.Quality);
+            }
+
+            (int qv, int crf) = quality is { } value
+                ? EncoderMath.QualityPair(encoder, value)
+                : (0, 0);
 
             CustomPreset preset = new()
             {

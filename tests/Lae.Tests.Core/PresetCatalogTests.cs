@@ -139,6 +139,32 @@ public sealed class PresetCatalogTests
         await Assert.That(applied.FpsLevels[0]).IsEqualTo(8.0);
     }
 
+    /// <summary>
+    /// Rungs and thresholds are one list, so a preset that replaces the rungs
+    /// takes the stored thresholds with them.
+    ///
+    /// <para>Thresholds are keyed by frame rate. Keeping the old ones while
+    /// adopting new rungs hangs the user's 150 kbps drop point on whichever rung
+    /// happened to survive -- the command-line path refuses exactly this, and a
+    /// preset is the same operation arriving through a different door.</para>
+    /// </summary>
+    [Test]
+    public async Task ALadderInThePresetTakesItsThresholdsWithIt()
+    {
+        EncodeDefaults stored = Stored().Defaults with
+        {
+            FpsLevels = [13, 8, 5, 3],
+            FpsThresholds = [new FpsThreshold(13, 200, 150), new FpsThreshold(8, 180, 140)],
+        };
+
+        EncodeDefaults applied = PresetCatalog.Apply(
+            new CustomPreset { Id = "choppy", FpsLevels = [8, 5] },
+            stored);
+
+        await Assert.That(applied.FpsLevels.Count).IsEqualTo(2);
+        await Assert.That(applied.FpsThresholds.Count).IsEqualTo(0);
+    }
+
     [Test]
     public async Task DescribeSaysWhatThePresetChanges()
     {

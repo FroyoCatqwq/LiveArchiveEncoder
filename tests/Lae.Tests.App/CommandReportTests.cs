@@ -209,7 +209,12 @@ public sealed class SetupReportTests
         await Assert.That(text.Contains("ffmpeg", StringComparison.Ordinal)).IsTrue();
         await Assert.That(text.Contains("ffprobe", StringComparison.Ordinal)).IsTrue();
         await Assert.That(text.Contains("PATH", StringComparison.Ordinal)).IsTrue();
-        await Assert.That(text.Contains("no download command yet", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(text.Contains("does not", StringComparison.Ordinal)).IsTrue();
+
+        // And it must not send the user to a command that does not exist. v7
+        // shipped exactly that -- a next step pointing at a menu entry nobody had
+        // written -- and the fix is not "recommend something plausible".
+        await Assert.That(text.Contains("lae toolchain install", StringComparison.Ordinal)).IsFalse();
     }
 
     [Test]

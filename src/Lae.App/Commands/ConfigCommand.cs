@@ -96,8 +96,6 @@ public static class ConfigCommand
             Emit(terminal, "defaults.deinterlace", d.Deinterlace.Filter);
             Emit(terminal, "defaults.hwaccel", d.Hwaccel);
             Emit(terminal, "defaults.parallel", d.Parallel);
-            Emit(terminal, "defaults.windowSeconds", d.WindowSeconds);
-            Emit(terminal, "defaults.bufferFrames", d.BufferFrames);
             Emit(terminal, "defaults.subtitles.mode", d.Subtitles.Mode);
             Emit(terminal, "defaults.subtitles.files", d.Subtitles.Files.Count);
             Emit(terminal, "defaults.recompress.enabled", d.Recompress.Enabled);
@@ -146,6 +144,17 @@ public static class ConfigCommand
                 // "read a v7 file", which is the only way the two cannot drift.
                 _ = files.Load();
                 foreach (string note in files.MigrationNotes) terminal.Line($"  {note}");
+
+                // The write can fail -- a read-only profile, a full disk -- and
+                // Load() reports that in its notes rather than throwing. Claiming
+                // "Wrote" over a refusal is the one thing a migration command
+                // must not do: the user would delete the v7 file.
+                if (!File.Exists(location.File))
+                {
+                    terminal.ErrorLine($"ERROR: {location.File} was not written; the v7 file is still the only copy.");
+                    return ExitCodes.Failed;
+                }
+
                 terminal.Line($"Wrote {location.File}");
                 return ExitCodes.Ok;
             }

@@ -66,13 +66,21 @@ public sealed record SettingsDocument
     /// parser, because only one of the read paths defended itself. One repair at
     /// the read boundary means every consumer sees the shape the type
     /// promises.</para>
+    /// <para>Recursive, and that word is the whole point. The first version of
+    /// this only repaired the six top-level members, so
+    /// <c>"defaults": { "fpsLevels": null }</c> came out of the file with a null
+    /// ladder and failed later, inside whichever consumer happened to walk it --
+    /// which is precisely the shape of the v7 bug this method exists to prevent.
+    /// A nested record gets its own <c>Normalised</c> and the parent calls it, so
+    /// a new collection anywhere in the tree has one obvious place to be
+    /// defended.</para>
     /// </summary>
     public SettingsDocument Normalised() => this with
     {
         Toolchain = Toolchain ?? new(),
         Network = Network ?? new(),
         Ui = Ui ?? new(),
-        Defaults = Defaults ?? new(),
+        Defaults = Defaults is { } defaults ? defaults.Normalised() : new(),
         CustomPresets = CustomPresets is { } presets ? [.. presets.Where(p => p is not null)] : [],
         Plugins = Plugins is { } plugins ? [.. plugins.Where(p => p is not null)] : [],
     };
@@ -222,6 +230,22 @@ public sealed record EncodeDefaults
     public SubtitleDefaults Subtitles { get; init; } = new();
 
     public RecompressChain Recompress { get; init; } = new();
+
+    /// <summary>
+    /// The same repair as <see cref="SettingsDocument.Normalised"/>, one level
+    /// down. Every member that holds a collection is rebuilt, so a <c>null</c>
+    /// written by a hand edit cannot reach a consumer as a null list.
+    /// </summary>
+    public EncodeDefaults Normalised() => this with
+    {
+        FpsLevels = FpsLevels is { } levels ? [.. levels] : [.. Constants.DefaultFpsLevels],
+        FpsThresholds = FpsThresholds is { } thresholds ? [.. thresholds.Where(t => t is not null)] : [],
+        Color = Color ?? new(),
+        Deinterlace = Deinterlace ?? new(),
+        X264 = X264 ?? new(),
+        Subtitles = Subtitles is { } subtitles ? subtitles.Normalised() : new(),
+        Recompress = Recompress is { } chain ? chain.Normalised() : new(),
+    };
 }
 
 /// <summary>One rung's thresholds.</summary>
@@ -325,6 +349,12 @@ public sealed record SubtitleDefaults
     /// <summary>Files, an embedded track and a carried track are mutually exclusive; reports whether any is set.</summary>
     [JsonIgnore]
     public bool Any => Mode != "off" && (Files.Count > 0 || Stream is not null || CopyTracks.Count > 0);
+
+    public SubtitleDefaults Normalised() => this with
+    {
+        Files = Files is { } files ? [.. files.Where(f => f is not null)] : [],
+        CopyTracks = CopyTracks is { } tracks ? [.. tracks] : [],
+    };
 }
 
 /// <summary>One hop of the "upload it to a video site" chain.</summary>
@@ -352,6 +382,16 @@ public sealed record RecompressChain
     /// <summary>Passes with a blank fragment are dropped; FFmpeg with no arguments is just a copy.</summary>
     public IReadOnlyList<RecompressPass> Active() =>
         [.. Passes.Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Args))];
+
+    /// <summary>
+    /// Rebuild the pass list, dropping nulls. A hand-written
+    /// <c>"passes": [null]</c> would otherwise reach <see cref="Active"/> as a
+    /// null array, and every read path would have to defend itself.
+    /// </summary>
+    public RecompressChain Normalised() => this with
+    {
+        Passes = Passes is { } passes ? [.. passes.Where(p => p is not null)] : [],
+    };
 }
 
 /// <summary>

@@ -429,4 +429,47 @@ public sealed class SettingsTests
         await Assert.That(twice.Toolchain.FfmpegSource).IsEqualTo(once.Toolchain.FfmpegSource);
         await Assert.That(twice.CustomPresets.Count).IsEqualTo(once.CustomPresets.Count);
     }
+
+    /// <summary>
+    /// A null collection nested inside the document is repaired like a top-level
+    /// one.
+    ///
+    /// <para>The first version of <c>Normalised</c> only rebuilt its six direct
+    /// members, so <c>"defaults": { "fpsLevels": null }</c> survived the read
+    /// boundary as a null ladder and blew up inside whichever consumer walked it
+    /// -- the same shape as the v7 crash the method exists to prevent, one level
+    /// down. Every type that holds a list repairs its own.</para>
+    /// </summary>
+    [Test]
+    public async Task ANestedNullCollectionIsRepairedToo()
+    {
+        const string json = """
+            {
+              "schemaVersion": 10,
+              "defaults": {
+                "fpsLevels": null,
+                "fpsThresholds": null,
+                "subtitles": { "files": null, "copyTracks": null },
+                "recompress": { "passes": null }
+              }
+            }
+            """;
+
+        SettingsDocument? parsed = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.SettingsDocument);
+        await Assert.That(parsed).IsNotNull();
+
+        SettingsDocument repaired = parsed!.Normalised();
+
+        // A missing ladder falls back to the built-in rungs rather than to an
+        // empty list: an empty list would mean "never adapt", which is not what a
+        // file that simply omitted the key asked for.
+        await Assert.That(repaired.Defaults.FpsLevels.Count).IsEqualTo(new EncodeDefaults().FpsLevels.Count);
+        await Assert.That(repaired.Defaults.FpsThresholds).IsNotNull();
+        await Assert.That(repaired.Defaults.Subtitles.Files).IsNotNull();
+        await Assert.That(repaired.Defaults.Subtitles.CopyTracks).IsNotNull();
+        await Assert.That(repaired.Defaults.Recompress.Passes).IsNotNull();
+
+        // And the result is usable: walking it must not throw.
+        await Assert.That(repaired.Defaults.Recompress.Active().Count).IsEqualTo(0);
+    }
 }

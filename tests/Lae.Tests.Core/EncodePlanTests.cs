@@ -631,4 +631,46 @@ public sealed class EncodePlanTests
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems.Any(p => p.Contains("no subtitle muxer", StringComparison.Ordinal))).IsTrue();
     }
+
+    /// <summary>
+    /// An encoder with no container table writes exactly one container, and asking
+    /// for another is refused instead of silently ignored.
+    ///
+    /// <para>qtrle is the clearest case: QuickTime's RLE codec lives in .mov and
+    /// nowhere else. The old code returned the encoder's own container without a
+    /// word, so <c>--container avi</c> produced a .mov and reported success -- a
+    /// file whose extension contradicts its contents, the sort of thing found a
+    /// year later.</para>
+    /// </summary>
+    [Test]
+    public async Task AContainerTheEncoderCannotWriteIsRefused()
+    {
+        EncodeRequest request = Request() with
+        {
+            DestinationPath = "/media/out.mov",
+            Encode = new EncodeDefaults { Encoder = "qtrle", Quality = 8, Container = "avi" },
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("qtrle", "mov", "mov"));
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems.Any(p => p.Contains("only write .mov", StringComparison.Ordinal))).IsTrue();
+    }
+
+    /// <summary>The one container it can write is accepted without a comment.</summary>
+    [Test]
+    public async Task TheOneContainerAnEncoderHasIsAccepted()
+    {
+        EncodeRequest request = Request() with
+        {
+            DestinationPath = "/media/out.mov",
+            Encode = new EncodeDefaults { Encoder = "qtrle", Quality = 8, Container = "mov" },
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("qtrle", "mov", "mov"));
+
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(plan.Container).IsEqualTo("mov");
+        await Assert.That(plan.Muxer).IsEqualTo("mov");
+    }
 }

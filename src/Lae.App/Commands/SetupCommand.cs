@@ -74,11 +74,11 @@ public static class SetupReport
         foreach (string line in probe.Missing()) terminal.Line($"  - {line}");
 
         terminal.Line();
-        terminal.Line("To fix it, either:");
-        terminal.Line("  1. put ffmpeg and ffprobe on PATH, then run 'lae setup' again; or");
-        terminal.Line("  2. run 'lae toolchain install' to fetch a build into the program's own folder.");
+        terminal.Line("To fix it: put ffmpeg and ffprobe on PATH (or point toolchain.ffmpegPath at");
+        terminal.Line("a build), then run 'lae setup' again.");
         terminal.Line();
-        terminal.Line("This build has no download command yet; use option 1 for now.");
+        terminal.Line("A download command is planned for the plugin milestone; this build does not");
+        terminal.Line("fetch anything.");
 
         return ExitCodes.Failed;
     }

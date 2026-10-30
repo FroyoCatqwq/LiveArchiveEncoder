@@ -318,7 +318,20 @@ public sealed record EncodePlan
         string wanted = requested.Trim().TrimStart('.').ToLowerInvariant();
 
         if (!Constants.ContainerChoicesByEncoder.TryGetValue(encoder.Name, out var choices))
+        {
+            // An encoder with no table entry writes exactly one container -- RV10
+            // only in .rm, RoQ only in .roq, QuickTime's own codecs only in .mov.
+            // Returning its default silently would mean `--container avi` produced
+            // a .mov and said nothing, which is the failure this whole method is
+            // written against; the request still loses, but it loses out loud.
+            if (!string.Equals(wanted, encoder.Extension, StringComparison.Ordinal))
+            {
+                problems.Add(
+                    $"'{encoder.Name}' can only write .{encoder.Extension}; it cannot write '{wanted}'");
+            }
+
             return (encoder.Extension, encoder.FormatName);
+        }
 
         foreach ((string ext, string format) in choices)
         {

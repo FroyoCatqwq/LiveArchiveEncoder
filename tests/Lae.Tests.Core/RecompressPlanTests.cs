@@ -224,4 +224,38 @@ public sealed class ArgsFragmentTests
         await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "clip.webm"])).Contains("looks like an output name");
         await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "/tmp/clip"])).Contains("looks like an output name");
     }
+
+    /// <summary>
+    /// A stray output in the middle is the same takeover as one at the end.
+    ///
+    /// <para>Validation used to look only at the last token, so
+    /// <c>-c:v copy /tmp/x.mp4 -an</c> passed and FFmpeg wrote a second file
+    /// nobody asked for. The program owns both ends of the command; a bare token
+    /// is only legitimate as the value of the option in front of it.</para>
+    /// </summary>
+    [Test]
+    public async Task AnOutputInTheMiddleIsRefused()
+    {
+        string? error = ArgsFragment.Validate(["-c:v", "copy", "/tmp/x.mp4", "-an"]);
+
+        await Assert.That(error).IsNotNull();
+        await Assert.That(error!).Contains("/tmp/x.mp4");
+    }
+
+    /// <summary>
+    /// A filter expression carries a path, and it is a value. Refusing it would
+    /// break the most useful fragment there is -- a watermark.
+    /// </summary>
+    [Test]
+    public async Task APathInsideAnOptionValueIsFine()
+    {
+        await Assert.That(ArgsFragment.Validate(
+            ["-vf", "drawtext=fontfile=C:/Fonts/arial.ttf:text=hi", "-c:v", "libx264"])).IsNull();
+    }
+
+    [Test]
+    public async Task AnEmptyArgumentIsRefused()
+    {
+        await Assert.That(ArgsFragment.Validate(["-c:v", "", "libx264"])).IsNotNull();
+    }
 }

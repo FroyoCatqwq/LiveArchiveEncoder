@@ -34,7 +34,7 @@ public static class PresetCatalog
     {
         ArgumentNullException.ThrowIfNull(document);
         return [.. document.CustomPresets
-            .Where(p => p is not null && p.Id.Length > 0)
+            .Where(p => p is not null && p.Id is { Length: > 0 })
             .OrderBy(p => p.Id, StringComparer.Ordinal)];
     }
 
@@ -213,7 +213,16 @@ public static class PresetCatalog
         // The ladder only moves when the preset names one; a preset without it
         // must keep whatever the user had, or every preset would silently reset
         // the adaptive behaviour to the built-in four rungs.
-        if (preset.FpsLevels is { Count: > 0 } levels) applied = applied with { FpsLevels = [.. levels] };
+        //
+        // Thresholds go with the rungs, as one list. Thresholds are keyed by frame
+        // rate, so keeping the old ones while taking the new rungs would hang the
+        // user's 150 kbps drop point on whichever rung happened to survive the
+        // edit -- the exact failure the command-line path refuses to make, and
+        // this is the same operation arriving through a different door.
+        if (preset.FpsLevels is { Count: > 0 } levels)
+        {
+            applied = applied with { FpsLevels = [.. levels], FpsThresholds = [] };
+        }
 
         // Deinterlacing is a filter with three parts; naming the filter alone
         // would leave a previous mode or parity attached to it.

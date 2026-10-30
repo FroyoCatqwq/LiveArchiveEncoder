@@ -23,6 +23,12 @@ internal static class Repl
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            // Every command gets its own cancellation scope. Without this the
+            // prompt works exactly once: the first Ctrl+C cancels the process-wide
+            // source, every later command starts already cancelled, and the next
+            // press is counted as a second one and goes straight to the runtime.
+            Interrupt.Reset();
+
             PromptResult response = await prompt.ReadLineAsync();
             if (!response.IsSuccess) break;   // Ctrl-C or end of input.
 
