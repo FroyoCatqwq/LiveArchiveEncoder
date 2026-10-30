@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests for Lae.App: the layer that decides what a command does and what it
+    says.
+
+    Nothing here starts FFmpeg. EncodeSession takes its four outside-world
+    dependencies as a record, so a test can say "the toolchain is missing" or
+    "the encoder list is empty" without owning a machine in that state, which
+    is the whole reason the session was split out of the command in the first
+    place.
+
+    The output is asserted through BufferedTerminal rather than by reading the
+    process's own streams: a test that captures standard output is a subprocess
+    test that happens to run in-process.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>Lae.Tests.App</RootNamespace>
+    <AssemblyName>Lae.Tests.App</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
+    <PackageReference Include="TUnit" Version="1.75.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lae.App\Lae.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="TUnit.Core" />
+    <Using Include="TUnit.Assertions" />
+  </ItemGroup>
+
+</Project>

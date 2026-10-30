@@ -52,24 +52,24 @@ public static class CommandTree
         // here; v8 has no menu, so the honest answer is the usage text.
         root.SetAction((ParseResult parseResult) =>
         {
-            if (parseResult.GetValue(versionOption)) return PrintVersion();
+            if (parseResult.GetValue(versionOption)) return PrintVersion(host);
             new HelpAction().Invoke(parseResult);
             return ExitCodes.Ok;
         });
 
-        root.Subcommands.Add(VersionCommand());
+        root.Subcommands.Add(VersionCommand(host));
         root.Subcommands.Add(BuildRepl(root));
-        root.Subcommands.Add(Commands.ConfigCommand.Build(host.Settings));
-        root.Subcommands.Add(Commands.SetupCommand.Build(host.Settings));
-        root.Subcommands.Add(Commands.EncodeCommand.Build(host.Settings));
+        root.Subcommands.Add(Commands.ConfigCommand.Build(host.Settings, host.Terminal));
+        root.Subcommands.Add(Commands.SetupCommand.Build(host.Settings, host.Terminal));
+        root.Subcommands.Add(Commands.EncodeCommand.Build(host.Settings, host.Terminal));
 
         return root;
     }
 
-    private static Command VersionCommand()
+    private static Command VersionCommand(AppHost host)
     {
         var command = new Command("version", "Print the version and exit.");
-        command.SetAction(_ => PrintVersion());
+        command.SetAction(_ => PrintVersion(host));
         return command;
     }
 
@@ -107,9 +107,9 @@ public static class CommandTree
         return command;
     }
 
-    private static int PrintVersion()
+    private static int PrintVersion(AppHost host)
     {
-        Console.WriteLine(LaeVersion.Current);
+        host.Terminal.Line(LaeVersion.Current);
         return ExitCodes.Ok;
     }
 }

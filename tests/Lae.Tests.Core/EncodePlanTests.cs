@@ -193,6 +193,39 @@ public sealed class EncodePlanTests
     /// run retargets the plan instead of building a second one. Exactly one
     /// argument may move: the output path, which is the last one by construction.
     /// </summary>
+    /// <summary>
+    /// A trimmed run has to end where the trim says, and the audio is the half
+    /// that does not end by itself.
+    ///
+    /// <para>The pump stops feeding video and the encoder sees its pipe close; the
+    /// audio arrives from a second read of the source and keeps going to the end
+    /// of the file. Without a cap the container duration follows the audio, so a
+    /// one-second excerpt comes out three seconds long. This was found by an
+    /// end-to-end run of a trimmed encode, not by reading the arguments.</para>
+    /// </summary>
+    [Test]
+    public async Task ATrimmedRunCapsTheSecondInputToo()
+    {
+        EncodeRequest request = Request() with { StartSeconds = 1, EndSeconds = 2 };
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: true), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(plan.SpanSeconds).IsEqualTo(1.0);
+        await Assert.That(HasRun(plan.EncoderArgs, "-t", "1.000000")).IsTrue();
+    }
+
+    /// <summary>
+    /// Without audio there is nothing to cap: a <c>-t</c> that only bounds the
+    /// pipe would shorten nothing and give a second reason to truncate.
+    /// </summary>
+    [Test]
+    public async Task ASilentRunNeedsNoCap()
+    {
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+
+        await Assert.That(plan.EncoderArgs.Contains("-t")).IsFalse();
+    }
+
     [Test]
     public async Task RetargetingMovesOnlyTheOutputPath()
     {

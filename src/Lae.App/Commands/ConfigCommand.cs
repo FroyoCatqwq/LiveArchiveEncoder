@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Text.Json;
+using Lae.App.Ui;
 using Lae.Core.Settings;
 using Lae.Media.Settings;
 
@@ -15,27 +16,27 @@ namespace Lae.App.Commands;
 /// </summary>
 public static class ConfigCommand
 {
-    public static Command Build(ISettingsStore store)
+    public static Command Build(ISettingsStore store, ITerminal terminal)
     {
         var command = new Command("config", "Show, locate or migrate the settings file.");
-        command.Subcommands.Add(PathCommand(store));
-        command.Subcommands.Add(ShowCommand(store));
-        command.Subcommands.Add(MigrateCommand(store));
+        command.Subcommands.Add(PathCommand(store, terminal));
+        command.Subcommands.Add(ShowCommand(store, terminal));
+        command.Subcommands.Add(MigrateCommand(store, terminal));
         return command;
     }
 
-    private static Command PathCommand(ISettingsStore store)
+    private static Command PathCommand(ISettingsStore store, ITerminal terminal)
     {
         var command = new Command("path", "Print the settings file path and exit.");
         command.SetAction(_ =>
         {
-            Console.WriteLine(store.Location);
+            terminal.Line(store.Location);
             return ExitCodes.Ok;
         });
         return command;
     }
 
-    private static Command ShowCommand(ISettingsStore store)
+    private static Command ShowCommand(ISettingsStore store, ITerminal terminal)
     {
         var command = new Command("show", "Print the effective settings as key = value lines.");
 
@@ -51,56 +52,57 @@ public static class ConfigCommand
 
             if (parseResult.GetValue(jsonOption))
             {
-                Console.WriteLine(JsonSerializer.Serialize(document, SettingsJsonContext.Default.SettingsDocument));
+                terminal.Line(JsonSerializer.Serialize(
+                    document, SettingsJsonContext.Default.SettingsDocument));
                 return ExitCodes.Ok;
             }
 
             // One flat list rather than nested blocks: this output is meant to be
             // greppable, and `lae config show | grep quality` is a more likely
             // question than `| jq .defaults.quality`.
-            Emit("schemaVersion", document.SchemaVersion);
-            Emit("toolchain.ffmpegSource", document.Toolchain.FfmpegSource);
-            Emit("toolchain.ffmpegPath", document.Toolchain.FfmpegPath);
-            Emit("toolchain.nnediWeights", document.Toolchain.NnediWeights);
-            Emit("network.proxy", document.Network.Proxy);
-            Emit("network.githubFront", document.Network.GithubFront);
-            Emit("ui.language", document.Ui.Language);
-            Emit("ui.playMode", document.Ui.PlayMode);
-            Emit("ui.playerPath", document.Ui.PlayerPath);
-            Emit("ui.checkForUpdates", document.Ui.CheckForUpdates);
+            Emit(terminal, "schemaVersion", document.SchemaVersion);
+            Emit(terminal, "toolchain.ffmpegSource", document.Toolchain.FfmpegSource);
+            Emit(terminal, "toolchain.ffmpegPath", document.Toolchain.FfmpegPath);
+            Emit(terminal, "toolchain.nnediWeights", document.Toolchain.NnediWeights);
+            Emit(terminal, "network.proxy", document.Network.Proxy);
+            Emit(terminal, "network.githubFront", document.Network.GithubFront);
+            Emit(terminal, "ui.language", document.Ui.Language);
+            Emit(terminal, "ui.playMode", document.Ui.PlayMode);
+            Emit(terminal, "ui.playerPath", document.Ui.PlayerPath);
+            Emit(terminal, "ui.checkForUpdates", document.Ui.CheckForUpdates);
 
             EncodeDefaults d = document.Defaults;
-            Emit("defaults.encoder", d.Encoder);
-            Emit("defaults.container", d.Container);
-            Emit("defaults.audioEncoder", d.AudioEncoder);
-            Emit("defaults.fps", d.Fps);
-            Emit("defaults.fpsLevels", string.Join(',', d.FpsLevels));
-            Emit("defaults.limitKbps", d.LimitKbps);
-            Emit("defaults.recoverKbps", d.RecoverKbps);
-            Emit("defaults.windowSeconds", d.WindowSeconds);
-            Emit("defaults.quality", d.Quality);
-            Emit("defaults.threads", d.Threads);
-            Emit("defaults.bufferFrames", d.BufferFrames);
-            Emit("defaults.audioKbps", d.AudioKbps);
-            Emit("defaults.audioChannels", d.AudioChannels);
-            Emit("defaults.audioRate", d.AudioRate);
-            Emit("defaults.size", $"{d.Width}x{d.Height}");
-            Emit("defaults.fitMode", d.FitMode);
-            Emit("defaults.cropAnchor", d.CropAnchor);
-            Emit("defaults.padColor", d.PadColor);
-            Emit("defaults.scaleAlgo", d.ScaleAlgo);
-            Emit("defaults.pixFmt", d.PixFmt);
-            Emit("defaults.dither", d.Dither);
-            Emit("defaults.deinterlace", d.Deinterlace.Filter);
-            Emit("defaults.hwaccel", d.Hwaccel);
-            Emit("defaults.parallel", d.Parallel);
-            Emit("defaults.lastEraPreset", d.LastEraPreset);
-            Emit("defaults.subtitles.mode", d.Subtitles.Mode);
-            Emit("defaults.subtitles.files", d.Subtitles.Files.Count);
-            Emit("defaults.recompress.enabled", d.Recompress.Enabled);
-            Emit("defaults.recompress.passes", d.Recompress.Active().Count);
-            Emit("customPresets", document.CustomPresets.Count);
-            Emit("plugins", document.Plugins.Count);
+            Emit(terminal, "defaults.encoder", d.Encoder);
+            Emit(terminal, "defaults.container", d.Container);
+            Emit(terminal, "defaults.audioEncoder", d.AudioEncoder);
+            Emit(terminal, "defaults.fps", d.Fps);
+            Emit(terminal, "defaults.fpsLevels", string.Join(',', d.FpsLevels));
+            Emit(terminal, "defaults.limitKbps", d.LimitKbps);
+            Emit(terminal, "defaults.recoverKbps", d.RecoverKbps);
+            Emit(terminal, "defaults.windowSeconds", d.WindowSeconds);
+            Emit(terminal, "defaults.quality", d.Quality);
+            Emit(terminal, "defaults.threads", d.Threads);
+            Emit(terminal, "defaults.bufferFrames", d.BufferFrames);
+            Emit(terminal, "defaults.audioKbps", d.AudioKbps);
+            Emit(terminal, "defaults.audioChannels", d.AudioChannels);
+            Emit(terminal, "defaults.audioRate", d.AudioRate);
+            Emit(terminal, "defaults.size", $"{d.Width}x{d.Height}");
+            Emit(terminal, "defaults.fitMode", d.FitMode);
+            Emit(terminal, "defaults.cropAnchor", d.CropAnchor);
+            Emit(terminal, "defaults.padColor", d.PadColor);
+            Emit(terminal, "defaults.scaleAlgo", d.ScaleAlgo);
+            Emit(terminal, "defaults.pixFmt", d.PixFmt);
+            Emit(terminal, "defaults.dither", d.Dither);
+            Emit(terminal, "defaults.deinterlace", d.Deinterlace.Filter);
+            Emit(terminal, "defaults.hwaccel", d.Hwaccel);
+            Emit(terminal, "defaults.parallel", d.Parallel);
+            Emit(terminal, "defaults.lastEraPreset", d.LastEraPreset);
+            Emit(terminal, "defaults.subtitles.mode", d.Subtitles.Mode);
+            Emit(terminal, "defaults.subtitles.files", d.Subtitles.Files.Count);
+            Emit(terminal, "defaults.recompress.enabled", d.Recompress.Enabled);
+            Emit(terminal, "defaults.recompress.passes", d.Recompress.Active().Count);
+            Emit(terminal, "customPresets", document.CustomPresets.Count);
+            Emit(terminal, "plugins", document.Plugins.Count);
 
             return ExitCodes.Ok;
         });
@@ -108,7 +110,7 @@ public static class ConfigCommand
         return command;
     }
 
-    private static Command MigrateCommand(ISettingsStore store)
+    private static Command MigrateCommand(ISettingsStore store, ITerminal terminal)
     {
         var command = new Command("migrate", "Convert a v7 config.json into a v8 settings.json.");
 
@@ -124,14 +126,14 @@ public static class ConfigCommand
             // in-memory store has nothing older to convert.
             if (store is not FileSettingsStore files)
             {
-                Console.Error.WriteLine("ERROR: this build has no settings file to migrate.");
+                terminal.ErrorLine("ERROR: this build has no settings file to migrate.");
                 return ExitCodes.Failed;
             }
 
             SettingsLocation location = SettingsLocation.Resolve();
             if (!File.Exists(location.LegacyFile))
             {
-                Console.WriteLine($"No v7 settings found at {location.LegacyFile}; nothing to migrate.");
+                terminal.Line($"No v7 settings found at {location.LegacyFile}; nothing to migrate.");
                 return ExitCodes.Ok;
             }
 
@@ -142,34 +144,34 @@ public static class ConfigCommand
                 // the notes; asking it to do the work here keeps one code path for
                 // "read a v7 file", which is the only way the two cannot drift.
                 _ = files.Load();
-                foreach (string note in files.MigrationNotes) Console.WriteLine($"  {note}");
-                Console.WriteLine($"Wrote {location.File}");
+                foreach (string note in files.MigrationNotes) terminal.Line($"  {note}");
+                terminal.Line($"Wrote {location.File}");
                 return ExitCodes.Ok;
             }
 
             string json = File.ReadAllText(location.LegacyFile);
             if (!LegacyV7Converter.LooksLikeV7(json))
             {
-                Console.Error.WriteLine($"ERROR: {location.LegacyFile} is not a v7 settings file.");
+                terminal.ErrorLine($"ERROR: {location.LegacyFile} is not a v7 settings file.");
                 return ExitCodes.Usage;
             }
 
             if (LegacyV7Converter.Parse(json) is not { } old)
             {
-                Console.Error.WriteLine($"ERROR: {location.LegacyFile} could not be parsed.");
+                terminal.ErrorLine($"ERROR: {location.LegacyFile} could not be parsed.");
                 return ExitCodes.Usage;
             }
 
             MigrationOutcome outcome = LegacyV7Converter.Convert(old);
-            Console.WriteLine($"Would write {location.File} (schema {outcome.Document.SchemaVersion})");
-            foreach (string note in outcome.Notes) Console.WriteLine($"  {note}");
-            Console.WriteLine($"Custom presets carried over: {outcome.Document.CustomPresets.Count}");
+            terminal.Line($"Would write {location.File} (schema {outcome.Document.SchemaVersion})");
+            foreach (string note in outcome.Notes) terminal.Line($"  {note}");
+            terminal.Line($"Custom presets carried over: {outcome.Document.CustomPresets.Count}");
             return ExitCodes.Ok;
         });
 
         return command;
     }
 
-    private static void Emit(string key, object? value)
-        => Console.WriteLine($"{key} = {value?.ToString() ?? "(unset)"}");
+    private static void Emit(ITerminal terminal, string key, object? value)
+        => terminal.Line($"{key} = {value?.ToString() ?? "(unset)"}");
 }

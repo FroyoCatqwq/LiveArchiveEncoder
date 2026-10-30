@@ -1,3 +1,4 @@
+using Lae.App.Ui;
 using Lae.Core.Settings;
 using Lae.Media.Settings;
 
@@ -21,11 +22,22 @@ public sealed class AppHost
 {
     public required ISettingsStore Settings { get; init; }
 
+    /// <summary>Where commands write. Swapped for a buffer in tests.</summary>
+    public ITerminal Terminal { get; init; } = new SystemTerminal();
+
     /// <summary>Real machine: settings beside the user's application data.</summary>
     public static AppHost CreateDefault()
-        => new() { Settings = new FileSettingsStore(SettingsLocation.Resolve()) };
+        => new()
+        {
+            Settings = new FileSettingsStore(SettingsLocation.Resolve()),
+            Terminal = new SystemTerminal(),
+        };
 
-    /// <summary>Tests and dry runs: nothing touches the disk.</summary>
-    public static AppHost InMemory(SettingsDocument? document = null)
-        => new() { Settings = new MemorySettingsStore(document) };
+    /// <summary>Tests and dry runs: nothing touches the disk, nothing is printed.</summary>
+    public static AppHost InMemory(SettingsDocument? document = null, ITerminal? terminal = null)
+        => new()
+        {
+            Settings = new MemorySettingsStore(document),
+            Terminal = terminal ?? new BufferedTerminal(),
+        };
 }

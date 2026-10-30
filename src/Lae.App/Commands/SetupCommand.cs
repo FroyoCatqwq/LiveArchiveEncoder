@@ -1,4 +1,5 @@
 using System.CommandLine;
+using Lae.App.Ui;
 using Lae.Core.Settings;
 using Lae.Media.Toolchain;
 
@@ -20,7 +21,7 @@ namespace Lae.App.Commands;
 /// </summary>
 public static class SetupCommand
 {
-    public static Command Build(ISettingsStore store)
+    public static Command Build(ISettingsStore store, ITerminal terminal)
     {
         var command = new Command(
             "setup",
@@ -29,57 +30,56 @@ public static class SetupCommand
         command.SetAction(_ =>
         {
             SettingsDocument settings = store.Load();
-            Console.WriteLine($"Settings   {store.Location}");
-
-            // The configured source wins over PATH, because that is what an
-            // encode will use; reporting a PATH copy the run will ignore would be
-            // worse than saying nothing.
-            string? directory = ToolchainDirectory(settings);
-            ToolchainProbeResult probe = ToolchainProbe.Probe(directory);
-
-            Console.WriteLine($"Source     {settings.Toolchain.FfmpegSource}"
-                + (directory is null ? "" : $" ({directory})"));
-            Console.WriteLine($"ffmpeg     {probe.Ffmpeg ?? "(not found)"}");
-            Console.WriteLine($"ffprobe    {probe.Ffprobe ?? "(not found)"}");
-
-            if (probe.Complete)
-            {
-                Console.WriteLine();
-                Console.WriteLine("Ready. Try: lae encode <input> --dry-run");
-                return ExitCodes.Ok;
-            }
-
-            Console.WriteLine();
-            Console.WriteLine("Missing:");
-            foreach (string line in probe.Missing()) Console.WriteLine($"  - {line}");
-
-            Console.WriteLine();
-            Console.WriteLine("To fix it, either:");
-            Console.WriteLine("  1. put ffmpeg and ffprobe on PATH, then run 'lae setup' again; or");
-            Console.WriteLine("  2. run 'lae toolchain install' to fetch a build into the program's own folder.");
-            Console.WriteLine();
-            Console.WriteLine("This build has no download command yet; use option 1 for now.");
-
-            return ExitCodes.Failed;
+            ToolchainProbeResult probe = ToolchainProbe.Probe(EncodeSession.ToolchainDirectory(settings));
+            return SetupReport.Run(settings, store.Location, probe, terminal);
         });
 
         return command;
     }
+}
 
-    /// <summary>
-    /// The folder an encode would look in, or null for "whatever is on PATH".
-    /// Only an explicit path can name a folder: a distribution id such as
-    /// <c>btbn</c> points at a managed install, which does not exist until
-    /// <c>lae toolchain install</c> has run.
-    /// </summary>
-    private static string? ToolchainDirectory(SettingsDocument settings)
+/// <summary>
+/// What <c>lae setup</c> says, given what the machine has.
+///
+/// <para>Separated from the command so the report can be asserted: this text is
+/// the whole value of the command, and v7 shipped a version of it that pointed at
+/// a menu entry that did not exist. A test with a probe result of "nothing found"
+/// catches that class of mistake without needing a machine without FFmpeg.</para>
+/// </summary>
+public static class SetupReport
+{
+    public static int Run(
+        SettingsDocument settings, string settingsPath, ToolchainProbeResult probe, ITerminal terminal)
     {
-        string? explicitPath = settings.Toolchain.FfmpegPath;
-        if (string.IsNullOrWhiteSpace(explicitPath)) return null;
+        terminal.Line($"Settings   {settingsPath}");
 
-        // A path may name the executable rather than its folder; accept both,
-        // because both are what a user would naturally type.
-        if (File.Exists(explicitPath)) return Path.GetDirectoryName(explicitPath);
-        return Directory.Exists(explicitPath) ? explicitPath : null;
+        // The configured source wins over PATH, because that is what an encode
+        // will use; reporting a PATH copy that the run ignores would be worse
+        // than saying nothing.
+        string? directory = EncodeSession.ToolchainDirectory(settings);
+        terminal.Line($"Source     {settings.Toolchain.FfmpegSource}"
+            + (directory is null ? "" : $" ({directory})"));
+        terminal.Line($"ffmpeg     {probe.Ffmpeg ?? "(not found)"}");
+        terminal.Line($"ffprobe    {probe.Ffprobe ?? "(not found)"}");
+
+        if (probe.Complete)
+        {
+            terminal.Line();
+            terminal.Line("Ready. Try: lae encode <input> --dry-run");
+            return ExitCodes.Ok;
+        }
+
+        terminal.Line();
+        terminal.Line("Missing:");
+        foreach (string line in probe.Missing()) terminal.Line($"  - {line}");
+
+        terminal.Line();
+        terminal.Line("To fix it, either:");
+        terminal.Line("  1. put ffmpeg and ffprobe on PATH, then run 'lae setup' again; or");
+        terminal.Line("  2. run 'lae toolchain install' to fetch a build into the program's own folder.");
+        terminal.Line();
+        terminal.Line("This build has no download command yet; use option 1 for now.");
+
+        return ExitCodes.Failed;
     }
 }

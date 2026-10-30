@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Lae.App.Ui;
 
 namespace Lae.App;
 
@@ -12,15 +13,23 @@ namespace Lae.App;
 /// </summary>
 internal sealed class LiveProgress : IDisposable
 {
+    private readonly ITerminal _terminal;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
-    private readonly bool _inline = !Console.IsErrorRedirected;
+    private readonly bool _inline;
     private double _lastReport;
     private bool _closed;
+
+    internal LiveProgress(ITerminal terminal)
+    {
+        _terminal = terminal;
+        _inline = terminal.IsErrorInteractive;
+    }
 
     /// <summary>Say where the run is. Cheap enough to call every few frames.</summary>
     public void Report(long done, long? total)
     {
         if (_closed) return;
+
         double elapsed = _clock.Elapsed.TotalSeconds;
         if (elapsed - _lastReport < (_inline ? 0.25 : 5.0)) return;
         _lastReport = elapsed;
@@ -29,8 +38,8 @@ internal sealed class LiveProgress : IDisposable
             ? $"[{elapsed,7:F1}s] {done,7}/{goal} frames ({100.0 * done / goal,5:F1}%)"
             : $"[{elapsed,7:F1}s] {done,7} frames";
 
-        if (_inline) Console.Error.Write($"\r{text}");
-        else Console.Error.WriteLine(text);
+        if (_inline) _terminal.Inline($"\r{text}");
+        else _terminal.ErrorLine(text);
     }
 
     /// <summary>Erase the progress line and print the outcome instead.</summary>
@@ -38,12 +47,12 @@ internal sealed class LiveProgress : IDisposable
     {
         Erase();
         _closed = true;
-        Console.Error.WriteLine(summary);
+        _terminal.ErrorLine(summary);
     }
 
     private void Erase()
     {
-        if (_inline && _lastReport > 0) Console.Error.Write("\r" + new string(' ', 60) + "\r");
+        if (_inline && _lastReport > 0) _terminal.Inline("\r" + new string(' ', 60) + "\r");
     }
 
     public void Dispose()

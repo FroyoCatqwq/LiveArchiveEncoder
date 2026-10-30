@@ -195,7 +195,7 @@ public sealed record EncodePlan
             request, source, filter, transport, span, problems);
 
         List<string> encoderArgsOut = BuildEncoderArgs(
-            request, source, encoder, transport, width, height, hasAudio, muxer, problems);
+            request, source, encoder, transport, width, height, hasAudio, muxer, span ?? 0, problems);
 
         return new EncodePlan
         {
@@ -292,7 +292,7 @@ public sealed record EncodePlan
 
     private static List<string> BuildEncoderArgs(
         EncodeRequest request, SourceInfo source, EncoderInfo encoder, string transport,
-        int width, int height, bool hasAudio, string muxer, List<string> problems)
+        int width, int height, bool hasAudio, string muxer, double span, List<string> problems)
     {
         EncodeDefaults e = request.Encode;
 
@@ -373,6 +373,16 @@ public sealed record EncodePlan
             int rate = e.AudioRate ?? source.AudioRate;
             if (rate > 0) cmd.AddRange(["-ar", rate.ToString(CultureInfo.InvariantCulture)]);
         }
+
+        // Cap the output at the span the run covers.
+        //
+        // The video side stops on its own: the pump stops writing and the pipe
+        // ends. The audio side does not -- it is a second read of the source that
+        // started at -ss and would otherwise run to the end of the file, so a
+        // 1 s excerpt came out as a 3 s file whose picture was 1 s of it and
+        // whose container duration followed the audio. Found by the end-to-end
+        // comparison of a trimmed run against its own source, not by reading it.
+        if (hasAudio && span > 0) cmd.AddRange(["-t", ArgsBuilder.FloatArg(span)]);
 
         cmd.AddRange(["-f", muxer, request.DestinationPath]);
         return cmd;
