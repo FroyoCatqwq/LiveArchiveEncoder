@@ -156,6 +156,12 @@ public sealed class FramePumpTests
     /// <summary>
     /// With no known length the run ends with the source: an indefinite slot count
     /// on a finished source would be an infinite file.
+    ///
+    /// <para>20 fps rather than 200. The bound below is about how many slots a
+    /// five-frame source costs, and at 5 ms per slot that number was really about
+    /// how quickly a loaded machine schedules two threads -- it passed alone and
+    /// failed with three other suites running. At 50 ms per slot the same bound
+    /// measures the thing it claims to.</para>
     /// </summary>
     [Test]
     public async Task EndsWithTheSourceWhenNoLengthIsKnown()
@@ -165,7 +171,7 @@ public sealed class FramePumpTests
         using var source = new MemoryStream(Script(5, frameSize));
         using var sink = new MemoryStream();
 
-        var spec = new PumpSpec { Fps = 200, FrameSize = frameSize, TargetFrames = null };
+        var spec = new PumpSpec { Fps = 20, FrameSize = frameSize, TargetFrames = null };
         PumpStats stats = FramePump.Run(source, sink, spec, null, null, CancellationToken.None);
 
         await Assert.That(stats.SourceEnded).IsTrue();

@@ -161,6 +161,15 @@ public sealed record PumpStats
 public static class FramePump
 {
     /// <summary>
+    /// How long the pacing loop waits at the end for the producer to say whether
+    /// the source ran out. Long enough for a thread that has already read its
+    /// end-of-stream to publish the fact; short enough that a live source, whose
+    /// producer is blocked in a read that will not return, costs nothing
+    /// noticeable.
+    /// </summary>
+    private static readonly TimeSpan EndGrace = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
     /// Pump until the target slot count is reached or the source runs out.
     ///
     /// <para><paramref name="tick"/> runs once per slot before the frame is
@@ -307,7 +316,23 @@ public static class FramePump
                 if (progress is not null && emitted % 4 == 0) progress(emitted, spec.TargetFrames);
             }
 
+            double elapsed = FineTimer.SecondsSince(start);
             capture.Stop();
+
+            // "The source ended" has to be an answer, not a race. The producer
+            // learns about the end of the stream on its own thread, so a run that
+            // reaches its target in the same millisecond the source runs out can
+            // read the flag before the producer has set it -- and then the report
+            // says the source was still going when it was not. Measured on a
+            // loaded two-core box: the same test passed alone and failed with
+            // three other suites running.
+            //
+            // The grace is short on purpose. A live source never ends, so the
+            // producer stays blocked in its read and this costs the grace once
+            // per run; the channel already knows it is complete when there is
+            // nothing to wait for, in which case there is nothing to wait for.
+            if (!channel.Completed) capture.WaitForEnd(EndGrace);
+
             capture.ThrowIfFailed();
             discarded = channel.Dropped;
 
@@ -316,7 +341,12 @@ public static class FramePump
                 Frames = emitted,
                 Fresh = fresh,
                 Repeated = repeated,
-                Seconds = FineTimer.SecondsSince(start),
+
+                // Measured before the wait above: the grace is teardown, not
+                // pacing, and folding it into the run's wall clock would make the
+                // reported rate depend on how long the source took to admit it had
+                // finished.
+                Seconds = elapsed,
                 SourceEnded = capture.Ended,
                 Dropped = discarded,
                 FinalRung = control?.Ladder.Rung ?? 0,
@@ -437,6 +467,14 @@ public static class FramePump
         internal void Start() => _thread.Start();
 
         internal void Stop() => _stop = true;
+
+        /// <summary>
+        /// Wait for the producer to finish, up to <paramref name="grace"/>. False
+        /// means it is still blocked in a read, which for a live source is the
+        /// normal answer and not a problem: the thread is a background one and
+        /// goes with the process.
+        /// </summary>
+        internal bool WaitForEnd(TimeSpan grace) => _thread.Join(grace);
 
         /// <summary>Rethrow whatever the producer died of, in the caller's thread.</summary>
         internal void ThrowIfFailed()
