@@ -33,19 +33,87 @@ public sealed class EncodeRequestBuildingTests
         },
     };
 
+    /// <summary>
+    /// No <c>--out</c> means "beside the source", but the extension is the plan's
+    /// to choose: it is the container the chosen encoder actually writes, and the
+    /// CLI does not know the encoder until this build's catalogue has been read.
+    /// The CLI used to guess "avi" here, which put an MP4 inside clip.avi the
+    /// moment anyone asked for libx264 without naming an output.
+    /// </summary>
     [Test]
-    public async Task TheDefaultOutputSitsBesideTheSourceWithTheContainerExtension()
+    public async Task NoOutputIsLeftForThePlanToName()
     {
         (EncodeRequest? request, string? error) = EncodeSession.BuildRequest(
             "/media/clips/talk.mkv", new EncodeOverrides(), Stored());
 
         await Assert.That(error).IsNull();
+        await Assert.That(request!.DestinationPath).IsNull();
+    }
 
-        // Compared through Path so the same assertion holds on both platforms:
-        // the point is "same folder, same stem, the container's extension".
-        string expectedFolder = Path.GetDirectoryName(Path.GetFullPath("/media/clips/talk.mkv"))!;
-        await Assert.That(Path.GetFileName(request!.DestinationPath)).IsEqualTo("talk.avi");
-        await Assert.That(Path.GetDirectoryName(request.DestinationPath)).IsEqualTo(expectedFolder);
+    [Test]
+    public async Task AnExplicitOutputIsTakenVerbatim()
+    {
+        (EncodeRequest? request, _) = EncodeSession.BuildRequest(
+            "/media/clips/talk.mkv", new EncodeOverrides { Output = "/tmp/out.mkv" }, Stored());
+
+        await Assert.That(request!.DestinationPath).IsEqualTo("/tmp/out.mkv");
+    }
+
+    /// <summary>
+    /// The stored quality is written in the stored encoder's scale. Switching the
+    /// encoder without restating it has to carry the number across scales, or a
+    /// 2004 stream's <c>-q:v 6</c> becomes <c>-crf 6</c> -- v7.9.8.2's bug, which
+    /// came out at two and a half times the intended bitrate.
+    /// </summary>
+    [Test]
+    public async Task SwitchingTheEncoderCarriesTheQualityNumberAcrossScales()
+    {
+        (EncodeRequest? request, _) = EncodeSession.BuildRequest(
+            "/media/in.mkv", new EncodeOverrides { Encoder = "libx264" }, Stored());
+
+        await Assert.That(request!.Encode.Encoder).IsEqualTo("libx264");
+
+        // q:v 6 -> crf round(7.5 + 1.17 * 6) = 15, per EncoderMath's calibration.
+        await Assert.That(request.Encode.Quality).IsEqualTo(15);
+    }
+
+    /// <summary>
+    /// ...but a number the user typed is already in the target encoder's scale,
+    /// and converting it would move it a second time.
+    /// </summary>
+    [Test]
+    public async Task RestatingQualityKeepsTheNumberTheUserTyped()
+    {
+        (EncodeRequest? request, _) = EncodeSession.BuildRequest(
+            "/media/in.mkv", new EncodeOverrides { Encoder = "libx264", Quality = 20 }, Stored());
+
+        await Assert.That(request!.Encode.Quality).IsEqualTo(20);
+    }
+
+    /// <summary>
+    /// A preset's quality is stored in both scales precisely so this works: the
+    /// preset is applied against the encoder it names, and the command line may
+    /// then change that encoder.
+    /// </summary>
+    [Test]
+    public async Task APresetQualitySurvivesAnEncoderSwitchFromTheCommandLine()
+    {
+        SettingsDocument settings = Stored() with
+        {
+            CustomPresets =
+            [
+                new CustomPreset { Id = "small", Encoder = "mpeg4", LiveQv = 8, LiveCrf = 17 },
+            ],
+            Defaults = Stored().Defaults with { Encoder = null },
+        };
+
+        (EncodeRequest? request, _) = EncodeSession.BuildRequest(
+            "/media/in.mkv", new EncodeOverrides { Preset = "small", Encoder = "libx264" }, settings);
+
+        await Assert.That(request!.Encode.Encoder).IsEqualTo("libx264");
+
+        // q:v 8 -> crf 17 (7.5 + 1.17 * 8 = 16.86), and no second conversion.
+        await Assert.That(request.Encode.Quality).IsEqualTo(17);
     }
 
     [Test]

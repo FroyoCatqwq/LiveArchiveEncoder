@@ -50,6 +50,36 @@ public sealed class FramePumpTests
     }
 
     /// <summary>
+    /// The buffer depth from the settings has to reach the channel, and one frame
+    /// of depth has to be enough to make progress: the producer needs somewhere to
+    /// put the picture it just decoded while the consumer is writing the previous
+    /// one. A depth of zero was a setting nothing read; a depth of one that
+    /// deadlocked would be worse.
+    /// </summary>
+    [Test]
+    public async Task RunsWithASingleFrameOfBuffer()
+    {
+        const int frameSize = 4;
+        const int target = 12;
+
+        using var source = new MemoryStream(Script(64, frameSize));
+        using var sink = new MemoryStream();
+
+        var spec = new PumpSpec
+        {
+            Fps = 500,
+            FrameSize = frameSize,
+            TargetFrames = target,
+            BufferFrames = 1,
+        };
+
+        PumpStats stats = FramePump.Run(source, sink, spec, null, null, CancellationToken.None);
+
+        await Assert.That(stats.Frames).IsEqualTo(target);
+        await Assert.That(sink.Length).IsEqualTo((long)target * frameSize);
+    }
+
+    /// <summary>
     /// The pump may repeat a frame, never rewind. A slot that showed frame 5 and
     /// then frame 3 would be a decoder writing out of order or a channel handing
     /// out an older buffer, and both would produce a visibly broken file.
@@ -185,8 +215,16 @@ public sealed class FramePumpTests
 
         try
         {
-            await Assert.ThrowsAsync<TimeoutException>(async () =>
-                FramePump.Run(source, stuck, spec, null, null, CancellationToken.None));
+            // Wrapped on purpose: "TimeoutException" tells the user nothing about
+            // who was stuck, so the pump says which side stopped draining and how
+            // long it waited, and keeps the timeout as the inner exception for
+            // anyone reading a log.
+            InvalidOperationException failure =
+                (await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                    FramePump.Run(source, stuck, spec, null, null, CancellationToken.None)))!;
+
+            await Assert.That(failure.Message.Contains("stopped accepting frames", StringComparison.Ordinal)).IsTrue();
+            await Assert.That(failure.InnerException is TimeoutException).IsTrue();
         }
         finally
         {

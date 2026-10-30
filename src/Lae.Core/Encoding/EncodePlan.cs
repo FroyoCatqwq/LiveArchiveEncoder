@@ -126,13 +126,28 @@ public sealed record EncodePlan
         var problems = new List<string>();
         var notes = new List<string>();
 
-        problems.AddRange(request.Validate());
+        // The container comes first, because it decides the output's extension
+        // when the caller did not name a path. Resolving it here rather than in
+        // the CLI is what stops an MP4 being written into a file called
+        // clip.avi: only the plan knows which encoder was found in this FFmpeg
+        // build, and therefore which container is actually in use.
+        (string container, string muxer) = ResolveContainer(request.Encode.Container, encoder, problems);
+        string destination = request.DestinationPath ?? EncodeRequest.DeriveDestination(request.SourcePath, container);
 
-        // Nothing here is wired yet. Refusing is the honest answer: a run that
-        // silently ignored a subtitle request would produce a file that looks
-        // finished and is missing the thing the user asked for.
-        if (request.Encode.Subtitles.Any)
-            problems.Add("subtitles are not wired into the v8 pipeline yet; drop the subtitle options for now");
+        problems.AddRange(request.Validate(destination));
+
+        // Subtitles are burned on the decoder side, into the frames that go down
+        // the pipe: the encoder then needs no knowledge of them, and a run with
+        // captions differs from one without only in what the frames contain.
+        // Whatever cannot be honoured -- an embedded track, a copy instead of a
+        // burn -- comes back as a problem rather than a silently plainer file.
+        SubtitleBurn burn = SubtitleChain.Build(
+            request.Encode.Subtitles, Math.Max(0, request.StartSeconds), request.FontsDirectory);
+        problems.AddRange(burn.Problems);
+        notes.AddRange(burn.Notes);
+
+        // The recompress chain is still refused: it is a second transcode of this
+        // run's own output, and wiring it means owning a pass loop, not a flag.
         if (request.Encode.Recompress.Enabled)
             problems.Add("the recompress chain is not wired into the v8 pipeline yet; drop --recompress for now");
 
@@ -141,7 +156,16 @@ public sealed record EncodePlan
         if (pickProblem is not null) problems.Add(pickProblem);
 
         double? span = request.SpanSeconds(source.DurationSeconds);
-        if (span is null) problems.Add("the trim range leaves nothing to encode");
+        if (span is null)
+        {
+            // Two different situations, two different sentences. "Leaves nothing
+            // to encode" is right for --from 10 --to 5 and useless for a source
+            // whose container reports no duration at all, which is the case the
+            // user cannot fix by adjusting the trim.
+            problems.Add(source.DurationSeconds > 0
+                ? "the trim range leaves nothing to encode"
+                : "the source reports no duration, so there is no span to pace; name one with --to");
+        }
 
         // The transport format is the source's own when the encoder takes it;
         // otherwise the closest thing both can agree on.
@@ -197,8 +221,6 @@ public sealed record EncodePlan
                     + $"climbing back at {ArgsBuilder.FloatArg(LadderPolicy.RecoverKbps(request.Encode))} kbps");
         }
 
-        (string container, string muxer) = ResolveContainer(request.Encode.Container, encoder, problems);
-
         // Building the chain can refuse: nnedi without its weights, an unknown
         // scale algorithm, a filter this build does not have. Those are requests
         // a user can make, so they belong in Problems -- a planner that throws
@@ -218,14 +240,15 @@ public sealed record EncodePlan
             problems.Add(exc.Message);
         }
 
-        VideoFilter filter = VideoFilter.Simple(filters);
+        VideoFilter filter = SubtitleChain.Apply(
+            filters, burn, VideoMap(request.VideoStream), width, height, transport);
         bool hasAudio = source.HasAudio && request.Encode.AudioEncoder.HasText;
 
         List<string> decoder = BuildDecoderArgs(
             request, source, filter, transport, span, problems);
 
         List<string> encoderArgsOut = BuildEncoderArgs(
-            request, source, encoder, transport, width, height, hasAudio, muxer, span ?? 0, problems);
+            request, source, encoder, transport, width, height, hasAudio, muxer, span ?? 0, destination, problems);
 
         return new EncodePlan
         {
@@ -236,7 +259,7 @@ public sealed record EncodePlan
             HasAudio = hasAudio,
             Container = container,
             Muxer = muxer,
-            DestinationPath = request.DestinationPath,
+            DestinationPath = destination,
             SpanSeconds = span ?? 0,
             Encode = request.Encode,
             DecoderArgs = decoder,
@@ -323,7 +346,8 @@ public sealed record EncodePlan
 
     private static List<string> BuildEncoderArgs(
         EncodeRequest request, SourceInfo source, EncoderInfo encoder, string transport,
-        int width, int height, bool hasAudio, string muxer, double span, List<string> problems)
+        int width, int height, bool hasAudio, string muxer, double span, string destination,
+        List<string> problems)
     {
         EncodeDefaults e = request.Encode;
 
@@ -440,7 +464,7 @@ public sealed record EncodePlan
         // alternation drove the frame rate up and down four times.
         cmd.AddRange(["-flush_packets", "1"]);
 
-        cmd.AddRange(["-f", muxer, request.DestinationPath]);
+        cmd.AddRange(["-f", muxer, destination]);
         return cmd;
     }
 

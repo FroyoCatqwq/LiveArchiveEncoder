@@ -74,6 +74,20 @@ public sealed record PumpSpec
     public LadderControl? Ladder { get; init; }
 
     /// <summary>
+    /// Frames the decoder may run ahead of the pump.
+    ///
+    /// <para>This is <c>BufferFrames</c> from the settings, and it was carried
+    /// through three layers without anything reading it until now: the channel's
+    /// depth is the only place the number means anything. One frame is the
+    /// minimum that works -- the producer needs somewhere to put the picture it
+    /// just decoded while the consumer writes the previous one -- and more is a
+    /// safety margin for a machine that stalls for a moment. It is not free: a
+    /// raw frame at 320x240 is 115 kB, so six of them is most of a megabyte of
+    /// memory per run.</para>
+    /// </summary>
+    public int BufferFrames { get; init; } = 6;
+
+    /// <summary>
     /// How long one frame may sit unpicked in the encoder's input before the run
     /// is declared stuck. One slot is at most a third of a second of programme,
     /// so 30 s means "not slow, wedged".
@@ -107,6 +121,15 @@ public sealed record PumpStats
 
     /// <summary>Frame rate left after adaptation, when a ladder was in use.</summary>
     public double MotionFps { get; init; }
+
+    /// <summary>
+    /// The last bitrate the ladder measured, in kbps, or 0 when no ladder ran.
+    ///
+    /// <para>Worth reporting separately from the file's average: the average says
+    /// what the whole file came to, this says where the encoder sat when the run
+    /// ended, and the two differ by exactly as much as the ladder moved.</para>
+    /// </summary>
+    public double MeasuredKbps { get; init; }
 
     /// <summary>Frames per second actually achieved, against the requested cadence.</summary>
     public double EffectiveFps => Seconds > 0 ? Frames / Seconds : 0;
@@ -152,12 +175,17 @@ public static class FramePump
         Action<long>? tick,
         Action<long, long?>? progress,
         CancellationToken token)
-    {        ArgumentNullException.ThrowIfNull(source);
+    {
+        ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(sink);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(spec.Fps);
         ArgumentOutOfRangeException.ThrowIfLessThan(spec.FrameSize, 1);
 
-        var channel = new FrameChannel(spec.FrameSize);
+        // A depth of zero is not "no buffering", it is a decoder that has nowhere
+        // to put the frame it just read. Clamped rather than refused because the
+        // number arrives from a settings file, and a run that works beats a run
+        // that explains why it will not start.
+        var channel = new FrameChannel(spec.FrameSize, Math.Max(1, spec.BufferFrames));
         var capture = new Capture(source, channel, spec.Fps);
         long start = Stopwatch.GetTimestamp();
         long slotTicks = FineTimer.IntervalTicks(spec.Fps);
@@ -179,6 +207,7 @@ public static class FramePump
         // encode and keeps the timeline intact.
         double cadence = 1.0;
         EncoderProgress produced = default;
+        double measured = 0;
         LadderControl? control = spec.Ladder;
 
         try
@@ -272,7 +301,7 @@ public static class FramePump
 
                 if (control is not null)
                 {
-                    produced = ObserveBitrate(control, produced);
+                    (produced, measured) = ObserveBitrate(control, produced);
                 }
 
                 if (progress is not null && emitted % 4 == 0) progress(emitted, spec.TargetFrames);
@@ -292,6 +321,7 @@ public static class FramePump
                 Dropped = discarded,
                 FinalRung = control?.Ladder.Rung ?? 0,
                 MotionFps = control?.Ladder.CurrentFps ?? spec.Fps,
+                MeasuredKbps = measured,
             };
         }
         finally
@@ -312,7 +342,7 @@ public static class FramePump
     /// the ladder would never descend, and the output would quietly be over its
     /// ceiling for the whole run.</para>
     /// </summary>
-    private static EncoderProgress ObserveBitrate(
+    private static (EncoderProgress Progress, double Kbps) ObserveBitrate(
         LadderControl control, EncoderProgress previous)
     {
         EncoderProgress now = control.Progress();
@@ -320,7 +350,7 @@ public static class FramePump
 
         // Nothing written yet, or the muxer cannot report: no reading rather than
         // a division by zero that would look like an infinite bitrate.
-        if (media <= previous.MediaSeconds) return now;
+        if (media <= previous.MediaSeconds) return (now, control.Window.Kbps());
 
         long delta = Math.Max(0, now.Bytes - previous.Bytes);
         control.Window.Add(media, (int)Math.Min(delta, int.MaxValue));
@@ -342,9 +372,11 @@ public static class FramePump
                 control.Moved?.Invoke(new LadderMove(
                     before, control.Ladder.CurrentFps, video, control.Window.CoveredSeconds));
             }
+
+            return (now, video);
         }
 
-        return now;
+        return (now, control.Window.Kbps());
     }
 
     /// <summary>
@@ -359,11 +391,24 @@ public static class FramePump
     private static void WriteFrame(
         Stream sink, byte[] payload, int count, TimeSpan deadline, CancellationToken token)
     {
-        sink.WriteAsync(payload.AsMemory(0, count), token)
-            .AsTask()
-            .WaitAsync(deadline, token)
-            .GetAwaiter()
-            .GetResult();
+        try
+        {
+            sink.WriteAsync(payload.AsMemory(0, count), token)
+                .AsTask()
+                .WaitAsync(deadline, token)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (TimeoutException exc)
+        {
+            // Told apart from a cancel on purpose: a cancelled run is the user's
+            // decision and exits 130, while a wedged encoder is a failure that has
+            // to say how long it waited. Without this the report is the word
+            // "TimeoutException", which says nothing about who was stuck.
+            throw new InvalidOperationException(
+                $"the encoder stopped accepting frames: no room in its input for {deadline.TotalSeconds:F0}s", exc);
+        }
+
         sink.Flush();
     }
 

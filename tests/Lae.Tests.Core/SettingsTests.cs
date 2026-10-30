@@ -261,7 +261,11 @@ public sealed class SettingsTests
         await Assert.That(d.X264.Profile).IsEqualTo("baseline");
         await Assert.That(d.X264.Level).IsEqualTo("3.1");
         await Assert.That(d.Parallel).IsEqualTo(4);
-        await Assert.That(d.H264Impl).IsEqualTo("libopenh264");
+
+        // v7's H.264 implementation hint has no v8 equivalent and must not be
+        // carried: a run names the encoder, so there is nothing to switch between.
+        // What it must do is say so, rather than drop it in silence.
+        await Assert.That(outcome.Notes.Any(n => n.Contains("H.264 implementation", StringComparison.Ordinal))).IsTrue();
 
         await Assert.That(d.Subtitles.Mode).IsEqualTo("copy");
         await Assert.That(d.Subtitles.Stream).IsEqualTo(3);

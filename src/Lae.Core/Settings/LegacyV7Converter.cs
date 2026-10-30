@@ -144,10 +144,19 @@ public static class LegacyV7Converter
             },
             // Never restore a nonsensical shard count from an older file.
             Parallel = Math.Max(1, old.Parallel ?? 1),
-            H264Impl = Clean(old.H264Impl),
             Subtitles = Subtitles(old.Subtitles),
             Recompress = Chain(old.Recompress),
         };
+
+        // v7 stored which H.264 implementation a preset should use, because its
+        // presets asked for "H.264" and something had to choose between libx264
+        // and libopenh264. v8 has no such presets: a run names the encoder, so
+        // there is nothing left for the hint to switch between. Saying so beats
+        // migrating a field nothing reads.
+        if (Clean(old.H264Impl) is { } impl)
+        {
+            notes.Add($"dropped the H.264 implementation hint '{impl}': name the encoder instead");
+        }
 
         ReportPerRunState(old, notes);
 
@@ -312,7 +321,6 @@ public static class LegacyV7Converter
                 VideoCodec = Clean(row.VideoCodec) ?? "libx264",
                 AudioCodec = Clean(row.AudioCodec) ?? "aac",
                 Container = Clean(row.Container) ?? "mp4",
-                H264Impl = Clean(row.H264Impl),
                 Note = Clean(row.Note),
             });
         }

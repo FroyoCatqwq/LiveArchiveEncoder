@@ -38,6 +38,14 @@ internal static class Repl
             }
 
             ParseResult parsed = root.Parse(line);
+
+            // Same two settings the entry point applies, and for the same reason:
+            // System.CommandLine's own catch would answer every failure with exit
+            // 1 and no message, so inside the prompt a command that threw would
+            // look like a command that silently did nothing -- and one bad line
+            // would end the session.
+            parsed.InvocationConfiguration.EnableDefaultExceptionHandler = false;
+
             if (parsed.Errors.Count > 0)
             {
                 foreach (var error in parsed.Errors)
@@ -45,7 +53,19 @@ internal static class Repl
                 continue;
             }
 
-            await parsed.InvokeAsync();
+            try
+            {
+                await parsed.InvokeAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                // Ctrl+C during a command cancels that command, not the session.
+                Console.Error.WriteLine("Interrupted.");
+            }
+            catch (Exception exc)
+            {
+                Console.Error.WriteLine($"ERROR: {exc.Message}");
+            }
         }
 
         return ExitCodes.Ok;

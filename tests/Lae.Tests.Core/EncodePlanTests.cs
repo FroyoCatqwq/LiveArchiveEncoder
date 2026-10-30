@@ -257,17 +257,81 @@ public sealed class EncodePlanTests
     }
 
     /// <summary>
+    /// With no output named, the plan picks the name -- and the extension is the
+    /// container it settled on, not a guess made before the encoder was known.
+    /// The old order wrote an MP4 into a file called in.avi.
+    /// </summary>
+    [Test]
+    public async Task ADerivedNameUsesTheContainerThePlanChose()
+    {
+        EncodeRequest request = Request(new EncodeDefaults { Encoder = "libx264" })
+            with { DestinationPath = null };
+
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder("libx264", "mp4", "mp4"));
+
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(plan.Container).IsEqualTo("mp4");
+        await Assert.That(Path.GetFileName(plan.DestinationPath)).IsEqualTo("in.mp4");
+
+        // The encoder command line ends with the same path, which is what makes
+        // WritingTo exact.
+        await Assert.That(plan.EncoderArgs[^1]).IsEqualTo(plan.DestinationPath);
+    }
+
+    /// <summary>
+    /// A derived name can land on the source -- an .avi encoded to mpeg4 is the
+    /// obvious case -- and that is a refusal with instructions, not an overwrite.
+    /// </summary>
+    [Test]
+    public async Task ADerivedNameThatCollidesWithTheSourceIsRefused()
+    {
+        EncodeRequest request = Request() with
+        {
+            SourcePath = "/media/in.avi",
+            DestinationPath = null,
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems.Any(p => p.Contains("--out", StringComparison.Ordinal))).IsTrue();
+    }
+
+    /// <summary>
+    /// A window of zero does not mean "measure instantly": the ladder's window
+    /// refuses to be built from it, and that refusal would arrive after both
+    /// children had been started. It is caught at validation instead.
+    /// </summary>
+    [Test]
+    public async Task AWindowOfZeroIsRefusedBeforeAnythingStarts()
+    {
+        EncodeRequest request = Request(new EncodeDefaults { Encoder = "mpeg4", WindowSeconds = 0 });
+
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems.Any(p => p.Contains("window", StringComparison.Ordinal))).IsTrue();
+    }
+
+    [Test]
+    public async Task ABufferOfZeroIsRefusedBeforeAnythingStarts()
+    {
+        EncodeRequest request = Request(new EncodeDefaults { Encoder = "mpeg4", BufferFrames = 0 });
+
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems.Any(p => p.Contains("buffer", StringComparison.Ordinal))).IsTrue();
+    }
+
+    /// <summary>
     /// Unwired features are refused rather than ignored. A run that quietly
-    /// dropped a subtitle request would produce a file that looks finished and is
-    /// missing the thing the user asked for.
+    /// dropped a recompress request would produce a file that looks finished and
+    /// is missing the thing the user asked for.
     /// </summary>
     [Test]
     public async Task UnwiredFeaturesAreRefusedNotIgnored()
     {
-        EncodeRequest subtitles = Request() with
-        {
-            Encode = new EncodeDefaults { Encoder = "mpeg4", Subtitles = new SubtitleDefaults { Files = ["/s/a.ass"] } },
-        };
         EncodeRequest recompress = Request() with
         {
             Encode = new EncodeDefaults
@@ -277,8 +341,31 @@ public sealed class EncodePlanTests
             },
         };
 
-        await Assert.That(EncodePlan.Create(subtitles, Source(), Encoder()).IsRunnable).IsFalse();
         await Assert.That(EncodePlan.Create(recompress, Source(), Encoder()).IsRunnable).IsFalse();
+    }
+
+    /// <summary>
+    /// Subtitles, by contrast, are wired: the burn lands on the decoder's filter
+    /// chain, so the encoder command is unchanged and the picture is what
+    /// differs.
+    /// </summary>
+    [Test]
+    public async Task ABurnedSubtitleReachesTheDecoderChainAndNotTheEncoder()
+    {
+        EncodeRequest request = Request() with
+        {
+            Encode = new EncodeDefaults
+            {
+                Encoder = "mpeg4",
+                Subtitles = new SubtitleDefaults { Mode = "burn", Files = ["/s/a.ass"] },
+            },
+        };
+
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(plan.DecoderArgs.Any(a => a.Contains("subtitles=filename=", StringComparison.Ordinal))).IsTrue();
+        await Assert.That(plan.EncoderArgs.Any(a => a.Contains("subtitles", StringComparison.Ordinal))).IsFalse();
     }
 
     /// <summary>

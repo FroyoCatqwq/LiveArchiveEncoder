@@ -92,6 +92,29 @@ public static class LiveEncode
 
             PumpStats stats = Pump(plan, progressTap, decoder, encoder, progress, warn, token);
 
+            // A run that produced nothing is a failure, however calmly it ended.
+            // The pump stops when the decoder's pipe closes, and a decoder that
+            // refused its arguments -- a subtitle file that is not there, a
+            // filter this build does not have -- closes the pipe without an
+            // exception: the read just returns end-of-stream. The muxer then
+            // writes a valid empty container, the rename succeeds, and the run
+            // reports success over a zero-frame file. Found by asking for a
+            // caption file that does not exist.
+            if (stats.Frames == 0)
+            {
+                throw new InvalidOperationException(
+                    "no frames came out of the decoder; " + Diagnostics(decoder));
+            }
+
+            if (stats.SourceEnded && decoder.HasExited && decoder.ExitCode != 0)
+            {
+                // The source ended early *and* the decoder was unhappy about it,
+                // which is a truncated result rather than a short source.
+                throw new InvalidOperationException(
+                    $"the decoder stopped after {stats.Frames} of {plan.TargetFrames} slots "
+                    + $"(code {decoder.ExitCode}); " + Diagnostics(decoder));
+            }
+
             // Closing the input is what tells the encoder the picture is over; it
             // then flushes its last packets and exits.
             encoder.Input?.Dispose();
@@ -117,8 +140,11 @@ public static class LiveEncode
                 warn($"the source ended after {stats.Frames} of {plan.TargetFrames} slots");
             }
 
-            long bytes = new FileInfo(partPath).Length;
+            // Promote first, measure second. Measuring the part file first meant a
+            // missing output surfaced as "Could not find file ...", while Promote
+            // has a sentence about what actually happened.
             PartFile.Promote(partPath, finalPath);
+            long bytes = new FileInfo(finalPath).Length;
 
             return new LiveRun
             {
@@ -159,10 +185,16 @@ public static class LiveEncode
             Fps = plan.Fps,
             FrameSize = plan.FrameSize,
             TargetFrames = plan.TargetFrames,
+            BufferFrames = plan.Encode.BufferFrames,
             Ladder = ladder is null ? null : new LadderControl
             {
                 Ladder = ladder,
-                Window = new BitrateWindow(plan.Encode.WindowSeconds),
+
+                // Clamped, because the window constructor refuses zero and this
+                // is the last line before a child process is started. The request
+                // is validated up front, so the clamp is a belt on top of braces
+                // for a settings file edited while the program was running.
+                Window = new BitrateWindow(Math.Max(0.1, plan.Encode.WindowSeconds)),
                 Progress = () => progressTap.Current,
                 AudioKbps = plan.HasAudio ? plan.Encode.AudioKbps : 0,
                 Moved = move => warn?.Invoke(

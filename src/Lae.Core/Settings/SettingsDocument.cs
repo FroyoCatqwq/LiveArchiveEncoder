@@ -30,7 +30,7 @@ public sealed record SettingsDocument
     /// A file with an older number is migrated on read; a newer one is refused
     /// rather than half-understood.
     /// </summary>
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
@@ -218,9 +218,6 @@ public sealed record EncodeDefaults
 
     /// <summary>Shard count for the parallel pipeline; 1 disables it.</summary>
     public int Parallel { get; init; } = 1;
-
-    /// <summary>"libx264" or "libopenh264" where a preset asks for H.264; null leaves it to the encoder.</summary>
-    public string? H264Impl { get; init; }
 
     public SubtitleDefaults Subtitles { get; init; } = new();
 
@@ -426,8 +423,6 @@ public sealed record CustomPreset
 
     /// <summary>Container for the second pass; null keeps whatever the encoder writes.</summary>
     public string? Container { get; init; }
-
-    public string? H264Impl { get; init; }
 }
 
 /// <summary>

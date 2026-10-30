@@ -64,6 +64,14 @@ public sealed class FileSettingsStore(SettingsLocation location) : ISettingsStor
 {
     private readonly SettingsLocation _location = location;
 
+    /// <summary>
+    /// Set when the file exists but could not be read. Saves are then refused:
+    /// the in-memory document is the defaults, and writing it would replace a
+    /// file the user may have spent an hour on with a set of defaults that says
+    /// nothing about what went wrong.
+    /// </summary>
+    private string? _unreadable;
+
     public string Location => _location.File;
 
     /// <summary>What the last <see cref="Load"/> did to the file, for the caller to report.</summary>
@@ -72,6 +80,7 @@ public sealed class FileSettingsStore(SettingsLocation location) : ISettingsStor
     public SettingsDocument Load()
     {
         MigrationNotes = [];
+        _unreadable = null;
 
         if (File.Exists(_location.File) && TryRead(_location.File) is { } current)
         {
@@ -82,8 +91,11 @@ public sealed class FileSettingsStore(SettingsLocation location) : ISettingsStor
         {
             // Present but unreadable. Refuse to overwrite it: the content may be
             // the only copy of settings someone spent an hour on, and "start from
-            // defaults" would destroy it on the next save.
-            MigrationNotes = [$"the settings file could not be parsed and was left untouched: {_location.File}"];
+            // defaults" would destroy it on the next save. _unreadable is what
+            // makes that refusal real -- saying it in a note while TrySave
+            // happily replaced the file was worse than not saying it at all.
+            _unreadable = $"{_location.File} exists but could not be read; fix or move it before changing settings";
+            MigrationNotes = [$"the settings file could not be parsed and will not be overwritten: {_location.File}"];
             return new SettingsDocument();
         }
 
@@ -155,6 +167,8 @@ public sealed class FileSettingsStore(SettingsLocation location) : ISettingsStor
     /// </summary>
     public string? TrySave(SettingsDocument document)
     {
+        if (_unreadable is { } refusal) return refusal;
+
         try
         {
             Directory.CreateDirectory(_location.Directory);

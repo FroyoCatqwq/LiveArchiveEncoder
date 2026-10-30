@@ -40,6 +40,18 @@ public sealed record EncodeOverrides
 
     /// <summary>Id of a stored preset to lay over the defaults before anything else.</summary>
     public string? Preset { get; init; }
+
+    /// <summary>Sidecar subtitle files to burn, in order. Empty means none.</summary>
+    public IReadOnlyList<string>? SubtitleFiles { get; init; }
+
+    /// <summary>Shape the burned text is laid out in: "source", "4:3" or "16:9".</summary>
+    public string? SubtitleBox { get; init; }
+
+    /// <summary>Font family forced over whatever the subtitle asks for.</summary>
+    public string? SubtitleFont { get; init; }
+
+    /// <summary>Extra directory libass may look in.</summary>
+    public string? FontsDir { get; init; }
 }
 
 /// <summary>
@@ -108,7 +120,18 @@ public static class EncodeSession
         bool dryRun,
         CancellationToken token)
     {
-        // The toolchain comes first: "no FFmpeg" is a setup problem with its own
+        // The request comes first, because it is the only step that can be wrong
+        // without touching the machine. Reporting "no such encoder" before "there
+        // is no FFmpeg here" is the difference between a user fixing their typing
+        // and a user reinstalling their toolchain.
+        (EncodeRequest? request, string? requestError) = BuildRequest(input, overrides, settings);
+        if (request is null)
+        {
+            terminal.ErrorLine($"ERROR: {requestError}");
+            return ExitCodes.Usage;
+        }
+
+        // The toolchain comes next: "no FFmpeg" is a setup problem with its own
         // command, not an encode failure, and it must not be reported as one.
         ToolchainProbeResult tools = dependencies.ProbeToolchain(ToolchainDirectory(settings));
         if (tools.Ffmpeg is null || tools.Ffprobe is null)
@@ -125,11 +148,13 @@ public static class EncodeSession
             return ExitCodes.Failed;
         }
 
-        (EncodeRequest? request, string? requestError) = BuildRequest(input, overrides, settings);
-        if (request is null)
+        // The font folder is only resolvable here: it is the one beside FFmpeg,
+        // which is exactly what the host knows and Lae.Core does not. A path that
+        // does not exist is not an error -- libass falls back to the system -- so
+        // the check is "is it there", not "must be".
+        if (FindFontsDirectory(settings.Defaults.Subtitles.FontDir, tools.Ffmpeg) is { } fonts)
         {
-            terminal.ErrorLine($"ERROR: {requestError}");
-            return ExitCodes.Usage;
+            request = request with { FontsDirectory = fonts };
         }
 
         (List<EncoderInfo> encoders, string? listError) = dependencies.ListEncoders(tools.Ffmpeg);
@@ -206,10 +231,56 @@ public static class EncodeSession
 
         encode = encode with
         {
-            Encoder = overrides.Encoder ?? encode.Encoder ?? "mpeg4",
             Recompress = new RecompressChain(),
             Subtitles = new SubtitleDefaults(),
         };
+
+        // ...and the same rule for subtitles: the file the last interactive
+        // session had open is not this run's business. Only the command line can
+        // turn burning on, which also means a scripted run cannot start drawing
+        // captions because of something in a settings file.
+        if (overrides.SubtitleFiles is { Count: > 0 } subtitleFiles)
+        {
+            encode = encode with
+            {
+                Subtitles = new SubtitleDefaults
+                {
+                    Mode = "burn",
+                    Files = [.. subtitleFiles.Where(f => !string.IsNullOrWhiteSpace(f))],
+                    BoxAspect = overrides.SubtitleBox ?? "source",
+                    FallbackFont = overrides.SubtitleFont,
+                    FontDir = overrides.FontsDir,
+                },
+            };
+        }
+
+        // The encoder moves first, and the quality number moves with it. A stored
+        // 8 means a 2004 stream's -q:v 8; handed to libx264 unchanged it becomes
+        // -crf 8, which is a different picture by a factor of two and a half in
+        // bitrate. That is v7.9.8.2's bug, and switching the encoder from the
+        // command line is the same door it came through -- the preset path
+        // converts, so this one has to as well.
+        //
+        // Only when the user did not restate the number: --quality 20 alongside
+        // --encoder libx264 is already a CRF, and converting it would turn 20
+        // into 25.
+        if (overrides.Encoder is { Length: > 0 } named)
+        {
+            EncodeDefaults previous = encode;
+            encode = encode with { Encoder = named };
+
+            if (overrides.Quality is null)
+            {
+                encode = encode with
+                {
+                    Quality = EncoderMath.ConvertQuality(previous.Encoder, named, previous.Quality),
+                };
+            }
+        }
+        else if (!encode.Encoder.HasText)
+        {
+            encode = encode with { Encoder = "mpeg4" };
+        }
 
         if (overrides.Container is { } container) encode = encode with { Container = container };
         if (overrides.Quality is { } quality) encode = encode with { Quality = quality };
@@ -237,7 +308,12 @@ public static class EncodeSession
             encode = encode with { Width = width, Height = height };
         }
 
-        string destination = overrides.Output ?? DeriveDestination(input, encode.Container ?? "avi");
+        // No --out means "beside the source", but the extension is the plan's to
+        // decide: it is the container the chosen encoder actually writes, which
+        // is not known until the encoder has been looked up in this build. The
+        // CLI used to guess "avi" here, and `--encoder libx264` then wrote an
+        // MP4 into clip.avi.
+        string? destination = string.IsNullOrWhiteSpace(overrides.Output) ? null : overrides.Output;
 
         var request = new EncodeRequest
         {
@@ -268,17 +344,6 @@ public static class EncodeSession
         return width > 0 && height > 0;
     }
 
-    /// <summary>
-    /// The default output name: same folder, same stem, the new extension. It is
-    /// never the input path itself, which the request validation would refuse.
-    /// </summary>
-    public static string DeriveDestination(string input, string container)
-    {
-        string folder = Path.GetDirectoryName(Path.GetFullPath(input)) ?? ".";
-        string stem = Path.GetFileNameWithoutExtension(input);
-        return Path.Combine(folder, $"{stem}.{container}");
-    }
-
     /// <summary>The plan, in the terms the user asked the question in.</summary>
     private static void PrintPlan(EncodePlan plan, SourceInfo source, string ffmpeg, ITerminal terminal)
     {
@@ -288,6 +353,18 @@ public static class EncodeSession
         terminal.Line($"output     {plan.Width}x{plan.Height} {plan.TransportPixelFormat}"
                     + $", {plan.Container} ({plan.Muxer}), {plan.Fps:G6} fps");
         terminal.Line($"span       {plan.SpanSeconds:G6}s -> {plan.TargetFrames} frames");
+
+        // The quality number is the one setting whose meaning changes with the
+        // encoder -- the same 8 is "quite good" in the mpeg family and "nearly
+        // lossless" in x264 -- so a dry run names the flag and the scale rather
+        // than a bare number the reader has to interpret.
+        string quality = EncoderMath.ScaleOf(plan.Encode.Encoder) switch
+        {
+            EncoderMath.QualityScale.Crf => $"crf {plan.Encode.Quality}",
+            EncoderMath.QualityScale.Bitrate => "no quality knob; the ceiling is the only dial",
+            _ => $"q:v {plan.Encode.Quality}",
+        };
+        terminal.Line($"quality    {quality}");
 
         // The ladder is the one part of the plan the user cannot see in the
         // command lines -- it changes what goes down the pipe, not what FFmpeg is
@@ -346,6 +423,24 @@ public static class EncodeSession
     /// </summary>
     private static string Quote(IReadOnlyList<string> command)
         => string.Join(' ', command.Select(a => a.Any(char.IsWhiteSpace) ? $"\"{a}\"" : a));
+
+    /// <summary>
+    /// Where the burn filter should look for fonts: the folder the user named, or
+    /// the one beside FFmpeg, which is where a distribution install puts the
+    /// family its presets ask for. Null when neither exists, so libass falls back
+    /// to the system's own library rather than to a path that is not there.
+    /// </summary>
+    public static string? FindFontsDirectory(string? configured, string? ffmpeg)
+    {
+        if (!string.IsNullOrWhiteSpace(configured) && Directory.Exists(configured)) return configured;
+        if (string.IsNullOrWhiteSpace(ffmpeg)) return null;
+
+        string? folder = Path.GetDirectoryName(ffmpeg);
+        if (folder is null) return null;
+
+        string candidate = Path.Combine(folder, "fonts");
+        return Directory.Exists(candidate) ? candidate : null;
+    }
 
     /// <summary>
     /// The folder an encode would look in, or null for "whatever is on PATH".

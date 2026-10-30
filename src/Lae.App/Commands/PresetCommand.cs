@@ -114,7 +114,6 @@ public static class PresetCommand
             if (preset.AudioKbps is { } audioKbps) Emit(terminal, "audioKbps", audioKbps.ToString(CultureInfo.InvariantCulture));
             Emit(terminal, "deinterlace", preset.Deinterlace);
             Emit(terminal, "scale", preset.ScaleAlgo);
-            Emit(terminal, "h264Impl", preset.H264Impl);
 
             // What it would change if applied right now -- which is the question
             // the values above are really about.

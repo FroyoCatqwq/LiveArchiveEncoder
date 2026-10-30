@@ -20,7 +20,18 @@ public sealed record EncodeRequest
 {
     public required string SourcePath { get; init; }
 
-    public required string DestinationPath { get; init; }
+    /// <summary>
+    /// Where the result goes, or null for "beside the source, named after the
+    /// container the plan settles on".
+    ///
+    /// <para>Null rather than a guess, because only the plan knows the container:
+    /// it is chosen from the encoder once the encoder has been looked up in the
+    /// catalogue this FFmpeg build reported. A caller that derives the name
+    /// itself has to assume a container, and assuming <c>avi</c> puts an MP4
+    /// inside a file called <c>clip.avi</c> the moment someone asks for libx264
+    /// without naming an output.</para>
+    /// </summary>
+    public string? DestinationPath { get; init; }
 
     /// <summary>
     /// The effective encode parameters: the stored defaults with this run's
@@ -55,6 +66,18 @@ public sealed record EncodeRequest
     public string? NnediWeights { get; init; }
 
     /// <summary>
+    /// Where libass may look for fonts, or null for "the system's only".
+    ///
+    /// <para>Resolved by the host for the same reason as the weights: the answer
+    /// is a folder beside FFmpeg, which this assembly cannot know. v7 kept the
+    /// fonts next to the binary so a distribution install could ship the one
+    /// family its presets asked for; the burn filter needs to be told where that
+    /// is, and CAPS-style guesses about the user's font library are how a caption
+    /// ends up rendered in something nobody chose.</para>
+    /// </summary>
+    public string? FontsDirectory { get; init; }
+
+    /// <summary>
     /// The length this run covers, when both ends are known. Null while the
     /// source has not been probed -- a request may legitimately be built before
     /// the duration is known, because the CLI has to validate paths first.
@@ -72,20 +95,27 @@ public sealed record EncodeRequest
     /// before anything is spawned, so a bad request fails in milliseconds with a
     /// sentence instead of after FFmpeg has written half a file.
     /// </summary>
-    public IReadOnlyList<string> Validate()
+    /// <param name="destination">
+    /// The path the run will really write, when the request does not name one.
+    /// Passing it in keeps the "is this the same file as the source" check
+    /// meaningful for a derived name -- <c>clip.avi</c> encoded with mpeg4 to a
+    /// derived name lands exactly on the source.
+    /// </param>
+    public IReadOnlyList<string> Validate(string? destination = null)
     {
         var problems = new List<string>();
+        string? output = destination ?? DestinationPath;
 
         if (string.IsNullOrWhiteSpace(SourcePath))
         {
             problems.Add("no input path");
         }
 
-        if (string.IsNullOrWhiteSpace(DestinationPath))
+        if (string.IsNullOrWhiteSpace(output))
         {
             problems.Add("no output path");
         }
-        else if (!string.IsNullOrWhiteSpace(SourcePath) && SamePath(SourcePath, DestinationPath))
+        else if (!string.IsNullOrWhiteSpace(SourcePath) && SamePath(SourcePath, output))
         {
             // Overwriting the source is not recoverable, and "it worked, but the
             // original is gone" is not a thing to discover afterwards. Saying how
@@ -105,6 +135,18 @@ public sealed record EncodeRequest
         if (Encode.Fps <= 0) problems.Add("the frame rate must be positive");
         if (Encode.Quality <= 0) problems.Add("the quality must be positive");
         if (Encode.Parallel < 1) problems.Add("the shard count must be at least 1");
+        if (Encode.Threads < 1) problems.Add("the encoder thread count must be at least 1");
+
+        // A window of zero is not "measure instantly", it is a division by zero
+        // one layer down: the ladder's window refuses to be constructed at all,
+        // and the exception arrives after both children have been started. A
+        // hand-edited settings file can produce it, so it is checked here where
+        // it costs a sentence instead of a stack trace.
+        if (Encode.WindowSeconds <= 0) problems.Add("the bitrate window must be positive");
+
+        // The queue between the decoder and the pump. Zero would mean "drop every
+        // frame", which is a stall dressed up as a setting.
+        if (Encode.BufferFrames < 1) problems.Add("the frame buffer must hold at least one frame");
 
         // Files and an embedded track are mutually exclusive: libass would burn
         // one and the muxer would carry the other, and the result has two
@@ -115,6 +157,23 @@ public sealed record EncodeRequest
         }
 
         return problems;
+    }
+
+    /// <summary>
+    /// The default output name: same folder, same stem, the given extension.
+    ///
+    /// <para>Pure, and here rather than in the CLI, because the extension comes
+    /// from the container the plan chose and the plan is the only thing that
+    /// knows it. The result may equal the source (an <c>.avi</c> encoded to
+    /// mpeg4), which <see cref="Validate"/> then refuses with a sentence rather
+    /// than leaving FFmpeg to discover it.</para>
+    /// </summary>
+    public static string DeriveDestination(string sourcePath, string container)
+    {
+        string full = Path.GetFullPath(sourcePath);
+        string folder = Path.GetDirectoryName(full) ?? ".";
+        string stem = Path.GetFileNameWithoutExtension(full);
+        return Path.Combine(folder, $"{stem}.{container}");
     }
 
     /// <summary>

@@ -150,12 +150,6 @@ public static class PixelFormatUtil
     }
 
     /// <summary>
-    /// Width/height must be divisible by the chroma grid before a frame can be
-    /// written. The old answer was a name heuristic -- which read 4:4:0
-    /// (<c>yuv440p</c>) as a 4:2:0 family and demanded an even width that 4:4:0
-    /// does not need. Subsampling now comes from the measured table.
-    /// </summary>
-    /// <summary>
     /// True when reducing the picture to this format loses so much colour that
     /// dithering changes what it looks like: a palette, a sub-8-bit RGB packing
     /// (5:5:5, 5:6:5, 3:3:2), 1-bit monochrome, or 8-bit grey.
@@ -170,6 +164,12 @@ public static class PixelFormatUtil
         return info.LowColour || info.HasPalette;
     }
 
+    /// <summary>
+    /// Width/height must be divisible by the chroma grid before a frame can be
+    /// written. The old answer was a name heuristic -- which read 4:4:0
+    /// (<c>yuv440p</c>) as a 4:2:0 family and demanded an even width that 4:4:0
+    /// does not need. Subsampling now comes from the measured table.
+    /// </summary>
     public static (int W, int H) RequiredDivisibility(string pixFmt)
     {
         if (PixelFormatCatalog.TryGet(pixFmt, out PixFmtInfo info))

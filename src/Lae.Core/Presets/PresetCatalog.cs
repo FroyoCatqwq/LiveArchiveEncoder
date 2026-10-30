@@ -53,6 +53,14 @@ public static class PresetCatalog
     }
 
     /// <summary>
+    /// Longest id that will be accepted. Ids are typed by hand and appear in a
+    /// JSON key and on a command line; the limit exists so that
+    /// <see cref="NormaliseId"/> can size its stack buffer from the input without
+    /// a very long argument turning into a stack overflow.
+    /// </summary>
+    public const int MaxIdLength = 64;
+
+    /// <summary>
     /// The id as it will be stored: trimmed, lower-case, spaces turned into
     /// hyphens. Ids end up on a command line and in a JSON key, so anything that
     /// would need quoting is refused rather than escaped.
@@ -61,9 +69,12 @@ public static class PresetCatalog
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";
 
-        Span<char> buffer = stackalloc char[raw.Length];
+        string trimmed = raw.Trim();
+        if (trimmed.Length > MaxIdLength) trimmed = trimmed[..MaxIdLength];
+
+        Span<char> buffer = stackalloc char[trimmed.Length];
         int length = 0;
-        foreach (char c in raw.Trim())
+        foreach (char c in trimmed)
         {
             char mapped = c switch
             {
@@ -94,6 +105,11 @@ public static class PresetCatalog
         if (id.Length == 0)
             return PresetChange.Failed("a preset needs an id made of letters, digits, '-', '_' or '.'");
 
+        // Truncating silently would store a preset the user cannot then reach by
+        // the name they typed, so a too-long id is refused with the number.
+        if (preset.Id.Trim().Length > MaxIdLength)
+            return PresetChange.Failed($"an id may be at most {MaxIdLength} characters, got {preset.Id.Trim().Length}");
+
         if (preset.Fps is { } fps && (!double.IsFinite(fps) || fps <= 0))
             return PresetChange.Failed($"'{id}': the frame rate must be positive");
 
@@ -101,8 +117,26 @@ public static class PresetCatalog
             return PresetChange.Failed($"'{id}': the width must be positive");
         if (preset.Height is { } h && h <= 0)
             return PresetChange.Failed($"'{id}': the height must be positive");
-        if (preset.LimitKbps is { } limit && limit <= 0)
+        if (preset.LimitKbps is { } limit && (!double.IsFinite(limit) || limit <= 0))
             return PresetChange.Failed($"'{id}': the bitrate ceiling must be positive");
+
+        // Zero is not "measure instantly": the ladder's window refuses to be
+        // constructed with it, and that refusal would arrive in the middle of an
+        // encode. A hand-written preset is exactly where such a number comes from.
+        if (preset.WindowSeconds is { } window && (!double.IsFinite(window) || window <= 0))
+            return PresetChange.Failed($"'{id}': the bitrate window must be positive");
+
+        if (preset.BufferFrames is { } buffer && buffer < 1)
+            return PresetChange.Failed($"'{id}': the frame buffer must hold at least one frame");
+
+        // A ladder whose every rung is above the base rate would adapt in one
+        // direction only, and a preset that cannot do what it says is worth
+        // refusing while the user is still looking at the command.
+        if (preset.FpsLevels is { Count: > 0 } levels && preset.Fps is { } baseFps
+            && EncoderMath.SelectLevels(baseFps, levels).Count == 0)
+        {
+            return PresetChange.Failed($"'{id}': no ladder rung is at or below the {baseFps:G4} fps base rate");
+        }
 
         CustomPreset stored = preset with { Id = id };
 
@@ -173,7 +207,6 @@ public static class PresetCatalog
             AudioKbps = preset.AudioKbps ?? defaults.AudioKbps,
             AudioChannels = preset.AudioChannels ?? defaults.AudioChannels,
             AudioRate = preset.AudioRate ?? defaults.AudioRate,
-            H264Impl = preset.H264Impl ?? defaults.H264Impl,
             Quality = quality ?? defaults.Quality,
         };
 

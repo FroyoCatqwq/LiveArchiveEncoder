@@ -72,6 +72,22 @@ public static class EncodeCommand
         {
             Description = "Print the two FFmpeg command lines and stop.",
         };
+        var subtitleOption = new Option<string[]>("--subtitle-file")
+        {
+            Description = "Burn this .srt/.ass into the picture; repeat for more than one.",
+        };
+        var subtitleBoxOption = new Option<string?>("--subtitle-box")
+        {
+            Description = "Shape the text is laid out in: source, 4:3 or 16:9.",
+        };
+        var subtitleFontOption = new Option<string?>("--subtitle-font")
+        {
+            Description = "Font family forced over whatever the subtitle file asks for.",
+        };
+        var fontsDirOption = new Option<string?>("--fonts-dir")
+        {
+            Description = "Extra folder libass may look in for fonts.",
+        };
 
         var command = new Command("encode", "Re-encode one source at archive pace.")
         {
@@ -87,6 +103,10 @@ public static class EncodeCommand
             limitOption,
             recoverOption,
             levelsOption,
+            subtitleOption,
+            subtitleBoxOption,
+            subtitleFontOption,
+            fontsDirOption,
             dryRunOption,
         };
 
@@ -128,6 +148,10 @@ public static class EncodeCommand
                 RecoverKbps = parseResult.GetValue(recoverOption),
                 FpsLevels = levels,
                 FpsThresholds = thresholds,
+                SubtitleFiles = parseResult.GetValue(subtitleOption),
+                SubtitleBox = parseResult.GetValue(subtitleBoxOption),
+                SubtitleFont = parseResult.GetValue(subtitleFontOption),
+                FontsDir = parseResult.GetValue(fontsDirOption),
             };
 
             return EncodeSession.Run(

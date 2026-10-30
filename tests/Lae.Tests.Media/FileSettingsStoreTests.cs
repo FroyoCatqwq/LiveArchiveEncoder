@@ -118,6 +118,36 @@ public sealed class FileSettingsStoreTests
     }
 
     /// <summary>
+    /// ...and a save after that read must refuse. Saying "left alone" in a note
+    /// while the next save replaced the file was worse than saying nothing: the
+    /// user is told their settings are safe and then loses them, through a
+    /// command like <c>preset add</c> that has nothing to do with the damage.
+    /// </summary>
+    [Test]
+    public async Task ASaveIsRefusedWhileTheFileCannotBeRead()
+    {
+        string folder = NewFolder();
+        try
+        {
+            var location = SettingsLocation.For(folder);
+            await File.WriteAllTextAsync(location.File, "{ this is not json");
+
+            var store = new FileSettingsStore(location);
+            _ = store.Load();
+
+            string? failure = store.TrySave(new SettingsDocument());
+
+            await Assert.That(failure).IsNotNull();
+            await Assert.That(failure!.Contains("could not be read", StringComparison.Ordinal)).IsTrue();
+            await Assert.That(await File.ReadAllTextAsync(location.File)).IsEqualTo("{ this is not json");
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// First read of a folder that only has a v7 file: the document is converted,
     /// written as <c>settings.json</c>, the v7 file stays where it is, and a copy
     /// is kept so the conversion can be inspected later.
