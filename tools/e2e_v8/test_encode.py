@@ -69,6 +69,26 @@ def test_a_trimmed_run_covers_only_the_trim_range(work: Work, needs_ffmpeg):
     assert 0.7 <= duration(work.probe(str(output))) <= 1.4
 
 
+def test_a_leftover_part_file_does_not_block_the_next_run(work: Work, needs_ffmpeg):
+    """A run killed from outside leaves its part file behind.
+
+    Found on a build server: the next run of the same name died with exit code
+    -17 and "already exists" from inside FFmpeg, which says nothing about what
+    went wrong. The part file is ours; it gets overwritten.
+    """
+    source = work.source(seconds=1)
+    output = work.root / "out.avi"
+    stale = work.root / "out.part.avi"
+    stale.write_bytes(b"left over from a run that was killed")
+
+    result = work.run("encode", source, "--out", str(output))
+
+    assert result.returncode == 0, result.stderr
+    assert output.exists()
+    assert not stale.exists()
+    assert work.parts() == []
+
+
 def test_an_interrupted_run_leaves_nothing_behind(work: Work, needs_ffmpeg):
     source = work.source(seconds=20)
     output = work.root / "out.avi"

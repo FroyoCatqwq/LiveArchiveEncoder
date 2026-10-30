@@ -318,6 +318,14 @@ public sealed record EncodePlan
         {
             "-hide_banner", "-loglevel", "error",
 
+            // Overwrite without asking. The output is our own part file, so a
+            // question never has a useful answer -- and without this, one crash
+            // that leaves a part file behind makes every later run of the same
+            // name fail with an "already exists" complaint from inside FFmpeg,
+            // reported as a mysterious exit code -17. Found by running twice on a
+            // build server where an earlier attempt had been killed from outside.
+            "-y",
+
             // The rate ladder steers by what the muxer has actually written, and
             // this is where that number comes from. It goes on stdout, which the
             // encoder has free -- frames arrive on stdin and leave through the

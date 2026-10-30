@@ -58,6 +58,13 @@ public static class LiveEncode
         string? folder = Path.GetDirectoryName(finalPath);
         if (!string.IsNullOrEmpty(folder)) Directory.CreateDirectory(folder);
 
+        // A part file from a run that was killed from outside -- the terminal
+        // closed, the machine rebooted, CI cancelled the job -- is ours and is
+        // disposable. Clearing it here means a later run never starts by arguing
+        // with a corpse. The encoder also passes -y, so both halves of this are
+        // covered.
+        PartFile.Discard(partPath);
+
         using ChildProcess decoder = ChildProcess.Start(
             plan.DecodeCommand(ffmpeg), new ChildSpec { ReadOutput = true });
 
