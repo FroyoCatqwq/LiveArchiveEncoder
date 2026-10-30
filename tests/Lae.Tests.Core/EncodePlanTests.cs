@@ -188,6 +188,29 @@ public sealed class EncodePlanTests
         await Assert.That(joined.Contains("avi", StringComparison.Ordinal)).IsTrue();
     }
 
+    /// <summary>
+    /// An encode writes to <c>name.part.ext</c> and is renamed afterwards, so the
+    /// run retargets the plan instead of building a second one. Exactly one
+    /// argument may move: the output path, which is the last one by construction.
+    /// </summary>
+    [Test]
+    public async Task RetargetingMovesOnlyTheOutputPath()
+    {
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+        EncodePlan part = plan.WritingTo("/media/out.part.avi");
+
+        await Assert.That(part.DestinationPath).IsEqualTo("/media/out.part.avi");
+        await Assert.That(part.EncoderArgs[^1]).IsEqualTo("/media/out.part.avi");
+        await Assert.That(plan.DestinationPath).IsEqualTo("/media/out.avi");
+
+        // Everything before the path is untouched, and the original plan is not
+        // mutated by the copy.
+        await Assert.That(part.EncoderArgs.Count).IsEqualTo(plan.EncoderArgs.Count);
+        await Assert.That(part.EncoderArgs.Take(plan.EncoderArgs.Count - 1).ToArray())
+            .IsEquivalentTo(plan.EncoderArgs.Take(plan.EncoderArgs.Count - 1).ToArray());
+        await Assert.That(plan.EncoderArgs[^1]).IsEqualTo("/media/out.avi");
+    }
+
     [Test]
     public async Task AChosenContainerSelectsItsMuxer()
     {
