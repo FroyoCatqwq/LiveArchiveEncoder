@@ -1,5 +1,6 @@
 using Lae.App.Ui;
 using Lae.Core;
+using Lae.Core.History;
 using Lae.Core.Settings;
 using Lae.Encoding;
 using Lae.Media.Toolchain;
@@ -94,7 +95,7 @@ public static partial class EncodeSession
 
         try
         {
-            return Execute(track.Request, source, ffmpeg, dependencies, terminal, dryRun, token);
+            return Execute(track.Request, source, ffmpeg, overrides.Preset, dependencies, terminal, dryRun, token);
         }
         finally
         {
@@ -194,6 +195,7 @@ public static partial class EncodeSession
         EncodeRequest request,
         SourceInfo source,
         string ffmpeg,
+        string? presetId,
         EncodeDependencies dependencies,
         ITerminal terminal,
         bool dryRun,
@@ -246,22 +248,60 @@ public static partial class EncodeSession
 
         if (dryRun) return ExitCodes.Ok;
 
-        using var progress = new LiveProgress(terminal);
-        LiveRun run = dependencies.Runner.Run(
-            plan, ffmpeg,
-            (done, total) => progress.Report(done, total),
-            note => terminal.ErrorLine($"note: {note}"),
-            token);
+        // The clock starts here rather than at the top of Run: the record is about
+        // the encode, and a request that took a second to validate should not be
+        // part of how long the encode took.
+        DateTimeOffset started = DateTimeOffset.UtcNow;
+        long? sourceBytes = SourceSize(request.SourcePath);
 
-        progress.Finish(
-            $"[{run.Pump.Seconds,7:F1}s] {run.Pump.Frames} frames written"
-            + (run.Pump.Repeated > 0 ? $" ({run.Pump.Repeated} repeated)" : ""));
+        LiveRun run;
+        using (var progress = new LiveProgress(terminal))
+        {
+            try
+            {
+                run = dependencies.Runner.Run(
+                    plan, ffmpeg,
+                    (done, total) => progress.Report(done, total),
+                    note => terminal.ErrorLine($"note: {note}"),
+                    token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Ctrl+C is not a failure and the history must not call it one.
+                // Both paths rethrow: the record is a side note, the exit code and
+                // the cleanup belong to whoever caught this.
+                Stopped(RunOutcome.Cancelled, "stopped by the user");
+                throw;
+            }
+            catch (Exception exc)
+            {
+                Stopped(RunOutcome.Failed, exc.Message);
+                throw;
+            }
+
+            progress.Finish(
+                $"[{run.Pump.Seconds,7:F1}s] {run.Pump.Frames} frames written"
+                + (run.Pump.Repeated > 0 ? $" ({run.Pump.Repeated} repeated)" : ""));
+        }
 
         PrintResult(run, terminal);
+
+        // Recorded against the capture, not against the chain below: the recording
+        // is the thing this row is about, and a failed hop is reported on its own
+        // line with its own exit code.
+        Remember(
+            dependencies.History,
+            BuildRecord(request, plan, run, presetId, RunOutcome.Ok, null, started, sourceBytes),
+            terminal);
 
         return post.Any
             ? RunChain(post, ffmpeg, plan.SpanSeconds, dependencies, terminal, token)
             : ExitCodes.Ok;
+
+        void Stopped(string outcome, string message) => Remember(
+            dependencies.History,
+            BuildRecord(request, plan, null, presetId, outcome, message, started, sourceBytes),
+            terminal);
     }
 
     /// <summary>

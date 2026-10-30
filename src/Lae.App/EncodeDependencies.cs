@@ -1,4 +1,5 @@
 using Lae.Core;
+using Lae.Core.History;
 using Lae.Encoding;
 using Lae.Media.Ffmpeg;
 using Lae.Media.Toolchain;
@@ -54,6 +55,13 @@ public sealed record EncodeDependencies
     /// </summary>
     public required Func<RecompressPlan, string, TimeSpan, Action<string>?, CancellationToken, RecompressOutcome>
         RunRecompress { get; init; }
+
+    /// <summary>
+    /// Where a finished run is remembered. A no-op by default so a test that does
+    /// not care about history never creates a database -- and neither does a dry
+    /// run, which promises to write no files at all.
+    /// </summary>
+    public IRunHistory History { get; init; } = NullRunHistory.Instance;
 
     public static EncodeDependencies Default { get; } = new()
     {

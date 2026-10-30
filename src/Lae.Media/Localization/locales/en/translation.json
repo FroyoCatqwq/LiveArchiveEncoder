@@ -1,0 +1,8 @@
+{
+  "history": {
+    "header": "   id  started          result     encoder/container  kbps  in → out",
+    "empty": "No runs recorded yet.",
+    "total": "{{runs}} run(s) recorded at {{path}}",
+    "limit": "--limit wants a positive number of rows."
+  }
+}

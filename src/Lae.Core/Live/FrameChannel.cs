@@ -145,7 +145,16 @@ public sealed class FrameChannel
         }
     }
 
-    /// <summary>The producer is done; the consumer may stop once the queue drains.</summary>
+    /// <summary>
+    /// The producer is done; the consumer may stop once the queue drains.
+    ///
+    /// <para>"Once the queue drains" is the whole contract, and it is easy to get
+    /// wrong: an empty <see cref="TryTake"/> followed by a completed
+    /// <see cref="Completed"/> is two separate reads, and a publish can land between
+    /// them. A consumer that stops on that pair loses whatever arrived in between
+    /// without counting it. Stop only on an empty take *after* completion was
+    /// already known.</para>
+    /// </summary>
     public void Complete()
     {
         lock (_gate) _completed = true;

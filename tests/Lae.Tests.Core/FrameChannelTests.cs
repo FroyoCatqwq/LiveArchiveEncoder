@@ -111,16 +111,30 @@ public sealed class FrameChannelTests
         });
 
         byte[] destination = new byte[frameSize];
+
+        // "Empty" and "done" are two locked reads, and the producer may publish
+        // between them: it can fill the whole queue after TryTake failed and before
+        // Completed is observed. Those frames are neither taken nor counted as
+        // dropped, so the sums stop adding up -- which is what this test did under
+        // a loaded machine, once, and cost an evening.
+        //
+        // The contract is "complete means no more will be published", so the safe
+        // stop is: a take that fails *after* completion was already known. Two
+        // observations of the same fact cannot be split by a publish.
+        bool completed = false;
         while (true)
         {
             if (channel.TryTake(destination))
             {
                 seen.Add(destination[0]);
+                completed = false;
                 continue;
             }
 
-            if (channel.Completed) break;
-            await Task.Delay(1);
+            if (completed) break;
+
+            completed = channel.Completed;
+            if (!completed) await Task.Delay(1);
         }
 
         await producer;

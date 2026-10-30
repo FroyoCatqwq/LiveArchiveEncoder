@@ -117,6 +117,56 @@ liveQv = 6
 
 诊断：找到没有、在哪、能不能跑。退出码 1 表示缺东西。它**只诊断，不下载**。
 
+### `lae history`
+
+跑完就忘是 v7 的老毛病：一行统计打完，什么都没留下。现在每次真正跑起来的编码会写一行到
+`history.db`（和设置同一个目录，SQLite）。
+
+```
+lae history list           # 最近 20 次，倒序
+lae history list --limit 5 # 只看最近 5 次
+lae history path           # 数据库在哪
+```
+
+```
+   id  started          result     encoder/container  kbps  in → out
+    3  2026-10-31 01:40  ok         mpeg4/avi           214  tape.mkv → tape_live.avi
+    2  2026-10-31 01:12  cancelled  mpeg4/avi             -  tape.mkv → -
+    1  2026-10-30 23:55  failed     libx264/mp4           -  tape.mkv → tape_live.mp4
+```
+
+几条刻意的选择：
+
+- **一次运行为一行**，记的是事实而不是意图：跑了多久、产物多大、平均码率、阶梯停在哪一档。
+- **失败的行不填 0，而是留空。** `0 kbps / 0 帧` 读起来像"成功编码了一段空内容"，比"它死了"
+  严重得多。失败原因单独一列，用的就是用户在屏幕上看到的那句话。
+- **Ctrl+C 记成 `cancelled`，不是 `failed`。** 中断不是错误，退出码 130 也不变。
+- **写不进去不算失败。** 磁盘满了、数据库被别的东西锁住，只会在 stderr 打一行 `note:`，
+  编码本身照常成功——已经压完的文件不该因为记不住而变成"失败"。
+- **`history list` 不会创建数据库。** 从没压过东西的机器上，它只说"还没有记录"。
+- **不记配置里已有的东西**（预设内容、默认值）。历史记的是发生过什么，预设记的是想要什么；
+  混在一起会变成两个都是二手的。
+
+数据库结构在 `src/Lae.Media/History/SqliteHistoryStore.cs` 里，`PRAGMA user_version = 1` 留给
+以后加列时判断。连接**不开连接池**：一次只写一行，而池化的句柄会让文件在进程空闲时仍被占用，
+Windows 上足够让用户的备份工具跳过它。
+
+### 语言
+
+输出有中英两套，按这个顺序决定：
+
+```
+LAE_LANG  →  settings.toml 里的 [ui] language  →  en
+```
+
+```toml
+[ui]
+language = "zh"     # 或 "en"
+```
+
+`zh-CN`、`zh_CN`、`ZH` 都认；不认识的语言落到英文，不会报错。机制、翻译进度和"怎么加一条新字符串"
+在 [`v8-i18n.md`](v8-i18n.md)。目前完整翻译的是 `lae history`，其余命令这一轮仍是英文。
+
 ### `lae repl`
 
 带高亮和补全的交互提示。补全候选来自同一棵命令树，所以 shell 补全脚本和这里的菜单

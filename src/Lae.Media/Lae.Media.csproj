@@ -19,7 +19,19 @@
     <ProjectReference Include="..\Lae.Core\Lae.Core.csproj" />
   </ItemGroup>
 
+  <!--
+    The translation resources travel inside the assembly, not beside it: v8 ships
+    as one self-contained file, and a loose locales/ folder would be the first
+    thing missing from a user's download. The logical names are pinned so the
+    lookup in I18NextMessages does not depend on MSBuild's folder-to-dots rule.
+  -->
   <ItemGroup>
+    <EmbeddedResource Include="Localization\locales\en\translation.json" LogicalName="lae.locales.en.translation.json" />
+    <EmbeddedResource Include="Localization\locales\zh\translation.json" LogicalName="lae.locales.zh.translation.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="I18Next.Net" Version="2.0.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="Tomlyn" Version="2.10.1" />
   </ItemGroup>

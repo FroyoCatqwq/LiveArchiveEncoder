@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Lae.App.Ui;
 using Lae.Core;
+using Lae.Core.History;
 using Lae.Core.Settings;
 
 namespace Lae.App.Commands;
@@ -17,7 +18,7 @@ namespace Lae.App.Commands;
 /// </summary>
 public static class EncodeCommand
 {
-    public static Command Build(ISettingsStore store, ITerminal terminal)
+    public static Command Build(ISettingsStore store, ITerminal terminal, IRunHistory history)
     {
         var inputArgument = new Argument<string>("input")
         {
@@ -189,7 +190,7 @@ public static class EncodeCommand
                 parseResult.GetValue(inputArgument)!,
                 overrides,
                 store.Load(),
-                EncodeDependencies.Default,
+                EncodeDependencies.Default with { History = history },
                 terminal,
                 parseResult.GetValue(dryRunOption),
                 Interrupt.Token);

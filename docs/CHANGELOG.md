@@ -18,6 +18,50 @@
 
 ---
 
+## v8.0.0-m2.1（未发布）
+
+M2 收尾的两件事：配置文件的格式定下来，以及程序终于开始记事。
+
+### 配置改成 TOML（⚠ 行为变化）
+
+`settings.json` → `settings.toml`，解析用 **Tomlyn 2.10.1**。JSON 只剩两个用途：读旧文件迁移，
+和 v7 `config.json` 的转换。
+
+为什么换（完整评估见 `deliverables/v8-config-format-decision.md`）：这份文件是**人写、机器偶尔改一行**，
+四个候选里只有 TOML 同时做到注释能活、写错当场报、程序能只改那一行。
+
+- **程序只改它拥有的那一段**：目前只有 `preset add/remove` 会写文件，它重写 `[[customPresets]]` 块，
+  其余字节（注释、空行、表顺序）一个字都不动。
+- **未知键是错误**：键集由 `SettingsDocument` 反射推导，不手写清单。`qualityy = 5` 会报出这个键，
+  而不是静默用默认值——v7 的 `fpsLevesl` 就是这个坑。
+- **迁移不删东西**：v7 的 `config.json` 复制成 `config.v7.backup.json` 后原地不动；v8 早前的
+  `settings.json` 复制成 `settings.v8-backup.json` 后删除（留着会每次启动重复迁移）。
+- `schemaVersion` 10 → 11。
+- `lae config show --json` 改为 `--toml`，打印的就是存储格式，可以直接存成 `settings.toml`。
+
+### 运行历史（SQLite）
+
+每次真正跑起来的编码写一行到 `history.db`（与设置同目录），新增 `lae history list|path`。
+记事实不记意图：时长、产物大小、平均码率、阶梯停在哪档、结果与失败原因。
+
+- 失败的行**留空而不是填 0**；Ctrl+C 记 `cancelled` 不是 `failed`。
+- 写不进去只在 stderr 打一行 `note:`，不把已完成的编码变成失败。
+- 读取不创建数据库：没压过东西的机器上 `history list` 只说"还没有记录"。
+- 连接**不开池**：一行写入不需要池，而池化句柄会让文件在进程空闲时仍被占用。
+
+### 中英输出（I18Next.Net 2.0.0）
+
+- 语言按 `LAE_LANG` → `settings.toml` 的 `[ui] language` → `en` 决定；`zh-CN`/`zh_CN`/`ZH`
+  都归到 `zh`，不认识的语言落到英文而不是报错。
+- 翻译资源**内嵌进程序集**（`lae.locales.{语言}.translation.json`），因为 v8 是自包含单文件发布，
+  散落的 `locales/` 目录会是用户包里第一个丢的东西。
+- 抽象在 `Lae.Core`（`IMessages` + `LanguageChoice`，纯逻辑可单测），实现在 `Lae.Media`
+  （i18next + 资源读取），和 `ISettingsStore`／`TomlSettingsStore` 同一套分法。
+- **本轮只完整翻译了 `lae history`**，其余命令仍是英文；剩余约 90 条字符串的清单和"怎么加一条"
+  写在 [`v8-i18n.md`](v8-i18n.md)。先做一个命令是为了出问题时能分清是机制错了还是某条键错。
+
+---
+
 ## v8.0.0-m2-canary（2026-10-31）
 
 v8 重写的**存档点**，不是给日常使用准备的产品版。里程碑 M0（骨架）、M1（设置与规划）、
