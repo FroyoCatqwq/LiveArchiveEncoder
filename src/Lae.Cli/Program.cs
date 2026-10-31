@@ -5,6 +5,10 @@ using Lae.App;
 // this file stays small enough to read in one screen — v7's counterpart was 542
 // lines of linear branches with 48 bare returns.
 
+// Before anything can write: redirected output is UTF-8 on every platform, so a
+// pipeline never has to guess this machine's code page.
+OutputEncoding.EnsureUtf8WhenRedirected();
+
 // Ctrl+C must mean "stop this run cleanly" for every command, not just encode:
 // installing the handler here is what turns it into a cancelled token instead of
 // the runtime killing the process with children still attached.

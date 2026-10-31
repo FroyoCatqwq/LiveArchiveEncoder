@@ -72,6 +72,8 @@
       "pacingValue": "{{frames}} slots in {{seconds}}s ({{fps}} fps), fresh {{fresh}}, repeated {{repeated}}",
       "motionValue": "ended at {{fps}} fps{{rung}}, {{dropped}} decoded frames dropped",
       "motionRung": " (rung {{rung}})",
+      "skipped": "skipped",
+      "skippedValue": "{{dropped}} decoded frames skipped while the encoder caught up; the ladder never moved",
       "framesWritten": "[{{seconds}}s] {{frames}} frames written",
       "framesRepeated": " ({{repeated}} repeated)"
     },

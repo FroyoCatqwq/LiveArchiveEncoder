@@ -72,6 +72,8 @@
       "pacingValue": "{{seconds}}s 内 {{frames}} 个槽（{{fps}} fps），新帧 {{fresh}}，重复 {{repeated}}",
       "motionValue": "结束于 {{fps}} fps{{rung}}，丢弃 {{dropped}} 个解码帧",
       "motionRung": "（第 {{rung}} 档）",
+      "skipped": "跳过",
+      "skippedValue": "编码器启动追帧时跳过 {{dropped}} 个解码帧；阶梯没有动过",
       "framesWritten": "[{{seconds}}s] 写入 {{frames}} 帧",
       "framesRepeated": "（{{repeated}} 帧重复）"
     },

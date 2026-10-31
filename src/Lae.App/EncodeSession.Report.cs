@@ -160,16 +160,28 @@ public static partial class EncodeSession
             repeated = run.Pump.Repeated,
         }));
 
-        // Only worth a line when it actually happened: a run that stayed on the
-        // top rung is the normal case, and saying so on every encode is noise.
-        if (run.Pump.FinalRung > 0 || run.Pump.Dropped > 0)
+        // Two different things, said separately.
+        //
+        // The ladder moving is a decision the program made: it saw the bitrate
+        // over the ceiling and slowed the picture down. Frames skipped because
+        // the encoder was still starting is not a decision, it is the queue
+        // absorbing startup -- and reporting both with one word ("motion") told
+        // the user the ladder had throttled a source it never touched. Found by
+        // the end-to-end case that encodes a static picture and asserts the
+        // report says nothing about motion.
+        if (run.Pump.FinalRung > 0)
         {
             Field(terminal, messages, "encode.result.motion", messages.Format("encode.result.motionValue", new
             {
                 fps = Number(run.Pump.MotionFps, "G4"),
-                rung = run.Pump.FinalRung > 0
-                    ? messages.Format("encode.result.motionRung", new { rung = run.Pump.FinalRung })
-                    : "",
+                rung = messages.Format("encode.result.motionRung", new { rung = run.Pump.FinalRung }),
+                dropped = run.Pump.Dropped,
+            }));
+        }
+        else if (run.Pump.Dropped > 0)
+        {
+            Field(terminal, messages, "encode.result.skipped", messages.Format("encode.result.skippedValue", new
+            {
                 dropped = run.Pump.Dropped,
             }));
         }
