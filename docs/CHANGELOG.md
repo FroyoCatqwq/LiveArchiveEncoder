@@ -18,9 +18,66 @@
 
 ---
 
-## v8.0.0-m2.1（未发布）
+## v8.0.0-m2.2（2026-10-31）
 
-M2 收尾的两件事：配置文件的格式定下来，以及程序终于开始记事。
+M2 收尾：预检回来了，Linux 底线抬到 glibc 2.34，配置改 TOML，程序开始记事，
+输出能说中英文，发布件只出依赖版。
+
+### 预检：三帧试跑（⚠ 行为变化）
+
+每次真正开录之前，先拿**同一条命令**跑三帧、写到旁边的临时文件，成功才继续。
+v7 有这一步，v8 一度丢了它——于是"这个编码器不肯吃这个像素格式"的第一个信号是
+一段已经开录的录像，报告只说"解码器一帧都没出来"。
+
+- 试跑由 `EncodePlan.ForTrial` 从真计划派生（三帧、自己的临时目标、`-t` 改写而不是追加），
+  走的是**同一个 runner**，所以它验证的就是真命令，而不是另一份会漂移的拼装逻辑。
+- 代价约一秒；一场跑坏的直播代价是一小时。
+- `--hwaccel auto` 因此有了意义：硬件能不能用是机器的属性，只能靠试。试失败就
+  改写计划改用软件解码并说明，而不是录到一半死掉。`-hwaccel auto` 也不再被
+  "not wired yet" 拒掉，交给 FFmpeg。
+- 比三帧还短的运行不再试跑一遍（它自己就是试跑）。
+
+### Linux 底线：glibc 2.34（⚠ 安装包内容变化）
+
+从这一版起只支持 **glibc ≥ 2.34**：RHEL / AlmaLinux / Rocky **9**、Debian **12**、
+Ubuntu **22.04** 及以上。v7 时代的 2.17 / 2.28 不再维护，AlmaLinux 8.10 已经跑不动
+新的 Linux 包（SQLite 原生库是按 2.34 编的）。
+
+这个决定换来的是不再被老发行版拖住依赖：`Microsoft.Data.Sqlite` 11.0.0-rc.3 +
+`SQLitePCLRaw.bundle_e_sqlite3` 3.0.5 + `SQLitePCLRaw.lib.e_sqlite3` **3.53.4.1-pre1**
+（SQLite **3.53.4**）。之前为守住 2.28 钉在 2.1.11，那一版带的是 SQLite 3.49.1，
+**在 CVE-2025-6965 的影响范围内**（`GHSA-2m69-gcr7-jv3q`，高），每次构建都报 NU1903。
+对我们不可利用（只跑固定的 `INSERT`/`SELECT`，不求值外部 SQL），但让每个扫描器都
+指着你的发布包不是能放着不管的事。
+
+Linux 侧的编译与测试因此搬进 **AlmaLinux 9 容器**（`tools/ci/al9-build.sh`）：
+源码只读挂载、构建产物全部落在卷里，宿主的工作副本一个字节都不动。
+
+### 单文件真的只有一个文件
+
+`PublishSingleFile` 之前把 `libe_sqlite3.so` 留在 exe 旁边——用户只拷 exe 就会在
+写历史时静默降级。现在 `IncludeNativeLibrariesForSelfExtract` 把它一起塞进去，
+打包脚本在出包前会断言目录里只有 `LiveArchiveEncoder` / `LiveArchiveEncoder.exe`。
+
+### 重定向输出固定 UTF-8（⚠ 行为变化）
+
+接终端时用系统码页是对的（中文 Windows 是 936）。**重定向时是错的**：
+`lae encode > log.txt`、脚本抓 stdout、CI 日志，拿到的都是机器 OEM 码页的中文字节，
+任何 UTF-8 读者只会看到乱码——e2e 里 `assert "来源" in stdout` 打在了一句完全正确的
+输出上。现在重定向的 stdout 一律 UTF-8（不带 BOM），交互输出保持原样。
+
+### 报告：跳过 ≠ 阶梯动了
+
+`motion` 这一行原来在"阶梯动了"**或**"丢过帧"时都打，用一句话说两件事。静态画面
+永远不会离开顶档，于是报告会说"motion ended at 13 fps, 8 decoded frames dropped"——
+听起来像是阶梯掐了一个它根本没碰过的素材。现在：
+
+- `motion` 只在阶梯真的动过时出现；
+- 启动追帧丢的帧单独一行 `skipped: … the ladder never moved`。
+
+丢帧本身是真的：3 秒静态板，39 槽、36 新帧、丢 3 帧、阶梯没动。原因是解码器在
+FFmpeg 还在开复用器时就开始填队列，而通道只有六帧深。这条留给"启动时序"自己一轮，
+报告先做到不撒谎。
 
 ### 配置改成 TOML（⚠ 行为变化）
 
@@ -86,6 +143,30 @@ M2 收尾的两件事：配置文件的格式定下来，以及程序终于开�
   [`v8-i18n.md`](v8-i18n.md)。
 - 新增测试：**两个语言的键集必须相同**（回退机制会把"漏译"变成中文里夹一句英文，不报错），
   以及 e2e 断言**两种语言打出的 FFmpeg 命令行逐字节相同**（翻译只能改措辞，不能改参数）。
+
+### 发布件只出依赖版
+
+不再出 NativeAOT 产物。四个包变两个：`win-x64.zip`、`linux-x64.tar.gz`，都是
+自包含单文件。理由：AOT 要多一套工具链（Windows 的 MSVC、Linux 的 clang 快照），
+编译慢一个数量级，换来的体积优势对这个尺寸的程序不值。打包脚本
+`tools/ci/pack-win.ps1` 与 `tools/ci/pack-linux.sh` 在出包前自己验三件事：
+`--version` 与源码一致、目录里只有一个文件、跑得起来。
+
+### CI 重新上线
+
+v8 开发期一直是"不跑 CI，靠两台测试机自证"。现在 `.github/workflows/v8.yml`
+在 `v8-milestone` 上跑 build + 单测（windows-latest / ubuntu-latest），SDK 从
+global.json 取。踩到的坑：`setup-dotnet` 会把 global.json 里的三段式
+`11.0.100-rc.3` 直接交给安装器，而源站只有四段构建号，于是 404——工作流里显式写
+`11.0.100-rc.3.26522.148`。
+
+e2e 仍然不进 CI：它按墙钟推进，两核共享 runner 会把时序断言变成偶发失败。它在
+本机和两台测试机上跑。
+
+### 测试
+
+单测 **312**（新增 13 条：`Lae.Tests.Core` 盖试跑计划的改写、`Lae.Tests.Encoding`
+用假 runner 盖预检的判断）、e2e **60**，零警告；AlmaLinux 9 容器内 312/312。
 
 ---
 
