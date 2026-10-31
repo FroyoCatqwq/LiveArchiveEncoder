@@ -260,6 +260,34 @@ public static partial class EncodeSession
 
         if (dryRun) return ExitCodes.Ok;
 
+        // Three frames of the real thing before the real thing.
+        //
+        // A live capture cannot be retried cheaply: by the time the encoder
+        // refuses a codec the clock has started and the broadcast has moved on.
+        // The trial turns that into one sentence and one second, and it is also
+        // where `--hwaccel auto` gets decided -- the plan comes back with the
+        // method this machine actually managed, or with none.
+        EncodePlan execution = plan;
+        try
+        {
+            PreflightResult trial = Preflight.Run(plan, ffmpeg, dependencies.Runner.Run, token);
+            execution = trial.Plan;
+
+            foreach (string note in trial.Notes)
+                terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exc)
+        {
+            // Nothing was recorded, so there is nothing to remember: a history
+            // row is a fact about an encode, and this one never happened.
+            terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = exc.Message }));
+            return ExitCodes.Failed;
+        }
+
         // The clock starts here rather than at the top of Run: the record is about
         // the encode, and a request that took a second to validate should not be
         // part of how long the encode took.
@@ -272,7 +300,7 @@ public static partial class EncodeSession
             try
             {
                 run = dependencies.Runner.Run(
-                    plan, ffmpeg,
+                    execution, ffmpeg,
                     (done, total) => progress.Report(done, total),
                     note => terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note })),
                     token);
@@ -309,7 +337,7 @@ public static partial class EncodeSession
         // line with its own exit code.
         Remember(
             dependencies.History,
-            BuildRecord(request, plan, run, presetId, RunOutcome.Ok, null, started, sourceBytes),
+            BuildRecord(request, execution, run, presetId, RunOutcome.Ok, null, started, sourceBytes),
             terminal);
 
         return post.Any
@@ -318,7 +346,7 @@ public static partial class EncodeSession
 
         void Stopped(string outcome, string message) => Remember(
             dependencies.History,
-            BuildRecord(request, plan, null, presetId, outcome, message, started, sourceBytes),
+            BuildRecord(request, execution, null, presetId, outcome, message, started, sourceBytes),
             terminal);
     }
 

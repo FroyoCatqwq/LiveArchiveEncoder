@@ -1,0 +1,67 @@
+name: CI (v8)
+
+# The v8 line lives on `v8-milestone` while `main` stays on v7. Nothing here
+# touches V7.slnx, and nothing in ci.yml touches V8.slnx: the two branches have
+# different SDK requirements (v8 pins .NET 11 rc through global.json) and a
+# shared workflow would have to pick one.
+on:
+  push:
+    branches: [v8-milestone]
+  pull_request:
+    branches: [v8-milestone]
+  workflow_dispatch:
+
+concurrency:
+  group: v8-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build + unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # global.json pins 11.0.100-rc.3 and is the only place that number lives;
+      # naming it again here is how the two drift apart. If the runner cannot
+      # resolve the pinned preview, this step fails instead of quietly building
+      # against a different SDK than the one the release is made with.
+      - name: Set up .NET (from global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: ./global.json
+          dotnet-quality: preview
+
+      - name: Show SDK
+        run: dotnet --version
+
+      # Two tests probe a real FFmpeg and skip without one. The 2.28 glibc floor
+      # the release promises is checked elsewhere (tools/ci/al9-build.sh in an
+      # AlmaLinux container); this job is about the code.
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg xz-utils
+
+      - name: Restore
+        run: dotnet restore LiveArchiveEncoder.V8.slnx
+
+      - name: Build
+        run: dotnet build LiveArchiveEncoder.V8.slnx -c Release --no-restore
+
+      # --solution, not a bare directory: `dotnet build` reports success even
+      # when a test project has compile errors, so the build step above cannot
+      # be trusted to mean "the tests compile".
+      - name: Test
+        run: dotnet test --solution LiveArchiveEncoder.V8.slnx -c Release --no-build
+
+      # The e2e suite under tools/e2e_v8 is deliberately not run here: it drives
+      # the realtime path against the wall clock, and a shared two-core runner
+      # turns wall-clock assertions into flaky ones. It runs on the two test
+      # machines instead; see docs/v8-architecture.md.

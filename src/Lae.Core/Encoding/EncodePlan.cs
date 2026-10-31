@@ -125,6 +125,116 @@ public sealed record EncodePlan
     }
 
     /// <summary>
+    /// The same plan, decoding through a different hardware method.
+    ///
+    /// <para>Exists for the one decision that can only be made by trying: whether
+    /// a hardware decoder works on this machine. The preflight asks, fails, and
+    /// rewrites the plan rather than making the caller rebuild every other
+    /// decision from the request. <c>off</c> removes the option entirely instead
+    /// of writing <c>-hwaccel off</c>, because FFmpeg treats an absent option and
+    /// an explicit "off" differently in the argument echo the user reads.</para>
+    /// </summary>
+    public EncodePlan WithHwaccel(string method)
+    {
+        List<string> args = [.. DecoderArgs];
+        bool off = string.Equals(method, "off", StringComparison.OrdinalIgnoreCase);
+
+        int at = args.IndexOf("-hwaccel");
+        if (at >= 0)
+        {
+            if (off) args.RemoveRange(at, 2);
+            else args[at + 1] = method;
+        }
+        else if (!off)
+        {
+            // Before -i, which is where a decoder-level option belongs; if there
+            // is no -i (a plan cannot exist without one) the front is the sane
+            // guess rather than an exception.
+            int input = args.IndexOf("-i");
+            args.InsertRange(input >= 0 ? input : 0, ["-hwaccel", method]);
+        }
+
+        return this with { DecoderArgs = args, Encode = Encode with { Hwaccel = method } };
+    }
+
+    /// <summary>Frames an encode has to reach before a trial is worth running.</summary>
+    public const int TrialFrames = 3;
+
+    /// <summary>
+    /// The same plan, cut down to a few frames and aimed at a throwaway file.
+    ///
+    /// <para>This is the preflight: run the real command shape over three frames
+    /// so a combination FFmpeg refuses -- an encoder that will not take this
+    /// pixel format, a muxer that will not hold this codec, a filter this build
+    /// does not have -- costs one sentence and a second, instead of a live
+    /// capture that dies after it has already recorded nothing. v7 did this with
+    /// a hand-built trial command; here the trial is the plan itself, which is
+    /// why no second argument builder exists to drift out of step.</para>
+    ///
+    /// <para>Both sides are capped. The decoder stops after
+    /// <see cref="TrialFrames"/> frames, and the encoder's <c>-t</c> is rewritten
+    /// to the same span -- without that, a run whose second input carries audio
+    /// would sit reading the source for the whole requested duration, because a
+    /// video pipe ending early does not end an output that still has an audio
+    /// stream to fill.</para>
+    /// </summary>
+    public EncodePlan ForTrial(string destination, int frames = TrialFrames)
+    {
+        if (frames < 1) throw new ArgumentOutOfRangeException(nameof(frames), frames, "a trial needs frames");
+
+        double span = frames / Fps;
+
+        List<string> decoder = [.. DecoderArgs];
+        int raw = PairAt(decoder, "-f", "rawvideo");
+        if (raw < 0)
+            throw new InvalidOperationException("this plan's decoder does not write rawvideo; cannot trial it");
+
+        decoder.InsertRange(raw, ["-frames:v", frames.ToString(CultureInfo.InvariantCulture)]);
+
+        // Retarget first: WritingTo rewrites the output path at the end of the
+        // encoder list, so building the trial's list from the original would put
+        // the real destination straight back (found by the test that checks the
+        // last argument).
+        EncodePlan retargeted = WritingTo(destination);
+
+        List<string> encoder = StripTimedLimit([.. retargeted.EncoderArgs]);
+        int format = PairAt(encoder, "-f", Muxer);
+        if (format < 0)
+            throw new InvalidOperationException("this plan's encoder does not name the muxer; cannot trial it");
+
+        encoder.InsertRange(format, ["-t", ArgsBuilder.FloatArg(span)]);
+
+        return retargeted with
+        {
+            DecoderArgs = decoder,
+            EncoderArgs = encoder,
+            SpanSeconds = span,
+        };
+    }
+
+    /// <summary>Removes every <c>-t</c> pair, so the trial can state its own.</summary>
+    private static List<string> StripTimedLimit(List<string> args)
+    {
+        for (int i = args.Count - 2; i >= 0; i--)
+        {
+            if (args[i] == "-t") args.RemoveRange(i, 2);
+        }
+
+        return args;
+    }
+
+    /// <summary>Index of an option and its value, or -1.</summary>
+    private static int PairAt(List<string> args, string name, string value)
+    {
+        for (int i = 0; i + 1 < args.Count; i++)
+        {
+            if (args[i] == name && args[i + 1] == value) return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
     /// Works out how to encode. Never throws for user input: everything that is
     /// wrong comes back in <see cref="Problems"/>, because a CLI has to report a
     /// bad request as exit 2 with a sentence, not as a stack trace.
@@ -296,7 +406,7 @@ public sealed record EncodePlan
         bool hasAudio = source.HasAudio && request.Encode.AudioEncoder.HasText;
 
         List<string> decoder = BuildDecoderArgs(
-            request, source, filter, transport, span, problems);
+            request, filter, transport, span);
 
         List<string> encoderArgsOut = BuildEncoderArgs(
             request, source, encoder, transport, width, height, hasAudio, carries, muxer, span ?? 0, destination, problems);
@@ -366,8 +476,8 @@ public sealed record EncodePlan
     }
 
     private static List<string> BuildDecoderArgs(
-        EncodeRequest request, SourceInfo source, VideoFilter filter,
-        string transport, double? span, List<string> problems)
+        EncodeRequest request, VideoFilter filter,
+        string transport, double? span)
     {
         EncodeDefaults e = request.Encode;
         var cmd = new List<string> { "-hide_banner", "-loglevel", "error" };
@@ -377,13 +487,14 @@ public sealed record EncodePlan
         // before -i.
         cmd.AddRange(ArgsBuilder.DitherArgs(e.Dither, transport));
 
+        // "auto" is passed through rather than refused: FFmpeg already means "use
+        // a hardware decoder if this machine has one, otherwise read in software"
+        // by it, and the preflight is what turns that into a decided answer --
+        // it runs three frames with the option, and falls back to "off" when the
+        // hardware path fails. Refusing here would have made the user supply a
+        // method name they have no way of knowing.
         if (!string.Equals(e.Hwaccel, "off", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.Equals(e.Hwaccel, "auto", StringComparison.OrdinalIgnoreCase))
-                problems.Add("--hwaccel auto needs device probing, which is not wired yet; name a method or use off");
-            else
-                cmd.AddRange(["-hwaccel", e.Hwaccel]);
-        }
+            cmd.AddRange(["-hwaccel", e.Hwaccel]);
 
         if (request.StartSeconds > 0)
             cmd.AddRange(["-ss", ArgsBuilder.FloatArg(request.StartSeconds)]);

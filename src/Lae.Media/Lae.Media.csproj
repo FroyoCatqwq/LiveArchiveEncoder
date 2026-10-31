@@ -31,37 +31,32 @@
   </ItemGroup>
 
   <!--
-    Pinned on purpose, and the pin is the whole reason these two lines are not
-    one:
+    Supported Linux baseline: glibc 2.34, i.e. RHEL/AlmaLinux/Rocky 9, Debian
+    12, Ubuntu 22.04 and newer. Decided 2026-10-31; v7's 2.17/2.28 floors are
+    gone with it. That decision is what lets the SQLite native library be
+    current instead of held back for an eight-year-old distribution.
 
-    * Microsoft.Data.Sqlite asks for a SQLitePCLRaw version whose bundled native
-      library decides the glibc floor. Measured with `objdump -T | grep GLIBC_`:
+    Why the three lines and not one:
 
-        2.1.10 -> 2.28   SQLite 3.46.1
-        2.1.11 -> 2.28   SQLite 3.49.1   (CVE-2025-6965, fixed in 3.50.2)
-        2.1.12 -> 2.34   SQLite 3.53.3
-        2.1.13 -> 2.34   SQLite 3.53.3
-        2.1.14 -> 2.28   SQLite 3.54.0   <- both constraints at once
+    * Microsoft.Data.Sqlite brings the ADO.NET layer and asks for a
+      SQLitePCLRaw core version.
+    * SQLitePCLRaw.bundle_e_sqlite3 picks the provider + native pairing.
+    * SQLitePCLRaw.lib.e_sqlite3 is the native library itself, and its version
+      number tracks SQLite: 3.53.4.1 ships SQLite 3.53.4, which is past the
+      3.50.2 fix for CVE-2025-6965 / GHSA-2m69-gcr7-jv3q. Pinned explicitly so
+      the engine version appears in the diff when it moves.
 
-      That floor is not academic: 2.34 means the history database fails to load
-      on AlmaLinux, Rocky and RHEL 8 (one of this project's two test machines,
-      and a normal home-server distribution). 2.1.14 is the only release that
-      keeps 2.28 *and* carries a SQLite newer than 3.50.2, which is what
-      GHSA-2m69-gcr7-jv3q / CVE-2025-6965 asks for. The advisory still says
-      "no patched version" because it tracks the package, not the bundled
-      engine.
+    History: 2.1.11 was pinned for glibc 2.28 and shipped SQLite 3.49.1, which
+    is the vulnerable one; 2.1.12/2.1.13 needed 2.34; 2.1.14 was the last
+    release that kept 2.28 (SQLite 3.54.0). With the floor raised none of that
+    matters any more: take the newest.
 
-    * The bundle reference is here so the version that decides that is visible in
-      this file. Without it, bumping Microsoft.Data.Sqlite would silently raise
-      the glibc floor again, and the failure would show up as a missing .so in a
-      user's log rather than as a diff.
-
-    Verified on glibc 2.28 (AlmaLinux 8.10, host) and 2.34 (AlmaLinux 9.8,
-    container) before bumping either number.
+    Verify a bump inside the AlmaLinux 9 container: tools/ci/al9-build.sh.
   -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.14" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0-rc.3.26522.148" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.4.1-pre1" />
   </ItemGroup>
 
   <ItemGroup>
