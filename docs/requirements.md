@@ -1,5 +1,10 @@
 # 系统与硬件需求
 
+> **本文描述的是 v7（`main`）。** v8 的底线不同：**Linux 要 glibc ≥ 2.34**
+> （RHEL / AlmaLinux / Rocky 9、Debian 12、Ubuntu 22.04 起），Windows 仍是
+> 10 1809 / Server 2019 起；v8 只发**依赖版自包含单文件**，不出 AOT。
+> 依据见 `CHANGELOG.md` 的 `v8.0.0-m2.2` 一节。
+
 一句话版本：**程序本身很轻，门槛在 FFmpeg。**
 
 LiveArchiveEncoder 自己不碰像素：解码与编码全部由 FFmpeg 子进程完成，程序负责帧槽节流、码率控制、
