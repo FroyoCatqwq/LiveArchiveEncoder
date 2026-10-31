@@ -32,6 +32,10 @@ export DOTNET_NOLOGO=1
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export ARTIFACTS=/home/ci/artifacts
 
+# FFmpeg from BtbN (installed by al9-setup.sh), not from the distribution: two
+# unit tests probe a real binary, and which binary they probe matters.
+export PATH="/home/ci/ffmpeg/bin:$PATH"
+
 mkdir -p "$DOTNET_CLI_HOME" "$NUGET_PACKAGES" "$ARTIFACTS"
 
 # The mount point doubles as the working copy: /src is the host checkout.

@@ -27,15 +27,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # global.json pins 11.0.100-rc.3 and is the only place that number lives;
-      # naming it again here is how the two drift apart. If the runner cannot
-      # resolve the pinned preview, this step fails instead of quietly building
-      # against a different SDK than the one the release is made with.
-      - name: Set up .NET (from global.json)
+      # The four-part build number, not global.json's "11.0.100-rc.3".
+      #
+      # setup-dotnet reads the version out of global.json and hands it to
+      # dotnet-install, which then asks for
+      # .../Sdk/11.0.100-rc.3/dotnet-sdk-11.0.100-rc.3-linux-x64.tar.gz -- a 404,
+      # because the feed only publishes the full build number. `dotnet-quality`
+      # does not help: it is ignored for a three-part version with a prerelease
+      # label. So the number is repeated here, and the two places have to be
+      # bumped together (global.json stays the source for local builds).
+      - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          global-json-file: ./global.json
-          dotnet-quality: preview
+          dotnet-version: 11.0.100-rc.3.26522.148
 
       - name: Show SDK
         run: dotnet --version
