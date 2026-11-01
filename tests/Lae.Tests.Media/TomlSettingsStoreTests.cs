@@ -276,6 +276,60 @@ public sealed class TomlSettingsStoreTests
     }
 
     /// <summary>
+    /// Three presets survive a save, and removing the middle one really removes it.
+    ///
+    /// <para>Every preset in an array of tables is its own header, so a block
+    /// boundary found by "the next line starting with a bracket" stops at the second
+    /// preset. That cost every preset after the first, on every save, while the
+    /// command printed "stored". The test above only ever went from zero presets to
+    /// one, which is exactly the path the bug was not on.</para>
+    /// </summary>
+    [Test]
+    public async Task EveryPresetSurvivesASaveAndRemovalRemovesTheRightOne()
+    {
+        string folder = NewFolder();
+        try
+        {
+            var location = SettingsLocation.For(folder);
+            var store = new TomlSettingsStore(location);
+
+            // Three separate saves, which is what three `lae preset add` calls do:
+            // the second one is the first to run against an existing block.
+            foreach (string id in new[] { "a", "b", "c" })
+            {
+                SettingsDocument current = store.Load();
+                SettingsDocument next = current with
+                {
+                    CustomPresets =
+                    [
+                        .. current.CustomPresets,
+                        new CustomPreset { Id = id, Encoder = "mpeg4", LiveQv = 6 },
+                    ],
+                };
+
+                await Assert.That(store.TrySave(next)).IsNull();
+            }
+
+            SettingsDocument afterAdds = new TomlSettingsStore(location).Load();
+            await Assert.That(string.Join(",", afterAdds.CustomPresets.Select(p => p.Id))).IsEqualTo("a,b,c");
+
+            SettingsDocument withoutB = afterAdds with
+            {
+                CustomPresets = [.. afterAdds.CustomPresets.Where(p => p.Id != "b")],
+            };
+
+            await Assert.That(store.TrySave(withoutB)).IsNull();
+
+            SettingsDocument afterRemove = new TomlSettingsStore(location).Load();
+            await Assert.That(string.Join(",", afterRemove.CustomPresets.Select(p => p.Id))).IsEqualTo("a,c");
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// First read of a folder that has only a v7 file: the document is converted,
     /// written as <c>settings.toml</c>, the v7 file stays where it is, and a copy is
     /// kept so the conversion can be inspected later.

@@ -80,11 +80,12 @@ public static class ToolchainSource
             bool exists = present?.Invoke(explicitPath) ?? true;
             if (!exists) return null;
 
-            // Either the executable itself or the folder holding it; both are
-            // things a person types.
-            bool looksLikeTool = explicitPath.EndsWith(
-                ToolchainLayout.ToolName("ffmpeg"), StringComparison.OrdinalIgnoreCase);
-            return looksLikeTool ? Path.GetDirectoryName(explicitPath) : explicitPath;
+            // Either the executable itself or the folder holding it; both are things
+            // a person types. Both spellings are accepted on both platforms: a
+            // settings file written on one machine may name the other platform's
+            // executable, and deciding by *this* machine's convention would then read
+            // a file path as a folder.
+            return LooksLikeTool(explicitPath) ? Path.GetDirectoryName(explicitPath) : explicitPath;
         }
 
         if (configRoot.HasText && FfmpegCatalog.Find(toolchain.FfmpegSource) is { } dist)
@@ -96,4 +97,8 @@ public static class ToolchainSource
 
         return null;
     }
+
+    private static bool LooksLikeTool(string path)
+        => path.EndsWith("ffmpeg", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith("ffmpeg.exe", StringComparison.OrdinalIgnoreCase);
 }
