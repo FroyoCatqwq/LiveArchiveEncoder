@@ -32,6 +32,14 @@ public sealed class ChildProcess : IDisposable
     private readonly DiagnosticTap _errors;
     private bool _disposed;
 
+    /// <summary>What the child answered, once it has. Guarded by <see cref="_exited"/>.</summary>
+    private int _exitCode = StillRunning;
+
+    private volatile bool _exited;
+
+    /// <summary>What <see cref="ExitCode"/> says while the child is still running.</summary>
+    private const int StillRunning = -1;
+
     private ChildProcess(Process process, DiagnosticTap errors, Stream? output, Stream? input)
     {
         _process = process;
@@ -49,22 +57,66 @@ public sealed class ChildProcess : IDisposable
     /// <summary>The last few lines the child wrote to standard error.</summary>
     public string Diagnostics(int lines = 8) => _errors.TailText(lines);
 
-    /// <summary>Whether the child has finished, without throwing if it just did.</summary>
+    /// <summary>
+    /// Whether the child has finished, without throwing if it just did.
+    ///
+    /// <para><c>WaitForExit(0)</c> asks the operating system once and caches the
+    /// answer. The old version called <c>Refresh()</c> on every read, and the pump
+    /// reads this twice per slot -- sixty refreshes a second at 30 fps, each one
+    /// a full re-read of the process table for an answer that changes twice per
+    /// run.</para>
+    /// </summary>
     public bool HasExited
     {
         get
         {
-            _process.Refresh();
-            return _process.HasExited;
+            if (_exited) return true;
+
+            try
+            {
+                if (!_process.WaitForExit(0)) return false;
+            }
+            catch (Exception exc) when (exc is ObjectDisposedException or InvalidOperationException)
+            {
+                // Disposed under us -- .NET answers "no process is associated with
+                // this object" with InvalidOperationException, not the disposed one.
+                // The only thing that disposes is Dispose, and that kills the child
+                // first, so "gone" is the honest answer; a teardown path that logs
+                // state should not throw.
+                return true;
+            }
+
+            Remember();
+            return true;
         }
     }
 
-    public int ExitCode
+    /// <summary>
+    /// The child's exit code, or -1 while it is still running.
+    ///
+    /// <para>-1 rather than an exception because of who asks: the pump's per-slot
+    /// check and the chain's failure path both want "did it fail?" and neither
+    /// wants to wrap the question in a try. <c>Process.ExitCode</c> throws
+    /// <c>InvalidOperationException</c> when the child is alive, so the old
+    /// property could only be read safely after a short-circuit at the call site
+    /// -- a rule nothing enforced.</para>
+    /// </summary>
+    public int ExitCode => HasExited ? _exitCode : StillRunning;
+
+    /// <summary>Read the code once, and keep it: a disposed <c>Process</c> forgets.</summary>
+    private void Remember()
     {
-        get
+        _exited = true;
+
+        try
         {
-            _process.Refresh();
-            return _process.ExitCode;
+            _exitCode = _process.ExitCode;
+        }
+        catch (Exception exc) when (exc is InvalidOperationException or ObjectDisposedException)
+        {
+            // No process handle to ask (disposed under us). -1 is the honest
+            // answer: not "success", not a fabricated code.
+            _exitCode = StillRunning;
         }
     }
 
@@ -105,8 +157,7 @@ public sealed class ChildProcess : IDisposable
     {
         try
         {
-            _process.Refresh();
-            if (!_process.HasExited) _process.Kill(entireProcessTree: true);
+            if (!HasExited) _process.Kill(entireProcessTree: true);
         }
         catch (Exception exc) when (exc is InvalidOperationException or System.ComponentModel.Win32Exception
                                         or NotSupportedException)
@@ -138,6 +189,9 @@ public sealed class ChildProcess : IDisposable
             _process.WaitForExit(5000);
             throw new InvalidOperationException(timeoutMessage);
         }
+
+        // It is gone: take the code now, while the handle is still ours to ask.
+        Remember();
     }
 
     public void Dispose()

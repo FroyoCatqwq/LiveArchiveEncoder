@@ -38,15 +38,27 @@ public static partial class EncodeSession
         EncodeDependencies dependencies,
         ITerminal terminal,
         bool dryRun,
-        CancellationToken token)
+        CancellationToken token,
+        IEventSink? events = null)
     {
+        IMessages messages = dependencies.Messages;
+
+        // One sink for the whole command, because `--json-events` is one stream
+        // for the whole command: preflight warnings, capture progress and the
+        // chain's notes all belong to the same run.
+        //
+        // A caller may hand its own sink in (the JSON renderer will be the first
+        // to); otherwise this call owns the terminal one and disposes it. Only
+        // what was created here is disposed here -- a supplied sink belongs to
+        // whoever supplied it.
+        using var owned = events is null ? new TerminalEventSink(terminal, messages) : null;
+        IEventSink sink = events ?? owned!;
+
         // --recompress-only is a different job from a capture: no encoder to choose,
         // no span to pace, no video plan. Branching before BuildRequest keeps the
         // two from sharing state they should not.
         if (overrides.RecompressOnly)
-            return RunChainOnly(input, overrides, settings, dependencies, terminal, dryRun, token);
-
-        IMessages messages = dependencies.Messages;
+            return RunChainOnly(input, overrides, settings, dependencies, terminal, sink, dryRun, token);
 
         // The request comes first, because it is the only step that can be wrong
         // without touching the machine. Reporting "no such encoder" before "there
@@ -98,12 +110,11 @@ public static partial class EncodeSession
             return track.Failure;
         }
 
-        if (track.Note is { } note)
-            terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
+        if (track.Note is { } note) sink.Warn(note);
 
         try
         {
-            return Execute(track.Request, source, ffmpeg, overrides.Preset, dependencies, terminal, dryRun, token);
+            return Execute(track.Request, source, ffmpeg, overrides.Preset, dependencies, terminal, sink, dryRun, token);
         }
         finally
         {
@@ -207,6 +218,7 @@ public static partial class EncodeSession
         string? presetId,
         EncodeDependencies dependencies,
         ITerminal terminal,
+        IEventSink sink,
         bool dryRun,
         CancellationToken token)
     {
@@ -231,8 +243,7 @@ public static partial class EncodeSession
 
         // Notes are commentary, not the answer, so they go to stderr: a dry run
         // piped to a file has to contain the two command lines and nothing else.
-        foreach (string note in plan.Notes)
-            terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
+        foreach (string note in plan.Notes) sink.Warn(note);
 
         if (!plan.IsRunnable)
         {
@@ -249,8 +260,7 @@ public static partial class EncodeSession
         // full-length capture that then ends in a refusal.
         RecompressPlan post = RecompressPlan.Create(request.Encode.Recompress, plan.DestinationPath, messages);
 
-        foreach (string note in post.Notes)
-            terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
+        foreach (string note in post.Notes) sink.Warn(note);
 
         if (!post.IsRunnable)
         {
@@ -273,11 +283,11 @@ public static partial class EncodeSession
         EncodePlan execution = plan;
         try
         {
+            sink.Stage(Phases.Preflight);
             PreflightResult trial = Preflight.Run(plan, ffmpeg, dependencies.Runner.Run, token);
             execution = trial.Plan;
 
-            foreach (string note in trial.Notes)
-                terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
+            foreach (string note in trial.Notes) sink.Warn(note);
         }
         catch (OperationCanceledException)
         {
@@ -298,40 +308,40 @@ public static partial class EncodeSession
         long? sourceBytes = SourceSize(request.SourcePath);
 
         LiveRun run;
-        using (var progress = new LiveProgress(terminal, messages))
-        {
-            try
-            {
-                run = dependencies.Runner.Run(
-                    execution, ffmpeg,
-                    (done, total) => progress.Report(done, total),
-                    note => terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note })),
-                    token);
-            }
-            catch (OperationCanceledException)
-            {
-                // Ctrl+C is not a failure and the history must not call it one.
-                // Both paths rethrow: the record is a side note, the exit code and
-                // the cleanup belong to whoever caught this.
-                Stopped(RunOutcome.Cancelled, "stopped by the user");
-                throw;
-            }
-            catch (Exception exc)
-            {
-                Stopped(RunOutcome.Failed, exc.Message);
-                throw;
-            }
+        sink.Stage(Phases.Capture);
 
-            progress.Finish(
-                messages.Format("encode.result.framesWritten", new
-                {
-                    seconds = Number(run.Pump.Seconds, "F1").PadLeft(7),
-                    frames = run.Pump.Frames,
-                })
-                + (run.Pump.Repeated > 0
-                    ? messages.Format("encode.result.framesRepeated", new { repeated = run.Pump.Repeated })
-                    : ""));
+        try
+        {
+            run = dependencies.Runner.Run(execution, ffmpeg, sink.Progress, sink.Warn, token);
         }
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C is not a failure and the history must not call it one.
+            // Both paths rethrow: the record is a side note, the exit code and
+            // the cleanup belong to whoever caught this.
+            Stopped(RunOutcome.Cancelled, "stopped by the user");
+            throw;
+        }
+        catch (Exception exc)
+        {
+            Stopped(RunOutcome.Failed, exc.Message);
+            throw;
+        }
+
+        // Replaces the progress line, and is the one line a human reads before the
+        // report below. `artifacts` and `elapsed` are for the L2 renderer: a
+        // machine wants the file and the clock, not the sentence.
+        sink.Done(
+            messages.Format("encode.result.framesWritten", new
+            {
+                seconds = Number(run.Pump.Seconds, "F1").PadLeft(7),
+                frames = run.Pump.Frames,
+            })
+            + (run.Pump.Repeated > 0
+                ? messages.Format("encode.result.framesRepeated", new { repeated = run.Pump.Repeated })
+                : ""),
+            [run.OutputPath],
+            DateTimeOffset.UtcNow - started);
 
         PrintResult(run, terminal, messages);
 
@@ -344,7 +354,7 @@ public static partial class EncodeSession
             terminal);
 
         return post.Any
-            ? RunChain(post, ffmpeg, plan.SpanSeconds, dependencies, terminal, token)
+            ? RunChain(post, ffmpeg, plan.SpanSeconds, dependencies, terminal, sink, token)
             : ExitCodes.Ok;
 
         void Stopped(string outcome, string message) => Remember(
@@ -383,4 +393,19 @@ public static partial class EncodeSession
     public static string? ToolchainDirectory(SettingsDocument settings, string? configRoot)
         => ToolchainSource.Folder(
             settings.Toolchain, configRoot, path => File.Exists(path) || Directory.Exists(path));
+
+    /// <summary>
+    /// The phases of a run, as the event stream spells them.
+    ///
+    /// <para>Deliberately short. The moments after the recording reuse
+    /// <see cref="Lae.Core.Plugins.PluginStages"/> instead of restating them here:
+    /// <c>between-passes</c> is the same moment whether a hop or a plugin runs in
+    /// it, and two spellings for one moment is how the plugin host and the report
+    /// drift apart.</para>
+    /// </summary>
+    internal static class Phases
+    {
+        internal const string Preflight = "preflight";
+        internal const string Capture = "capture";
+    }
 }

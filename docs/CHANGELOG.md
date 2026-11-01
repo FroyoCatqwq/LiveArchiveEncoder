@@ -18,6 +18,100 @@
 
 ---
 
+## v8.0.0-m2.4-canary（2026-11-01）
+
+M3 之前的三处地基。三件都不是用户看得见的功能，都是"现在不改，插件一接进来就得连改三遍"的东西。
+
+### 插件阶段只剩三个（⚠ 配置语义）
+
+`PluginRegistration` 的注释写 `pre-encode / post-encode / between-passes`，蓝图握手里写的是
+`post-encode / between-passes / after-chain`——同一份协议、两套词，而其中一个是这台机器
+**永远做不到**的：直播采集的源是流，不是文件，没有"编码前把成品交给插件"这种时刻。
+
+定稿三个，落在 `Lae.Core/Plugins/PluginStages.cs`，握手、`settings.toml`、事件流共用：
+`post-encode` / `between-passes` / `after-chain`。
+
+`[[plugins]]` 的 `stages` 现在会归一化（去空白、小写、去重），**但认不出的名字保留**，
+由 `PluginRegistration.UnknownStages` 报出来。静默丢弃的后果是"插件从不运行"，而输出里
+没有任何一句话能回答为什么。
+
+### 二次压缩链的执行器不再认识 FFmpeg
+
+part 文件、Promote、每趟超时、取消、失败编号这套逻辑原来长在 `RecompressRun` 里，而它手里
+只有 `RecompressStep.Command(ffmpeg, part)`——插件 hop 塞不进这个形状，于是只剩"再写一份"
+这条路，而两份 part 逻辑就是两份开始漂移的逻辑（`DiagnosticTap` 那次就是这么来的）。
+
+现在分两层：`PostHop`（编号 / 标签 / 输出 / `Produce` 委托）与 `PostChainRun`（唯一一份失败
+策略），`RecompressRun` 退化成适配器。行为没变——错误串逐字节相同，测试直接钉住
+"失败跳留下什么、丢掉什么"。插件 hop 此后只要实现"从 input 写 part"。
+
+### 输出收敛成一条事件流
+
+`IEventSink`：`Stage` / `Progress` / `Warn` / `Done`。`TerminalEventSink` 把它渲染成今天的样子
+（进度行、`note:` 前缀、`frames written` 一行），所以**屏幕上没有任何变化**，e2e 一字节没动。
+
+`EncodeSession.Run` 多了一个可选的 sink 参数：不给就用终端渲染器（并由它释放），给了就
+**替换**它——`--json-events` 因此是第二个渲染器，而不是第二套 `ErrorLine` 调用。阶段名与
+插件位置共用 `PluginStages` 的词：`between-passes` 在两边是同一个时刻。
+
+### `Core` 退回纯领域，泵搬进 `Encoding`（⚠ 内部结构）
+
+`CoreStaysPure` 原本只禁 `Console`/`File`/`Process` 这几个词，所以"Core 里每条规则都能无 fixture 测"
+这句话，对全程序唯一的那个线程并不成立——`FramePump` 就在 Core 里，起线程、读 `Stopwatch`、
+拿 `CancellationTokenSource`，一样不落。行数也说明了同一件事：Core 7,680 行，Encoding 625 行。
+
+搬的是**执行**，不是**决定**：
+
+| 搬进 `Lae.Encoding/Live` | 留在 `Lae.Core/Live` |
+| --- | --- |
+| `FramePump`（537 行：线程、截止时间、阶梯落地） | `FpsLadder`（238 行：降不降、降到几帧） |
+| `FrameChannel`（143 行：帧握手） | — |
+| `FineTimer`（104 行：1 ms 定时 + 睡/旋混合） | — |
+
+阶梯必须留下：`EncodePlan.BuildLadder()` 在规划阶段就要把它算出来，而 Core 不能引用 Encoding。
+搬完 Core 从 7,680 行降到约 6,950，Encoding 从 625 涨到约 1,470——不是把代码变小，是把它放对楼层。
+
+规矩同步收紧，否则这堆东西会漂回去：`CoreStaysPure` 增加
+`Thread`/`Stopwatch`/`Timer`/`CancellationTokenSource`/`SemaphoreSlim`；
+`OnlyThePipelineStartsThreads` 的扫描范围加上 `Lae.Encoding`，只放行 `FramePump.cs`——泵搬进去了，
+它的邻居也一起被看住。测试跟着代码走：`FramePumpTests`、`FrameChannelTests` 从 `Lae.Tests.Core`
+移到 `Lae.Tests.Encoding`，`FpsLadderTests` 留下，单测总数不变。
+
+### 泵不再在开文件的时候丢画面，丢帧也分得清了
+
+编码器的第一次写入要开复用器、写文件头，几十到几百毫秒；这期间生产者一直按 `1/fps` 往六帧深的
+队列里塞，塞满就覆盖最旧的。13 fps 的素材每次运行丢 **3~8 帧**，而报告把这些帧记成"阶梯跳过的"
+——阶梯一次都没动过。
+
+- 生产者发布第一帧后**等消费者写出第一帧**再起节拍（`Capture.Release` / `WaitForRelease`），
+  而且节拍基准从放行时刻算起。沿用原来的基准会把等待的时间当成"错过的槽"，生产者转头加速追赶，
+  正好把它刚被叫停的那件事做一遍。
+- `PumpStats.Dropped` 拆成 `DroppedAtStart` 与 `DroppedWhileRunning`；`Dropped` 仍是两者之和
+  （历史行只要一个数）。
+- 报告里 `motion` 行只报运行时丢帧；阶梯动过而仍有启动丢帧时，多一行 `startup`。没有阶梯时
+  那行 `skipped` 的数字和文案一字未改。
+
+回归测试：首帧写入故意卡 120 ms，200 fps × 40 槽。旧实现在这里丢 18 帧，新实现 0 帧。
+
+### 三个读进程状态的小毛病
+
+- **`ChildProcess.ExitCode` 在子进程还活着时会抛**：`Process.ExitCode` 的规则是没退出就抛
+  `InvalidOperationException`，原来的封装直接透传，全靠调用点先问 `HasExited` 兜着。现在未退出
+  返回 −1，并带一条测试钉住。同时把退出码读一次就记住：原来每次读都 `Refresh()`，泵每槽读两次，
+  30 fps 下是每秒六十次重读进程表。
+- **`PipeLines.Dispose` 同步等异步**：`Task.Wait(2s)` 写在 `Dispose` 里。控制台程序没事，放进任何
+  有同步上下文的宿主就是死锁的经典形状。现在只 `Cancel()`，令牌源交给读任务收尾释放——就地释放会
+  和下一轮 `_stop.Token` 撞上，抛出的 `ObjectDisposedException` 正好被"吞掉管道异常"的同一个
+  过滤器吃掉，于是看起来"没事"。
+
+### `EncodePlan.Create` 不抛的承诺有测试了
+
+扫描里那条"仍有一条抛路径"在 `764c5bd` 已经修掉（`ChooseTransportPixFmt` 改抛带键的
+`RefusalException`，`Create` 把它收进 `Problems`），但没有任何测试钉着它。补一条：编码器声明的
+像素格式本版本一个都不认识 → 计划成立、`IsRunnable` 为假、句子点名那个编码器。
+
+---
+
 ## v8.0.0-m2.3-canary（2026-11-01）
 
 `lae toolchain` 把"程序需要 FFmpeg，你自己去找"这件事补完了；同时把一整轮静态审查翻出来

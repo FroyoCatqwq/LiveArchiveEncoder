@@ -3,42 +3,24 @@ using Lae.Media;
 
 namespace Lae.Encoding;
 
-/// <summary>What the post-encode chain produced.</summary>
-public sealed record RecompressOutcome
-{
-    /// <summary>The file to hand on: the last hop that was written, or the live product.</summary>
-    public required string FinalPath { get; init; }
-
-    /// <summary>Every hop that was written, in order.</summary>
-    public required IReadOnlyList<string> Written { get; init; }
-
-    /// <summary>1-based number of the hop that failed, or 0.</summary>
-    public int FailedStep { get; init; }
-
-    /// <summary>Why it stopped, or null when the chain finished.</summary>
-    public string? Error { get; init; }
-
-    public bool Failed => Error is not null;
-}
-
 /// <summary>
 /// Runs the hops <see cref="RecompressPlan"/> worked out: one FFmpeg child per
 /// hop, each reading the hop before.
 ///
-/// <para>Failure policy, and it is the whole point of doing this after the live
-/// pass rather than during it: <b>the recording is never touched</b>. A hop that
-/// exits badly removes its own part product, reports which hop it was, and stops
-/// the chain; whatever already finished stays on disk. A second pass that cannot
-/// run is not a reason to throw away a twenty-minute capture.</para>
+/// <para>Only the FFmpeg half lives here now. The chain's failure policy -- never
+/// touch the input, discard a failed hop's part product, stop at the first
+/// failure, keep what already finished, treat an interrupt as an interrupt --
+/// belongs to <see cref="PostChainRun"/> and is shared with every other kind of
+/// hop. It was written twice on purpose only once: the second copy would have
+/// been the plugin's, and the two would have disagreed about promoting.</para>
 ///
-/// <para>Each hop writes <c>name.part.ext</c> and is renamed only once it has
-/// succeeded, the same rule every other write path follows -- FFmpeg's <c>-y</c>
-/// truncates its destination as it opens it, so writing straight to the real name
-/// would destroy the good copy the moment a pass failed halfway.</para>
+/// <para>What is left is the part that really is about FFmpeg: a plan's step
+/// becomes a command line, and the child is given a deadline derived from the
+/// recording's length.</para>
 /// </summary>
 public static class RecompressRun
 {
-    public static RecompressOutcome Run(
+    public static PostChainOutcome Run(
         RecompressPlan plan,
         string ffmpeg,
         TimeSpan perStepBudget,
@@ -48,68 +30,35 @@ public static class RecompressRun
         if (!plan.IsRunnable)
             throw new InvalidOperationException("the recompress plan has problems; nothing was started");
 
-        var written = new List<string>();
-        string current = plan.LivePath;
+        return PostChainRun.Run(Hops(plan, ffmpeg, perStepBudget), plan.LivePath, warn, token);
+    }
+
+    private static List<PostHop> Hops(RecompressPlan plan, string ffmpeg, TimeSpan budget)
+    {
+        var hops = new List<PostHop>(plan.Steps.Count);
 
         foreach (RecompressStep step in plan.Steps)
         {
-            token.ThrowIfCancellationRequested();
-
-            string part = PartFile.PathFor(step.OutputPath);
-            string? folder = Path.GetDirectoryName(step.OutputPath);
-            if (!string.IsNullOrEmpty(folder)) Directory.CreateDirectory(folder);
-
-            // Same rule as the live pass: a part product left by a run that was
-            // killed from outside is ours and is disposable. FFmpeg also gets -y,
-            // so a leftover can never turn into "already exists".
-            if (PartFile.Discard(part) is { } leftover) warn?.Invoke(leftover);
-
-            string? error;
-            try
+            hops.Add(new PostHop
             {
-                error = RunStep(step, ffmpeg, part, perStepBudget, token);
-            }
-            catch (OperationCanceledException)
-            {
-                // An interrupt is not a hop failure. Its part product goes, and
-                // the cancel travels on so the program can answer with 130.
-                PartFile.Discard(part);
-                throw;
-            }
+                Number = step.Number,
+                // Reads as the subject of the runner's failure sentence:
+                // "pass 2 (webm) failed: FFmpeg exited with code 1".
+                Label = $"pass {step.Number} ({step.Container})",
+                OutputPath = step.OutputPath,
 
-            if (error is not null)
-            {
-                PartFile.Discard(part);
-                return new RecompressOutcome
-                {
-                    FinalPath = current,
-                    Written = written,
-                    FailedStep = step.Number,
-                    Error = $"pass {step.Number} ({step.Container}) failed: {error}",
-                };
-            }
-
-            try
-            {
-                PartFile.Promote(part, step.OutputPath);
-            }
-            catch (Exception exc) when (exc is InvalidOperationException or IOException or UnauthorizedAccessException)
-            {
-                PartFile.Discard(part);
-                return new RecompressOutcome
-                {
-                    FinalPath = current,
-                    Written = written,
-                    FailedStep = step.Number,
-                    Error = $"pass {step.Number} ({step.Container}) left nothing to keep: {exc.Message}",
-                };
-            }
-
-            written.Add(step.OutputPath);
-            current = step.OutputPath;
+                // The plan chains each step's InputPath to the previous step's
+                // OutputPath, and the runner hands over what was actually
+                // written. Re-stamping it makes the runner -- not the plan -- the
+                // source of truth about what a hop reads, which is the only thing
+                // a plugin hop can offer. The command line is unchanged: the two
+                // paths are equal by construction.
+                Produce = (input, part, token) =>
+                    RunStep(step with { InputPath = input }, ffmpeg, part, budget, token),
+            });
         }
 
-        return new RecompressOutcome { FinalPath = current, Written = written };
+        return hops;
     }
 
     /// <summary>One hop. Returns the reason it cannot be kept, or null on success.</summary>

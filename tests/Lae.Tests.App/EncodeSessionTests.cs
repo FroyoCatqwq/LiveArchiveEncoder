@@ -1,4 +1,4 @@
-using Lae.App;
+﻿using Lae.App;
 using Lae.App.Ui;
 using Lae.Core;
 using Lae.Core.Settings;
@@ -64,10 +64,13 @@ public sealed class EncodeSessionTests
         public bool Ran { get; private set; }
 
         /// <summary>What the post chain should answer; the default pretends every hop succeeded.</summary>
-        public Func<RecompressPlan, RecompressOutcome>? OnRecompress { get; init; }
+        public Func<RecompressPlan, PostChainOutcome>? OnRecompress { get; init; }
 
         /// <summary>The chain the session handed over, so a test can read what it planned.</summary>
         public RecompressPlan? Chain { get; private set; }
+
+        /// <summary>A warning the chain says out loud, so the event stream has one to carry.</summary>
+        public string? ChainWarning { get; init; }
 
         public TimeSpan ChainBudget { get; private set; }
 
@@ -86,13 +89,14 @@ public sealed class EncodeSessionTests
                 return OnExtract?.Invoke(destination);
             },
             Runner = this,
-            RunRecompress = (plan, _, budget, _, token) =>
+            RunRecompress = (plan, _, budget, warn, token) =>
             {
                 Chain = plan;
                 ChainBudget = budget;
                 token.ThrowIfCancellationRequested();
+                if (ChainWarning is { } warning) warn?.Invoke(warning);
 
-                return OnRecompress?.Invoke(plan) ?? new RecompressOutcome
+                return OnRecompress?.Invoke(plan) ?? new PostChainOutcome
                 {
                     FinalPath = plan.FinalPath,
                     Written = [.. plan.Steps.Select(s => s.OutputPath)],
@@ -133,12 +137,13 @@ public sealed class EncodeSessionTests
 
     private static (int Code, BufferedTerminal Terminal) Run(
         Deps deps, EncodeOverrides? overrides = null, bool dryRun = false,
-        SettingsDocument? settings = null)
+        SettingsDocument? settings = null, IEventSink? events = null)
     {
         var terminal = new BufferedTerminal();
         int code = EncodeSession.Run(
             Source, overrides ?? new EncodeOverrides { Output = "/media/out.avi" },
-            settings ?? new SettingsDocument(), deps.Build(), terminal, dryRun, CancellationToken.None);
+            settings ?? new SettingsDocument(), deps.Build(), terminal, dryRun, CancellationToken.None,
+            events);
 
         return (code, terminal);
     }
@@ -329,7 +334,7 @@ public sealed class EncodeSessionTests
     {
         var deps = new Deps
         {
-            OnRecompress = plan => new RecompressOutcome
+            OnRecompress = plan => new PostChainOutcome
             {
                 FinalPath = plan.LivePath,
                 Written = [],
@@ -678,6 +683,92 @@ public sealed class EncodeSessionTests
         => new(index, "subtitle", codec, "chi", null);
 
     /// <summary>
+    /// Records the stream so a test can read what the session said, in the order
+    /// it said it. This is the consumer <c>--json-events</c> will be: if it cannot
+    /// see the phases, neither can a GUI.
+    /// </summary>
+    private sealed class RecordingSink : IEventSink
+    {
+        public List<string> Events { get; } = [];
+
+        public void Stage(string name) => Events.Add($"stage:{name}");
+
+        public void Progress(long done, long? total) => Events.Add($"progress:{done}/{total?.ToString() ?? "-"}");
+
+        public void Warn(string message) => Events.Add($"warn:{message}");
+
+        public void Done(string summary, IReadOnlyList<string> artifacts, TimeSpan elapsed)
+            => Events.Add($"done:{string.Join(",", artifacts)}");
+    }
+
+    /// <summary>
+    /// The phases arrive in the order they happen, and a finished capture says so
+    /// once, with its product. Before this, none of that was observable: the
+    /// session printed and forgot.
+    /// </summary>
+    [Test]
+    public async Task ARunEmitsItsStagesInOrderAndOneDone()
+    {
+        var deps = new Deps();
+        var recorder = new RecordingSink();
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.avi",
+            RecompressArgs = ["-c:v libx264 -crf 30"],
+        };
+
+        (int code, _) = Run(deps, overrides, events: recorder);
+
+        await Assert.That(code).IsEqualTo(ExitCodes.Ok);
+
+        List<string> events = recorder.Events;
+        int preflight = events.IndexOf("stage:preflight");
+        int capture = events.IndexOf("stage:capture");
+        int done = events.FindIndex(e => e.StartsWith("done:", StringComparison.Ordinal));
+        int chain = events.IndexOf("stage:between-passes");
+
+        await Assert.That(preflight).IsGreaterThanOrEqualTo(0).Because("the trial is a phase, and it is announced");
+        await Assert.That(capture).IsGreaterThan(preflight);
+        await Assert.That(done).IsGreaterThan(capture);
+        await Assert.That(chain).IsGreaterThan(done).Because("the chain runs after the recording is written");
+
+        await Assert.That(events[done]).IsEqualTo("done:/media/out.avi")
+            .Because("a machine wants the artifact, not the sentence");
+        await Assert.That(events.Count(e => e.StartsWith("done:", StringComparison.Ordinal))).IsEqualTo(1);
+    }
+
+    /// <summary>
+    /// A warning travels as an event, and the default renderer still puts it on
+    /// stderr with its prefix.
+    ///
+    /// <para>A supplied sink <em>replaces</em> the terminal one rather than
+    /// shadowing it -- that is what makes <c>--json-events</c> a second renderer
+    /// instead of a second set of print calls. A caller that wants both composes
+    /// them.</para>
+    /// </summary>
+    [Test]
+    public async Task AWarningIsAnEventAndTheDefaultRendererStillPrefixesIt()
+    {
+        var overrides = new EncodeOverrides
+        {
+            Output = "/media/out.avi",
+            RecompressArgs = ["-c:v libx264 -crf 30"],
+        };
+
+        var recorder = new RecordingSink();
+        (int recorded, _) = Run(new Deps { ChainWarning = "a leftover part file was removed" }, overrides, events: recorder);
+
+        await Assert.That(recorded).IsEqualTo(ExitCodes.Ok);
+        await Assert.That(recorder.Events).Contains("warn:a leftover part file was removed");
+
+        (int printed, BufferedTerminal terminal) =
+            Run(new Deps { ChainWarning = "a leftover part file was removed" }, overrides);
+
+        await Assert.That(printed).IsEqualTo(ExitCodes.Ok);
+        await Assert.That(terminal.ErrorLines.Any(l => l == "note: a leftover part file was removed")).IsTrue();
+    }
+
+    /// <summary>
     /// A cancel is not a failure and must not be reported as one: it has to reach
     /// the top of the program, which turns it into exit 130 and one line.
     /// </summary>
@@ -697,3 +788,4 @@ public sealed class EncodeSessionTests
         });
     }
 }
+

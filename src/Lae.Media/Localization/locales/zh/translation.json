@@ -77,6 +77,8 @@
       "motionRung": "（第 {{rung}} 档）",
       "skipped": "跳过",
       "skippedValue": "编码器启动追帧时跳过 {{dropped}} 个解码帧；阶梯没有动过",
+      "startup": "启动",
+      "startupValue": "编码器收下第一帧之前丢了 {{dropped}} 个解码帧",
       "frozenTail": "截断",
       "frozenTailValue": "源早结束了 {{slots}} 个槽位；尾部是重复的最后一帧",
       "framesWritten": "[{{seconds}}s] 写入 {{frames}} 帧",

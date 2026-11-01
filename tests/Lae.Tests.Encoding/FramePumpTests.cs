@@ -1,7 +1,8 @@
 using Lae.Core;
 using Lae.Core.Settings;
+using Lae.Encoding;
 
-namespace Lae.Tests.Core;
+namespace Lae.Tests.Encoding;
 
 /// <summary>
 /// The pacing loop, over memory streams.
@@ -47,6 +48,59 @@ public sealed class FramePumpTests
 
         await Assert.That(stats.Frames).IsEqualTo(target);
         await Assert.That(sink.Length).IsEqualTo((long)target * frameSize);
+    }
+
+    /// <summary>
+    /// The encoder opening its file must not cost pictures.
+    ///
+    /// <para>Before this, the producer started pacing the moment it was started
+    /// while the consumer's first write took as long as a muxer needs to open a
+    /// file and write a header. A 13 fps source lost three to eight frames per run
+    /// that way, and the report attributed them to the ladder, which had not
+    /// moved. Now the producer publishes one frame, waits for the consumer to say
+    /// it is through the first write, and only then starts its cadence.</para>
+    ///
+    /// <para>The sink stalls on the first write so the window is deterministic:
+    /// 120 ms at 200 fps is twenty-four frames' worth of queue, against a depth of
+    /// six. On the old behaviour this fails by eighteen frames rather than
+    /// whenever the build machine happens to be slow.</para>
+    /// </summary>
+    [Test]
+    public async Task TheEncoderOpeningItsFileCostsNoPictures()
+    {
+        const int frameSize = 4;
+
+        using var source = new MemoryStream(Script(400, frameSize));
+        using var sink = new SlowFirstWrite(milliseconds: 120);
+
+        var spec = new PumpSpec { Fps = 200, FrameSize = frameSize, TargetFrames = 40 };
+        PumpStats stats = FramePump.Run(source, sink, spec, null, null, CancellationToken.None);
+
+        await Assert.That(stats.Frames).IsEqualTo(40L);
+        await Assert.That(stats.DroppedAtStart).IsEqualTo(0L)
+            .Because("the producer is held until the encoder has taken its first frame");
+        await Assert.That(stats.Dropped).IsEqualTo(0L);
+    }
+
+    /// <summary>
+    /// A sink that takes its time over the first write, the way a muxer takes its
+    /// time over a header. Everything after it is a memory write.
+    /// </summary>
+    private sealed class SlowFirstWrite(int milliseconds) : MemoryStream
+    {
+        private bool _first = true;
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_first)
+            {
+                _first = false;
+                Thread.Sleep(milliseconds);
+            }
+
+            return base.WriteAsync(buffer, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -446,6 +500,12 @@ public sealed class FramePumpLadderTests
         PumpStats stats = FramePump.Run(source, sink, spec, null, null, CancellationToken.None);
 
         await Assert.That(stats.Dropped).IsGreaterThan(0L);
+
+        // Every one of these was the ladder's doing: the encoder was ready long
+        // before the first drop. Startup loss is counted separately, and a report
+        // that folded the two together could not say which had happened.
+        await Assert.That(stats.DroppedAtStart).IsEqualTo(0L);
+        await Assert.That(stats.DroppedWhileRunning).IsEqualTo(stats.Dropped);
 
         // A skipped frame can only be counted once. The producer publishes one
         // frame per slot, so the tally is the frames that were not taken -- which

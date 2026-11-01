@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lae.Core.Plugins;
 
 namespace Lae.Core.Settings;
 
@@ -82,7 +83,9 @@ public sealed record SettingsDocument
         Ui = Ui ?? new(),
         Defaults = Defaults is { } defaults ? defaults.Normalised() : new(),
         CustomPresets = CustomPresets is { } presets ? [.. presets.Where(p => p is not null)] : [],
-        Plugins = Plugins is { } plugins ? [.. plugins.Where(p => p is not null)] : [],
+        Plugins = Plugins is { } plugins
+            ? [.. plugins.Where(p => p is not null).Select(p => p.Normalised())]
+            : [],
     };
 }
 
@@ -488,8 +491,27 @@ public sealed record PluginRegistration
     /// <summary>Executable, resolved relative to the plugin directory when not absolute.</summary>
     public required string Command { get; init; }
 
-    /// <summary>Stages this plugin may run at: "pre-encode", "post-encode", "between-passes".</summary>
+    /// <summary>
+    /// Stages this plugin may run at; the vocabulary is
+    /// <see cref="PluginStages"/>. There is no <c>pre-encode</c>: a live capture's
+    /// source is a stream, so there is no finished file to hand a plugin before
+    /// the encode.
+    /// </summary>
     public IReadOnlyList<string> Stages { get; init; } = [];
 
     public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// Stage names this registration asks for that the host cannot run.
+    ///
+    /// <para>Surfaced rather than dropped: a typo in <c>settings.toml</c> would
+    /// otherwise mean the plugin runs nowhere, and "my plugin never runs" is a
+    /// question with no answer in the output.</para>
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> UnknownStages
+        => [.. PluginStages.Normalise(Stages).Where(stage => !PluginStages.IsKnown(stage))];
+
+    /// <summary>Spelling repaired, meaning kept -- see <see cref="PluginStages.Normalise"/>.</summary>
+    public PluginRegistration Normalised() => this with { Stages = PluginStages.Normalise(Stages) };
 }

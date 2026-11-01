@@ -1,4 +1,4 @@
-namespace Lae.Core;
+namespace Lae.Encoding;
 
 /// <summary>
 /// The frame handoff between "whatever produces frames" and the pacing loop.

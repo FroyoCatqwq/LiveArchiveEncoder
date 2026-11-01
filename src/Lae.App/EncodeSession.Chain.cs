@@ -1,6 +1,7 @@
-using Lae.App.Ui;
+﻿using Lae.App.Ui;
 using Lae.Core;
 using Lae.Core.Localization;
+using Lae.Core.Plugins;
 using Lae.Core.Settings;
 using Lae.Encoding;
 using Lae.Media.Toolchain;
@@ -34,6 +35,7 @@ public static partial class EncodeSession
         SettingsDocument settings,
         EncodeDependencies dependencies,
         ITerminal terminal,
+        IEventSink sink,
         bool dryRun,
         CancellationToken token)
     {
@@ -68,8 +70,7 @@ public static partial class EncodeSession
 
         RecompressPlan plan = RecompressPlan.Create(chain, input, messages);
 
-        foreach (string note in plan.Notes)
-            terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
+        foreach (string note in plan.Notes) sink.Warn(note);
 
         if (!plan.IsRunnable)
         {
@@ -85,10 +86,12 @@ public static partial class EncodeSession
             ? dependencies.ProbeSource(ffprobe, input, token).Info?.DurationSeconds ?? 0
             : 0;
 
-        RecompressOutcome outcome = dependencies.RunRecompress(
+        sink.Stage(PluginStages.BetweenPasses);
+
+        PostChainOutcome outcome = dependencies.RunRecompress(
             plan, ffmpeg,
             TimeSpan.FromSeconds(Math.Max(300.0, span * 4.0 + 120.0)),
-            note => terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note })),
+            sink.Warn,
             token);
 
         return ReportOutcome(outcome, plan, terminal, messages);
@@ -104,7 +107,7 @@ public static partial class EncodeSession
     /// </summary>
     private static int RunChain(
         RecompressPlan plan, string ffmpeg, double span,
-        EncodeDependencies dependencies, ITerminal terminal, CancellationToken token)
+        EncodeDependencies dependencies, ITerminal terminal, IEventSink sink, CancellationToken token)
     {
         // A hop is a plain transcode, not a realtime one, so the budget is not
         // derived from the clock the pump kept. Generous on purpose: a VP9 or
@@ -114,10 +117,10 @@ public static partial class EncodeSession
         TimeSpan budget = TimeSpan.FromSeconds(Math.Max(300.0, span * 4.0 + 120.0));
         IMessages messages = dependencies.Messages;
 
-        RecompressOutcome outcome = dependencies.RunRecompress(
-            plan, ffmpeg, budget,
-            note => terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note })),
-            token);
+        sink.Stage(PluginStages.BetweenPasses);
+
+        PostChainOutcome outcome = dependencies.RunRecompress(
+            plan, ffmpeg, budget, sink.Warn, token);
 
         return ReportOutcome(outcome, plan, terminal, messages, withRecording: true);
     }
@@ -131,7 +134,7 @@ public static partial class EncodeSession
     /// one.</para>
     /// </summary>
     private static int ReportOutcome(
-        RecompressOutcome outcome, RecompressPlan plan, ITerminal terminal, IMessages messages,
+        PostChainOutcome outcome, RecompressPlan plan, ITerminal terminal, IMessages messages,
         bool withRecording = false)
     {
         foreach (string path in outcome.Written)
@@ -150,3 +153,4 @@ public static partial class EncodeSession
         return ExitCodes.Failed;
     }
 }
+

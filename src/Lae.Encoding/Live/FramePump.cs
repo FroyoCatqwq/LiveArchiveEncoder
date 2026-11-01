@@ -1,15 +1,16 @@
 using System.Diagnostics;
+using Lae.Core;
 
-namespace Lae.Core;
+namespace Lae.Encoding;
 
 /// <summary>
 /// The bitrate feedback the pump reads, in one place.
 ///
 /// <para><see cref="OutputBytes"/> is a delegate and not a file handle on
-/// purpose: the pump is in <c>Lae.Core</c>, which is not allowed to touch a
-/// disk. The caller hands in "how many bytes has the encoder written so far"
-/// and the pump stays a pure scheduler over two streams -- which is also what
-/// makes the ladder testable without FFmpeg, by passing a counter.</para>
+/// purpose: the pump schedules two streams and owns neither, and the answer to
+/// "how big is the output" belongs to whoever owns the child process that is
+/// writing it. Keeping it a delegate is also what makes the ladder testable
+/// without FFmpeg -- a test passes a counter.</para>
 /// </summary>
 public sealed record LadderControl
 {
@@ -20,10 +21,10 @@ public sealed record LadderControl
     /// <summary>
     /// What the encoder has produced so far.
     ///
-    /// <para>A delegate and not a file handle on purpose: the pump lives in
-    /// <c>Lae.Core</c>, which does not do I/O, and the caller already owns the
-    /// child process that knows the answer. It is also what makes the ladder
-    /// testable without FFmpeg -- a test hands in a counter.</para>
+    /// <para>A delegate rather than a file handle because the caller already owns
+    /// the child process that knows the answer, and because a scheduling loop that
+    /// reaches for the filesystem stops being a scheduler. It is also what makes
+    /// the ladder testable without FFmpeg -- a test hands in a counter.</para>
     /// </summary>
     public required Func<EncoderProgress> Progress { get; init; }
 
@@ -126,8 +127,32 @@ public sealed record PumpStats
     /// <summary>True when the source ended before the target slot count was reached.</summary>
     public required bool SourceEnded { get; init; }
 
-    /// <summary>Decoded frames thrown away because the ladder was throttling or the consumer lagged.</summary>
-    public long Dropped { get; init; }
+    /// <summary>
+    /// Decoded frames thrown away before the encoder accepted its first frame.
+    ///
+    /// <para>This is not a decision the program made. The producer starts at
+    /// <c>1/fps</c> the moment it is started, and the encoder spends its first
+    /// <see cref="WriteFrame"/> opening the muxer and writing a header -- tens or
+    /// hundreds of milliseconds during which the six-deep queue fills and the
+    /// oldest frames are overwritten. On a 13 fps source that was three to eight
+    /// frames per run, and they were reported as if the ladder had skipped
+    /// them.</para>
+    ///
+    /// <para>The pump now holds the producer until the first frame is written, so
+    /// this number should be zero; it stays in the stats because "should be" is
+    /// not "is", and a silent regression here costs pictures.</para>
+    /// </summary>
+    public long DroppedAtStart { get; init; }
+
+    /// <summary>
+    /// Decoded frames thrown away once the encoder was running: the ladder
+    /// skipping pictures it refuses to show, plus whatever the queue lost while
+    /// the consumer lagged.
+    /// </summary>
+    public long DroppedWhileRunning { get; init; }
+
+    /// <summary>The total, which is what a history row and a one-line summary want.</summary>
+    public long Dropped => DroppedAtStart + DroppedWhileRunning;
 
     /// <summary>
     /// Slots written after the source had run out, repeating the last picture.
@@ -238,7 +263,7 @@ public static class FramePump
         long fresh = 0;
         long repeated = 0;
         long frozenAtEnd = 0;
-        long discarded;
+        long droppedAtStart = 0;
 
         // The cadence counter. At full rate it adds 1.0 per slot and always
         // passes the threshold, so a run with no ladder behaves exactly as
@@ -366,6 +391,23 @@ public static class FramePump
                 WriteFrame(sink, frame, spec.FrameSize, spec.WriteDeadline, token);
                 emitted++;
 
+                if (emitted == 1)
+                {
+                    // Startup ends here: the muxer is open and has taken a frame,
+                    // so the producer may begin its cadence. Before this the
+                    // producer ran flat out from the moment it was started, and
+                    // every frame it published while the encoder was still
+                    // writing a header went into a six-deep queue and pushed an
+                    // older one out -- three to eight pictures per run, reported
+                    // as if the ladder had skipped them.
+                    //
+                    // The order matters: snapshot first, then release. Releasing
+                    // first would let the producer drop one more frame that this
+                    // snapshot would then blame on the run.
+                    droppedAtStart = channel.Dropped;
+                    capture.Release();
+                }
+
                 if (control is not null)
                 {
                     (produced, measured) = ObserveBitrate(control, produced);
@@ -392,7 +434,11 @@ public static class FramePump
             if (!channel.Completed) capture.WaitForEnd(EndGrace);
 
             capture.ThrowIfFailed();
-            discarded = channel.Dropped;
+
+            // Read once, then split: the channel's tally keeps moving until the
+            // producer has been stopped, so two reads of it are two different
+            // numbers and the parts would not add up to the whole.
+            long dropped = channel.Dropped;
 
             return new PumpStats
             {
@@ -406,7 +452,8 @@ public static class FramePump
                 // finished.
                 Seconds = elapsed,
                 SourceEnded = capture.Ended,
-                Dropped = discarded,
+                DroppedAtStart = droppedAtStart,
+                DroppedWhileRunning = dropped - droppedAtStart,
                 FrozenAtEnd = frozenAtEnd,
                 FinalRung = control?.Ladder.Rung ?? 0,
                 MotionFps = control?.Ladder.CurrentFps ?? spec.Fps,
@@ -517,6 +564,7 @@ public static class FramePump
         private readonly long _intervalTicks;
         private readonly Thread _thread;
         private volatile bool _stop;
+        private volatile bool _go;
         private Exception? _failure;
         private volatile bool _ended;
 
@@ -534,6 +582,33 @@ public static class FramePump
         internal void Start() => _thread.Start();
 
         internal void Stop() => _stop = true;
+
+        /// <summary>
+        /// Let the producer begin its cadence. Called once, by the consumer, after
+        /// the first frame has been written -- see <see cref="WaitForRelease"/>.
+        /// </summary>
+        internal void Release() => _go = true;
+
+        /// <summary>
+        /// Hold the cadence until the encoder has taken its first frame.
+        ///
+        /// <para>The first frame is already in the queue at this point, so the
+        /// consumer has what it needs; what it does not have is a muxer that can
+        /// absorb frame two yet. Pacing from the start means the queue fills while
+        /// the header is being written and the oldest pictures are overwritten --
+        /// which is exactly the startup loss this waits to avoid.</para>
+        ///
+        /// <para>A 1 ms sleep loop rather than an event: one wait per run, no
+        /// kernel handle to own or dispose, and the loop sees <c>_stop</c> within a
+        /// millisecond when the run is torn down under it. A live source pays this
+        /// once, and the decoder behind it simply stops being read for however
+        /// long the muxer takes to open a file -- the same backpressure it would
+        /// get from a slow consumer at any other moment.</para>
+        /// </summary>
+        private void WaitForRelease()
+        {
+            while (!_go && !_stop) Thread.Sleep(1);
+        }
 
         /// <summary>
         /// Wait for the producer to finish, up to <paramref name="grace"/>. False
@@ -556,6 +631,7 @@ public static class FramePump
         {
             byte[] frame = new byte[_channel.FrameSize];
             long next = Stopwatch.GetTimestamp();
+            bool first = true;
 
             try
             {
@@ -568,6 +644,20 @@ public static class FramePump
                     }
 
                     _channel.Publish(frame);
+
+                    if (first)
+                    {
+                        first = false;
+                        WaitForRelease();
+
+                        // The cadence starts when the encoder starts, not when the
+                        // first frame was read. Inheriting the original `next`
+                        // would make every slot spent waiting count as missed, and
+                        // the producer would run flat out to catch up -- dropping
+                        // the queue it was just told to stop filling.
+                        next = Stopwatch.GetTimestamp();
+                        continue;
+                    }
 
                     // Reset the deadline when the slot is already overdue instead
                     // of trying to catch up: a decoder that fell behind cannot

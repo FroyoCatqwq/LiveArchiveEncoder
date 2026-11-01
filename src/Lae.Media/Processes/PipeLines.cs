@@ -55,11 +55,19 @@ internal sealed class PipeLines : IDisposable
     }
 
     /// <summary>
-    /// Stop reading and wait briefly for the loop to notice. Two seconds is
-    /// longer than a pending read of a pipe that still has a writer, and short
-    /// enough that a shutdown the caller already considers done is not held up;
-    /// a read still in flight after that is cancelled by the token and unwinds
-    /// through the same filter.
+    /// Stop reading, and return without waiting for the loop to notice.
+    ///
+    /// <para>The old version blocked for up to two seconds here. Nothing needed
+    /// that wait -- a caller has already read whatever diagnostics it wanted, and
+    /// the pipe is closed by the child's own death a moment later -- while it is
+    /// the textbook sync-over-async shape: harmless in a console program, a
+    /// deadlock in any host with a synchronization context. A reader that is a
+    /// pool task ending when its pipe closes does not need to be joined.</para>
+    ///
+    /// <para>The token source is disposed by the reader instead, on the way out.
+    /// Disposing it here would race the loop's next token access and turn a clean
+    /// shutdown into an <c>ObjectDisposedException</c> swallowed by the same filter
+    /// that is supposed to swallow real pipe errors.</para>
     /// </summary>
     public void Dispose()
     {
@@ -67,7 +75,11 @@ internal sealed class PipeLines : IDisposable
         _disposed = true;
 
         try { _stop.Cancel(); } catch (ObjectDisposedException) { /* already down */ }
-        try { _reader.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { /* shutdown race */ }
-        _stop.Dispose();
+
+        _ = _reader.ContinueWith(
+            _ => _stop.Dispose(),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 }

@@ -1,4 +1,4 @@
-namespace Lae.Core;
+namespace Lae.Encoding;
 
 /// <summary>
 /// Millisecond timer resolution plus the sleep/spin hybrid that the pacing loop

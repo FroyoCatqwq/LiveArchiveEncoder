@@ -175,7 +175,11 @@ public static partial class EncodeSession
             {
                 fps = Number(run.Pump.MotionFps, "G4"),
                 rung = messages.Format("encode.result.motionRung", new { rung = run.Pump.FinalRung }),
-                dropped = run.Pump.Dropped,
+                // Only what the run itself dropped. The frames lost while the
+                // muxer was opening the file are not the ladder's doing, and
+                // counting them here made the report say the ladder had throttled
+                // a source it never touched.
+                dropped = run.Pump.DroppedWhileRunning,
             }));
         }
         else if (run.Pump.Dropped > 0)
@@ -183,6 +187,19 @@ public static partial class EncodeSession
             Field(terminal, messages, "encode.result.skipped", messages.Format("encode.result.skippedValue", new
             {
                 dropped = run.Pump.Dropped,
+            }));
+        }
+
+        // With no ladder every drop is the queue absorbing something, and the line
+        // above already says so. With a ladder, startup loss has its own cause and
+        // its own sentence -- and it needs one: the pump now waits for the encoder
+        // before pacing, so anything here is a regression, and a silent one costs
+        // pictures.
+        if (run.Pump.FinalRung > 0 && run.Pump.DroppedAtStart > 0)
+        {
+            Field(terminal, messages, "encode.result.startup", messages.Format("encode.result.startupValue", new
+            {
+                dropped = run.Pump.DroppedAtStart,
             }));
         }
 

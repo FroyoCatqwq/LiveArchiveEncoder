@@ -242,6 +242,34 @@ public sealed class EncodePlanTests
         await Assert.That(plan.EncoderArgs.Contains("-t")).IsFalse();
     }
 
+    /// <summary>
+    /// An encoder whose listed pixel formats are all unknown to this build is a
+    /// verdict the user can act on, not a crash.
+    ///
+    /// <para><see cref="EncodePlan.Create"/> promises never to throw for user
+    /// input, and the scan found one path that broke it: a cold or exotic encoder
+    /// listing formats absent from the measured catalogue threw straight through,
+    /// so the CLI answered exit 1 with a stack trace where the contract says exit
+    /// 2 with a sentence. The catch is in place now; nothing pinned it, and the
+    /// failure it prevents is invisible until the day it comes back.</para>
+    /// </summary>
+    [Test]
+    public async Task AnEncoderWithNoKnownPixelFormatBecomesAProblem()
+    {
+        EncoderInfo odd = Encoder();
+        odd.Caps = new EncoderCaps
+        {
+            Name = "oddcodec",
+            SupportedPixFmts = ["yuv999p", "weird444"],
+        };
+
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), odd, En);
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems.Any(p => p.Contains("oddcodec", StringComparison.Ordinal))).IsTrue()
+            .Because("the sentence has to name the encoder, or the user cannot tell which one to avoid");
+    }
+
     [Test]
     public async Task RetargetingMovesOnlyTheOutputPath()
     {

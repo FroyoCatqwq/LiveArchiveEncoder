@@ -77,6 +77,8 @@
       "motionRung": " (rung {{rung}})",
       "skipped": "skipped",
       "skippedValue": "{{dropped}} decoded frames skipped while the encoder caught up; the ladder never moved",
+      "startup": "startup",
+      "startupValue": "{{dropped}} decoded frames lost before the encoder took its first frame",
       "frozenTail": "truncated",
       "frozenTailValue": "the source ran out {{slots}} slot(s) early; the tail repeats the last frame",
       "framesWritten": "[{{seconds}}s] {{frames}} frames written",

@@ -1,6 +1,6 @@
-using Lae.Core;
+using Lae.Encoding;
 
-namespace Lae.Tests.Core;
+namespace Lae.Tests.Encoding;
 
 /// <summary>
 /// The frame handoff. Every rule here exists because the alternative breaks a

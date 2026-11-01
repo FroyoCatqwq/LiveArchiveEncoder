@@ -51,6 +51,23 @@ public sealed partial class DependencyDirectionTests
     private static partial Regex ForbiddenInCore();
 
     /// <summary>
+    /// Concurrency and the clock are runtime mechanics, not domain rules.
+    ///
+    /// <para>These were not on the list when the pump lived in Core, so the claim
+    /// "every rule in Core is testable without a fixture" was true of the planners
+    /// and false of the one type that started a thread. The pump's producer, the
+    /// frame handoff and the 1 ms timer now live in <c>Lae.Encoding</c>, where the
+    /// pipeline is allowed to own them -- and this list is what keeps them from
+    /// drifting back.</para>
+    ///
+    /// <para><c>Stopwatch</c> and <c>Timer</c> are here for the same reason: a
+    /// domain rule that reads the wall clock cannot be tested without waiting.
+    /// Time a rule needs arrives as a parameter or as <c>TimeProvider</c>.</para>
+    /// </summary>
+    [GeneratedRegex(@"\b(Thread|Stopwatch|Timer|CancellationTokenSource|SemaphoreSlim)\b")]
+    private static partial Regex ForbiddenInCoreConcurrency();
+
+    /// <summary>
     /// The domain assembly must not depend on any other project. If it ever needs
     /// one, the type being added is not domain logic.
     /// </summary>
@@ -63,9 +80,9 @@ public sealed partial class DependencyDirectionTests
     }
 
     /// <summary>
-    /// The domain assembly must not reach for the console, the filesystem or a
-    /// process. Those are host concerns; keeping them out is what makes every
-    /// rule in Core testable without a fixture.
+    /// The domain assembly must not reach for the console, the filesystem, a
+    /// process, a thread or the clock. Those are host concerns; keeping them out
+    /// is what makes every rule in Core testable without a fixture.
     ///
     /// <para><c>Path</c> is intentionally allowed: it is pure string arithmetic,
     /// and forbidding it would push path composition into every caller.</para>
@@ -80,14 +97,15 @@ public sealed partial class DependencyDirectionTests
             string[] lines = File.ReadAllLines(file);
             for (int i = 0; i < lines.Length; i++)
             {
-                if (ForbiddenInCore().IsMatch(lines[i]))
+                if (ForbiddenInCore().IsMatch(lines[i]) || ForbiddenInCoreConcurrency().IsMatch(lines[i]))
                     offenders.Add($"{Path.GetFileName(file)}:{i + 1}: {lines[i].Trim()}");
             }
         }
 
         await Assert.That(offenders).IsEmpty()
-            .Because("Lae.Core must not touch Console/File/Process/HttpClient; "
-                   + "move the type to Lae.Media (I/O) or Lae.App (host)");
+            .Because("Lae.Core must not touch Console/File/Process/HttpClient, nor Thread/Stopwatch/Timer/"
+                   + "CancellationTokenSource; move the type to Lae.Media (I/O), Lae.Encoding (pipeline "
+                   + "mechanics) or Lae.App (host)");
     }
 
     /// <summary>
@@ -187,23 +205,32 @@ public sealed partial class DependencyDirectionTests
     }
 
     /// <summary>
-    /// The pacing thread belongs to <see cref="Lae.Core"/>'s pump and to nothing
-    /// else above it.
+    /// The pacing thread belongs to the pipeline's pump and to nothing else above
+    /// it.
     ///
     /// <para>A thread started by a command is a thread nobody joins, and the
     /// encoding pipeline already has exactly one place where a second thread is
     /// justified -- the producer that reads the decoder pipe. Everything else
     /// above that line is meant to be a pure function.</para>
+    ///
+    /// <para>The pump moved from <c>Lae.Core</c> to <c>Lae.Encoding</c> (it is
+    /// runtime mechanics, not a domain rule), so the scan follows it: the pipeline
+    /// is now the assembly that owns the thread, and its neighbours there are
+    /// checked too. <c>FramePump.cs</c> is the one file allowed to say
+    /// <c>new Thread</c>.</para>
     /// </summary>
     [Test]
     public async Task OnlyThePipelineStartsThreads()
     {
         List<string> offenders = [];
 
-        foreach (string assembly in new[] { "Lae.App", "Lae.Cli" })
+        foreach (string assembly in new[] { "Lae.App", "Lae.Cli", "Lae.Encoding" })
         {
             foreach (string file in SourceFiles(assembly))
             {
+                // The single producer thread, and the only one in the program.
+                if (Path.GetFileName(file) == "FramePump.cs") continue;
+
                 string[] lines = File.ReadAllLines(file);
                 for (int i = 0; i < lines.Length; i++)
                 {
@@ -214,6 +241,6 @@ public sealed partial class DependencyDirectionTests
         }
 
         await Assert.That(offenders).IsEmpty()
-            .Because("the host does not own threads; the pump in Lae.Core does");
+            .Because("the pipeline owns the only thread, in FramePump; the host and the chain do not start one");
     }
 }

@@ -1,4 +1,4 @@
-using Lae.Core;
+﻿using Lae.Core;
 using Lae.Core.History;
 using Lae.Core.Localization;
 using Lae.Encoding;
@@ -61,7 +61,7 @@ public sealed record EncodeDependencies
     /// FFmpeg, and the exit-code policy around a failed hop is exactly what needs
     /// a test.
     /// </summary>
-    public required Func<RecompressPlan, string, TimeSpan, Action<string>?, CancellationToken, RecompressOutcome>
+    public required Func<RecompressPlan, string, TimeSpan, Action<string>?, CancellationToken, PostChainOutcome>
         RunRecompress { get; init; }
 
     /// <summary>
@@ -102,3 +102,4 @@ public sealed record EncodeDependencies
         Messages = I18NextMessages.Create(LanguageChoice.English),
     };
 }
+
