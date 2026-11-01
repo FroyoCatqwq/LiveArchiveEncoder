@@ -197,7 +197,7 @@ public static class ArgsBuilder
     {
         if (filterName == "off") return "";
         if (!Constants.DeinterlaceFilters.Contains(filterName))
-            throw new ArgumentException($"unsupported deinterlace filter: {filterName}");
+            throw new Localization.RefusalException("plan.error.unknownDeinterlace", new { value = filterName });
 
         string deintValue = markedOnly ? "interlaced" : "all";
 
@@ -205,9 +205,10 @@ public static class ArgsBuilder
         {
             if (!nnediWeights.HasText)
             {
-                throw new ArgumentException(
-                    "the nnedi filter needs its NNEDI3 weights file; run "
-                    + "`LiveArchiveEncoder --nnedi-update` (or pass --nnedi-weights PATH)");
+                // This used to tell the reader to run `LiveArchiveEncoder
+                // --nnedi-update`, a v7 flag that v8 does not have. The advice has
+                // to name a command that exists, or it is worse than none.
+                throw new Localization.RefusalException("plan.error.nnediNeedsWeights");
             }
             string fieldValue = parity switch { "tff" => "tf", "bff" => "bf", _ => "af" };
             return $"nnedi=weights={FilterArgs.EscapePath(nnediWeights)}:field={fieldValue}:deint={deintValue}";

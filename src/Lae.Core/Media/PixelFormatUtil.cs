@@ -125,8 +125,12 @@ public static class PixelFormatUtil
             if (PixelFormatCatalog.TryGet(item, out PixFmtInfo info)) return info.Name;
         }
 
-        throw new ArgumentException(
-            $"No supported raw transport format known for encoder {caps.Name}: {string.Join(' ', supported)}");
+        // A refusal with a key rather than a plain argument error: this one is
+        // reached by an encoder whose listed formats are all unknown to this build,
+        // which is a user-visible verdict ("this FFmpeg build is not one I can work
+        // with"), not a bug in this program.
+        throw new Localization.RefusalException(
+            "plan.error.noTransportFormat", new { encoder = caps.Name, formats = string.Join(' ', supported) });
     }
 
     /// <summary>

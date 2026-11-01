@@ -42,24 +42,26 @@ public static class SubtitleCopy
     /// What to write <paramref name="sourceCodec"/> as in <paramref name="container"/>,
     /// or why that cannot be done.
     /// </summary>
-    public static (string? Codec, string? Problem) Resolve(string container, string? sourceCodec, int index)
+    public static (string? Codec, string? Problem) Resolve(
+        string container, string? sourceCodec, int index, Localization.IMessages messages)
     {
         string ext = container.Trim().TrimStart('.').ToLowerInvariant();
 
         if (!ConvertsTo.TryGetValue(ext, out string? target))
         {
-            return (null,
-                $"a .{ext} file cannot carry a subtitle stream: {ext} has no subtitle muxer; "
-                + "carry it into mkv instead, or burn it into the picture");
+            return (null, messages.Format("plan.error.containerNoSubtitles", new { container = ext }));
         }
 
         if (target == "copy") return ("copy", null);
 
         if (SubtitleTrack.IsBitmap(sourceCodec))
         {
-            return (null,
-                $"subtitle track {index} is {sourceCodec}, which .{ext} cannot hold; "
-                + "it needs mkv to stay a stream, or --subtitle-file to be burned instead");
+            return (null, messages.Format("plan.error.bitmapNeedsMatroska", new
+            {
+                index,
+                codec = sourceCodec,
+                container = ext,
+            }));
         }
 
         return (target, null);
@@ -76,21 +78,21 @@ public static class SubtitleCopy
     /// assumption.</para>
     /// </summary>
     public static (IReadOnlyList<SubtitleCarry> Tracks, IReadOnlyList<string> Problems) Resolve(
-        string container, SourceInfo source, IReadOnlyList<int> indices)
+        string container, SourceInfo source, IReadOnlyList<int> indices, Localization.IMessages messages)
     {
         var carries = new List<SubtitleCarry>(indices.Count);
         var problems = new List<string>();
 
         foreach (int index in indices.Distinct())
         {
-            if (source.CheckPick(index, "subtitle", "--subtitle-copy") is { } pickProblem)
+            if (source.CheckPick(index, "subtitle", "--subtitle-copy", messages) is { } pickProblem)
             {
                 problems.Add(pickProblem);
                 continue;
             }
 
             string? sourceCodec = source.Streams.First(s => s.Index == index).Codec;
-            (string? codec, string? problem) = Resolve(container, sourceCodec, index);
+            (string? codec, string? problem) = Resolve(container, sourceCodec, index, messages);
 
             if (codec is null) problems.Add(problem!);
             else carries.Add(new SubtitleCarry(index, codec));

@@ -1,5 +1,7 @@
 using Lae.Core;
 
+using static Lae.Tests.Core.TestMessages;
+
 namespace Lae.Tests.Core;
 
 /// <summary>
@@ -19,7 +21,7 @@ public sealed class SubtitleTrackTests
     public async Task TextTracksCanBeReWrappedAndDrawn(string codec)
     {
         await Assert.That(SubtitleTrack.IsText(codec)).IsTrue();
-        await Assert.That(SubtitleTrack.Problem(codec, 2)).IsNull();
+        await Assert.That(SubtitleTrack.Problem(codec, 2, En)).IsNull();
     }
 
     [Test]
@@ -30,7 +32,7 @@ public sealed class SubtitleTrackTests
     {
         await Assert.That(SubtitleTrack.IsBitmap(codec)).IsTrue();
 
-        string? problem = SubtitleTrack.Problem(codec, 4);
+        string? problem = SubtitleTrack.Problem(codec, 4, En);
         await Assert.That(problem).IsNotNull();
         await Assert.That(problem!).Contains("bitmap");
         await Assert.That(problem!).Contains("track 4");
@@ -45,7 +47,7 @@ public sealed class SubtitleTrackTests
     {
         await Assert.That(SubtitleTrack.IsText("something_new")).IsFalse();
         await Assert.That(SubtitleTrack.IsBitmap("something_new")).IsFalse();
-        await Assert.That(SubtitleTrack.Problem("something_new", 1)).IsNull();
+        await Assert.That(SubtitleTrack.Problem("something_new", 1, En)).IsNull();
     }
 
     /// <summary>

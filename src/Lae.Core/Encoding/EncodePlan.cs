@@ -1,4 +1,5 @@
 using System.Globalization;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
 
 namespace Lae.Core;
@@ -238,8 +239,16 @@ public sealed record EncodePlan
     /// Works out how to encode. Never throws for user input: everything that is
     /// wrong comes back in <see cref="Problems"/>, because a CLI has to report a
     /// bad request as exit 2 with a sentence, not as a stack trace.
+    ///
+    /// <para><paramref name="messages"/> is the language those sentences come back
+    /// in. A parameter rather than a field on the request, because the same request
+    /// has to be able to answer in either language within one process -- which is
+    /// what the tests and <c>lae repl</c> both do -- and resolving here rather than
+    /// at the printing end is what keeps <see cref="Problems"/> a list of finished
+    /// sentences for every consumer: the report, the history row, the note line.</para>
     /// </summary>
-    public static EncodePlan Create(EncodeRequest request, SourceInfo source, EncoderInfo encoder)
+    public static EncodePlan Create(
+        EncodeRequest request, SourceInfo source, EncoderInfo encoder, IMessages messages)
     {
         var problems = new List<string>();
         var notes = new List<string>();
@@ -249,7 +258,7 @@ public sealed record EncodePlan
         // the CLI is what stops an MP4 being written into a file called
         // clip.avi: only the plan knows which encoder was found in this FFmpeg
         // build, and therefore which container is actually in use.
-        (string container, string muxer) = ResolveContainer(request.Encode.Container, encoder, problems);
+        (string container, string muxer) = ResolveContainer(request.Encode.Container, encoder, problems, messages);
         string destination = request.DestinationPath ?? EncodeRequest.DeriveDestination(request.SourcePath, container);
 
         // A named output has to agree with the container the plan settled on.
@@ -266,13 +275,17 @@ public sealed record EncodePlan
             string extension = Path.GetExtension(named).TrimStart('.').ToLowerInvariant();
             if (extension.Length > 0 && !SameFormatFamily(container, extension))
             {
-                problems.Add(
-                    $"'{Path.GetFileName(named)}' is named .{extension} but {encoder.Name} writes {container}; "
-                    + $"rename it to .{container} or ask for --container {extension} with an encoder that can write it");
+                problems.Add(messages.Format("plan.error.extensionMismatch", new
+                {
+                    name = Path.GetFileName(named),
+                    given = extension,
+                    encoder = encoder.Name,
+                    container,
+                }));
             }
         }
 
-        problems.AddRange(request.Validate(destination));
+        problems.AddRange(request.Validate(destination, messages));
 
         // Carried subtitle tracks need the container before they can be checked:
         // Matroska keeps a PGS track as it is, MP4 can only hold text, and an AVI
@@ -283,16 +296,20 @@ public sealed record EncodePlan
         if (request.Encode.Subtitles.Mode == "copy" && request.Encode.Subtitles.CopyTracks.Count > 0)
         {
             (IReadOnlyList<SubtitleCarry> resolved, IReadOnlyList<string> carryProblems) =
-                SubtitleCopy.Resolve(container, source, request.Encode.Subtitles.CopyTracks);
+                SubtitleCopy.Resolve(container, source, request.Encode.Subtitles.CopyTracks, messages);
 
             problems.AddRange(carryProblems);
             carries = resolved;
 
             if (resolved.Count > 0)
             {
-                notes.Add("carrying subtitle " + (resolved.Count == 1 ? "track " : "tracks ")
-                        + string.Join(", ", resolved.Select(t => t.Index))
-                        + $" as {resolved[0].Codec} into {container}");
+                notes.Add(messages.Format(
+                    resolved.Count == 1 ? "plan.note.carryOne" : "plan.note.carryMany", new
+                    {
+                        tracks = string.Join(", ", resolved.Select(t => t.Index)),
+                        codec = resolved[0].Codec,
+                        container,
+                    }));
             }
         }
 
@@ -302,7 +319,7 @@ public sealed record EncodePlan
         // Whatever cannot be honoured -- an embedded track, a copy instead of a
         // burn -- comes back as a problem rather than a silently plainer file.
         SubtitleBurn burn = SubtitleChain.Build(
-            request.Encode.Subtitles, Math.Max(0, request.StartSeconds), request.FontsDirectory);
+            request.Encode.Subtitles, Math.Max(0, request.StartSeconds), request.FontsDirectory, messages);
         problems.AddRange(burn.Problems);
         notes.AddRange(burn.Notes);
 
@@ -312,8 +329,8 @@ public sealed record EncodePlan
         // before anything is spawned so a bad chain costs a sentence rather than
         // a full-length capture followed by a refusal.
 
-        string? pickProblem = source.CheckPick(request.VideoStream, "video", "--video-stream")
-                           ?? source.CheckPick(request.AudioStream, "audio", "--audio-stream");
+        string? pickProblem = source.CheckPick(request.VideoStream, "video", "--video-stream", messages)
+                           ?? source.CheckPick(request.AudioStream, "audio", "--audio-stream", messages);
         if (pickProblem is not null) problems.Add(pickProblem);
 
         double? span = request.SpanSeconds(source.DurationSeconds);
@@ -323,9 +340,9 @@ public sealed record EncodePlan
             // to encode" is right for --from 10 --to 5 and useless for a source
             // whose container reports no duration at all, which is the case the
             // user cannot fix by adjusting the trim.
-            problems.Add(source.DurationSeconds > 0
-                ? "the trim range leaves nothing to encode"
-                : "the source reports no duration, so there is no span to pace; name one with --to");
+            problems.Add(messages[source.DurationSeconds > 0
+                ? "plan.error.trimEmpty"
+                : "plan.error.noDuration"]);
         }
 
         // The transport format is the source's own when the encoder takes it;
@@ -340,6 +357,14 @@ public sealed record EncodePlan
                     ? PixelFormatUtil.ChooseTransportPixFmt(source.PixelFormat, caps)
                     : PixelFormatCatalog.Normalise(source.PixelFormat) is { Length: > 0 } own ? own : "yuv420p";
         }
+        catch (RefusalException exc)
+        {
+            // A refusal from one of the argument builders: it carries a key, so it
+            // comes back in the caller's language instead of as the English the
+            // sentence was written in.
+            problems.Add(exc.Resolve(messages));
+            transport = "yuv420p";
+        }
         catch (ArgumentException exc)
         {
             // An encoder that lists pixel formats none of which this build has ever
@@ -351,7 +376,10 @@ public sealed record EncodePlan
         }
 
         if (requested is { Length: > 0 } && !requested.Equals(transport, StringComparison.Ordinal))
-            notes.Add($"the requested pixel format '{requested}' was not usable; encoding as '{transport}'");
+        {
+            notes.Add(messages.Format(
+                "plan.note.pixFmtFallback", new { requested, transport }));
+        }
 
         // Some formats need even, or 4-aligned, dimensions. Rounding here rather
         // than letting FFmpeg round later keeps the frame size the pacing loop
@@ -360,8 +388,14 @@ public sealed record EncodePlan
             PixelFormatUtil.NormalizeTransportDimensions(request.Encode.Width, request.Encode.Height, transport);
         if (!exact)
         {
-            notes.Add($"frame size {request.Encode.Width}x{request.Encode.Height} is not legal for "
-                    + $"{transport}; using {width}x{height}");
+            notes.Add(messages.Format("plan.note.sizeRounded", new
+            {
+                width = request.Encode.Width,
+                height = request.Encode.Height,
+                transport,
+                usedWidth = width,
+                usedHeight = height,
+            }));
         }
 
         // RoQ is the one encoder with a hard frame-size rule. Its odd sizes are a
@@ -371,16 +405,17 @@ public sealed record EncodePlan
         {
             try
             {
-                if (EncoderMath.ValidateRoqDimensions(width, height) is { } roqWarning) notes.Add(roqWarning);
+                if (EncoderMath.ValidateRoqDimensions(width, height, messages) is { } roqWarning)
+                    notes.Add(roqWarning);
             }
-            catch (ArgumentException exc)
+            catch (RefusalException exc)
             {
-                problems.Add(exc.Message);
+                problems.Add(exc.Resolve(messages));
             }
         }
 
         if (encoder.Name == "amv" && !EncoderMath.UsesWholeFps(encoder.Name))
-            problems.Add("internal error: amv must use whole frame rates");
+            problems.Add(messages["plan.error.amvWholeFps"]);
 
         // The ladder climbs back below the recovery point, so a recovery rate at
         // or above the ceiling leaves it no gap to sit in: it would drop a rung,
@@ -390,9 +425,12 @@ public sealed record EncodePlan
         // the user typed is not the number in use.
         if (request.Encode.LimitKbps > 0 && request.Encode.RecoverKbps >= request.Encode.LimitKbps)
         {
-            notes.Add($"recovery {ArgsBuilder.FloatArg(request.Encode.RecoverKbps)} kbps is not below the "
-                    + $"{ArgsBuilder.FloatArg(request.Encode.LimitKbps)} kbps ceiling; "
-                    + $"climbing back at {ArgsBuilder.FloatArg(LadderPolicy.RecoverKbps(request.Encode))} kbps");
+            notes.Add(messages.Format("plan.note.recoverClamped", new
+            {
+                recover = ArgsBuilder.FloatArg(request.Encode.RecoverKbps),
+                limit = ArgsBuilder.FloatArg(request.Encode.LimitKbps),
+                used = ArgsBuilder.FloatArg(LadderPolicy.RecoverKbps(request.Encode)),
+            }));
         }
 
         // Building the chain can refuse: nnedi without its weights, an unknown
@@ -408,6 +446,10 @@ public sealed record EncodePlan
                 request.Encode.Deinterlace.Filter, request.Encode.Deinterlace.FieldMode,
                 request.Encode.Deinterlace.Parity, request.Encode.Deinterlace.MarkedOnly,
                 request.NnediWeights);
+        }
+        catch (RefusalException exc)
+        {
+            problems.Add(exc.Resolve(messages));
         }
         catch (ArgumentException exc)
         {
@@ -478,7 +520,7 @@ public sealed record EncodePlan
     /// which is the sort of thing discovered a year later.</para>
     /// </summary>
     private static (string Container, string Muxer) ResolveContainer(
-        string? requested, EncoderInfo encoder, List<string> problems)
+        string? requested, EncoderInfo encoder, List<string> problems, IMessages messages)
     {
         if (string.IsNullOrWhiteSpace(requested))
             return (encoder.Extension, encoder.FormatName);
@@ -494,8 +536,12 @@ public sealed record EncodePlan
             // written against; the request still loses, but it loses out loud.
             if (!string.Equals(wanted, encoder.Extension, StringComparison.Ordinal))
             {
-                problems.Add(
-                    $"'{encoder.Name}' can only write .{encoder.Extension}; it cannot write '{wanted}'");
+                problems.Add(messages.Format("plan.error.containerOnlyOne", new
+                {
+                    encoder = encoder.Name,
+                    extension = encoder.Extension,
+                    wanted,
+                }));
             }
 
             return (encoder.Extension, encoder.FormatName);
@@ -506,9 +552,12 @@ public sealed record EncodePlan
             if (ext == wanted) return (ext, format);
         }
 
-        problems.Add(
-            $"'{encoder.Name}' cannot write '{wanted}'; it can write: "
-            + string.Join(", ", choices.Select(c => c.Ext)));
+        problems.Add(messages.Format("plan.error.containerChoices", new
+        {
+            encoder = encoder.Name,
+            wanted,
+            choices = string.Join(", ", choices.Select(c => c.Ext)),
+        }));
 
         return (encoder.Extension, encoder.FormatName);
     }

@@ -1,3 +1,5 @@
+using Lae.Core.Localization;
+
 namespace Lae.Core;
 
 /// <summary>
@@ -101,19 +103,27 @@ public sealed record EncodeRequest
     /// meaningful for a derived name -- <c>clip.avi</c> encoded with mpeg4 to a
     /// derived name lands exactly on the source.
     /// </param>
-    public IReadOnlyList<string> Validate(string? destination = null)
+    /// <param name="messages">
+    /// The language to refuse in. A parameter rather than a field because the same
+    /// request must be able to answer in either language within one process, which
+    /// is what the tests and <c>lae repl</c> both do.
+    /// </param>
+    public IReadOnlyList<string> Validate(string? destination, IMessages messages)
     {
         var problems = new List<string>();
         string? output = destination ?? DestinationPath;
 
+        void Refuse(string key, object? values = null)
+            => problems.Add(values is null ? messages[key] : messages.Format(key, values));
+
         if (string.IsNullOrWhiteSpace(SourcePath))
         {
-            problems.Add("no input path");
+            Refuse("plan.error.noInput");
         }
 
         if (string.IsNullOrWhiteSpace(output))
         {
-            problems.Add("no output path");
+            Refuse("plan.error.noOutput");
         }
         else if (!string.IsNullOrWhiteSpace(SourcePath) && SamePath(SourcePath, output))
         {
@@ -122,20 +132,20 @@ public sealed record EncodeRequest
             // to proceed matters: the derived output name is the source name with
             // the encoder's extension, so encoding an .avi to mpeg4 lands here on
             // the first try and reads like a refusal of the whole command.
-            problems.Add("the output path is the input path; name a different output with --out");
+            Refuse("plan.error.outputIsInput");
         }
 
-        if (StartSeconds < 0) problems.Add("the start offset cannot be negative");
+        if (StartSeconds < 0) Refuse("plan.error.negativeStart");
         if (EndSeconds is { } end && end <= StartSeconds)
         {
-            problems.Add("the end offset is not after the start offset");
+            Refuse("plan.error.endBeforeStart");
         }
 
-        if (Encode.Width <= 0 || Encode.Height <= 0) problems.Add("the frame size must be positive");
-        if (Encode.Fps <= 0) problems.Add("the frame rate must be positive");
-        if (Encode.Quality <= 0) problems.Add("the quality must be positive");
-        if (Encode.Parallel < 1) problems.Add("the shard count must be at least 1");
-        if (Encode.Threads < 1) problems.Add("the encoder thread count must be at least 1");
+        if (Encode.Width <= 0 || Encode.Height <= 0) Refuse("plan.error.badSize");
+        if (Encode.Fps <= 0) Refuse("plan.error.badFps");
+        if (Encode.Quality <= 0) Refuse("plan.error.badQuality");
+        if (Encode.Parallel < 1) Refuse("plan.error.badParallel");
+        if (Encode.Threads < 1) Refuse("plan.error.badThreads");
 
         // Sharding was measured and rejected, and the rejection is not "it was
         // slow": the wall clock *is* the pacing, so N shards each pacing in
@@ -148,8 +158,9 @@ public sealed record EncodeRequest
         // single-threaded and letting the number look honoured.
         if (Encode.Parallel > 1)
         {
-            problems.Add($"parallel {Encode.Parallel} is not available in v8: the pacing is the clock, "
-                       + "so N shards finish in the same wall time as one; set parallel to 1");
+            // "shards" rather than "count": i18next reads `count` as a request for
+            // its plural resolver, which would look for a different key entirely.
+            Refuse("plan.error.parallelUnsupported", new { shards = Encode.Parallel });
         }
 
         // A window of zero is not "measure instantly", it is a division by zero
@@ -157,11 +168,11 @@ public sealed record EncodeRequest
         // and the exception arrives after both children have been started. A
         // hand-edited settings file can produce it, so it is checked here where
         // it costs a sentence instead of a stack trace.
-        if (Encode.WindowSeconds <= 0) problems.Add("the bitrate window must be positive");
+        if (Encode.WindowSeconds <= 0) Refuse("plan.error.badWindow");
 
         // The queue between the decoder and the pump. Zero would mean "drop every
         // frame", which is a stall dressed up as a setting.
-        if (Encode.BufferFrames < 1) problems.Add("the frame buffer must hold at least one frame");
+        if (Encode.BufferFrames < 1) Refuse("plan.error.badBuffer");
 
         // Files and an embedded track are mutually exclusive: libass would burn
         // one and the muxer would carry the other, and the result has two
@@ -173,8 +184,7 @@ public sealed record EncodeRequest
                     + (Encode.Subtitles.CopyTracks.Count > 0 ? 1 : 0);
         if (sources > 1)
         {
-            problems.Add("pick one: subtitle files to burn, one track to burn, "
-                       + "or tracks to carry -- not several at once");
+            Refuse("plan.error.subtitleSources");
         }
 
         return problems;

@@ -2,6 +2,8 @@ using Lae.Core;
 using Lae.Core.Settings;
 using Lae.Encoding;
 
+using static Lae.Tests.Encoding.TestMessages;
+
 namespace Lae.Tests.Encoding;
 
 /// <summary>
@@ -48,7 +50,7 @@ public sealed class PreflightTests
             Encode = new EncodeDefaults { Encoder = "mpeg4", Quality = 8, Fps = 25, Hwaccel = hwaccel },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder(), En);
         return (plan, folder);
     }
 

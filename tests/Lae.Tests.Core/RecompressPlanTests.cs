@@ -1,6 +1,8 @@
 using Lae.Core;
 using Lae.Core.Settings;
 
+using static Lae.Tests.Core.TestMessages;
+
 namespace Lae.Tests.Core;
 
 /// <summary>
@@ -35,7 +37,7 @@ public sealed class RecompressPlanTests
             Passes = [new RecompressPass("-c:v libx264", "mp4")],
         };
 
-        RecompressPlan plan = RecompressPlan.Create(chain, Live);
+        RecompressPlan plan = RecompressPlan.Create(chain, Live, En);
 
         await Assert.That(plan.Steps.Count).IsEqualTo(0);
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
@@ -46,7 +48,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task AnArmedChainWithNothingInItIsAProblem()
     {
-        RecompressPlan plan = RecompressPlan.Create(Chain(new RecompressPass("   ", "mp4")), Live);
+        RecompressPlan plan = RecompressPlan.Create(Chain(new RecompressPass("   ", "mp4")), Live, En);
 
         await Assert.That(plan.Steps.Count).IsEqualTo(0);
         await Assert.That(plan.IsRunnable).IsFalse();
@@ -57,7 +59,7 @@ public sealed class RecompressPlanTests
     public async Task HopsAreNumberedFromTheRecordingAndFeedEachOther()
     {
         RecompressPlan plan = RecompressPlan.Create(
-            Armed("-c:v libx264 -crf 30", "-c:v libvpx-vp9 -crf 34"), Live);
+            Armed("-c:v libx264 -crf 30", "-c:v libvpx-vp9 -crf 34"), Live, En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
         await Assert.That(plan.Steps.Count).IsEqualTo(2);
@@ -86,7 +88,7 @@ public sealed class RecompressPlanTests
     [Arguments("-c:v rv20 -q:v 6", "rm")]
     public async Task TheContainerComesFromTheCodec(string fragment, string expected)
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed(fragment), Live);
+        RecompressPlan plan = RecompressPlan.Create(Armed(fragment), Live, En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
         await Assert.That(plan.Steps[0].Container).IsEqualTo(expected);
@@ -96,7 +98,7 @@ public sealed class RecompressPlanTests
     public async Task AnExplicitContainerWins()
     {
         RecompressPlan plan = RecompressPlan.Create(
-            Chain(new RecompressPass("-c:v libx264 -crf 30", "mkv")), Live);
+            Chain(new RecompressPass("-c:v libx264 -crf 30", "mkv")), Live, En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
         await Assert.That(plan.Steps[0].Container).IsEqualTo("mkv");
@@ -107,7 +109,7 @@ public sealed class RecompressPlanTests
     public async Task ACodecThatCannotBeWrittenThereIsRefused()
     {
         RecompressPlan plan = RecompressPlan.Create(
-            Chain(new RecompressPass("-c:v libx264 -crf 30", "rm")), Live);
+            Chain(new RecompressPass("-c:v libx264 -crf 30", "rm")), Live, En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems[0]).Contains("libx264 cannot be written to .rm");
@@ -122,7 +124,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task ACopyHopKeepsTheContainerItWasHanded()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed("-c:v copy"), Live);
+        RecompressPlan plan = RecompressPlan.Create(Armed("-c:v copy"), Live, En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
         await Assert.That(plan.Steps[0].Container).IsEqualTo("avi");
@@ -132,7 +134,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task AHopCannotTakeOverItsInput()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed("-i other.mkv -c:v libx264"), Live);
+        RecompressPlan plan = RecompressPlan.Create(Armed("-i other.mkv -c:v libx264"), Live, En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems[0]).Contains("'-i' is not allowed");
@@ -141,7 +143,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task AHopCannotNameItsOwnOutput()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed("-c:v libx264 -crf 30 clip.mp4"), Live);
+        RecompressPlan plan = RecompressPlan.Create(Armed("-c:v libx264 -crf 30 clip.mp4"), Live, En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems[0]).Contains("looks like an output name");
@@ -150,7 +152,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task AnEmptyFragmentIsAProblem()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed(""), Live);
+        RecompressPlan plan = RecompressPlan.Create(Armed(""), Live, En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems[0]).Contains("every pass is blank");
@@ -159,7 +161,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task TheCommandLineKeepsBothEnds()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed("-c:v libx264 -crf 30"), Live);
+        RecompressPlan plan = RecompressPlan.Create(Armed("-c:v libx264 -crf 30"), Live, En);
         List<string> command = plan.Steps[0].Command("ffmpeg", "out_web.part.mp4");
 
         await Assert.That(command[0]).IsEqualTo("ffmpeg");
@@ -202,15 +204,15 @@ public sealed class ArgsFragmentTests
     [Test]
     public async Task AnOrdinaryFragmentIsAccepted()
     {
-        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "-crf", "30"])).IsNull();
-        await Assert.That(ArgsFragment.Validate(["-c:a", "copy"])).IsNull();
-        await Assert.That(ArgsFragment.Validate(["-vf", "yadif,fps=15"])).IsNull();
+        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "-crf", "30"], En)).IsNull();
+        await Assert.That(ArgsFragment.Validate(["-c:a", "copy"], En)).IsNull();
+        await Assert.That(ArgsFragment.Validate(["-vf", "yadif,fps=15"], En)).IsNull();
     }
 
     [Test]
     public async Task AnOutputFlagIsRefused()
     {
-        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "-o"])).Contains("'-o' is not an FFmpeg flag");
+        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "-o"], En)).Contains("'-o' is not an FFmpeg flag");
     }
 
     /// <summary>
@@ -220,9 +222,9 @@ public sealed class ArgsFragmentTests
     [Test]
     public async Task ABareWordIsNotAPath()
     {
-        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264"])).IsNull();
-        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "clip.webm"])).Contains("looks like an output name");
-        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "/tmp/clip"])).Contains("looks like an output name");
+        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264"], En)).IsNull();
+        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "clip.webm"], En)).Contains("looks like an output name");
+        await Assert.That(ArgsFragment.Validate(["-c:v", "libx264", "/tmp/clip"], En)).Contains("looks like an output name");
     }
 
     /// <summary>
@@ -236,7 +238,7 @@ public sealed class ArgsFragmentTests
     [Test]
     public async Task AnOutputInTheMiddleIsRefused()
     {
-        string? error = ArgsFragment.Validate(["-c:v", "copy", "/tmp/x.mp4", "-an"]);
+        string? error = ArgsFragment.Validate(["-c:v", "copy", "/tmp/x.mp4", "-an"], En);
 
         await Assert.That(error).IsNotNull();
         await Assert.That(error!).Contains("/tmp/x.mp4");
@@ -250,12 +252,12 @@ public sealed class ArgsFragmentTests
     public async Task APathInsideAnOptionValueIsFine()
     {
         await Assert.That(ArgsFragment.Validate(
-            ["-vf", "drawtext=fontfile=C:/Fonts/arial.ttf:text=hi", "-c:v", "libx264"])).IsNull();
+            ["-vf", "drawtext=fontfile=C:/Fonts/arial.ttf:text=hi", "-c:v", "libx264"], En)).IsNull();
     }
 
     [Test]
     public async Task AnEmptyArgumentIsRefused()
     {
-        await Assert.That(ArgsFragment.Validate(["-c:v", "", "libx264"])).IsNotNull();
+        await Assert.That(ArgsFragment.Validate(["-c:v", "", "libx264"], En)).IsNotNull();
     }
 }

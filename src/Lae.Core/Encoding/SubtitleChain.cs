@@ -52,7 +52,8 @@ public static class SubtitleChain
     /// by the host: it is the folder beside FFmpeg, which this assembly cannot
     /// know about.
     /// </param>
-    public static SubtitleBurn Build(SubtitleDefaults subtitles, double startSeconds, string? fontsDirectory)
+    public static SubtitleBurn Build(
+        SubtitleDefaults subtitles, double startSeconds, string? fontsDirectory, Localization.IMessages messages)
     {
         ArgumentNullException.ThrowIfNull(subtitles);
 
@@ -75,9 +76,7 @@ public static class SubtitleChain
         // step, so say which flag it came from rather than burning nothing.
         if (subtitles.Stream is { } track)
         {
-            problems.Add(
-                $"subtitle track {track} has to be unwrapped into a file before planning "
-                + "(that is what --subtitle-track does); nothing would be burned");
+            problems.Add(messages.Format("plan.error.trackNotUnwrapped", new { index = track }));
             return new SubtitleBurn("", default, problems, notes);
         }
 
@@ -87,14 +86,14 @@ public static class SubtitleChain
             // encoder command line is where it belongs, not the filter chain. All
             // this side has to say is whether the request named anything.
             if (subtitles.CopyTracks.Count == 0)
-                problems.Add("copy mode carries tracks into the output; name them with --subtitle-copy");
+                problems.Add(messages["plan.error.copyNeedsTracks"]);
 
             return new SubtitleBurn("", default, problems, notes);
         }
 
         if (subtitles.Mode is not ("burn" or ""))
         {
-            problems.Add($"unknown subtitle mode '{subtitles.Mode}'; use burn or off");
+            problems.Add(messages.Format("plan.error.unknownSubtitleMode", new { mode = subtitles.Mode }));
             return new SubtitleBurn("", default, problems, notes);
         }
 
@@ -103,7 +102,14 @@ public static class SubtitleChain
 
         if (files.Count > MaxFiles)
         {
-            problems.Add($"at most {MaxFiles} subtitle files can be burned at once, got {files.Count}");
+            problems.Add(messages.Format("plan.error.tooManySubtitleFiles", new
+            {
+                max = MaxFiles,
+
+                // "given", not "count": i18next treats `count` as a plural lookup.
+                given = files.Count,
+            }));
+
             return new SubtitleBurn("", default, problems, notes);
         }
 
@@ -111,7 +117,7 @@ public static class SubtitleChain
 
         // Here, and not a line earlier: from this point on captions are really
         // being drawn, so this is the first place the box shape means anything.
-        aspect = Aspect(subtitles.BoxAspect, problems);
+        aspect = Aspect(subtitles.BoxAspect, problems, messages);
         if (problems.Count > 0) return new SubtitleBurn("", default, problems, notes);
 
         // Push the timeline forward so the file's own times line up with the
@@ -167,7 +173,8 @@ public static class SubtitleChain
     }
 
     /// <summary>"source" means the whole frame; anything else is a shape libass must be given.</summary>
-    private static (int Num, int Den) Aspect(string? boxAspect, List<string> problems)
+    private static (int Num, int Den) Aspect(
+        string? boxAspect, List<string> problems, Localization.IMessages messages)
     {
         switch ((boxAspect ?? "source").Trim().ToLowerInvariant())
         {
@@ -179,7 +186,7 @@ public static class SubtitleChain
             case "16:9":
                 return (16, 9);
             default:
-                problems.Add($"unknown subtitle box aspect '{boxAspect}'; use source, 4:3 or 16:9");
+                problems.Add(messages.Format("plan.error.unknownBoxAspect", new { value = boxAspect }));
                 return default;
         }
     }

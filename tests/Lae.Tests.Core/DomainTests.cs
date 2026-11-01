@@ -1,6 +1,8 @@
 using Lae.Core;
 using Lae.Core.Settings;
 
+using static Lae.Tests.Core.TestMessages;
+
 namespace Lae.Tests.Core;
 
 /// <summary>
@@ -146,10 +148,10 @@ public sealed class DomainTests
         // H.264 + AAC is the sane mp4 pairing, so a container is offered.
         string? container = RecompressCodecs.DefaultContainer("libx264", "aac");
         await Assert.That(container).IsNotNull();
-        await Assert.That(RecompressCodecs.ValidateContainer("libx264", "aac", container!)).IsNull();
+        await Assert.That(RecompressCodecs.ValidateContainer("libx264", "aac", container!, En)).IsNull();
 
         // A container that cannot hold the pair must be reported, not silently
         // accepted and then fail inside FFmpeg minutes later.
-        await Assert.That(RecompressCodecs.ValidateContainer("libx264", "aac", "not-a-container")).IsNotNull();
+        await Assert.That(RecompressCodecs.ValidateContainer("libx264", "aac", "not-a-container", En)).IsNotNull();
     }
 }

@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Lae.Core\Lae.Core.csproj" />
+    <ProjectReference Include="..\..\src\Lae.Media\Lae.Media.csproj" />
   </ItemGroup>
 
   <ItemGroup>

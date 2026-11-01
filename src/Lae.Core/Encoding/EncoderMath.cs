@@ -390,19 +390,20 @@ public static class EncoderMath
         return (w, h, w == width && h == height);
     }
 
-    public static string? ValidateRoqDimensions(int width, int height)
+    public static string? ValidateRoqDimensions(int width, int height, Localization.IMessages messages)
     {
         if (width <= 0 || height <= 0 || width % 16 != 0 || height % 16 != 0)
         {
-            throw new ArgumentException(
-                $"roqvideo requires width and height to be divisible by 16; got {width}x{height}");
+            throw new Localization.RefusalException(
+                "plan.error.roqDimensions", new { width, height });
         }
+
         static bool IsPow2(int v) => v > 0 && (v & (v - 1)) == 0;
         if (!IsPow2(width) || !IsPow2(height))
         {
-            return $"RoQ output is {width}x{height}. FFmpeg can encode this size, but it is not "
-                + "power-of-two and may not be compatible with Quake's RoQ decoder.";
+            return messages.Format("plan.note.roqNotPowerOfTwo", new { width, height });
         }
+
         return null;
     }
 
@@ -410,8 +411,12 @@ public static class EncoderMath
     {
         string key = value.Trim().ToLowerInvariant();
         if (Constants.ScaleAlgorithmAliases.TryGetValue(key, out string? canonical)) return canonical;
-        throw new ArgumentException(
-            $"unknown scale algorithm '{value}'; choose: {string.Join(", ", Constants.ScaleAlgorithms)}");
+
+        throw new Localization.RefusalException("plan.error.unknownScaleAlgo", new
+        {
+            value,
+            choices = string.Join(", ", Constants.ScaleAlgorithms),
+        });
     }
 
     /// <summary>

@@ -7,6 +7,8 @@ using Lae.Media;
 using Lae.Media.Ffmpeg;
 using Lae.Media.Toolchain;
 
+using static Lae.Tests.Encoding.TestMessages;
+
 namespace Lae.Tests.Encoding;
 
 /// <summary>
@@ -109,7 +111,7 @@ public sealed class LiveEncodeTests
             },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, source, encoder!);
+        EncodePlan plan = EncodePlan.Create(request, source, encoder!, En);
         await Assert.That(plan.Problems).IsEmpty().Because(string.Join("; ", plan.Problems));
 
         LiveRun run = LiveEncode.Run(plan, rig.Ffmpeg, null, null, CancellationToken.None);
@@ -163,7 +165,7 @@ public sealed class LiveEncodeTests
             },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, source!, encoder);
+        EncodePlan plan = EncodePlan.Create(request, source!, encoder, En);
         await Assert.That(plan.IsRunnable).IsTrue();
 
         // Cancel before the first slot: the run has to unwind without leaving a

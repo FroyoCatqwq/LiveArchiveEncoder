@@ -1,5 +1,6 @@
 using Lae.Core;
 using Lae.Core.Settings;
+using static Lae.Tests.Core.TestMessages;
 
 namespace Lae.Tests.Core;
 
@@ -23,7 +24,7 @@ public sealed class EncodeRequestTests
     [Test]
     public async Task APlainRequestIsAccepted()
     {
-        await Assert.That(Sample().Validate().Count).IsEqualTo(0);
+        await Assert.That(Sample().Validate(null, En).Count).IsEqualTo(0);
     }
 
     [Test]
@@ -31,7 +32,7 @@ public sealed class EncodeRequestTests
     {
         var request = Sample() with { DestinationPath = "/media/in.mkv" };
 
-        IReadOnlyList<string> problems = request.Validate();
+        IReadOnlyList<string> problems = request.Validate(null, En);
 
         await Assert.That(problems.Count).IsEqualTo(1);
         await Assert.That(problems[0].Contains("input path", StringComparison.Ordinal)).IsTrue();
@@ -43,19 +44,19 @@ public sealed class EncodeRequestTests
         var missingInput = Sample() with { SourcePath = "  " };
         var missingOutput = Sample() with { DestinationPath = "" };
 
-        await Assert.That(missingInput.Validate().Count).IsEqualTo(1);
-        await Assert.That(missingOutput.Validate().Count).IsEqualTo(1);
+        await Assert.That(missingInput.Validate(null, En).Count).IsEqualTo(1);
+        await Assert.That(missingOutput.Validate(null, En).Count).IsEqualTo(1);
     }
 
     [Test]
     public async Task AnImpossibleTrimRangeIsRefused()
     {
-        await Assert.That((Sample() with { StartSeconds = -1 }).Validate().Count).IsEqualTo(1);
+        await Assert.That((Sample() with { StartSeconds = -1 }).Validate(null, En).Count).IsEqualTo(1);
 
         // end <= start covers both "backwards" and "zero length".
-        await Assert.That((Sample() with { StartSeconds = 30, EndSeconds = 30 }).Validate().Count).IsEqualTo(1);
-        await Assert.That((Sample() with { StartSeconds = 30, EndSeconds = 10 }).Validate().Count).IsEqualTo(1);
-        await Assert.That((Sample() with { StartSeconds = 10, EndSeconds = 30 }).Validate().Count).IsEqualTo(0);
+        await Assert.That((Sample() with { StartSeconds = 30, EndSeconds = 30 }).Validate(null, En).Count).IsEqualTo(1);
+        await Assert.That((Sample() with { StartSeconds = 30, EndSeconds = 10 }).Validate(null, En).Count).IsEqualTo(1);
+        await Assert.That((Sample() with { StartSeconds = 10, EndSeconds = 30 }).Validate(null, En).Count).IsEqualTo(0);
     }
 
     /// <summary>
@@ -70,7 +71,7 @@ public sealed class EncodeRequestTests
             Subtitles = new SubtitleDefaults { Files = ["/subs/a.ass"], Stream = 2 },
         };
 
-        await Assert.That((Sample() with { Encode = encode }).Validate().Count).IsEqualTo(1);
+        await Assert.That((Sample() with { Encode = encode }).Validate(null, En).Count).IsEqualTo(1);
     }
 
     /// <summary>
@@ -83,14 +84,14 @@ public sealed class EncodeRequestTests
     public async Task ShardingIsRefusedWithItsReason()
     {
         EncodeDefaults encode = Sample().Encode with { Parallel = 4 };
-        IReadOnlyList<string> problems = (Sample() with { Encode = encode }).Validate();
+        IReadOnlyList<string> problems = (Sample() with { Encode = encode }).Validate(null, En);
 
         await Assert.That(problems.Count).IsEqualTo(1);
         await Assert.That(problems[0]).Contains("parallel 4");
         await Assert.That(problems[0]).Contains("set parallel to 1");
 
         // One shard is the default and is not a problem.
-        await Assert.That((Sample() with { Encode = Sample().Encode with { Parallel = 1 } }).Validate().Count)
+        await Assert.That((Sample() with { Encode = Sample().Encode with { Parallel = 1 } }).Validate(null, En).Count)
             .IsEqualTo(0);
     }
 
@@ -143,3 +144,4 @@ public sealed class EncodeRequestTests
         await Assert.That((Sample() with { StartSeconds = 400 }).SpanSeconds(300)).IsNull();
     }
 }
+

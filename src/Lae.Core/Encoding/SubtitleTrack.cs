@@ -44,12 +44,11 @@ public static class SubtitleTrack
     /// and the refusal names the thing that does work: carrying the track into the
     /// output, which is what a WEB-DL's PGS tracks are for.</para>
     /// </summary>
-    public static string? Problem(string? codec, int index)
+    public static string? Problem(string? codec, int index, Localization.IMessages messages)
     {
         if (!IsBitmap(codec)) return null;
 
-        return $"subtitle track {index} is a bitmap format ({codec}): there is no text to lay out, "
-             + $"so it cannot be burned; carry it with --subtitle-copy {index} into an mkv instead";
+        return messages.Format("plan.error.bitmapTrack", new { index, codec });
     }
 
     /// <summary>
@@ -84,7 +83,11 @@ public static class SubtitleTrack
     }
 
     /// <summary>What the run says, so an extracted file appearing in the folder is not a mystery.</summary>
-    public static string Note(string sourcePath, int index, string? codec)
-        => $"burning subtitle track {index} ({codec ?? "unknown codec"}) from {Path.GetFileName(sourcePath)}; "
-         + "unwrapped to a file first because the filter cannot read a stream";
+    public static string Note(string sourcePath, int index, string? codec, Localization.IMessages messages)
+        => messages.Format("plan.note.trackUnwrapped", new
+        {
+            index,
+            codec = codec ?? messages["plan.note.unknownCodec"],
+            name = Path.GetFileName(sourcePath),
+        });
 }

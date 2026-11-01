@@ -1,6 +1,8 @@
 using Lae.Core;
 using Lae.Core.Settings;
 
+using static Lae.Tests.Core.TestMessages;
+
 namespace Lae.Tests.Core;
 
 /// <summary>
@@ -83,7 +85,7 @@ public sealed class EncodePlanTests
     [Test]
     public async Task APlainRunProducesTwoCommandsThatAgree()
     {
-        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(plan.TransportPixelFormat).IsEqualTo("yuv420p");
@@ -120,7 +122,7 @@ public sealed class EncodePlanTests
     public async Task TheTrimRangeLandsInTheRightPlaces()
     {
         EncodeRequest request = Request() with { StartSeconds = 60, EndSeconds = 200 };
-        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder(), En);
 
         await Assert.That(plan.SpanSeconds).IsEqualTo(140.0);
         await Assert.That(HasRun(plan.DecoderArgs, "-ss", "60.000000", "-i", "/media/in.mkv")).IsTrue();
@@ -135,7 +137,7 @@ public sealed class EncodePlanTests
     [Test]
     public async Task AudioIsReadASecondTimeAndMapped()
     {
-        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: true), Encoder());
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: true), Encoder(), En);
 
         await Assert.That(plan.HasAudio).IsTrue();
         await Assert.That(HasRun(plan.EncoderArgs, "-i", "pipe:0", "-i", "/media/in.mkv")).IsTrue();
@@ -167,7 +169,7 @@ public sealed class EncodePlanTests
             ],
         };
 
-        EncodePlan plan = EncodePlan.Create(request, source, Encoder());
+        EncodePlan plan = EncodePlan.Create(request, source, Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(HasRun(plan.DecoderArgs, "-map", "0:2")).IsTrue();
@@ -179,7 +181,7 @@ public sealed class EncodePlanTests
     public async Task APickOfTheWrongKindIsRefused()
     {
         EncodeRequest request = Request() with { VideoStream = 1 };
-        EncodePlan plan = EncodePlan.Create(request, Source(audio: true), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: true), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(string.Join('\n', plan.Problems).Contains("not video", StringComparison.Ordinal)).IsTrue();
@@ -194,7 +196,7 @@ public sealed class EncodePlanTests
     public async Task AnImpossibleContainerNamesTheAlternatives()
     {
         EncodeRequest request = Request() with { Encode = new EncodeDefaults { Encoder = "mpeg4", Container = "flv" } };
-        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         string joined = string.Join('\n', plan.Problems);
@@ -221,7 +223,7 @@ public sealed class EncodePlanTests
     public async Task ATrimmedRunCapsTheSecondInputToo()
     {
         EncodeRequest request = Request() with { StartSeconds = 1, EndSeconds = 2 };
-        EncodePlan plan = EncodePlan.Create(request, Source(audio: true), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: true), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(plan.SpanSeconds).IsEqualTo(1.0);
@@ -235,7 +237,7 @@ public sealed class EncodePlanTests
     [Test]
     public async Task ASilentRunNeedsNoCap()
     {
-        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder(), En);
 
         await Assert.That(plan.EncoderArgs.Contains("-t")).IsFalse();
     }
@@ -243,7 +245,7 @@ public sealed class EncodePlanTests
     [Test]
     public async Task RetargetingMovesOnlyTheOutputPath()
     {
-        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder(), En);
         EncodePlan part = plan.WritingTo("/media/out.part.avi");
 
         await Assert.That(part.DestinationPath).IsEqualTo("/media/out.part.avi");
@@ -263,7 +265,7 @@ public sealed class EncodePlanTests
     {
         EncodeRequest request = Request() with { Encode = new EncodeDefaults { Encoder = "mpeg4", Container = "mkv" } };
         request = request with { DestinationPath = "/media/out.mkv" };
-        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(plan.Container).IsEqualTo("mkv");
@@ -282,7 +284,7 @@ public sealed class EncodePlanTests
         EncodeRequest request = Request(new EncodeDefaults { Encoder = "libx264" })
             with { DestinationPath = null };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder("libx264", "mp4", "mp4"));
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder("libx264", "mp4", "mp4"), En);
 
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(plan.Container).IsEqualTo("mp4");
@@ -306,7 +308,7 @@ public sealed class EncodePlanTests
             DestinationPath = null,
         };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems.Any(p => p.Contains("--out", StringComparison.Ordinal))).IsTrue();
@@ -322,7 +324,7 @@ public sealed class EncodePlanTests
     {
         EncodeRequest request = Request(new EncodeDefaults { Encoder = "mpeg4", WindowSeconds = 0 });
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems.Any(p => p.Contains("window", StringComparison.Ordinal))).IsTrue();
@@ -333,7 +335,7 @@ public sealed class EncodePlanTests
     {
         EncodeRequest request = Request(new EncodeDefaults { Encoder = "mpeg4", BufferFrames = 0 });
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems.Any(p => p.Contains("buffer", StringComparison.Ordinal))).IsTrue();
@@ -365,8 +367,8 @@ public sealed class EncodePlanTests
             },
         };
 
-        EncodePlan before = EncodePlan.Create(plain, Source(), Encoder());
-        EncodePlan after = EncodePlan.Create(armed, Source(), Encoder());
+        EncodePlan before = EncodePlan.Create(plain, Source(), Encoder(), En);
+        EncodePlan after = EncodePlan.Create(armed, Source(), Encoder(), En);
 
         await Assert.That(after.IsRunnable).IsTrue();
         await Assert.That(after.DestinationPath).IsEqualTo(before.DestinationPath);
@@ -391,7 +393,7 @@ public sealed class EncodePlanTests
             },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(plan.DecoderArgs.Any(a => a.Contains("subtitles=filename=", StringComparison.Ordinal))).IsTrue();
@@ -410,7 +412,7 @@ public sealed class EncodePlanTests
         {
             Encode = new EncodeDefaults { Encoder = "mpeg4", Width = 321, Height = 241 },
         };
-        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(audio: false), Encoder(), En);
 
         await Assert.That(plan.Width % 2).IsEqualTo(0);
         await Assert.That(plan.Height % 2).IsEqualTo(0);
@@ -422,7 +424,7 @@ public sealed class EncodePlanTests
     [Test]
     public async Task FrameCountAndSizeMatchThePlan()
     {
-        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+        EncodePlan plan = EncodePlan.Create(Request(), Source(audio: false), Encoder(), En);
 
         // 300 s at 13 fps.
         await Assert.That(plan.TargetFrames).IsEqualTo(3900L);
@@ -446,7 +448,7 @@ public sealed class EncodePlanTests
         };
 
         EncodePlan plan = EncodePlan.Create(
-            request, Source(audio: false), Encoder("libx264", "mp4", "mp4"));
+            request, Source(audio: false), Encoder("libx264", "mp4", "mp4"), En);
 
         await Assert.That(HasRun(plan.EncoderArgs, "-crf", "20")).IsTrue();
         await Assert.That(HasRun(plan.EncoderArgs, "-maxrate", "480k")).IsTrue();
@@ -455,7 +457,7 @@ public sealed class EncodePlanTests
         // VBV stays off the mpeg family: a fixed quantiser and a tight buffer are
         // contradictory requests, and FFmpeg reports "rc buffer underflow" on
         // every frame while overshooting anyway.
-        EncodePlan mpeg = EncodePlan.Create(Request(), Source(audio: false), Encoder());
+        EncodePlan mpeg = EncodePlan.Create(Request(), Source(audio: false), Encoder(), En);
         await Assert.That(mpeg.EncoderArgs.Contains("-maxrate")).IsFalse();
         await Assert.That(mpeg.EncoderArgs.Contains("-bufsize")).IsFalse();
     }
@@ -476,7 +478,7 @@ public sealed class EncodePlanTests
             },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder(), En);
 
         await Assert.That(plan.BuildLadder()).IsNotNull();
         await Assert.That(string.Join(',', plan.BuildLadder()!.Rungs.Select(r => r.Fps))).IsEqualTo("13,9,4");
@@ -497,7 +499,7 @@ public sealed class EncodePlanTests
             Encode = new EncodeDefaults { Encoder = "mpeg4", LimitKbps = 60, RecoverKbps = 150 },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder(), En);
 
         await Assert.That(plan.BuildLadder()!.Rungs[1].RiseBelowKbps).IsEqualTo(45.0);
         await Assert.That(string.Join('\n', plan.Notes).Contains("recovery", StringComparison.Ordinal)).IsTrue();
@@ -507,7 +509,7 @@ public sealed class EncodePlanTests
     [Test]
     public async Task TheEncoderIsAskedForItsProgressStream()
     {
-        EncodePlan plan = EncodePlan.Create(Request(), Source(), Encoder());
+        EncodePlan plan = EncodePlan.Create(Request(), Source(), Encoder(), En);
 
         await Assert.That(HasRun(plan.EncoderArgs, "-progress", "pipe:1")).IsTrue();
 
@@ -540,7 +542,7 @@ public sealed class EncodePlanTests
         };
 
         EncodePlan plan = EncodePlan.Create(
-            request, WithSubs((2, "hdmv_pgs_subtitle"), (3, "hdmv_pgs_subtitle")), Encoder());
+            request, WithSubs((2, "hdmv_pgs_subtitle"), (3, "hdmv_pgs_subtitle")), Encoder(), En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
         await Assert.That(plan.HasSubtitleTracks).IsTrue();
@@ -585,7 +587,7 @@ public sealed class EncodePlanTests
             ],
         };
 
-        EncodePlan plan = EncodePlan.Create(request, silent, Encoder());
+        EncodePlan plan = EncodePlan.Create(request, silent, Encoder(), En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
         await Assert.That(plan.HasAudio).IsFalse();
@@ -607,7 +609,7 @@ public sealed class EncodePlanTests
             },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, WithSubs((2, "hdmv_pgs_subtitle")), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, WithSubs((2, "hdmv_pgs_subtitle")), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems.Any(p => p.Contains("mkv", StringComparison.Ordinal))).IsTrue();
@@ -630,7 +632,7 @@ public sealed class EncodePlanTests
             },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, WithSubs((2, "subrip")), Encoder());
+        EncodePlan plan = EncodePlan.Create(request, WithSubs((2, "subrip")), Encoder(), En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems.Any(p => p.Contains("no subtitle muxer", StringComparison.Ordinal))).IsTrue();
@@ -655,7 +657,7 @@ public sealed class EncodePlanTests
             Encode = new EncodeDefaults { Encoder = "qtrle", Quality = 8, Container = "avi" },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("qtrle", "mov", "mov"));
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("qtrle", "mov", "mov"), En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems.Any(p => p.Contains("only write .mov", StringComparison.Ordinal))).IsTrue();
@@ -671,7 +673,7 @@ public sealed class EncodePlanTests
             Encode = new EncodeDefaults { Encoder = "qtrle", Quality = 8, Container = "mov" },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("qtrle", "mov", "mov"));
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("qtrle", "mov", "mov"), En);
 
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(plan.Container).IsEqualTo("mov");
@@ -696,7 +698,7 @@ public sealed class EncodePlanTests
             Encode = new EncodeDefaults { Encoder = "flv", Quality = 8 },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("flv", "flv", "flv"));
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("flv", "flv", "flv"), En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems.Any(p => p.Contains("out.avi", StringComparison.Ordinal))).IsTrue();
@@ -712,7 +714,7 @@ public sealed class EncodePlanTests
             Encode = new EncodeDefaults { Encoder = "flv", Quality = 8, Container = "avi" },
         };
 
-        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("flv", "flv", "flv"));
+        EncodePlan plan = EncodePlan.Create(request, Source(), Encoder("flv", "flv", "flv"), En);
 
         await Assert.That(plan.IsRunnable).IsTrue();
         await Assert.That(plan.Container).IsEqualTo("avi");

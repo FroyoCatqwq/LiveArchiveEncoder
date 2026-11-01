@@ -1,5 +1,7 @@
 using Lae.Core;
 
+using static Lae.Tests.Core.TestMessages;
+
 namespace Lae.Tests.Core;
 
 /// <summary>
@@ -38,7 +40,7 @@ public sealed class SubtitleCopyTests
     [Test]
     public async Task MatroskaKeepsABitmapTrackAsItIs()
     {
-        (string? codec, string? problem) = SubtitleCopy.Resolve("mkv", "hdmv_pgs_subtitle", 2);
+        (string? codec, string? problem) = SubtitleCopy.Resolve("mkv", "hdmv_pgs_subtitle", 2, En);
 
         await Assert.That(codec).IsEqualTo("copy");
         await Assert.That(problem).IsNull();
@@ -52,7 +54,7 @@ public sealed class SubtitleCopyTests
     public async Task ATextTrackIsConvertedWhereItMustBeAndCopiedWhereItCanBe(
         string container, string sourceCodec, string expected)
     {
-        (string? codec, string? problem) = SubtitleCopy.Resolve(container, sourceCodec, 2);
+        (string? codec, string? problem) = SubtitleCopy.Resolve(container, sourceCodec, 2, En);
 
         await Assert.That(problem).IsNull();
         await Assert.That(codec).IsEqualTo(expected);
@@ -65,7 +67,7 @@ public sealed class SubtitleCopyTests
     [Test]
     public async Task ABitmapTrackCannotGoIntoMp4AndTheRefusalSaysMkv()
     {
-        (string? codec, string? problem) = SubtitleCopy.Resolve("mp4", "hdmv_pgs_subtitle", 3);
+        (string? codec, string? problem) = SubtitleCopy.Resolve("mp4", "hdmv_pgs_subtitle", 3, En);
 
         await Assert.That(codec).IsNull();
         await Assert.That(problem).IsNotNull();
@@ -81,7 +83,7 @@ public sealed class SubtitleCopyTests
     [Arguments("asf")]
     public async Task ContainersWithoutASubtitleMuxerAreRefused(string container)
     {
-        (string? codec, string? problem) = SubtitleCopy.Resolve(container, "subrip", 2);
+        (string? codec, string? problem) = SubtitleCopy.Resolve(container, "subrip", 2, En);
 
         await Assert.That(codec).IsNull();
         await Assert.That(problem!).Contains("no subtitle muxer");
@@ -91,7 +93,7 @@ public sealed class SubtitleCopyTests
     public async Task EveryNamedTrackIsCarried()
     {
         (IReadOnlyList<SubtitleCarry> tracks, IReadOnlyList<string> problems) =
-            SubtitleCopy.Resolve("mkv", Source(), [2, 3]);
+            SubtitleCopy.Resolve("mkv", Source(), [2, 3], En);
 
         await Assert.That(problems.Count).IsEqualTo(0);
         await Assert.That(tracks.Count).IsEqualTo(2);
@@ -109,7 +111,7 @@ public sealed class SubtitleCopyTests
     public async Task NamingANonSubtitleStreamIsAProblem()
     {
         (IReadOnlyList<SubtitleCarry> tracks, IReadOnlyList<string> problems) =
-            SubtitleCopy.Resolve("mkv", Source(), [0]);
+            SubtitleCopy.Resolve("mkv", Source(), [0], En);
 
         await Assert.That(tracks.Count).IsEqualTo(0);
         await Assert.That(problems.Count).IsEqualTo(1);
@@ -120,7 +122,7 @@ public sealed class SubtitleCopyTests
     [Test]
     public async Task ADuplicateIndexIsCollapsed()
     {
-        (IReadOnlyList<SubtitleCarry> tracks, _) = SubtitleCopy.Resolve("mkv", Source(), [2, 2]);
+        (IReadOnlyList<SubtitleCarry> tracks, _) = SubtitleCopy.Resolve("mkv", Source(), [2, 2], En);
 
         await Assert.That(tracks.Count).IsEqualTo(1);
     }

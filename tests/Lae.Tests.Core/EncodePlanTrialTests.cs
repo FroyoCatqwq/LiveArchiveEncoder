@@ -1,6 +1,8 @@
 using Lae.Core;
 using Lae.Core.Settings;
 
+using static Lae.Tests.Core.TestMessages;
+
 namespace Lae.Tests.Core;
 
 /// <summary>
@@ -48,7 +50,7 @@ public sealed class EncodePlanTrialTests
             Encode = new EncodeDefaults { Encoder = "mpeg4", Quality = 8, Fps = fps, Hwaccel = hwaccel },
         },
         Source(audio),
-        Encoder());
+        Encoder(), En);
 
     private static bool HasRun(IReadOnlyList<string> args, params string[] expected)
     {

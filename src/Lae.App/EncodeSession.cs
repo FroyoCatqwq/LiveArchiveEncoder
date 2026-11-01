@@ -139,11 +139,11 @@ public static partial class EncodeSession
     {
         if (request.Encode.Subtitles.Stream is not { } index) return TrackPreparation.Done(request);
 
-        if (source.CheckPick(index, "subtitle", "--subtitle-track") is { } pickProblem)
+        if (source.CheckPick(index, "subtitle", "--subtitle-track", dependencies.Messages) is { } pickProblem)
             return TrackPreparation.Refused(ExitCodes.Usage, pickProblem);
 
         string? codec = source.Streams.First(s => s.Index == index).Codec;
-        if (SubtitleTrack.Problem(codec, index) is { } codecProblem)
+        if (SubtitleTrack.Problem(codec, index, dependencies.Messages) is { } codecProblem)
             return TrackPreparation.Refused(ExitCodes.Usage, codecProblem);
 
         // Beside the output, because the source may be a read-only mount or a
@@ -174,7 +174,7 @@ public static partial class EncodeSession
 
         return new TrackPreparation(
             prepared, dryRun ? null : temporary,
-            SubtitleTrack.Note(request.SourcePath, index, codec), ExitCodes.Ok, null);
+            SubtitleTrack.Note(request.SourcePath, index, codec, dependencies.Messages), ExitCodes.Ok, null);
     }
 
     private static void DiscardTemporary(string path, ITerminal terminal, IMessages messages)
@@ -226,7 +226,7 @@ public static partial class EncodeSession
             return ExitCodes.Usage;
         }
 
-        EncodePlan plan = EncodePlan.Create(request, source, encoder);
+        EncodePlan plan = EncodePlan.Create(request, source, encoder, messages);
 
         // Notes are commentary, not the answer, so they go to stderr: a dry run
         // piped to a file has to contain the two command lines and nothing else.
@@ -246,7 +246,7 @@ public static partial class EncodeSession
         // fragment with "-i" in it, or a codec that cannot be written to the
         // container asked for, has to cost a sentence now -- not after a
         // full-length capture that then ends in a refusal.
-        RecompressPlan post = RecompressPlan.Create(request.Encode.Recompress, plan.DestinationPath);
+        RecompressPlan post = RecompressPlan.Create(request.Encode.Recompress, plan.DestinationPath, messages);
 
         foreach (string note in post.Notes)
             terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));

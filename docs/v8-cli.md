@@ -115,7 +115,38 @@ liveQv = 6
 
 ### `lae setup`
 
-诊断：找到没有、在哪、能不能跑。退出码 1 表示缺东西。它**只诊断，不下载**。
+诊断：找到没有、在哪、能不能跑。退出码 1 表示缺东西。它**只诊断，不下载**——一个会拉 80 MB
+的诊断不算诊断，而且真实的下载失败总是选在最坏的时刻。
+
+### `lae toolchain`
+
+真正下载 FFmpeg 的命令。
+
+```
+lae toolchain list                  # 装了什么，正在用哪个
+lae toolchain install               # 默认 btbn（BtbN 的每日快照）
+lae toolchain install nonfree       # 带 fdk-aac 的那套
+lae toolchain install --from ./ffmpeg.zip   # 从本地压缩包装，不联网
+lae toolchain use btbn              # 让 encode 用这一份
+lae toolchain use path              # 交还给机器自己的 PATH
+lae toolchain path                  # 编码时到底会跑哪个 ffmpeg
+lae toolchain remove btbn           # 删掉
+```
+
+几个刻意的选择：
+
+- **装在设置文件旁边**（`<配置目录>/ffmpeg/<id>/bin`），不是装在程序旁边。v8 是自包含单文件
+  发布，启动时会把自己解到临时目录，写在可执行文件旁边的任何东西下次就没了。
+- **每个来源一个目录，整目录替换**。先下到 `.staging/`、解开、检查、再发布。下载断在一个
+  80 MB 的包中间，不会毁掉已经在用的那一份。
+- **只有两个来源**：BtbN 和 nonfree。gyan 不发 Linux 版；avbuild 的 SourceForge 镜像挡在
+  Cloudflare 中间页后面，下载器只会存回一张 HTML——v7 把它标成"手动下载"，那不是命令该有
+  的样子。
+- **没有 aria2c**。v7 用它开 16 条连接，多数机器上最后还是退回单连接。一个总能用的实现胜过
+  两个里偶尔失败的那个。
+- **`install` 不等于 `use`**。装完会明说"它还没被选中"，否则下一次编码用的还是原来那份。
+- **`--front gh-proxy.com`** 走 GitHub 加速前缀，**`--proxy`** 走 HTTP 代理，两个都会记进设置
+  （只在你显式给了的时候记，`off` 和"没说过"是两件事）。
 
 ### `lae history`
 

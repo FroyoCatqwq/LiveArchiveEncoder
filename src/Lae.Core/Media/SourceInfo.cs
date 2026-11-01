@@ -60,14 +60,22 @@ public sealed record SourceInfo
     /// The stream pick, resolved and checked. Returns a reason when the requested
     /// index is out of range or names the wrong kind of stream -- a stale index
     /// from a settings file must not silently select the subtitle track.
+    ///
+    /// <para><paramref name="messages"/> because this is one of the sentences a user
+    /// reads most: a wrong index is the commonest way to name a stream wrongly, and
+    /// "that stream is audio, not subtitle" is the whole answer.</para>
     /// </summary>
-    public string? CheckPick(int? absoluteIndex, string type, string flag)
+    public string? CheckPick(int? absoluteIndex, string type, string flag, Localization.IMessages messages)
     {
         if (absoluteIndex is not { } index) return null;
 
         SourceStream? stream = Streams.FirstOrDefault(s => s.Index == index);
-        if (stream is null) return $"{flag} {index}: the source has no stream with that index";
-        if (stream.Type != type) return $"{flag} {index}: that stream is {stream.Type}, not {type}";
+        if (stream is null)
+            return messages.Format("plan.error.streamMissing", new { flag, index });
+
+        if (stream.Type != type)
+            return messages.Format("plan.error.streamWrongType", new { flag, index, actual = stream.Type, type });
+
         return null;
     }
 }

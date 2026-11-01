@@ -15,8 +15,9 @@ namespace Lae.Core;
 public static class LaeVersion
 {
     /// <summary>The build's own version, without a leading "v".</summary>
-    public const string Current = "8.0.0-m2.2";
+    public const string Current = "8.0.0-m2.3";
 
     /// <summary>True while this is a milestone build rather than a release.</summary>
     public static bool IsPrerelease => Current.Contains('-', StringComparison.Ordinal);
 }
+

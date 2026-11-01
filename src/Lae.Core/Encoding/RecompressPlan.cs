@@ -74,7 +74,8 @@ public sealed record RecompressPlan
     /// Works out the chain against a live product. Never throws for user input.
     /// An unarmed chain plans nothing and says nothing -- that is the normal case.
     /// </summary>
-    public static RecompressPlan Create(RecompressChain chain, string livePath)
+    public static RecompressPlan Create(
+        RecompressChain chain, string livePath, Localization.IMessages messages)
     {
         string live = livePath;
         var problems = new List<string>();
@@ -89,7 +90,7 @@ public sealed record RecompressPlan
         // must not be mistaken for "no chain".
         if (passes.Count == 0 && chain.Passes.Count > 0)
         {
-            problems.Add("the recompress chain is armed but every pass is blank");
+            problems.Add(messages["plan.error.chainAllBlank"]);
             return new RecompressPlan { LivePath = live, Steps = [], Problems = problems };
         }
 
@@ -104,15 +105,17 @@ public sealed record RecompressPlan
         for (int i = 0; i < passes.Count; i++)
         {
             int number = i + 1;
-            (List<string> tokens, string? error) = ArgsFragment.Parse(passes[i].Args);
+            (List<string> tokens, string? error) = ArgsFragment.Parse(passes[i].Args, messages);
 
             if (error is not null)
             {
-                problems.Add($"pass {number}: {error}");
+                problems.Add(messages.Format("plan.error.chainPass", new { number, detail = error }));
                 continue;
             }
 
-            (string next, string? containerError) = ResolveContainer(passes[i], tokens, container, number);
+            (string next, string? containerError) = ResolveContainer(
+                passes[i], tokens, container, number, messages);
+
             if (containerError is not null)
             {
                 problems.Add(containerError);
@@ -143,8 +146,10 @@ public sealed record RecompressPlan
 
         if (steps.Count > 0)
         {
-            notes.Add("recompress chain: "
-                + string.Join(" > ", steps.Select(s => $"{Path.GetFileName(s.OutputPath)} ({s.Container})")));
+            notes.Add(messages.Format("plan.note.chain", new
+            {
+                hops = string.Join(" > ", steps.Select(s => $"{Path.GetFileName(s.OutputPath)} ({s.Container})")),
+            }));
         }
 
         return new RecompressPlan { LivePath = live, Steps = steps, Notes = notes, Problems = problems };
@@ -160,7 +165,8 @@ public sealed record RecompressPlan
     /// several seconds in with a muxer message.</para>
     /// </summary>
     private static (string Container, string? Error) ResolveContainer(
-        RecompressPass pass, IReadOnlyList<string> tokens, string previous, int number)
+        RecompressPass pass, IReadOnlyList<string> tokens, string previous, int number,
+        Localization.IMessages messages)
     {
         string? video = RecompressCodecs.DetectVideoCodec(tokens);
         string? audio = RecompressCodecs.DetectAudioCodec(tokens);
@@ -174,8 +180,12 @@ public sealed record RecompressPlan
             // picks the codec, a codec from a newer FFmpeg) is taken at its word.
             if (video is not null)
             {
-                string? error = RecompressCodecs.ValidateContainer(video, audio, wanted);
-                if (error is not null) return (previous, $"pass {number}: {error}");
+                string? error = RecompressCodecs.ValidateContainer(video, audio, wanted, messages);
+                if (error is not null)
+                {
+                    return (previous, messages.Format(
+                        "plan.error.chainPass", new { number, detail = error }));
+                }
             }
 
             return (wanted, null);
@@ -186,7 +196,12 @@ public sealed record RecompressPlan
         string? derived = RecompressCodecs.DefaultContainer(video, audio);
         return derived is not null
             ? (derived, null)
-            : (previous, $"pass {number}: {video} and {audio} share no container; name one with --recompress-container");
+            : (previous, messages.Format("plan.error.chainNoContainer", new
+            {
+                number,
+                video,
+                audio,
+            }));
     }
 
     /// <summary>

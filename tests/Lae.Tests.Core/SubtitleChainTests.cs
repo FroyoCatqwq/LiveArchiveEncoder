@@ -1,6 +1,8 @@
 using Lae.Core;
 using Lae.Core.Settings;
 
+using static Lae.Tests.Core.TestMessages;
+
 namespace Lae.Tests.Core;
 
 /// <summary>
@@ -26,7 +28,7 @@ public sealed class SubtitleChainTests
     [Test]
     public async Task NothingAskedMeansNothingBurned()
     {
-        SubtitleBurn burn = SubtitleChain.Build(new SubtitleDefaults(), 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(new SubtitleDefaults(), 0, null, En);
 
         await Assert.That(burn.Filter.Length).IsEqualTo(0);
         await Assert.That(burn.Problems.Count).IsEqualTo(0);
@@ -35,7 +37,7 @@ public sealed class SubtitleChainTests
     [Test]
     public async Task ABurnOfOneFileNamesThatFile()
     {
-        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 0, null, En);
 
         await Assert.That(burn.Problems.Count).IsEqualTo(0);
         await Assert.That(burn.Filter.StartsWith("subtitles=filename=", StringComparison.Ordinal)).IsTrue();
@@ -51,7 +53,7 @@ public sealed class SubtitleChainTests
     [Test]
     public async Task ATrimmedRunShiftsTheClockForwardAndBack()
     {
-        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 12, null);
+        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 12, null, En);
 
         int forward = burn.Filter.IndexOf("setpts=PTS+12.000000/TB", StringComparison.Ordinal);
         int burnAt = burn.Filter.IndexOf("subtitles=", StringComparison.Ordinal);
@@ -65,7 +67,7 @@ public sealed class SubtitleChainTests
     [Test]
     public async Task AnUntrimmedRunNeedsNoShift()
     {
-        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 0, null, En);
 
         await Assert.That(burn.Filter.Contains("setpts", StringComparison.Ordinal)).IsFalse();
     }
@@ -73,7 +75,7 @@ public sealed class SubtitleChainTests
     [Test]
     public async Task TheFontsFolderIsHandedToLibass()
     {
-        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 0, "/tools/fonts");
+        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 0, "/tools/fonts", En);
 
         await Assert.That(burn.Filter.Contains("fontsdir=", StringComparison.Ordinal)).IsTrue();
         await Assert.That(burn.Filter.Contains("tools", StringComparison.Ordinal)).IsTrue();
@@ -83,7 +85,7 @@ public sealed class SubtitleChainTests
     public async Task AFallbackFamilyIsForcedOverWhatTheFileAsksFor()
     {
         SubtitleDefaults settings = Burn("/subs/a.srt") with { FallbackFont = "SimHei" };
-        SubtitleBurn burn = SubtitleChain.Build(settings, 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(settings, 0, null, En);
 
         // Quoted, so the graph parser leaves the commas inside the style alone.
         await Assert.That(burn.Filter.Contains("force_style='FontName=SimHei'", StringComparison.Ordinal)).IsTrue();
@@ -103,7 +105,7 @@ public sealed class SubtitleChainTests
     public async Task AnEmbeddedTrackIsRefusedWithTheWayForward()
     {
         SubtitleDefaults settings = new() { Mode = "burn", Stream = 3 };
-        SubtitleBurn burn = SubtitleChain.Build(settings, 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(settings, 0, null, En);
 
         await Assert.That(burn.Problems.Count).IsEqualTo(1);
         await Assert.That(burn.Problems[0].Contains("--subtitle-track", StringComparison.Ordinal)).IsTrue();
@@ -119,12 +121,12 @@ public sealed class SubtitleChainTests
     public async Task CopyModeDrawsNothingAndNeedsATrackNamed()
     {
         SubtitleBurn named = SubtitleChain.Build(
-            new SubtitleDefaults { Mode = "copy", CopyTracks = [2] }, 0, null);
+            new SubtitleDefaults { Mode = "copy", CopyTracks = [2] }, 0, null, En);
 
         await Assert.That(named.Problems.Count).IsEqualTo(0);
         await Assert.That(named.Filter.Length).IsEqualTo(0);
 
-        SubtitleBurn unnamed = SubtitleChain.Build(new SubtitleDefaults { Mode = "copy" }, 0, null);
+        SubtitleBurn unnamed = SubtitleChain.Build(new SubtitleDefaults { Mode = "copy" }, 0, null, En);
 
         await Assert.That(unnamed.Problems.Count).IsEqualTo(1);
         await Assert.That(unnamed.Problems[0].Contains("--subtitle-copy", StringComparison.Ordinal)).IsTrue();
@@ -134,7 +136,7 @@ public sealed class SubtitleChainTests
     public async Task AnUnknownBoxShapeIsRefused()
     {
         SubtitleDefaults settings = Burn("/subs/a.srt") with { BoxAspect = "5:4" };
-        SubtitleBurn burn = SubtitleChain.Build(settings, 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(settings, 0, null, En);
 
         await Assert.That(burn.Problems.Count).IsEqualTo(1);
         await Assert.That(burn.Problems[0].Contains("4:3", StringComparison.Ordinal)).IsTrue();
@@ -144,7 +146,7 @@ public sealed class SubtitleChainTests
     public async Task ABurnedBoxIsAShapeLibassIsGiven()
     {
         SubtitleDefaults settings = Burn("/subs/a.srt") with { BoxAspect = "4:3" };
-        SubtitleBurn burn = SubtitleChain.Build(settings, 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(settings, 0, null, En);
 
         await Assert.That(burn.BoxAspect).IsEqualTo((4, 3));
     }
@@ -157,7 +159,7 @@ public sealed class SubtitleChainTests
     [Test]
     public async Task TheWholeFrameStaysASimpleChain()
     {
-        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt"), 0, null, En);
         VideoFilter filter = SubtitleChain.Apply("scale=320:240", burn, "0:v", 320, 240, "yuv420p");
 
         await Assert.That(filter.IsGraph).IsFalse();
@@ -167,7 +169,7 @@ public sealed class SubtitleChainTests
     [Test]
     public async Task ABurnedBoxBuildsTheCropBurnOverlayGraph()
     {
-        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt") with { BoxAspect = "4:3" }, 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(Burn("/subs/a.srt") with { BoxAspect = "4:3" }, 0, null, En);
         VideoFilter filter = SubtitleChain.Apply("scale=320:240", burn, "0:v", 320, 240, "yuv420p");
 
         await Assert.That(filter.IsGraph).IsTrue();
@@ -183,7 +185,7 @@ public sealed class SubtitleChainTests
     [Test]
     public async Task APathIsEscapedForTheFiltergraph()
     {
-        SubtitleBurn burn = SubtitleChain.Build(Burn(@"C:\subs\a.srt"), 0, null);
+        SubtitleBurn burn = SubtitleChain.Build(Burn(@"C:\subs\a.srt"), 0, null, En);
 
         await Assert.That(burn.Filter.Contains(@"'C\:\\subs\\a.srt'", StringComparison.Ordinal)).IsTrue();
     }

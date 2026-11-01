@@ -179,16 +179,31 @@ public static class RecompressCodecs
     /// Check a requested container against the pair. Returns null when it is
     /// fine, otherwise the sentence the caller prints.
     /// </summary>
-    public static string? ValidateContainer(string videoCodec, string? audioCodec, string container)
+    public static string? ValidateContainer(
+        string videoCodec, string? audioCodec, string container, Localization.IMessages messages)
     {
         string wanted = container.Trim().TrimStart('.').ToLowerInvariant();
         string audio = IsCopyAudio(audioCodec) ? CopyAudio : (audioCodec ?? "").Trim().ToLowerInvariant();
 
         SecondPassVideoCodec? video = FindVideo(videoCodec);
         if (video is null)
-            return $"unknown video codec '{videoCodec}'; known: {string.Join(", ", VideoNames)}";
+        {
+            return messages.Format("plan.error.unknownVideoCodec", new
+            {
+                codec = videoCodec,
+                known = string.Join(", ", VideoNames),
+            });
+        }
+
         if (!video.Containers.Contains(wanted, StringComparer.OrdinalIgnoreCase))
-            return $"{video.Name} cannot be written to .{wanted}; it supports {string.Join(", ", video.Containers)}";
+        {
+            return messages.Format("plan.error.codecContainer", new
+            {
+                codec = video.Name,
+                container = wanted,
+                containers = string.Join(", ", video.Containers),
+            });
+        }
 
         if (IsCopyAudio(audio)) return null;
         // No audio codec named (or one the caller does not want checked): the
@@ -196,9 +211,25 @@ public static class RecompressCodecs
         if (!audio.HasText) return null;
         SecondPassAudioCodec? audioInfo = FindAudio(audio);
         if (audioInfo is null)
-            return $"unknown audio codec '{audio}'; known: {string.Join(", ", AudioNames)}, or {CopyAudio}";
+        {
+            return messages.Format("plan.error.unknownAudioCodec", new
+            {
+                codec = audio,
+                known = string.Join(", ", AudioNames),
+                copy = CopyAudio,
+            });
+        }
+
         if (!audioInfo.Containers.Contains(wanted, StringComparer.OrdinalIgnoreCase))
-            return $"{audioInfo.Name} cannot be written to .{wanted}; it supports {string.Join(", ", audioInfo.Containers)}";
+        {
+            return messages.Format("plan.error.codecContainer", new
+            {
+                codec = audioInfo.Name,
+                container = wanted,
+                containers = string.Join(", ", audioInfo.Containers),
+            });
+        }
+
         return null;
     }
 

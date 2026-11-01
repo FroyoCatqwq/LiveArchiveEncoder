@@ -66,7 +66,7 @@ public static partial class EncodeSession
             return ExitCodes.Usage;
         }
 
-        RecompressPlan plan = RecompressPlan.Create(chain, input);
+        RecompressPlan plan = RecompressPlan.Create(chain, input, messages);
 
         foreach (string note in plan.Notes)
             terminal.ErrorLine(messages.Format("encode.note.prefixed", new { text = note }));
