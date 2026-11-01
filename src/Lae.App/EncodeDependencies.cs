@@ -1,6 +1,8 @@
 ﻿using Lae.Core;
 using Lae.Core.History;
 using Lae.Core.Localization;
+using Lae.Core.Plugins;
+using Lae.Core.Settings;
 using Lae.Encoding;
 using Lae.Media.Ffmpeg;
 using Lae.Media.Localization;
@@ -61,8 +63,19 @@ public sealed record EncodeDependencies
     /// FFmpeg, and the exit-code policy around a failed hop is exactly what needs
     /// a test.
     /// </summary>
-    public required Func<PostChainPlan, string, TimeSpan, Action<string>?, CancellationToken, PostChainOutcome>
-        RunPostChain { get; init; }
+    public required Func<PostChainPlan, string, TimeSpan, IPluginRunner?, Action<string>?, CancellationToken,
+        PostChainOutcome> RunPostChain { get; init; }
+
+    /// <summary>
+    /// Builds the plugin host for one run, or null when there is none.
+    ///
+    /// <para>A factory rather than an instance because the host needs the ffprobe
+    /// path, which is only known once the toolchain has been probed -- and probing
+    /// happens per run, after this record was assembled. The default returns null so
+    /// a test that never mentions plugins also never touches the disk looking for
+    /// one.</para>
+    /// </summary>
+    public Func<PluginSetup, IPluginRunner?> CreatePlugins { get; init; } = _ => null;
 
     /// <summary>
     /// Where a finished run is remembered. A no-op by default so a test that does
@@ -99,8 +112,38 @@ public sealed record EncodeDependencies
         ExtractSubtitle = FfmpegTools.ExtractSubtitle,
         Runner = new LiveEncodeRunner(),
         RunPostChain = ChainRunner.Run,
+        CreatePlugins = PluginRuntime.Create,
         Messages = I18NextMessages.Create(LanguageChoice.English),
     };
+}
+
+/// <summary>
+/// Everything the plugin host needs that the session only learns at run time.
+///
+/// <para>A record instead of five parameters: the factory signature would otherwise
+/// be a row of same-shaped arguments, and getting two of them the wrong way round
+/// compiles.</para>
+/// </summary>
+public sealed record PluginSetup
+{
+    /// <summary>Resolved per run; null when this machine has no ffprobe, which costs the product checks.</summary>
+    public string? Ffprobe { get; init; }
+
+    public required SettingsDocument Settings { get; init; }
+
+    /// <summary>Where a user-installed plugin lives.</summary>
+    public string? ConfigRoot { get; init; }
+
+    public required IMessages Messages { get; init; }
+
+    /// <summary>The probe the verifier reuses, so a plugin's product is read the same way a source is.</summary>
+    public required Func<string, string, CancellationToken, (SourceInfo? Info, string? Error)> ProbeSource { get; init; }
+
+    /// <summary>Where a plugin's forwarded stderr lines go.</summary>
+    public Action<string>? Warn { get; init; }
+
+    /// <summary><c>--plugin id=path</c>, which beats the discovery order.</summary>
+    public IReadOnlyDictionary<string, string>? Explicit { get; init; }
 }
 
 

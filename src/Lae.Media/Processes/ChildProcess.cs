@@ -11,6 +11,25 @@ public sealed record ChildSpec
     /// <summary>Give the caller the child's standard input (the frames it encodes).</summary>
     public bool WriteInput { get; init; }
 
+    /// <summary>
+    /// Where the child starts. Null means inherit the program's own directory.
+    ///
+    /// <para>A plugin gets a throwaway directory so the scratch files it leaves
+    /// behind are ours to delete rather than the user's project; FFmpeg hops leave
+    /// it null, because everything they touch is named on the command line.</para>
+    /// </summary>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>
+    /// Called for each line the child writes to standard error, as it arrives.
+    ///
+    /// <para>Separate from <see cref="DiagnosticLines"/>, which keeps a tail for the
+    /// failure message. This is for showing the lines while there is still time to
+    /// care: a plugin that runs for two minutes should say what it is doing, and a
+    /// plugin's warnings are not errors. Called from the reader's thread.</para>
+    /// </summary>
+    public Action<string>? OnErrorLine { get; init; }
+
     /// <summary>How many stderr lines to keep for the failure message.</summary>
     public int DiagnosticLines { get; init; } = 64;
 }
@@ -140,6 +159,8 @@ public sealed class ChildProcess : IDisposable
 
         for (int i = 1; i < command.Count; i++) start.ArgumentList.Add(command[i]);
 
+        if (spec.WorkingDirectory is { Length: > 0 } folder) start.WorkingDirectory = folder;
+
         Process process = Process.Start(start)
             ?? throw new InvalidOperationException($"could not start {command[0]}");
 
@@ -148,7 +169,7 @@ public sealed class ChildProcess : IDisposable
 
         return new ChildProcess(
             process,
-            new DiagnosticTap(process.StandardError.BaseStream, spec.DiagnosticLines),
+            new DiagnosticTap(process.StandardError.BaseStream, spec.DiagnosticLines, spec.OnErrorLine),
             output, input);
     }
 
@@ -215,10 +236,12 @@ public sealed class ChildProcess : IDisposable
         private readonly Lock _gate = new();
         private readonly PipeLines _pipe;
         private readonly int _capacity;
+        private readonly Action<string>? _sink;
 
-        internal DiagnosticTap(Stream errors, int capacity)
+        internal DiagnosticTap(Stream errors, int capacity, Action<string>? sink)
         {
             _capacity = Math.Max(1, capacity);
+            _sink = sink;
             _pipe = PipeLines.Start(errors, Keep);
         }
 
@@ -235,11 +258,19 @@ public sealed class ChildProcess : IDisposable
         {
             if (line.Length == 0) return;
 
+            string trimmed = line.Trim();
+            if (trimmed.Length == 0) return;
+
             lock (_gate)
             {
-                _lines.Enqueue(line.Trim());
+                _lines.Enqueue(trimmed);
                 while (_lines.Count > _capacity) _lines.Dequeue();
             }
+
+            // Outside the lock: the sink writes to a terminal or an event stream,
+            // and holding the ring's lock while someone else's code runs is how a
+            // slow consumer becomes a stalled child.
+            _sink?.Invoke(trimmed);
         }
 
         public void Dispose() => _pipe.Dispose();

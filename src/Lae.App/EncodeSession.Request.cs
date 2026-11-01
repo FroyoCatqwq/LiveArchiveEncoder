@@ -207,6 +207,30 @@ public static partial class EncodeSession
     }
 
     /// <summary>
+    /// The chain for <c>--recompress-only</c>: the command line first, then the one
+    /// in the settings.
+    ///
+    /// <para>An ordinary encode never comes here, and that is the point. v7.9.8.6
+    /// merged the stored chain into every run and every encode silently recompressed
+    /// itself until the e2e suite caught it; the rule that came out of it is that a
+    /// plain encode takes its chain from the command line only.</para>
+    ///
+    /// <para><c>--recompress-only</c> is a different request: "run the chain and
+    /// nothing else". With no fragment on the command line, the stored chain is the
+    /// only candidate left -- and without this a plugin hop, which can only be
+    /// written in a settings file, would have no way to be run at all.</para>
+    /// </summary>
+    public static (ChainSettings? Chain, string? Error) BuildChainOnly(
+        EncodeOverrides overrides, SettingsDocument settings, IMessages messages)
+    {
+        (ChainSettings? fromCommand, string? error) = BuildChain(overrides, messages);
+        if (error is not null || fromCommand is not null) return (fromCommand, error);
+
+        ChainSettings stored = settings.Defaults.Chain;
+        return stored.Enabled && stored.Active().Count > 0 ? (stored, null) : (null, null);
+    }
+
+    /// <summary>
     /// WIDTHxHEIGHT, with either case of the separator and nothing else. The
     /// parse is strict because the alternative -- FFmpeg's own guess at a
     /// half-understood size -- produces a file at a size nobody asked for.

@@ -14,7 +14,12 @@
 | 1 | 本机或素材做不到（找不到 FFmpeg、源读不出来、编码器中途死了、产物为空、二次压缩的某一趟失败） |
 | 2 | 请求本身不成立（参数错、编码器不存在、容器写不了、功能还没接） |
 | 3 | 有更新版本（自更新查询用，暂未接线） |
+| 4 | 插件出问题：找不到、握手说不清、退出码非零、超时。**退出码 2 也从插件来，但那一条是宿主拼错了命令行** |
+| 5 | 插件说成功，产物过不了三层校验（空文件、读不出视频流、比输入短一截） |
 | 130 | 被 Ctrl+C 打断（子进程已收尾、part 文件已清理） |
+
+4 和 5 分开是有理由的：4 是"这个插件没跑起来"，5 是"它跑起来了、说自己成功了、给了一个坏的"
+——后者是唯一一种程序被骗的失败，排查方向完全不同。
 
 `stdout` 是答案（计划、路径、清单），`stderr` 是旁白（`note:`、`ERROR:`、进度）。
 把 `encode --dry-run` 重定向到文件，得到的正好是两条可以直接粘进 shell 的命令行。
@@ -49,6 +54,9 @@ lae encode clip.mkv --out clip.avi --encoder mpeg4 --quality 8 --limit 200
 | `--fonts-dir` | 额外字体目录（默认先找 FFmpeg 同级的 `fonts/`） |
 | `--recompress` | 一段 FFmpeg 参数，等于给产物再压一趟。**可重复**，写几次就是几趟 |
 | `--recompress-container` | 某一趟的容器，按位置与 `--recompress` 配对；不写就由那趟的编码器决定 |
+| `--recompress-only` | 跳过采集，只对已有文件跑链。**没给 `--recompress` 时用设置里的链** |
+| `--json-events` | 进度写成 JSON Lines 到 stdout，人类可读的报告整份挪到 stderr |
+| `--plugin` | `<id>=<路径>`，调试一个还没装好的插件。**压过全部发现规则**，可重复 |
 | `--dry-run` | 只打印命令行，不开进程 |
 
 ### `lae preset`
@@ -314,6 +322,42 @@ lae encode tape_live.avi --recompress "-c:v libx264 -crf 32" --recompress-only
 
 它读的就是命令行里那个文件，产物仍然是 `tape_live_web.mp4`，输入文件**一个字节都不动**
 （端到端测试逐字节比过）。
+
+### 链里的一步可以是插件
+
+`--recompress` 只能写 FFmpeg 片段。插件要写成设置文件里的一步：
+
+```toml
+[defaults.recompress]
+enabled = true
+
+[[defaults.recompress.passes]]
+args = "-c:v libx264 -crf 28"     # FFmpeg 一趟
+container = "mp4"
+
+[[defaults.recompress.passes]]
+plugin = "lae-damage"             # 插件一趟
+stage = "damage"
+
+[defaults.recompress.passes.params]
+intensity = "0.25"
+```
+
+**这一步只有在 `--recompress-only` 时才会跑**——就是上面那条命令，去掉 `--recompress`：
+
+```
+lae encode tape_live.avi --recompress-only      # 用设置里的链
+```
+
+普通 `lae encode` **不读**设置里的链，永远是命令行说了算。这不是遗漏，是 v7.9.8.6 的教训：
+那一版让每次编码都悄悄二次压缩了自己。`--recompress-only` 是显式说"只跑链"，所以它可以
+用存量配置。
+
+插件本身装在 `<配置目录>/plugins/<id>/`（或 `pack` 出来那份旁边的 `plugins/`），写一个
+`plugin.json` 说明怎么启动它。协议、发现顺序、握手、三层产物校验全在
+[`plugin-contract.md`](plugin-contract.md)。
+
+调试一个还没装好的：`--plugin lae-damage=./target/damage.exe`。
 
 ## 分片并行：不做
 

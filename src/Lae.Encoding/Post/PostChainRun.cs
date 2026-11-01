@@ -3,6 +3,53 @@ using Lae.Media;
 namespace Lae.Encoding;
 
 /// <summary>
+/// Why a chain stopped.
+///
+/// <para>Declared here rather than as an exit code because this assembly has no
+/// business knowing what number a program returns. The chain says what kind of
+/// thing went wrong; the command decides that a plugin error is 4 and an unusable
+/// product is 5.</para>
+/// </summary>
+public enum ChainFailure
+{
+    /// <summary>Nothing failed.</summary>
+    None,
+
+    /// <summary>An FFmpeg hop did not produce its output. Exit 1.</summary>
+    Hop,
+
+    /// <summary>A plugin could not be run, would not describe itself, or exited non-zero. Exit 4.</summary>
+    Plugin,
+
+    /// <summary>A plugin returned success and its product does not hold up. Exit 5.</summary>
+    Verification,
+}
+
+/// <summary>
+/// What one hop produced: nothing wrong, or a reason and the kind of thing it was.
+///
+/// <para>Convertible from <c>string?</c> so an FFmpeg hop can keep saying
+/// <c>return null</c> / <c>return "鈥?</c>. That is not a shortcut: a bare string
+/// from a hop can only mean "this hop failed", and the only hop that can fail in a
+/// way worth distinguishing is a plugin, which does not use the conversion.</para>
+/// </summary>
+public sealed record HopResult
+{
+    /// <summary>The hop succeeded; its part product is ready to promote.</summary>
+    public static readonly HopResult Ok = new();
+
+    public ChainFailure Failure { get; init; } = ChainFailure.Hop;
+
+    /// <summary>The sentence, already worded by whoever knows what went wrong.</summary>
+    public string? Error { get; init; }
+
+    public bool Failed => Error is not null;
+
+    public static implicit operator HopResult(string? error)
+        => error is null ? Ok : new HopResult { Failure = ChainFailure.Hop, Error = error };
+}
+
+/// <summary>
 /// One link of the post-encode chain: a program that turns the product it is
 /// given into another file.
 ///
@@ -27,8 +74,8 @@ public sealed record PostHop
 
     /// <summary>
     /// What this hop is, for a human: <c>pass 2 (webm)</c> or
-    /// <c>plugin lae-damage (between-passes)</c>. It goes into the failure
-    /// sentence, so it has to read as the subject of one.
+    /// <c>plugin lae-damage (damage)</c>. It goes into the failure sentence, so it
+    /// has to read as the subject of one.
     /// </summary>
     public required string Label { get; init; }
 
@@ -36,12 +83,12 @@ public sealed record PostHop
     public required string OutputPath { get; init; }
 
     /// <summary>
-    /// Writes <c>part</c> from <c>input</c>. Returns null on success, or the
-    /// reason this hop cannot be kept -- already a sentence, because every
-    /// producer words its own failure differently (an exit code from FFmpeg, a
-    /// broken handshake from a plugin).
+    /// Writes <c>part</c> from <c>input</c>. Returns success, or the reason this hop
+    /// cannot be kept -- already a sentence, because every producer words its own
+    /// failure differently (an exit code from FFmpeg, a broken handshake from a
+    /// plugin).
     /// </summary>
-    public required Func<string, string, CancellationToken, string?> Produce { get; init; }
+    public required Func<string, string, CancellationToken, HopResult?> Produce { get; init; }
 }
 
 /// <summary>What a chain run produced.</summary>
@@ -55,6 +102,9 @@ public sealed record PostChainOutcome
 
     /// <summary>1-based number of the hop that failed, or 0.</summary>
     public int FailedStep { get; init; }
+
+    /// <summary>What kind of failure stopped it; <see cref="ChainFailure.None"/> when it finished.</summary>
+    public ChainFailure FailedKind { get; init; }
 
     /// <summary>Why it stopped, or null when the chain finished.</summary>
     public string? Error { get; init; }
@@ -105,10 +155,15 @@ public static class PostChainRun
             // the one place that knows to clear the way.
             if (PartFile.Discard(part) is { } leftover) warn?.Invoke(leftover);
 
-            string? error;
+            HopResult result;
             try
             {
-                error = hop.Produce(current, part, token);
+                // Null and Ok mean the same thing here. A hop written as
+                // `return null` -- the shape every FFmpeg hop had before plugin
+                // hops existed -- hands back a null reference rather than going
+                // through the conversion to HopResult, so accepting it is what
+                // keeps those hops working.
+                result = hop.Produce(current, part, token) ?? HopResult.Ok;
             }
             catch (OperationCanceledException)
             {
@@ -118,6 +173,8 @@ public static class PostChainRun
                 throw;
             }
 
+            string? error = result.Error;
+
             if (error is not null)
             {
                 PartFile.Discard(part);
@@ -126,6 +183,7 @@ public static class PostChainRun
                     FinalPath = current,
                     Written = written,
                     FailedStep = hop.Number,
+                    FailedKind = result.Failure,
                     Error = $"{hop.Label} failed: {error}",
                 };
             }
@@ -142,6 +200,7 @@ public static class PostChainRun
                     FinalPath = current,
                     Written = written,
                     FailedStep = hop.Number,
+                    FailedKind = result.Failure,
                     Error = $"{hop.Label} left nothing to keep: {exc.Message}",
                 };
             }

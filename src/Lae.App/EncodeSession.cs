@@ -114,7 +114,7 @@ public static partial class EncodeSession
 
         try
         {
-            return Execute(track.Request, source, ffmpeg, overrides.Preset, dependencies, terminal, sink, dryRun, token);
+            return Execute(track.Request, source, settings, ffmpeg, tools.Ffprobe, overrides, dependencies, terminal, sink, dryRun, token);
         }
         finally
         {
@@ -214,8 +214,10 @@ public static partial class EncodeSession
     private static int Execute(
         EncodeRequest request,
         SourceInfo source,
+        SettingsDocument settings,
         string ffmpeg,
-        string? presetId,
+        string ffprobe,
+        EncodeOverrides overrides,
         EncodeDependencies dependencies,
         ITerminal terminal,
         IEventSink sink,
@@ -350,16 +352,16 @@ public static partial class EncodeSession
         // line with its own exit code.
         Remember(
             dependencies.History,
-            BuildRecord(request, execution, run, presetId, RunOutcome.Ok, null, started, sourceBytes),
+            BuildRecord(request, execution, run, overrides.Preset, RunOutcome.Ok, null, started, sourceBytes),
             terminal);
 
         return post.Any
-            ? RunChain(post, ffmpeg, plan.SpanSeconds, dependencies, terminal, sink, token)
+            ? RunChain(post, ffmpeg, ffprobe, settings, overrides.Plugins, plan.SpanSeconds, dependencies, terminal, sink, token)
             : ExitCodes.Ok;
 
         void Stopped(string outcome, string message) => Remember(
             dependencies.History,
-            BuildRecord(request, execution, null, presetId, outcome, message, started, sourceBytes),
+            BuildRecord(request, execution, null, overrides.Preset, outcome, message, started, sourceBytes),
             terminal);
     }
 

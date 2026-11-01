@@ -138,17 +138,31 @@ public sealed record PostChainPlan
 
             if (step.Kind == ChainStepKind.Plugin)
             {
-                // The model accepts plugin hops so a settings file written today
-                // keeps working tomorrow, but nothing can run one yet. Saying so
-                // here -- rather than dropping the hop -- is the difference
-                // between "you configured something this build cannot do" and a
-                // chain that quietly delivers the wrong product.
-                problems.Add(messages.Format("plan.error.chainPluginNotReady", new
-                {
-                    number,
-                    plugin = step.Plugin,
-                }));
+                // A plugin hop keeps the container it was handed unless the user
+                // named one, because a plugin that filters a video normally writes
+                // the same kind of file it read. Guessing a container here would
+                // mean a "webm" hop whose plugin actually wrote mp4, and the
+                // extension would be the only thing that lied.
+                string pluginContainer = step.Container.HasText
+                    ? step.Container.Trim().TrimStart('.').ToLowerInvariant()
+                    : container;
 
+                string pluginOutput = DeriveOutputPath(live, pluginContainer, number);
+
+                planned.Add(new PostChainStep
+                {
+                    Number = number,
+                    InputPath = input,
+                    OutputPath = pluginOutput,
+                    Container = pluginContainer,
+                    Kind = ChainStepKind.Plugin,
+                    Plugin = step.Plugin,
+                    Stage = step.Stage,
+                    Params = step.Params,
+                });
+
+                input = pluginOutput;
+                container = pluginContainer;
                 continue;
             }
 

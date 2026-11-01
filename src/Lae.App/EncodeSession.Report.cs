@@ -2,6 +2,7 @@
 using Lae.App.Ui;
 using Lae.Core;
 using Lae.Core.Localization;
+using Lae.Core.Settings;
 using Lae.Encoding;
 
 namespace Lae.App;
@@ -129,8 +130,21 @@ public static partial class EncodeSession
     {
         terminal.Line();
         terminal.Line(messages["encode.chain.header"]);
+
         foreach (PostChainStep step in plan.Steps)
-            terminal.Line($"  {Quote(step.Command(ffmpeg, step.OutputPath))}");
+        {
+            // A plugin hop has no command line to show -- the one that matters is
+            // built at run time, with paths that do not exist yet. Printing its
+            // shape is the honest equivalent: what runs, on what, into what.
+            terminal.Line(step.Kind == ChainStepKind.Plugin
+                ? "  " + messages.Format("encode.chain.pluginStep", new
+                {
+                    plugin = step.Plugin,
+                    stage = string.IsNullOrWhiteSpace(step.Stage) ? "-" : step.Stage,
+                    output = Path.GetFileName(step.OutputPath),
+                })
+                : $"  {Quote(step.Command(ffmpeg, step.OutputPath))}");
+        }
     }
 
     /// <summary>

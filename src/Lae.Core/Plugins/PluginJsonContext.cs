@@ -22,4 +22,5 @@ namespace Lae.Core.Plugins;
     ReadCommentHandling = System.Text.Json.JsonCommentHandling.Skip,
     AllowTrailingCommas = true)]
 [JsonSerializable(typeof(PluginHandshake))]
+[JsonSerializable(typeof(PluginManifest))]
 public sealed partial class PluginJsonContext : JsonSerializerContext;

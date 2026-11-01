@@ -44,7 +44,8 @@
       "fontsDir": "Extra folder libass may look in for fonts.",
       "recompress": "One FFmpeg fragment for a post-encode pass; repeat for a chain (a 2007 portal first, then the 2011 one).",
       "recompressContainer": "Container for a post-encode pass, paired by position with --recompress.",
-      "recompressOnly": "Run the chain against the existing file and skip the capture entirely."
+      "recompressOnly": "Run the chain against the existing file and skip the capture entirely.",
+      "jsonEvents": "Emit progress as JSON Lines on stdout; the human report moves to stderr so the stream stays parseable."
     },
     "plan": {
       "source": "source",
@@ -91,7 +92,8 @@
     "chain": {
       "header": "recompress:",
       "written": "recompress {{name}}",
-      "recordingUntouched": "the recording is untouched: {{path}}"
+      "recordingUntouched": "the recording is untouched: {{path}}",
+      "pluginStep": "plugin {{plugin}} (stage {{stage}}) -> {{output}}"
     },
     "error": {
       "generic": "ERROR: {{detail}}",
@@ -367,7 +369,25 @@
     }
   },
   "plugin": {
+    "log": {
+      "prefix": "plugin {{id}}: {{line}}"
+    },
     "error": {
+      "notFound": "no plugin named '{{id}}' was found; install it, or point at one with --plugin {{id}}=<path>",
+      "disabled": "plugin '{{id}}' is turned off in settings.toml",
+      "cannotStart": "plugin '{{id}}' could not be started: {{detail}}",
+      "handshake": "plugin '{{id}}' cannot be used: {{detail}}",
+      "handshakeTimeout": "plugin '{{id}}' did not describe itself within {{seconds}}s",
+      "handshakeExit": "plugin '{{id}}' exited with code {{code}} when asked for its handshake: {{detail}}",
+      "noSuchStage": "plugin '{{id}}' has no stage '{{stage}}'; it offers {{known}}",
+      "usageExit": "plugin '{{id}}' rejected the command line it was given (exit 2). That is a mistake in this program, not in the plugin: {{detail}}",
+      "exitCode": "plugin '{{id}}' exited with code {{code}}: {{detail}}",
+      "timeout": "plugin '{{id}}' did not finish within {{seconds}}s and was stopped",
+      "noProduct": "plugin '{{id}}' reported success but wrote no output",
+      "emptyProduct": "plugin '{{id}}' reported success but its output is empty",
+      "notReadable": "plugin '{{id}}' wrote something that is not a readable video: {{detail}}",
+      "noVideoStream": "plugin '{{id}}' wrote a file with no video stream in it",
+      "truncated": "plugin '{{id}}' wrote {{got}}s of video from {{expected}}s of input; that is more than a rounding difference",
       "handshakeEmpty": "the plugin printed nothing when asked for its handshake",
       "handshakeNotJson": "the handshake is not valid JSON: {{detail}}",
       "handshakeSchema": "the handshake declares schema {{given}}; this build speaks {{supported}}",

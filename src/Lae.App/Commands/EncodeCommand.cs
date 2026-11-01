@@ -8,7 +8,7 @@ using Lae.Core.Settings;
 namespace Lae.App.Commands;
 
 /// <summary>
-/// <c>lae encode</c> — the arguments, and nothing else.
+/// <c>lae encode</c> 鈥?the arguments, and nothing else.
 ///
 /// <para>This type used to hold the whole command: toolchain discovery, probing,
 /// encoder resolution, planning, reporting and the run itself, in one closure
@@ -115,6 +115,10 @@ public static class EncodeCommand
         {
             Description = messages["encode.opt.recompressOnly"],
         };
+        var jsonEventsOption = new Option<bool>("--json-events")
+        {
+            Description = messages["encode.opt.jsonEvents"],
+        };
 
         var command = new Command("encode", messages["encode.desc"])
         {
@@ -139,6 +143,7 @@ public static class EncodeCommand
             recompressOption,
             recompressContainerOption,
             recompressOnlyOption,
+            jsonEventsOption,
             dryRunOption,
         };
 
@@ -191,6 +196,14 @@ public static class EncodeCommand
                 RecompressOnly = parseResult.GetValue(recompressOnlyOption),
             };
 
+            // With --json-events the machine-readable stream owns stdout, so the
+            // human report is moved to stderr. Without this the two formats land in
+            // the same pipe and the result parses as neither.
+            bool jsonEvents = parseResult.GetValue(jsonEventsOption);
+
+            ITerminal console = jsonEvents ? new MergedIntoError(terminal) : terminal;
+            IEventSink? events = jsonEvents ? new JsonEventSink(terminal) : null;
+
             return EncodeSession.Run(
                 parseResult.GetValue(inputArgument)!,
                 overrides,
@@ -201,9 +214,10 @@ public static class EncodeCommand
                     Messages = messages,
                     ConfigRoot = store.DataDirectory,
                 },
-                terminal,
+                console,
                 parseResult.GetValue(dryRunOption),
-                Interrupt.Token);
+                Interrupt.Token,
+                events);
         });
 
         return command;

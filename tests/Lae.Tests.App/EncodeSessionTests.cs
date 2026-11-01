@@ -1,4 +1,4 @@
-﻿using Lae.App;
+using Lae.App;
 using Lae.App.Ui;
 using Lae.Core;
 using Lae.Core.Settings;
@@ -89,7 +89,7 @@ public sealed class EncodeSessionTests
                 return OnExtract?.Invoke(destination);
             },
             Runner = this,
-            RunPostChain = (plan, _, budget, warn, token) =>
+            RunPostChain = (plan, _, budget, _, warn, token) =>
             {
                 Chain = plan;
                 ChainBudget = budget;

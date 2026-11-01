@@ -44,7 +44,8 @@
       "fontsDir": "libass 额外查找字体的目录。",
       "recompress": "二次压缩的一趟 FFmpeg 参数；多趟就重复给（先 2007 年的门户，再 2011 年的）。",
       "recompressContainer": "某一趟的容器，按位置与 --recompress 配对。",
-      "recompressOnly": "对已有文件跑链，完全跳过采集。"
+      "recompressOnly": "对已有文件跑链，完全跳过采集。",
+      "jsonEvents": "把进度以 JSON Lines 打到 stdout；人类可读的报告改走 stderr，这样这一流才解析得了。"
     },
     "plan": {
       "source": "来源",
@@ -91,7 +92,8 @@
     "chain": {
       "header": "二次压缩:",
       "written": "二次压缩 {{name}}",
-      "recordingUntouched": "录像没有被改动：{{path}}"
+      "recordingUntouched": "录像没有被改动：{{path}}",
+      "pluginStep": "插件 {{plugin}}（stage {{stage}}）-> {{output}}"
     },
     "error": {
       "generic": "ERROR: {{detail}}",
@@ -367,7 +369,25 @@
     }
   },
   "plugin": {
+    "log": {
+      "prefix": "插件 {{id}}：{{line}}"
+    },
     "error": {
+      "notFound": "找不到名为 '{{id}}' 的插件；装一个，或者用 --plugin {{id}}=<路径> 指过去",
+      "disabled": "插件 '{{id}}' 在 settings.toml 里关掉了",
+      "cannotStart": "插件 '{{id}}' 起不来：{{detail}}",
+      "handshake": "插件 '{{id}}' 用不了：{{detail}}",
+      "handshakeTimeout": "插件 '{{id}}' 在 {{seconds}} 秒内没说清自己是什么",
+      "handshakeExit": "插件 '{{id}}' 被问握手时以 {{code}} 退出：{{detail}}",
+      "noSuchStage": "插件 '{{id}}' 没有 stage '{{stage}}'；它有 {{known}}",
+      "usageExit": "插件 '{{id}}' 拒绝了给它的命令行（退出码 2）。这是本程序的错，不是插件的：{{detail}}",
+      "exitCode": "插件 '{{id}}' 以 {{code}} 退出：{{detail}}",
+      "timeout": "插件 '{{id}}' 超过 {{seconds}} 秒没跑完，已停掉",
+      "noProduct": "插件 '{{id}}' 说成功了，但什么都没写",
+      "emptyProduct": "插件 '{{id}}' 说成功了，但产物是空的",
+      "notReadable": "插件 '{{id}}' 写出的东西不是能读的视频：{{detail}}",
+      "noVideoStream": "插件 '{{id}}' 写出的文件里没有视频流",
+      "truncated": "插件 '{{id}}' 把 {{expected}} 秒的输入写成了 {{got}} 秒的视频；这已经不是四舍五入的差别了",
       "handshakeEmpty": "问插件要握手信息，它什么都没打印",
       "handshakeNotJson": "握手不是合法 JSON：{{detail}}",
       "handshakeSchema": "握手声明 schema {{given}}，而本版本只会读 {{supported}}",

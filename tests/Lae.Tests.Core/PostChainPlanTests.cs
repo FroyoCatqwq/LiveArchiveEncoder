@@ -175,22 +175,34 @@ public sealed class PostChainPlanTests
     }
 
     /// <summary>
-    /// A plugin hop is refused, not skipped.
+    /// A plugin hop is planned like any other hop.
     ///
-    /// <para>Skipping it would deliver a product the chain did not describe, and
-    /// the user would have no way to tell: the run says "done", the file exists,
-    /// and the step they wrote simply did not happen. Refusing costs a sentence
-    /// now and names the build's gap.</para>
+    /// <para>The planner cannot know whether the plugin is installed -- that takes a
+    /// handshake, and a plan is built before anything starts. So the plan accepts it
+    /// and the host has the only say. Refusing here would make a correct settings
+    /// file unusable, which is what this test asserted back when there was no host
+    /// to run it.</para>
     /// </summary>
     [Test]
-    public async Task APluginStepIsRefusedUntilThereIsAHost()
+    public async Task APluginStepIsPlannedLikeAnyOtherHop()
     {
         PostChainPlan plan = PostChainPlan.Create(
             Chain(new ChainStep { Plugin = "lae-damage", Stage = "damage" }), Live, En);
 
-        await Assert.That(plan.IsRunnable).IsFalse();
-        await Assert.That(plan.Problems[0]).Contains("lae-damage");
-        await Assert.That(plan.Problems[0]).Contains("no plugin host");
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(plan.Steps.Count).IsEqualTo(1);
+
+        PostChainStep step = plan.Steps[0];
+        await Assert.That(step.Kind).IsEqualTo(ChainStepKind.Plugin);
+        await Assert.That(step.Plugin).IsEqualTo("lae-damage");
+        await Assert.That(step.Stage).IsEqualTo("damage");
+        await Assert.That(step.InputPath).IsEqualTo(Live);
+
+        // A plugin keeps the container it was handed unless the step names one: a
+        // filter normally writes the same kind of file it read, and guessing
+        // otherwise would put a wrong extension on a correct file.
+        await Assert.That(step.Container).IsEqualTo("avi");
+        await Assert.That(step.OutputPath).IsEqualTo("out_web.avi");
     }
 
     /// <summary>
@@ -208,11 +220,11 @@ public sealed class PostChainPlanTests
     }
 
     /// <summary>
-    /// One bad step stops the plan; it does not quietly plan the good ones and
-    /// run a shorter chain than the user wrote.
+    /// A chain may mix the two kinds, and order is the whole meaning: the plugin
+    /// filters what the transcode produced, not the recording.
     /// </summary>
     [Test]
-    public async Task APluginStepAnywhereStopsTheWholePlan()
+    public async Task AChainOfBothKindsKeepsItsOrder()
     {
         PostChainPlan plan = PostChainPlan.Create(
             Chain(
@@ -220,8 +232,17 @@ public sealed class PostChainPlanTests
                 new ChainStep { Plugin = "lae-damage" }),
             Live, En);
 
-        await Assert.That(plan.IsRunnable).IsFalse();
-        await Assert.That(plan.Problems[0]).Contains("step 2");
+        await Assert.That(plan.IsRunnable).IsTrue();
+        await Assert.That(plan.Steps.Count).IsEqualTo(2);
+
+        await Assert.That(plan.Steps[0].Kind).IsEqualTo(ChainStepKind.Ffmpeg);
+        await Assert.That(plan.Steps[1].Kind).IsEqualTo(ChainStepKind.Plugin);
+
+        // The plugin reads what the FFmpeg hop wrote, and inherits its container
+        // rather than the recording's.
+        await Assert.That(plan.Steps[1].InputPath).IsEqualTo(plan.Steps[0].OutputPath);
+        await Assert.That(plan.Steps[1].Container).IsEqualTo("mp4");
+        await Assert.That(plan.Steps[1].OutputPath).IsEqualTo("out_web2.mp4");
     }
 }
 

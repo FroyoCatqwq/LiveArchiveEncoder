@@ -123,22 +123,30 @@ TOML、SQLite 和下载器；为省这点拆 Media 要两个程序集，评审�
 | --- | --- | --- |
 | `Constants.cs` 25 KB 一个静态类 | 容器、音频、像素格式、颜色、滤镜全在里面 | v8.1；按域拆成 `ContainerCatalog`/`ColorCatalog`/`FilterCatalog` |
 | `EncodePlan.Create` 仍有 170 行 | 已经抽出了 `BuildDecoderArgs`/`BuildEncoderArgs`，决策段还是长 | 下次动编码参数时顺手拆 |
-| `EncodeDependencies` 是五个 `Func` 的袋子 | 测试要填四个才能测一个 | 等 M3 插件需要注入更多东西时再考虑接口化 |
-| `SubtitleDefaults.Codec` 没有消费者 | 容器→编码器的表已经决定了 `-c:s` | M3 前删掉，或让 `--subtitle-codec` 接上 |
-| 事件流只有终端一个渲染器 | `IEventSink` 的第二个消费者（JSONL）还没写 | M3，和 `--json-events` 一起 |
+| `EncodeDependencies` 是七个 `Func` 的袋子 | 测试要填四个才能测一个；M3 又加了 `CreatePlugins` | v8.1 考虑收成一个 `IEncodeServices` |
+| `SubtitleDefaults.Codec` 没有消费者 | 容器→编码器的表已经决定了 `-c:s` | M4 删掉，或让 `--subtitle-codec` 接上 |
 | `LegacyV7Converter` 仍在 Core | 它是纯的（只做 JSON → 记录的映射），但只服务一次迁移 | v8.0.0 之后可以移到 `Lae.Media`，和 `FileSettingsStore` 一起 |
 | 表现层没有 Spectre.Console | 决策时选了它，实际一直在用 `ITerminal` 的裸文本 | 等 REPL 需要真正的表格/进度条时再接 |
+| `--plugin` 只能按 `id=path` 用 | 一个还没装好的插件够用了；批量调试要写几行 | 等真有人写第二个插件时再看 |
+
+已经还掉的（记着它们曾经在表上）：`Lae.Core/Live` 里装着全程序唯一的线程——泵搬进了
+`Lae.Encoding`，`CoreStaysPure` 也扩到 `Thread`/`Stopwatch`/`Timer`；事件流只有终端一个
+渲染器——`JsonEventSink` 是第二个。
 
 ## 9. 一条事件流，两个渲染器
 
 编码期间发生的事只有四件，都在 `Lae.App/Ui/IEventSink` 上：
 
-| 事件 | 谁发 | 终端怎么渲染 | JSONL 会怎么渲染 |
+| 事件 | 谁发 | 终端怎么渲染 | JSONL 怎么渲染 |
 | --- | --- | --- | --- |
-| `Stage(name)` | 会话 | **不打印**（这些阶段报告里本来就有） | `{"t":"stage","name":"capture"}` |
-| `Progress(done,total)` | 泵的调用方 | 就地重写一行（节流：交互 0.25 s，重定向 5 s 一行） | `{"t":"progress",…}` |
-| `Warn(text)` | 计划、预检、链条 | `note: …` | `{"t":"warn","message":…}` |
-| `Done(summary,artifacts,elapsed)` | 会话 | 擦掉进度行，打印 `frames written` | `{"t":"done","artifacts":[…],"seconds":…}` |
+| `Stage(name)` | 会话 | **不打印**（这些阶段报告里本来就有） | `{"event":"stage","name":"capture"}` |
+| `Progress(done,total)` | 泵的调用方 | 就地重写一行（节流：交互 0.25 s，重定向 5 s 一行） | `{"event":"progress","done":…,"total":…}` |
+| `Warn(text)` | 计划、预检、链条 | `note: …` | `{"event":"warn","message":…}` |
+| `Done(summary,artifacts,elapsed)` | 会话 | 擦掉进度行，打印 `frames written` | `{"event":"done","artifacts":[…],"elapsedMs":…}` |
+
+`--json-events` 开启时，stdout 只留 JSONL，人类可读的报告整份挪到 stderr
+（`MergedIntoError`）。两种格式挤在同一个管道里，谁都不好解析。进度节流到每秒四行，
+但最后一格一定发出去——被节流掉的如果正好是最终数字，那这个流就没用了。
 
 两条规矩：
 
@@ -155,7 +163,37 @@ TOML、SQLite 和下载器；为省这点拆 Media 要两个程序集，评审�
 **没有 `pre-encode` 这个阶段**：直播采集的源是流，不是文件，没有成品可以在编码前交给
 插件。协议里写它，只会得到一个永远跑不到的 stage——M2.3 之前的注释里就写着它。
 
-## 10. 和 v7 的对照
+## 10. 插件：宿主在链上，管道不知道它存在
+
+插件是**独立进程**。宿主不加载 DLL、不共享内存、不传对象：只拼一条命令行、读它的 stdout、
+转发它的 stderr、然后校验它写出来的文件。崩溃的插件代价是一个退出码，不是整次编码。
+
+```
+发现（6 级顺序）→ 握手（10 s 超时，进程内缓存）→ 参数校验 → 调用 → 三层产物校验
+```
+
+三处设计值得记住：
+
+1. **接口在 `Lae.Core`，实现在 `Lae.Plugins`。** `ChainRunner` 只认 `IPluginRunner`，
+   所以流水线不引用插件宿主——"插件能反过来驱动编码"这条边界因此不可能被越过去。
+   顺带的好处是整条链可以用一个假的 runner 测，不用起进程。
+2. **失败分三种，不是一种。** `ChainFailure.Hop`（FFmpeg 失败，退出码 1）、
+   `ChainFailure.Plugin`（插件拒绝/崩溃/超时，4）、`ChainFailure.Verification`
+   （插件说成功、产物不可用，5）。最后一种是唯一"程序被骗了"的失败，值得自己的号码。
+3. **工作目录是插件自己的目录**，不是临时目录。manifest 可以写 `["python3", "run.py"]`，
+   而相对脚本名只有在读 manifest 的那个目录里才是路径。
+
+三层产物校验是这一节的重点，因为"`.part` 存在且非空"对黑盒不够：
+
+| 层 | 检查 | 防的是 |
+| --- | --- | --- |
+| 1 | 存在且 > 0 字节 | 打开输出后悄悄失败 |
+| 2 | ffprobe 读得出、至少一条视频流 | 写出来的不是视频 |
+| 3 | 时长与输入相差 ≤ 1 s | **只处理了前 10% 就返回 0** |
+
+第三层防的是黑盒插件最可能的坏法，也是最难靠肉眼发现的：文件能播，长度短了一截。
+
+## 11. 和 v7 的对照
 
 | | v7 | v8 |
 | --- | --- | --- |

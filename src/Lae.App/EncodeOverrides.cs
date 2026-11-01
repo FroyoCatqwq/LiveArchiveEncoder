@@ -67,4 +67,13 @@ public sealed record EncodeOverrides
     /// choice, no probe of its own beyond the length.
     /// </summary>
     public bool RecompressOnly { get; init; }
+
+    /// <summary>
+    /// <c>--plugin id=path</c>: where to find a plugin that is not installed.
+    ///
+    /// <para>For debugging one being written, and for a fixture in a test that
+    /// deliberately lives outside the plugins folder. It overrides discovery for
+    /// the ids named and leaves every other plugin to the normal order.</para>
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Plugins { get; init; }
 }
