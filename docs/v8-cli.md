@@ -131,6 +131,8 @@ lae toolchain use btbn              # 让 encode 用这一份
 lae toolchain use path              # 交还给机器自己的 PATH
 lae toolchain path                  # 编码时到底会跑哪个 ffmpeg
 lae toolchain remove btbn           # 删掉
+lae toolchain nnedi                 # 下 NNEDI3 权重（nnedi 反交错器要）
+lae toolchain nnedi --remove        # 删掉权重
 ```
 
 几个刻意的选择：
@@ -147,6 +149,12 @@ lae toolchain remove btbn           # 删掉
 - **`install` 不等于 `use`**。装完会明说"它还没被选中"，否则下一次编码用的还是原来那份。
 - **`--front gh-proxy.com`** 走 GitHub 加速前缀，**`--proxy`** 走 HTTP 代理，两个都会记进设置
   （只在你显式给了的时候记，`off` 和"没说过"是两件事）。
+- **`nnedi` 不是 install 的一个 id**。它没有可执行文件，不是"可以选的那一份"。它下载的是
+  `nnedi` 去隔行滤镜按路径读的 13 MB 权重，装在 `<配置目录>/nnedi/`，第二次运行用 HEAD
+  比长度判"已是最新"。下载完会让 FFmpeg 真的拿它初始化一帧——滤镜读的是固定偏移，13 MB 的
+  网页和 13 MB 的权重在大小上分不出来。`toolchain.nnediWeights` 指了路径就以它为准，文件和
+  目录都行；指的那份不在，按"没有权重"处理，于是你会看到"运行 `lae toolchain nnedi`"，
+  而不是 FFmpeg 说某个文件打不开。
 
 ### `lae history`
 

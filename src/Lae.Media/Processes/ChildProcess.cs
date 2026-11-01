@@ -94,7 +94,10 @@ public sealed class ChildProcess : IDisposable
         Stream? output = spec.ReadOutput ? process.StandardOutput.BaseStream : null;
         Stream? input = spec.WriteInput ? process.StandardInput.BaseStream : null;
 
-        return new ChildProcess(process, new DiagnosticTap(process.StandardError, spec.DiagnosticLines), output, input);
+        return new ChildProcess(
+            process,
+            new DiagnosticTap(process.StandardError.BaseStream, spec.DiagnosticLines),
+            output, input);
     }
 
     /// <summary>Kill the child and everything it started. Best effort by design.</summary>
@@ -148,21 +151,21 @@ public sealed class ChildProcess : IDisposable
     }
 
     /// <summary>
-    /// Drains a child's standard error into a bounded ring, on its own thread,
-    /// so neither the child nor the caller ever blocks on it.
+    /// Keeps the tail of a child's standard error so a failure can quote the last
+    /// thing FFmpeg said. The reading itself is <see cref="PipeLines"/>; all this
+    /// adds is the bounded ring and the thread-safe read of it.
     /// </summary>
     private sealed class DiagnosticTap : IDisposable
     {
         private readonly Queue<string> _lines = new();
         private readonly Lock _gate = new();
-        private readonly CancellationTokenSource _stop = new();
-        private readonly Task _reader;
+        private readonly PipeLines _pipe;
         private readonly int _capacity;
 
-        internal DiagnosticTap(StreamReader reader, int capacity)
+        internal DiagnosticTap(Stream errors, int capacity)
         {
             _capacity = Math.Max(1, capacity);
-            _reader = Task.Run(() => Drain(reader));
+            _pipe = PipeLines.Start(errors, Keep);
         }
 
         internal string TailText(int count)
@@ -174,37 +177,17 @@ public sealed class ChildProcess : IDisposable
             return string.Join(" | ", lines.Count <= count ? lines : lines.Skip(lines.Count - count));
         }
 
-        private async Task Drain(StreamReader reader)
+        private void Keep(string line)
         {
-            // Owned here, closed here. Relying on Process.Dispose to release it means
-            // the reader outlives the run that used it, which on Windows is one more
-            // handle on a pipe whose child is already gone.
-            using (reader)
+            if (line.Length == 0) return;
+
+            lock (_gate)
             {
-                try
-                {
-                    while (await reader.ReadLineAsync(_stop.Token).ConfigureAwait(false) is { } line)
-                    {
-                        if (line.Length == 0) continue;
-                        lock (_gate)
-                        {
-                            _lines.Enqueue(line.Trim());
-                            while (_lines.Count > _capacity) _lines.Dequeue();
-                        }
-                    }
-                }
-                catch (Exception exc) when (exc is OperationCanceledException or ObjectDisposedException or IOException)
-                {
-                    // The run is over and the pipe went away; nothing to report.
-                }
+                _lines.Enqueue(line.Trim());
+                while (_lines.Count > _capacity) _lines.Dequeue();
             }
         }
 
-        public void Dispose()
-        {
-            try { _stop.Cancel(); } catch (ObjectDisposedException) { /* already down */ }
-            try { _reader.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { /* shutdown race */ }
-            _stop.Dispose();
-        }
+        public void Dispose() => _pipe.Dispose();
     }
 }

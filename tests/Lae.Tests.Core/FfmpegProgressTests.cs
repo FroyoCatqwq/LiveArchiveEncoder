@@ -22,7 +22,7 @@ public sealed class FfmpegProgressTests
         foreach (string line in new[]
                  {
                      "frame=13", "fps=13.0", "total_size=40960", "out_time_us=1000000",
-                     "out_time_ms=1000", "speed=1.01x", "progress=continue",
+                     "out_time_ms=1000000", "speed=1.01x", "progress=continue",
                  })
         {
             blockEnded = FfmpegProgress.TryRead(line, ref current);
@@ -61,14 +61,36 @@ public sealed class FfmpegProgressTests
         await Assert.That(FfmpegProgress.TryRead("progress=end", ref current)).IsTrue();
     }
 
-    /// <summary>Older builds report milliseconds and no microseconds at all.</summary>
+    /// <summary>
+    /// The field named <c>out_time_ms</c> carries microseconds, not milliseconds.
+    ///
+    /// <para>This is not a guess: <c>ffmpeg -progress pipe:1</c> on a two-second
+    /// clip prints <c>out_time_us=2000000</c> and <c>out_time_ms=2000000</c>
+    /// (measured on N-128198). Reading it as milliseconds gives 2000 seconds and
+    /// a bitrate three orders of magnitude too low. The number still looks like a
+    /// duration, which is exactly why the wrong reading survived a review.</para>
+    /// </summary>
     [Test]
-    public async Task MillisecondsStandInForMicroseconds()
+    public async Task TheMillisecondFieldCarriesMicroseconds()
     {
         EncoderProgress current = default;
-        FfmpegProgress.TryRead("out_time_ms=2500", ref current);
+        FfmpegProgress.TryRead("out_time_ms=2500000", ref current);
 
         await Assert.That(current.MediaSeconds).IsEqualTo(2.5);
+    }
+
+    /// <summary>An older build that has only one of the two fields still reads.</summary>
+    [Test]
+    public async Task EitherMicrosecondFieldIsEnough()
+    {
+        EncoderProgress withUs = default;
+        FfmpegProgress.TryRead("out_time_us=1500000", ref withUs);
+
+        EncoderProgress withMs = default;
+        FfmpegProgress.TryRead("out_time_ms=1500000", ref withMs);
+
+        await Assert.That(withUs.MediaSeconds).IsEqualTo(1.5);
+        await Assert.That(withMs.MediaSeconds).IsEqualTo(withUs.MediaSeconds);
     }
 
     [Test]

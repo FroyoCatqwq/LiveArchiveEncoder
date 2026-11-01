@@ -16,6 +16,58 @@ namespace Lae.Tests.Core;
 public sealed class ToolchainCatalogTests
 {
     /// <summary>
+    /// The NNEDI3 weights, resolved the same way the FFmpeg install is: an
+    /// explicit path wins, the managed folder is the fallback, and a path that is
+    /// not there comes back null rather than being passed to the filter.
+    ///
+    /// <para>The last part is the one worth pinning. A stale path that reached
+    /// <c>nnedi=weights=/gone/file</c> would arrive as an FFmpeg sentence about a
+    /// file it could not open; null turns into the sentence that says
+    /// <c>lae toolchain nnedi</c>, which is the one a user can act on.</para>
+    /// </summary>
+    [Test]
+    public async Task AnInstalledWeightsFileIsFoundInTheManagedFolder()
+    {
+        string managed = Nnedi.Weights("/cfg");
+
+        await Assert.That(ToolchainSource.NnediWeights(new ToolchainSettings(), "/cfg", p => p == managed))
+            .IsEqualTo(managed);
+    }
+
+    [Test]
+    public async Task AConfiguredFolderIsSearchedForTheFileName()
+    {
+        string expected = Path.Combine("/home/me/znedi3", Nnedi.WeightsName);
+        var settings = new ToolchainSettings { NnediWeights = "/home/me/znedi3" };
+
+        await Assert.That(ToolchainSource.NnediWeights(settings, "/cfg", p => p == expected))
+            .IsEqualTo(expected);
+    }
+
+    [Test]
+    public async Task AConfiguredFileIsTakenAsItIs()
+    {
+        var settings = new ToolchainSettings { NnediWeights = "/home/me/nnedi3_weights.bin" };
+
+        await Assert.That(ToolchainSource.NnediWeights(settings, "/cfg", p => p == settings.NnediWeights))
+            .IsEqualTo("/home/me/nnedi3_weights.bin");
+    }
+
+    [Test]
+    public async Task AConfiguredPathThatIsGoneIsNotReportedAsConfigured()
+    {
+        var settings = new ToolchainSettings { NnediWeights = "/gone/nnedi3_weights.bin" };
+
+        await Assert.That(ToolchainSource.NnediWeights(settings, "/cfg", _ => false)).IsNull();
+    }
+
+    [Test]
+    public async Task NothingConfiguredAndNothingInstalledIsNull()
+    {
+        await Assert.That(ToolchainSource.NnediWeights(new ToolchainSettings(), "/cfg", _ => false)).IsNull();
+    }
+
+    /// <summary>
     /// An id appears at most once per platform. Two "btbn" rows on one platform
     /// would make <see cref="FfmpegCatalog.Find"/> return whichever came first,
     /// and the install would land in a folder the other row disagreed about.

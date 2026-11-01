@@ -1,5 +1,7 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Lae.Core.Settings;
+
+using static Lae.Tests.Core.TestMessages;
 
 namespace Lae.Tests.Core;
 
@@ -215,7 +217,7 @@ public sealed class SettingsTests
     [Test]
     public async Task ConversionCarriesEverySettingsValue()
     {
-        MigrationOutcome outcome = LegacyV7Converter.Convert(SampleV7());
+        MigrationOutcome outcome = LegacyV7Converter.Convert(SampleV7(), En);
         SettingsDocument document = outcome.Document;
         EncodeDefaults d = document.Defaults;
 
@@ -285,7 +287,7 @@ public sealed class SettingsTests
     [Test]
     public async Task TheOffGithubFrontSurvivesAsADecision()
     {
-        MigrationOutcome outcome = LegacyV7Converter.Convert(SampleV7());
+        MigrationOutcome outcome = LegacyV7Converter.Convert(SampleV7(), En);
         await Assert.That(outcome.Document.Network.GithubFront).IsEqualTo("off");
     }
 
@@ -296,7 +298,7 @@ public sealed class SettingsTests
     [Test]
     public async Task BothRecompressShapesBecomeOneOrderedChain()
     {
-        RecompressChain chain = LegacyV7Converter.Convert(SampleV7()).Document.Defaults.Recompress;
+        RecompressChain chain = LegacyV7Converter.Convert(SampleV7(), En).Document.Defaults.Recompress;
 
         await Assert.That(chain.Enabled).IsTrue();
         await Assert.That(chain.Passes.Count).IsEqualTo(2);
@@ -326,7 +328,7 @@ public sealed class SettingsTests
     [Test]
     public async Task DroppingPerRunStateIsReported()
     {
-        MigrationOutcome outcome = LegacyV7Converter.Convert(SampleV7());
+        MigrationOutcome outcome = LegacyV7Converter.Convert(SampleV7(), En);
         string joined = string.Join('\n', outcome.Notes);
 
         await Assert.That(joined.Contains("input path", StringComparison.Ordinal)).IsTrue();
@@ -342,7 +344,7 @@ public sealed class SettingsTests
         old.Crop43 = false;
         old.FitMode = null;
 
-        MigrationOutcome outcome = LegacyV7Converter.Convert(old);
+        MigrationOutcome outcome = LegacyV7Converter.Convert(old, En);
 
         await Assert.That(outcome.Document.Defaults.FitMode).IsEqualTo("stretch");
         await Assert.That(string.Join('\n', outcome.Notes).Contains("stretch", StringComparison.Ordinal)).IsTrue();
@@ -359,7 +361,7 @@ public sealed class SettingsTests
         LegacyV7Settings old = SampleV7();
         old.FpsLevels = [5, 25, 5, -3, double.NaN, 12.5];
 
-        MigrationOutcome outcome = LegacyV7Converter.Convert(old);
+        MigrationOutcome outcome = LegacyV7Converter.Convert(old, En);
         IReadOnlyList<double> ladder = outcome.Document.Defaults.FpsLevels;
 
         await Assert.That(ladder.Count).IsEqualTo(3);
@@ -374,7 +376,7 @@ public sealed class SettingsTests
         LegacyV7Settings old = SampleV7();
         old.FpsLevels = [0, -1, double.NaN];
 
-        MigrationOutcome outcome = LegacyV7Converter.Convert(old);
+        MigrationOutcome outcome = LegacyV7Converter.Convert(old, En);
 
         await Assert.That(outcome.Document.Defaults.FpsLevels.Count).IsEqualTo(4);
         await Assert.That(string.Join('\n', outcome.Notes).Contains("built-in", StringComparison.Ordinal)).IsTrue();
@@ -391,7 +393,7 @@ public sealed class SettingsTests
     [Test]
     public async Task CustomPresetsAreSluggedAndClamped()
     {
-        MigrationOutcome outcome = LegacyV7Converter.Convert(SampleV7());
+        MigrationOutcome outcome = LegacyV7Converter.Convert(SampleV7(), En);
         CustomPreset preset = outcome.Document.CustomPresets[0];
 
         await Assert.That(preset.Id).IsEqualTo("my_site/2012");
@@ -407,7 +409,7 @@ public sealed class SettingsTests
         LegacyV7Settings old = SampleV7();
         old.CustomEras = [new LegacyCustomEra { Id = "///" }];
 
-        MigrationOutcome outcome = LegacyV7Converter.Convert(old);
+        MigrationOutcome outcome = LegacyV7Converter.Convert(old, En);
 
         await Assert.That(outcome.Document.CustomPresets.Count).IsEqualTo(0);
         await Assert.That(string.Join('\n', outcome.Notes).Contains("no usable id", StringComparison.Ordinal)).IsTrue();
@@ -421,7 +423,7 @@ public sealed class SettingsTests
     [Test]
     public async Task NormalisingIsIdempotent()
     {
-        SettingsDocument once = LegacyV7Converter.Convert(SampleV7()).Document;
+        SettingsDocument once = LegacyV7Converter.Convert(SampleV7(), En).Document;
         SettingsDocument twice = once.Normalised();
 
         await Assert.That(twice.Defaults.Quality).IsEqualTo(once.Defaults.Quality);
@@ -473,3 +475,4 @@ public sealed class SettingsTests
         await Assert.That(repaired.Defaults.Recompress.Active().Count).IsEqualTo(0);
     }
 }
+

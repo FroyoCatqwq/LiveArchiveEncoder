@@ -37,6 +37,110 @@ public static class ToolchainCommand
         command.Subcommands.Add(RemoveCommand(store, terminal, messages));
         command.Subcommands.Add(UseCommand(store, terminal, messages));
         command.Subcommands.Add(PathCommand(store, terminal, messages));
+        command.Subcommands.Add(NnediCommand(store, terminal, messages));
+        return command;
+    }
+
+    /// <summary>
+    /// The NNEDI3 weights that the <c>nnedi</c> deinterlacer loads by path.
+    ///
+    /// <para>A subcommand of its own rather than an id under <c>install</c>: the
+    /// weights are not a distribution, they carry no executables, and listing them
+    /// beside builds that can encode would suggest a choice between them. They are
+    /// also the one thing this command fetches that v7 could fetch and v8 could
+    /// not, which made <c>deinterlace = "nnedi"</c> a setting that only ever
+    /// produced a refusal.</para>
+    /// </summary>
+    private static Command NnediCommand(ISettingsStore store, ITerminal terminal, IMessages messages)
+    {
+        var proxyOption = new Option<string?>("--proxy")
+        {
+            Description = messages["toolchain.install.opt.proxy"],
+        };
+
+        var frontOption = new Option<string?>("--front")
+        {
+            Description = messages["toolchain.install.opt.front"],
+        };
+
+        var noFrontOption = new Option<bool>("--no-front")
+        {
+            Description = messages["toolchain.install.opt.noFront"],
+        };
+
+        var forceOption = new Option<bool>("--force")
+        {
+            Description = messages["toolchain.nnedi.opt.force"],
+        };
+
+        var removeOption = new Option<bool>("--remove")
+        {
+            Description = messages["toolchain.nnedi.opt.remove"],
+        };
+
+        var command = new Command("nnedi", messages["toolchain.nnedi.desc"])
+        {
+            proxyOption,
+            frontOption,
+            noFrontOption,
+            forceOption,
+            removeOption,
+        };
+
+        command.SetAction((ParseResult parseResult) =>
+        {
+            SettingsDocument settings = store.Load();
+            var installer = new NnediInstaller(ConfigRoot(store), messages);
+
+            if (parseResult.GetValue(removeOption))
+            {
+                if (installer.Remove() is { } removeError)
+                {
+                    terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = removeError }));
+                    return ExitCodes.Failed;
+                }
+
+                terminal.Line(messages.Format("toolchain.nnedi.removed", new { path = installer.Weights }));
+                return ExitCodes.Ok;
+            }
+
+            string? front = parseResult.GetValue(frontOption);
+            if (parseResult.GetValue(noFrontOption)) front = GitHubFront.Off;
+
+            (string? prefix, string? frontError) = GitHubFront.Normalise(front);
+            if (frontError is not null)
+            {
+                terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = frontError }));
+                return ExitCodes.Usage;
+            }
+
+            string? proxy = parseResult.GetValue(proxyOption) ?? settings.Network.Proxy;
+
+            // The FFmpeg that would load this file: proving the download is
+            // loadable is worth one frame, and a machine with no FFmpeg at all
+            // still gets the file (the check is skipped).
+            ToolchainProbeResult tools = ToolchainProbe.Probe(
+                EncodeSession.ToolchainDirectory(settings, ConfigRoot(store)));
+
+            NnediOutcome outcome = installer.Install(
+                tools.Ffmpeg, proxy, prefix,
+                parseResult.GetValue(forceOption),
+                line => terminal.Line($"  {line}"),
+                Interrupt.Token);
+
+            if (!outcome.Ok)
+            {
+                terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = outcome.Error }));
+                return ExitCodes.Failed;
+            }
+
+            terminal.Line(messages.Format(
+                outcome.AlreadyCurrent ? "toolchain.nnedi.current" : "toolchain.nnedi.installed",
+                new { path = outcome.Weights, mb = outcome.Bytes / (1024 * 1024) }));
+
+            return ExitCodes.Ok;
+        });
+
         return command;
     }
 

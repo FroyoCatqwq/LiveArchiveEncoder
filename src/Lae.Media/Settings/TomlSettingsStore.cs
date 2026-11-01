@@ -1,7 +1,9 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Lae.Core.Localization;
 using Lae.Core.Settings;
+using Lae.Media.Localization;
 using Tomlyn;
 using Tomlyn.Model;
 using Tomlyn.Serialization;
@@ -29,7 +31,7 @@ namespace Lae.Media.Settings;
 /// default ladder. <see cref="SettingsKeySchema"/> closes that hole by deriving
 /// the legal key set from the document type.</para>
 /// </summary>
-public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStore
+public sealed class TomlSettingsStore : ISettingsStore
 {
     /// <summary>
     /// The whole file is camelCase and omits nulls, so a stored document reads
@@ -46,7 +48,19 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
 
     private const string PresetHeader = "[[customPresets]]";
 
-    private readonly SettingsLocation _location = location;
+    private readonly SettingsLocation _location;
+
+    /// <summary>
+    /// Set by the caller when the language is already known, and otherwise filled
+    /// in on first use from the document this store read.
+    /// </summary>
+    private IMessages? _messages;
+
+    public TomlSettingsStore(SettingsLocation location, IMessages? messages = null)
+    {
+        _location = location;
+        _messages = messages;
+    }
 
     /// <summary>
     /// Set when the file exists but could not be read. Saves are then refused:
@@ -62,6 +76,23 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
     public string Location => _location.File;
 
     public string? DataDirectory => _location.Directory;
+
+    /// <summary>
+    /// The language this store's sentences are written in.
+    ///
+    /// <para>A store has to speak before the language is known, because the
+    /// language is one of the things it reads: a v8 file names it in
+    /// <c>[ui]</c>, and a v7 file names it in <c>Language</c>. So the document it
+    /// just parsed decides, <c>LAE_LANG</c> overrides, and the answer is kept --
+    /// a migration happens on the first read, and by then there is nobody to ask.
+    /// </para>
+    ///
+    /// <para>With no document at all (the file would not parse), the environment
+    /// variable is the only clue, and English is the floor.</para>
+    /// </summary>
+    private IMessages Speak(SettingsDocument? document)
+        => _messages ??= I18NextMessages.Create(LanguageChoice.Pick(
+            Environment.GetEnvironmentVariable("LAE_LANG"), document?.Ui.Language));
 
     /// <summary>What the last <see cref="Load"/> did to the file, for the caller to report.</summary>
     public IReadOnlyList<string> MigrationNotes { get; private set; } = [];
@@ -85,11 +116,15 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
             {
                 // Reported, not swallowed: the note is what tells the user their
                 // file is intact and why the program is running on defaults.
-                _unreadable = $"{_location.File} exists but could not be read; fix or move it before changing settings";
+                IMessages messages = Speak(null);
+                _unreadable = messages.Format("settings.unreadable", new { path = _location.File });
                 MigrationNotes =
                 [
-                    $"the settings file could not be read ({exc.GetType().Name}: {exc.Message}); "
-                    + "it will not be overwritten",
+                    messages.Format("settings.readFailed", new
+                    {
+                        type = exc.GetType().Name,
+                        detail = exc.Message,
+                    }),
                 ];
                 return new SettingsDocument();
             }
@@ -98,7 +133,7 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
         if (File.Exists(_location.PreviousFile) && TryReadPreviousJson() is { } previous)
         {
             return Migrate(
-                previous, _location.PreviousFile, _location.PreviousBackup, "the v8 JSON settings",
+                previous, _location.PreviousFile, _location.PreviousBackup, "settings.migratedV8",
                 removeSource: true);
         }
 
@@ -114,19 +149,22 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
     /// Parses TOML into a document, refusing any key the type does not have.
     /// Throws on a broken file; callers decide whether that is fatal.
     /// </summary>
-    public static SettingsDocument Deserialize(string text)
+    public SettingsDocument Deserialize(string text)
     {
+        IMessages messages = Speak(null);
         TomlTable table = TomlSerializer.Deserialize<TomlTable>(text) ?? [];
 
         IReadOnlyList<string> problems = SettingsKeySchema.Validate(table);
         if (problems.Count > 0)
         {
-            throw new InvalidDataException(
-                "the settings file has keys this build does not understand: " + string.Join("; ", problems));
+            throw new InvalidDataException(messages.Format("settings.unknownKeys", new
+            {
+                problems = string.Join("; ", problems),
+            }));
         }
 
         return TomlSerializer.Deserialize<SettingsDocument>(text, Options)
-            ?? throw new InvalidDataException("the settings file is empty");
+            ?? throw new InvalidDataException(messages["settings.empty"]);
     }
 
     /// <summary>
@@ -179,7 +217,7 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
     /// the user arranged by hand, which is the whole promise of keeping comments
     /// in the first place.</para>
     /// </summary>
-    private static string Rewrite(string source, SettingsDocument document)
+    private string Rewrite(string source, SettingsDocument document)
     {
         string[] lines = source.Replace("\r\n", "\n").Split('\n');
 
@@ -194,9 +232,11 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
             // parses the next time it is opened.
             if (Array.Exists(lines, line => IsKeyAssignment(line, "customPresets")))
             {
-                throw new InvalidDataException(
-                    $"presets must be written as {PresetHeader} blocks so they can be updated; "
-                    + $"the single-value form in {nameof(SettingsDocument.CustomPresets)} cannot be edited in place");
+                throw new InvalidDataException(Speak(document).Format("settings.presetsNotBlocks", new
+                {
+                    header = PresetHeader,
+                    key = nameof(SettingsDocument.CustomPresets),
+                }));
             }
 
             return section.Length == 0 ? source : Trim(source) + Environment.NewLine + section;
@@ -220,7 +260,7 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
     /// keeps one definition of how a preset turns into TOML; a second writer would
     /// drift the moment a field is added.</para>
     /// </summary>
-    private static string PresetSection(IReadOnlyList<CustomPreset> presets)
+    private string PresetSection(IReadOnlyList<CustomPreset> presets)
     {
         if (presets.Count == 0) return "";
 
@@ -228,7 +268,7 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
         string[] lines = full.Split('\n');
 
         int start = Array.FindIndex(lines, IsPresetHeader);
-        if (start < 0) throw new InvalidDataException("the presets could not be rendered as TOML");
+        if (start < 0) throw new InvalidDataException(Speak(null)["settings.presetsRender"]);
 
         int end = PresetBlockEnd(lines, start);
         return string.Join('\n', lines[start..end]).TrimEnd() + "\n";
@@ -319,28 +359,33 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
     /// reads -- leaving it behind would mean migrating on every launch.</para>
     /// </summary>
     private SettingsDocument Migrate(
-        SettingsDocument document, string from, string backup, string what, bool removeSource)
+        SettingsDocument document, string from, string backup, string whatKey, bool removeSource)
     {
+        IMessages messages = Speak(document);
         var notes = new List<string>();
 
         try
         {
             Directory.CreateDirectory(_location.Directory);
             if (!File.Exists(backup)) File.Copy(from, backup);
-            notes.Add($"migrated {what} from {Path.GetFileName(from)} (kept as {Path.GetFileName(backup)})");
+            notes.Add(messages.Format(whatKey, new
+            {
+                from = Path.GetFileName(from),
+                backup = Path.GetFileName(backup),
+            }));
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
         {
-            notes.Add($"the old settings could not be copied to {backup} ({exc.Message}); they were read as-is");
+            notes.Add(messages.Format("settings.copyFailed", new { path = backup, detail = exc.Message }));
         }
 
         if (TrySave(document) is { } failure)
         {
-            notes.Add($"the migrated settings could not be written ({failure}); they apply to this run only");
+            notes.Add(messages.Format("settings.migratedWriteFailed", new { detail = failure }));
         }
         else
         {
-            notes.Add($"wrote {_location.File}");
+            notes.Add(messages.Format("settings.wrote", new { path = _location.File }));
 
             if (!removeSource) return Finish();
 
@@ -350,7 +395,11 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
             }
             catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
             {
-                notes.Add($"{Path.GetFileName(from)} could not be removed ({exc.Message}); it is now out of date");
+                notes.Add(messages.Format("settings.removeFailed", new
+                {
+                    name = Path.GetFileName(from),
+                    detail = exc.Message,
+                }));
             }
         }
 
@@ -372,7 +421,7 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException or JsonException)
         {
-            MigrationNotes = [$"the previous v8 settings could not be read: {exc.Message}"];
+            MigrationNotes = [Speak(null).Format("settings.previousUnreadable", new { detail = exc.Message })];
             return null;
         }
     }
@@ -385,22 +434,31 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
             if (!LegacyV7Converter.LooksLikeV7(json)) return null;
             if (LegacyV7Converter.Parse(json) is not { } old) return null;
 
-            MigrationOutcome outcome = LegacyV7Converter.Convert(old);
+            // The v7 file names its own language, which is the language its notes
+            // should be read in -- the v8 document does not exist yet.
+            MigrationOutcome outcome = LegacyV7Converter.Convert(old, Speak(null));
 
             // Keep a copy before writing anything, so the conversion can be checked
             // even if the new file is later edited by hand. The v7 file itself is
             // left in place: v7 may still be the only build the user has.
             SettingsDocument document = Migrate(
-                outcome.Document, _location.LegacyFile, _location.LegacyBackup, "the v7 settings",
+                outcome.Document, _location.LegacyFile, _location.LegacyBackup, "settings.migratedV7",
                 removeSource: false);
 
-            MigrationNotes = [.. outcome.Notes, .. MigrationNotes, $"the v7 file is unchanged at {_location.LegacyFile}"];
+            IMessages messages = Speak(outcome.Document);
+            MigrationNotes =
+            [
+                .. outcome.Notes,
+                .. MigrationNotes,
+                messages.Format("settings.legacyKept", new { path = _location.LegacyFile }),
+            ];
             return document;
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException or JsonException)
         {
-            MigrationNotes = [$"the v7 settings could not be read: {exc.Message}"];
+            MigrationNotes = [Speak(null).Format("settings.legacyUnreadable", new { detail = exc.Message })];
             return null;
         }
     }
 }
+

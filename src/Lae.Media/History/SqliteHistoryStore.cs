@@ -181,6 +181,8 @@ public sealed class SqliteHistoryStore(string path) : IRunHistory
 
     private string Remember(Exception exc)
     {
+        // The driver's sentence only: `history list` frames it in the user's
+        // language, and framing it here as well would print the frame twice.
         _problem ??= exc.Message;
         return exc.Message;
     }

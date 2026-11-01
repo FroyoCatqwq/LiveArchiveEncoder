@@ -224,6 +224,45 @@ public sealed class PreflightTests
         await Assert.That(runner.Calls.Count).IsEqualTo(0);
     }
 
+    /// <summary>
+    /// A landing place that refuses an invented name -- an archival mount that
+    /// only allows the exact output name, a share with an extension whitelist --
+    /// used to fail the trial for a reason that says nothing about the encode.
+    /// The trial moves to the temporary folder, and the note says what that no
+    /// longer proves.
+    /// </summary>
+    [Test]
+    public async Task AFolderThatRefusesATrialFileMovesTheTrialAndSaysSo()
+    {
+        (EncodePlan plan, string folder) = Setup();
+        using var _ = new Cleanup(folder);
+
+        (string chosen, string? note) = Preflight.ProbeFolder(plan, _ => true, (_, _) => false);
+
+        await Assert.That(chosen).IsEqualTo(Path.GetTempPath());
+        await Assert.That(note).IsNotNull();
+        await Assert.That(note!).Contains(Path.GetTempPath());
+        await Assert.That(note).Contains("not proven");
+    }
+
+    /// <summary>
+    /// A folder that is not there is not a permission problem: the trial stays
+    /// where the recording would go, so FFmpeg's own sentence names the path.
+    /// Moving it elsewhere would turn "no such directory" into a note about the
+    /// filesystem.
+    /// </summary>
+    [Test]
+    public async Task AMissingOutputFolderIsNotTreatedAsAPermissionProblem()
+    {
+        (EncodePlan plan, string folder) = Setup();
+        using var _ = new Cleanup(folder);
+
+        (string chosen, string? note) = Preflight.ProbeFolder(plan, _ => false, (_, _) => false);
+
+        await Assert.That(chosen).IsEqualTo(folder);
+        await Assert.That(note).IsNull();
+    }
+
     private sealed class Cleanup(string folder) : IDisposable
     {
         public void Dispose()

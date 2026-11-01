@@ -46,21 +46,19 @@ public static class FfmpegProgress
             return false;
         }
 
-        if (line.StartsWith("out_time_us=", StringComparison.Ordinal))
+        // Both fields carry microseconds despite what their names say. out_time_ms
+        // is documented as milliseconds and is not: it holds AV_TIME_BASE ticks,
+        // which are microseconds, and has since the field was added. Measured on
+        // FFmpeg N-128198 with a two-second clip, both lines read
+        // `=2000000`. Reading the second as milliseconds reports 2000 seconds,
+        // and every bitrate derived from it is a thousand times too small --
+        // which is the dangerous part, because 2000 is still a plausible
+        // duration for an archive encode, so nothing looks broken.
+        if (line.StartsWith("out_time_us=", StringComparison.Ordinal)
+            || line.StartsWith("out_time_ms=", StringComparison.Ordinal))
         {
-            if (long.TryParse(line["out_time_us=".Length..], out long micros) && micros >= 0)
+            if (long.TryParse(line[(line.IndexOf('=') + 1)..], out long micros) && micros >= 0)
                 current = current with { MediaSeconds = micros / 1_000_000.0 };
-            return false;
-        }
-
-        // Older builds emit milliseconds instead of microseconds.
-        if (line.StartsWith("out_time_ms=", StringComparison.Ordinal))
-        {
-            if (long.TryParse(line["out_time_ms=".Length..], out long millis) && millis >= 0
-                && current.MediaSeconds <= 0)
-            {
-                current = current with { MediaSeconds = millis / 1000.0 };
-            }
 
             return false;
         }

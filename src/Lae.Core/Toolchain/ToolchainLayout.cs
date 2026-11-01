@@ -101,4 +101,40 @@ public static class ToolchainSource
     private static bool LooksLikeTool(string path)
         => path.EndsWith("ffmpeg", StringComparison.OrdinalIgnoreCase)
         || path.EndsWith("ffmpeg.exe", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The NNEDI3 weights an encode should load, or null when there are none.
+    ///
+    /// <para>An explicit <see cref="ToolchainSettings.NnediWeights"/> wins. It may
+    /// name the file or the folder holding it -- unzipping the upstream release
+    /// and pointing at that folder is the obvious way to get one -- and both
+    /// spellings are read here rather than at the call site, so <c>encode</c> and
+    /// <c>setup</c> cannot disagree about whether the weights exist.</para>
+    ///
+    /// <para>A path that does not exist returns null instead of being reported as
+    /// configured: the plan's answer to "nnedi with no weights" is a sentence that
+    /// says how to fetch them, and a stale path that silently produced
+    /// <c>nnedi=weights=/gone/file</c> would arrive as an FFmpeg error instead.
+    /// </para>
+    /// </summary>
+    public static string? NnediWeights(
+        ToolchainSettings toolchain, string? configRoot, Func<string, bool>? present = null)
+    {
+        Func<string, bool> exists = present ?? (_ => true);
+
+        if (toolchain.NnediWeights is { } configured && configured.HasText)
+        {
+            string trimmed = configured.Trim().Trim('"');
+            string path = trimmed.EndsWith(Nnedi.WeightsName, StringComparison.OrdinalIgnoreCase)
+                ? trimmed
+                : Path.Combine(trimmed, Nnedi.WeightsName);
+
+            return exists(path) ? path : null;
+        }
+
+        if (!configRoot.HasText) return null;
+
+        string managed = Nnedi.Weights(configRoot);
+        return exists(managed) ? managed : null;
+    }
 }

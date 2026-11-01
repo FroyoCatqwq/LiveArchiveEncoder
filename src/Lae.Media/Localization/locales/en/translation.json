@@ -157,7 +157,7 @@
       "unknownAudioCodec": "unknown audio codec '{{codec}}'; known: {{known}}, or {{copy}}",
       "codecContainer": "{{codec}} cannot be written to .{{container}}; it supports {{containers}}",
       "unknownDeinterlace": "unknown deinterlace filter '{{value}}'",
-      "nnediNeedsWeights": "the nnedi filter needs its NNEDI3 weights; set toolchain.nnediWeights in settings.toml to the weights file, or pick another deinterlacer",
+      "nnediNeedsWeights": "the nnedi filter needs its NNEDI3 weights; run 'lae toolchain nnedi' to fetch them, or point toolchain.nnediWeights at a copy you already have",
       "unknownScaleAlgo": "unknown scale algorithm '{{value}}'; choose: {{choices}}"
     },
     "note": {
@@ -171,6 +171,34 @@
       "unknownCodec": "unknown codec",
       "chain": "recompress chain: {{hops}}"
     }
+  },
+  "settings": {
+    "unreadable": "{{path}} exists but could not be read; fix or move it before changing settings",
+    "readFailed": "the settings file could not be read ({{type}}: {{detail}}); it will not be overwritten",
+    "unknownKeys": "the settings file has keys this build does not understand: {{problems}}",
+    "empty": "the settings file is empty",
+    "presetsNotBlocks": "presets must be written as {{header}} blocks so they can be updated; the single-value form of {{key}} cannot be edited in place",
+    "presetsRender": "the presets could not be rendered as TOML",
+    "migratedV8": "migrated the v8 JSON settings from {{from}} (kept as {{backup}})",
+    "migratedV7": "migrated the v7 settings from {{from}} (kept as {{backup}})",
+    "copyFailed": "the old settings could not be copied to {{path}} ({{detail}}); they were read as-is",
+    "migratedWriteFailed": "the migrated settings could not be written ({{detail}}); they apply to this run only",
+    "wrote": "wrote {{path}}",
+    "removeFailed": "{{name}} could not be removed ({{detail}}); it is now out of date",
+    "previousUnreadable": "the previous v8 settings could not be read: {{detail}}",
+    "legacyUnreadable": "the v7 settings could not be read: {{detail}}",
+    "legacyKept": "the v7 file is unchanged at {{path}}"
+  },
+  "migrate": {
+    "h264Impl": "dropped the H.264 implementation hint '{{impl}}': name the encoder instead",
+    "inputPath": "dropped the remembered input path ({{path}}); pass it on the command line",
+    "outputPath": "dropped the remembered output path ({{path}}); pass it or use the derived name",
+    "trim": "dropped the remembered trim range; use --from/--to",
+    "streams": "dropped the remembered stream picks; use --video-stream/--audio-stream",
+    "crop43": "read the legacy \"crop 4:3 = no\" flag as fitMode=stretch",
+    "presetNoId": "dropped a custom preset with no usable id",
+    "ladderEmpty": "the frame-rate ladder was empty after cleaning; using the built-in four rungs",
+    "ladderCleaned": "the frame-rate ladder was sorted and de-duplicated ({{given}} -> {{kept}} rungs)"
   },
   "config": {
     "desc": "Show, locate or migrate the settings file.",
@@ -289,6 +317,23 @@
       "desc": "Print the ffmpeg an encode would run, and exit 1 when there is none.",
       "none": "ERROR: no ffmpeg found; run 'lae toolchain install' or 'lae setup'"
     },
+    "nnedi": {
+      "desc": "Fetch the NNEDI3 weights the nnedi deinterlacer loads, or remove them.",
+      "opt": {
+        "force": "Download again even when the installed file already looks current.",
+        "remove": "Delete the installed weights instead."
+      },
+      "installed": "weights installed at {{path}} ({{mb}} MB)",
+      "current": "weights are already current at {{path}} ({{mb}} MB)",
+      "removed": "removed the weights from {{path}}",
+      "error": {
+        "folder": "could not create {{path}}: {{detail}}",
+        "html": "the server returned a web page instead of the weights ({{bytes}} bytes); try again with --proxy or --front",
+        "tooSmall": "the downloaded file is only {{bytes}} bytes, which cannot be nnedi3_weights.bin",
+        "notLoadable": "the file downloaded but the nnedi filter cannot read it: {{detail}}",
+        "publish": "could not put the weights in place at {{path}}: {{detail}}"
+      }
+    },
     "log": {
       "url": "from {{url}}",
       "archive": "from {{path}}",
@@ -313,7 +358,8 @@
       "tarTimeout": "tar took longer than ten minutes and was stopped",
       "zipFailed": "could not unpack the archive: {{detail}}",
       "notInstalled": "'{{id}}' is not installed",
-      "removeFailed": "could not remove {{path}}: {{detail}}"
+      "removeFailed": "could not remove {{path}}: {{detail}}",
+      "machineRefused": "the filesystem refused the install ({{type}}: {{detail}})"
     }
   },
   "history": {

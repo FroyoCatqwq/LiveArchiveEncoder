@@ -111,6 +111,33 @@ public static class FfmpegTools
     }
 
     /// <summary>
+    /// Whether FFmpeg's <c>nnedi</c> filter can initialise on these weights, and
+    /// why not when it cannot. Null means it loaded.
+    ///
+    /// <para>The filter reads fixed offsets out of the blob, so a 13 MB HTML page
+    /// and 13 MB of the right file are indistinguishable by size. Letting the
+    /// filter open it is the only honest check short of hashing against upstream,
+    /// and it costs one frame of black.</para>
+    /// </summary>
+    public static string? ProbeNnedi(string ffmpeg, string weights, CancellationToken token)
+    {
+        List<string> args =
+        [
+            "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "color=c=black:s=64x64:r=2:d=1",
+            "-vf", $"nnedi=weights={FilterArgs.EscapePath(weights)}",
+            "-frames:v", "1", "-f", "null", "-",
+        ];
+
+        (string _, string error, int code) = Run(ffmpeg, args, 30, token);
+        if (code == 0) return null;
+
+        string text = error.Trim();
+        if (text.Length == 0) return $"nnedi exited with {code}";
+        return text.Split('\n')[0].Trim();
+    }
+
+    /// <summary>
     /// Runs a tool to completion and returns its streams.
     ///
     /// <para>Both pipes are drained concurrently with the wait. Reading one and

@@ -52,7 +52,8 @@ public static partial class EncodeSession
         // without touching the machine. Reporting "no such encoder" before "there
         // is no FFmpeg here" is the difference between a user fixing their typing
         // and a user reinstalling their toolchain.
-        (EncodeRequest? request, string? requestError) = BuildRequest(input, overrides, settings, messages);
+        (EncodeRequest? request, string? requestError) = BuildRequest(
+            input, overrides, settings, messages, dependencies.ConfigRoot, File.Exists);
         if (request is null)
         {
             terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = requestError }));

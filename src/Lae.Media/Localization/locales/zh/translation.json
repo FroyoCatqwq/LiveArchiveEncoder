@@ -157,7 +157,7 @@
       "unknownAudioCodec": "不认识的音频编码 '{{codec}}'；可用：{{known}}，或 {{copy}}",
       "codecContainer": "{{codec}} 写不进 .{{container}}；它支持 {{containers}}",
       "unknownDeinterlace": "不认识的反交错滤镜 '{{value}}'",
-      "nnediNeedsWeights": "nnedi 滤镜需要它的 NNEDI3 权重；把 settings.toml 里的 toolchain.nnediWeights 指到权重文件，或者换一个反交错器",
+      "nnediNeedsWeights": "nnedi 滤镜需要它的 NNEDI3 权重；运行 'lae toolchain nnedi' 下载，或把 toolchain.nnediWeights 指到你已有的那份",
       "unknownScaleAlgo": "不认识的缩放算法 '{{value}}'；可选：{{choices}}"
     },
     "note": {
@@ -171,6 +171,34 @@
       "unknownCodec": "未知编码",
       "chain": "二次压缩链：{{hops}}"
     }
+  },
+  "settings": {
+    "unreadable": "{{path}} 存在但读不出来；先修好或移走它，再改设置",
+    "readFailed": "设置文件读不出来（{{type}}：{{detail}}）；不会覆盖它",
+    "unknownKeys": "设置文件里有这个版本不认识的键：{{problems}}",
+    "empty": "设置文件是空的",
+    "presetsNotBlocks": "预设必须写成 {{header}} 块才能被更新；{{key}} 的单值形式没法原地修改",
+    "presetsRender": "预设没法渲染成 TOML",
+    "migratedV8": "已把 {{from}} 里的 v8 JSON 设置迁过来（原文件留作 {{backup}}）",
+    "migratedV7": "已把 {{from}} 里的 v7 设置迁过来（原文件留作 {{backup}}）",
+    "copyFailed": "旧设置没能复制到 {{path}}（{{detail}}）；已按原样读取",
+    "migratedWriteFailed": "迁移后的设置写不进去（{{detail}}）；只对本次运行生效",
+    "wrote": "已写入 {{path}}",
+    "removeFailed": "{{name}} 删不掉（{{detail}}）；它现在已过期",
+    "previousUnreadable": "上一版的 v8 设置读不出来：{{detail}}",
+    "legacyUnreadable": "v7 设置读不出来：{{detail}}",
+    "legacyKept": "v7 的设置文件原样保留在 {{path}}"
+  },
+  "migrate": {
+    "h264Impl": "丢掉了 H.264 实现提示「{{impl}}」：直接指定编码器即可",
+    "inputPath": "丢掉了记住的输入路径（{{path}}）：请在命令行上给出",
+    "outputPath": "丢掉了记住的输出路径（{{path}}）：请给出一个，或使用派生名",
+    "trim": "丢掉了记住的裁剪区间：请用 --from/--to",
+    "streams": "丢掉了记住的流选择：请用 --video-stream/--audio-stream",
+    "crop43": "把旧的「crop 4:3 = no」读作 fitMode=stretch",
+    "presetNoId": "丢了一个没有可用 id 的自定义预设",
+    "ladderEmpty": "清理后帧率阶梯是空的；改用内置的四档",
+    "ladderCleaned": "帧率阶梯已排序并去重（{{given}} -> {{kept}} 档）"
   },
   "config": {
     "desc": "查看、定位或迁移设置文件。",
@@ -289,6 +317,23 @@
       "desc": "打印编码时会运行的 ffmpeg；找不到时退出码 1。",
       "none": "ERROR: 找不到 ffmpeg；运行 'lae toolchain install' 或 'lae setup'"
     },
+    "nnedi": {
+      "desc": "下载 nnedi 反交错器要用的 NNEDI3 权重，或者删掉它们。",
+      "opt": {
+        "force": "即使已安装的那份看起来是最新的，也重新下载。",
+        "remove": "改为删除已安装的权重。"
+      },
+      "installed": "权重已装到 {{path}}（{{mb}} MB）",
+      "current": "权重已经是最新的：{{path}}（{{mb}} MB）",
+      "removed": "已从 {{path}} 删掉权重",
+      "error": {
+        "folder": "建不了 {{path}}：{{detail}}",
+        "html": "服务器返回的是网页而不是权重（{{bytes}} 字节）；试试加 --proxy 或 --front",
+        "tooSmall": "下到的文件只有 {{bytes}} 字节，不可能是 nnedi3_weights.bin",
+        "notLoadable": "文件下下来了，但 nnedi 滤镜读不了：{{detail}}",
+        "publish": "没把权重放到 {{path}}：{{detail}}"
+      }
+    },
     "log": {
       "url": "来自 {{url}}",
       "archive": "来自 {{path}}",
@@ -313,7 +358,8 @@
       "tarTimeout": "tar 超过十分钟还没结束，已中止",
       "zipFailed": "解包失败：{{detail}}",
       "notInstalled": "'{{id}}' 没有安装",
-      "removeFailed": "删不掉 {{path}}：{{detail}}"
+      "removeFailed": "删不掉 {{path}}：{{detail}}",
+      "machineRefused": "文件系统不让装（{{type}}：{{detail}}）"
     }
   },
   "history": {

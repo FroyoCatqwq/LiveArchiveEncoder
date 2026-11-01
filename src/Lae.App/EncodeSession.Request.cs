@@ -2,6 +2,7 @@ using Lae.Core;
 using Lae.Core.Localization;
 using Lae.Core.Presets;
 using Lae.Core.Settings;
+using Lae.Core.Toolchain;
 
 namespace Lae.App;
 
@@ -23,7 +24,8 @@ public static partial class EncodeSession
     /// keeps a scripted run predictable.</para>
     /// </summary>
     public static (EncodeRequest? Request, string? Error) BuildRequest(
-        string input, EncodeOverrides overrides, SettingsDocument settings, IMessages messages)
+        string input, EncodeOverrides overrides, SettingsDocument settings, IMessages messages,
+        string? configRoot = null, Func<string, bool>? exists = null)
     {
         // Order: stored defaults, then the preset, then the command line. Each
         // layer may only overwrite what it actually spells, which is what makes
@@ -158,6 +160,13 @@ public static partial class EncodeSession
             Encode = encode,
             StartSeconds = overrides.From ?? 0,
             EndSeconds = overrides.To,
+
+            // Resolved here rather than in the plan: "the weights are in the
+            // managed folder" is a fact about the machine, and the plan is a pure
+            // function. A configured path that no longer exists comes back null,
+            // which turns into the sentence that says how to fetch them instead of
+            // an FFmpeg error about a missing file.
+            NnediWeights = ToolchainSource.NnediWeights(settings.Toolchain, configRoot, exists),
         };
 
         return (request, null);

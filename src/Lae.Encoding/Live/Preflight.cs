@@ -1,4 +1,4 @@
-using Lae.Core;
+﻿using Lae.Core;
 using Lae.Media;
 
 namespace Lae.Encoding;
@@ -67,8 +67,15 @@ public static class Preflight
             };
         }
 
-        Exception? first = Try(plan, ffmpeg, run, token);
-        if (first is null) return new PreflightResult { Plan = plan, Trialed = true };
+        (string folder, string? moved) = ProbeFolder(plan);
+        var notes = new List<string>(2);
+        if (moved is not null) notes.Add(moved);
+
+        Exception? first = Try(plan, ffmpeg, run, folder, token);
+        if (first is null)
+        {
+            return new PreflightResult { Plan = plan, Trialed = true, Notes = notes };
+        }
 
         // A cancelled trial is the user's doing, not a verdict on the plan.
         // Rethrown with its own stack: `throw first` would reset the trace to
@@ -86,7 +93,7 @@ public static class Preflight
         // shipped, and it is right: the user asked for acceleration, not for a
         // guarantee, and a recording in software beats an error message.
         EncodePlan software = plan.WithHwaccel("off");
-        Exception? second = Try(software, ffmpeg, run, token);
+        Exception? second = Try(software, ffmpeg, run, folder, token);
         if (second is OperationCanceledException) Rethrow(second);
 
         if (second is not null)
@@ -97,31 +104,107 @@ public static class Preflight
             throw new InvalidOperationException(Explain(second), second);
         }
 
-        string note = $"hardware decoding ({method}) failed the trial; decoding in software; {first.Message}";
+        notes.Add($"hardware decoding ({method}) failed the trial; decoding in software; {first.Message}");
 
         return new PreflightResult
         {
             Plan = software,
             Trialed = true,
-            Notes = [note],
+            Notes = notes,
         };
     }
 
     /// <summary>
     /// Where a trial writes. A dot-file beside the output, so it lands on the
-    /// same filesystem (a trial into /tmp would prove the wrong thing about a
-    /// share) and so a leftover from a killed process is obviously ours.
+    /// same filesystem (a trial into a temporary folder would prove the wrong
+    /// thing about a share) and so a leftover from a killed process is obviously
+    /// ours.
     /// </summary>
-    public static string ProbePath(EncodePlan plan)
+    public static string ProbePath(EncodePlan plan, string? folder = null)
+        => Path.Combine(
+            folder ?? OutputFolder(plan),
+            $".lae-preflight-{Guid.NewGuid():N}.{plan.Container}");
+
+    /// <summary>
+    /// The folder a trial should write in, and the sentence to print when that is
+    /// not the output folder.
+    ///
+    /// <para>The output folder is the right place: a trial there proves the muxer
+    /// can write on the filesystem the recording will live on, which a trial
+    /// somewhere in the temporary folder does not. But not every landing place
+    /// accepts a name the program invents -- an archival mount that only allows
+    /// the exact output name, a share with an extension whitelist -- and there
+    /// the trial fails for a reason that says nothing about the encode. So the
+    /// output folder is asked first, with the same shape of name the trial will
+    /// really use, and only when that is refused does the trial move, saying
+    /// where it went and what that no longer proves.</para>
+    /// </summary>
+    /// <para>Both predicates are parameters so the decision can be tested without
+    /// arranging a folder that really refuses writes, which no portable test can
+    /// do -- Windows cannot express it with attributes and POSIX cannot express
+    /// it for root. The defaults are the real ones.</para>
+    /// </summary>
+    public static (string Folder, string? Note) ProbeFolder(
+        EncodePlan plan,
+        Func<string, bool>? folderExists = null,
+        Func<string, EncodePlan, bool>? accepts = null)
     {
-        string full = Path.GetFullPath(plan.DestinationPath);
-        string folder = Path.GetDirectoryName(full) ?? ".";
-        return Path.Combine(folder, $".lae-preflight-{Guid.NewGuid():N}.{plan.Container}");
+        Func<string, bool> exists = folderExists ?? Directory.Exists;
+        Func<string, EncodePlan, bool> take = accepts ?? Accepts;
+        string intended = OutputFolder(plan);
+
+        // A folder that is not there is not a permission problem. Let the trial
+        // fail in it, so the sentence FFmpeg prints names the path it could not
+        // open; moving the trial elsewhere would hide that.
+        if (!exists(intended) || take(intended, plan)) return (intended, null);
+
+        string fallback = Path.GetTempPath();
+        return (fallback,
+            $"the output folder refused a trial file, so the three-frame trial ran in {fallback}; "
+            + "the muxer was not proven against the destination filesystem");
     }
 
-    private static Exception? Try(EncodePlan plan, string ffmpeg, PlanRunner run, CancellationToken token)
+    private static string OutputFolder(EncodePlan plan)
+        => Path.GetDirectoryName(Path.GetFullPath(plan.DestinationPath)) ?? ".";
+
+    /// <summary>
+    /// Whether the folder will take a name of the shape the trial creates. The
+    /// part file is the one asked about, because that is what the run opens
+    /// first, and it is the name a whitelist will answer about.
+    /// </summary>
+    private static bool Accepts(string folder, EncodePlan plan)
     {
-        string probe = ProbePath(plan);
+        string probe = PartFile.PathFor(ProbePath(plan, folder));
+
+        try
+        {
+            using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                // Opening it is the whole question.
+            }
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                        or NotSupportedException or ArgumentException)
+        {
+            return false;
+        }
+
+        try
+        {
+            File.Delete(probe);
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            // Leftover litter, not a verdict: the folder did accept the name.
+        }
+
+        return true;
+    }
+
+    private static Exception? Try(EncodePlan plan, string ffmpeg, PlanRunner run, string folder,
+        CancellationToken token)
+    {
+        string probe = ProbePath(plan, folder);
 
         try
         {
@@ -170,3 +253,4 @@ public static class Preflight
     private static void Rethrow(Exception exc)
         => System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(exc);
 }
+

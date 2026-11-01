@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace Lae.Core.Settings;
 
@@ -90,9 +90,17 @@ public static class LegacyV7Converter
     /// of an exception. A settings file that refuses to load is worse than one
     /// that loads with a value repaired -- and the repair is listed in the
     /// notes.</para>
+    ///
+    /// <para><paramref name="messages"/> because the notes are read by the person
+    /// whose file was migrated, at the moment they upgrade. An English list in a
+    /// Chinese session is the one place where "it is only a warning" is not good
+    /// enough: these sentences say what was thrown away.</para>
     /// </summary>
-    public static MigrationOutcome Convert(LegacyV7Settings old)
+    public static MigrationOutcome Convert(LegacyV7Settings old, Localization.IMessages messages)
     {
+        ArgumentNullException.ThrowIfNull(old);
+        ArgumentNullException.ThrowIfNull(messages);
+
         var notes = new List<string>();
 
         var defaults = new EncodeDefaults
@@ -101,7 +109,7 @@ public static class LegacyV7Converter
             Container = Clean(old.Container),
             AudioEncoder = Clean(old.AudioEncoder) ?? "libmp3lame",
             Fps = Positive(old.Fps, Constants.DefaultFps),
-            FpsLevels = Ladder(old.FpsLevels, notes),
+            FpsLevels = Ladder(old.FpsLevels, notes, messages),
             FpsThresholds = Thresholds(old.FpsLevelKbps),
             LimitKbps = Positive(old.Limit, 200.0),
             RecoverKbps = Positive(old.Recover, 150.0),
@@ -114,7 +122,7 @@ public static class LegacyV7Converter
             AudioRate = old.AudioRate is > 0 ? old.AudioRate : null,
             Width = Positive(old.Width, Constants.DefaultWidth),
             Height = Positive(old.Height, Constants.DefaultHeight),
-            FitMode = FitMode(old, notes),
+            FitMode = FitMode(old, notes, messages),
             CropAnchor = Clean(old.CropAnchor) ?? "center",
             PadColor = Clean(old.PadColor) ?? "black",
             ScaleAlgo = Clean(old.ScaleAlgo) ?? "neighbor",
@@ -155,10 +163,10 @@ public static class LegacyV7Converter
         // migrating a field nothing reads.
         if (Clean(old.H264Impl) is { } impl)
         {
-            notes.Add($"dropped the H.264 implementation hint '{impl}': name the encoder instead");
+            notes.Add(messages.Format("migrate.h264Impl", new { impl }));
         }
 
-        ReportPerRunState(old, notes);
+        ReportPerRunState(old, notes, messages);
 
         var document = new SettingsDocument
         {
@@ -184,7 +192,7 @@ public static class LegacyV7Converter
                 CheckForUpdates = old.AutoUpdateCheck ?? true,
             },
             Defaults = defaults,
-            CustomPresets = CustomPresets(old.CustomEras, notes),
+            CustomPresets = CustomPresets(old.CustomEras, notes, messages),
         };
 
         return new MigrationOutcome(document.Normalised(), notes);
@@ -195,25 +203,38 @@ public static class LegacyV7Converter
     /// removal here would look like a bug to anyone upgrading with a trim range
     /// they actually wanted.
     /// </summary>
-    private static void ReportPerRunState(LegacyV7Settings old, List<string> notes)
+    private static void ReportPerRunState(
+        LegacyV7Settings old, List<string> notes, Localization.IMessages messages)
     {
         if (Clean(old.InputPath) is { } input)
-            notes.Add($"dropped the remembered input path ({input}); pass it on the command line");
+        {
+            notes.Add(messages.Format("migrate.inputPath", new { path = input }));
+        }
+
         if (Clean(old.OutputPath) is { } output)
-            notes.Add($"dropped the remembered output path ({output}); pass it or use the derived name");
+        {
+            notes.Add(messages.Format("migrate.outputPath", new { path = output }));
+        }
+
         if (old.StartTimeSeconds is > 0 || old.EndTimeSeconds is > 0)
-            notes.Add("dropped the remembered trim range; use --from/--to");
+        {
+            notes.Add(messages["migrate.trim"]);
+        }
+
         if (old.VideoStream is not null || old.AudioStream is not null)
-            notes.Add("dropped the remembered stream picks; use --video-stream/--audio-stream");
+        {
+            notes.Add(messages["migrate.streams"]);
+        }
     }
 
-    private static string FitMode(LegacyV7Settings old, List<string> notes)
+    private static string FitMode(
+        LegacyV7Settings old, List<string> notes, Localization.IMessages messages)
     {
         // v7.7 and earlier: "crop 4:3 = no" meant no crop at all, i.e. a stretch.
         // Read before FitMode so a file carrying both keeps the older meaning.
         if (old.Crop43 is false)
         {
-            notes.Add("read the legacy \"crop 4:3 = no\" flag as fitMode=stretch");
+            notes.Add(messages["migrate.crop43"]);
             return "stretch";
         }
 
@@ -271,7 +292,8 @@ public static class LegacyV7Converter
     /// numbers survive untouched -- those are the user's own, and dropping them
     /// would lose real work -- but nothing else about the old shape does.</para>
     /// </summary>
-    private static IReadOnlyList<CustomPreset> CustomPresets(List<LegacyCustomEra?>? rows, List<string> notes)
+    private static IReadOnlyList<CustomPreset> CustomPresets(
+        List<LegacyCustomEra?>? rows, List<string> notes, Localization.IMessages messages)
     {
         if (rows is not { Count: > 0 }) return [];
 
@@ -283,7 +305,7 @@ public static class LegacyV7Converter
             string id = Slug(row.Id);
             if (id.Length == 0)
             {
-                notes.Add("dropped a custom preset with no usable id");
+                notes.Add(messages["migrate.presetNoId"]);
                 continue;
             }
 
@@ -349,7 +371,8 @@ public static class LegacyV7Converter
     /// only shows up later as a rung that can never be reached. Sorting is the
     /// forgiving reading of "these are my rungs, I typed them in a hurry".
     /// </summary>
-    private static IReadOnlyList<double> Ladder(List<double?>? levels, List<string> notes)
+    private static IReadOnlyList<double> Ladder(
+        List<double?>? levels, List<string> notes, Localization.IMessages messages)
     {
         if (levels is not { Count: > 0 }) return [.. Constants.DefaultFpsLevels];
 
@@ -372,12 +395,14 @@ public static class LegacyV7Converter
 
         if (ladder.Count == 0)
         {
-            notes.Add("the frame-rate ladder was empty after cleaning; using the built-in four rungs");
+            notes.Add(messages["migrate.ladderEmpty"]);
             return [.. Constants.DefaultFpsLevels];
         }
 
         if (ladder.Count != values.Count)
-            notes.Add($"the frame-rate ladder was sorted and de-duplicated ({values.Count} -> {ladder.Count} rungs)");
+        {
+            notes.Add(messages.Format("migrate.ladderCleaned", new { given = values.Count, kept = ladder.Count }));
+        }
 
         return ladder;
     }
@@ -436,3 +461,4 @@ public static class LegacyV7Converter
     private static double Positive(double? value, double fallback)
         => value is { } v && double.IsFinite(v) && v > 0 ? v : fallback;
 }
+

@@ -185,7 +185,7 @@ public static class ConfigCommand
                 return ExitCodes.Usage;
             }
 
-            MigrationOutcome outcome = LegacyV7Converter.Convert(old);
+            MigrationOutcome outcome = LegacyV7Converter.Convert(old, messages);
             terminal.Line(messages.Format(
                 "config.migrate.wouldWrite",
                 new { path = location.File, schema = outcome.Document.SchemaVersion }));

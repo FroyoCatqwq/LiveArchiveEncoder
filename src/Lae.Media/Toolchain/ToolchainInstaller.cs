@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using Lae.Core;
@@ -168,8 +168,14 @@ public sealed class ToolchainInstaller(string configRoot, IMessages messages)
                                         or NotSupportedException or ArgumentException)
         {
             // One place for the "the machine would not let us" family, so an
-            // install never ends in a stack trace.
-            return new InstallOutcome { Ok = false, Error = $"{exc.GetType().Name}: {exc.Message}" };
+            // install never ends in a stack trace. The exception's own type and
+            // sentence stay: they are what says whether it was permissions, a full
+            // disk or a name the filesystem would not take.
+            return Fail("toolchain.error.machineRefused", new
+            {
+                type = exc.GetType().Name,
+                detail = exc.Message,
+            });
         }
         finally
         {
@@ -249,116 +255,12 @@ public sealed class ToolchainInstaller(string configRoot, IMessages messages)
     private InstallOutcome? Download(
         string url, string destination, string? proxy, Action<string>? log, CancellationToken token)
     {
-        // SocketsHttpHandler rather than HttpClientHandler: the latter does not
-        // expose ConnectTimeout, and a host that never answers would otherwise
-        // wait for the operating system's own timeout, which is minutes.
-        using var handler = new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(30) };
-
-        if (proxy.HasText)
-        {
-            if (!Uri.TryCreate(proxy, UriKind.Absolute, out Uri? proxyUri))
-                return Fail("toolchain.error.badProxy", new { value = proxy });
-
-            handler.Proxy = new WebProxy(proxyUri);
-            handler.UseProxy = true;
-        }
-
-        using var client = new HttpClient(handler, disposeHandler: true)
-        {
-            // No total timeout: an archive is 80-200 MB and a slow link is not a
-            // failure. The idle deadline below is what ends a connection that has
-            // stopped delivering.
-            Timeout = Timeout.InfiniteTimeSpan,
-        };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("LiveArchiveEncoder");
-
-        try
-        {
-            using HttpResponseMessage response = client
-                .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token)
-                .GetAwaiter().GetResult();
-
-            if (!response.IsSuccessStatusCode)
-            {
-                string detail = "";
-                try
-                {
-                    string page = response.Content.ReadAsStringAsync(token).GetAwaiter().GetResult();
-                    if (page.Trim() is { Length: > 0 } trimmed) detail = " -- " + Head(trimmed.Replace('\n', ' '), 160);
-                }
-                catch (Exception exc) when (exc is HttpRequestException or IOException or OperationCanceledException)
-                {
-                    // The body is a nicety; the status line is the answer.
-                }
-
-                return Fail("toolchain.error.httpStatus", new
-                {
-                    code = (int)response.StatusCode,
-                    reason = response.ReasonPhrase ?? "",
-                    detail,
-                });
-            }
-
-            long? total = response.Content.Headers.ContentLength;
-            using Stream body = response.Content.ReadAsStreamAsync(token).GetAwaiter().GetResult();
-            using FileStream target = File.Create(destination);
-
-            byte[] buffer = new byte[1024 * 1024];
-            long written = 0;
-            long nextReport = 0;
-
-            while (true)
-            {
-                int read;
-                using (var idle = CancellationTokenSource.CreateLinkedTokenSource(token))
-                {
-                    idle.CancelAfter(TimeSpan.FromSeconds(60));
-                    try
-                    {
-                        read = body.ReadAsync(buffer, idle.Token).AsTask().GetAwaiter().GetResult();
-                    }
-                    catch (OperationCanceledException) when (!token.IsCancellationRequested)
-                    {
-                        return Fail("toolchain.error.stalled", new
-                        {
-                            seconds = 60,
-                            mb = written / (1024 * 1024),
-                        });
-                    }
-                }
-
-                if (read <= 0) break;
-
-                target.Write(buffer, 0, read);
-                written += read;
-
-                if (log is not null && written >= nextReport)
-                {
-                    nextReport = written + 20L * 1024 * 1024;
-                    log(total is { } size
-                        ? _messages.Format("toolchain.log.progress", new
-                        {
-                            done = written / (1024 * 1024),
-                            total = size / (1024 * 1024),
-                            percent = (int)(100.0 * written / Math.Max(1, size)),
-                        })
-                        : _messages.Format("toolchain.log.progressUnknown", new { done = written / (1024 * 1024) }));
-                }
-            }
-
-            return null;
-        }
-        catch (Exception exc) when (exc is HttpRequestException or IOException or TaskCanceledException
-                                        or System.Net.Sockets.SocketException or OperationCanceledException)
-        {
-            // A cancel is the user's decision, and the caller's catch turns it
-            // into exit 130; everything else is a sentence.
-            if (token.IsCancellationRequested) throw;
-
-            return new InstallOutcome { Ok = false, Error = exc.Message };
-        }
+        // The transfer lives in HttpDownload, which the NNEDI weights fetch also
+        // uses: two copies of an idle deadline is two copies of the same
+        // off-by-one-window bug, and only one of them gets fixed.
+        string? error = HttpDownload.Fetch(url, destination, proxy, _messages, log, token);
+        return error is null ? null : new InstallOutcome { Ok = false, Error = error };
     }
-
     /// <summary>
     /// Confirm the downloaded bytes really are the archive asked for, by their
     /// magic number. Returns null when they are, otherwise a sentence naming the
@@ -548,7 +450,6 @@ public sealed class ToolchainInstaller(string configRoot, IMessages messages)
 
         return null;
     }
-
-    private static string Head(string text, int max) => text.Length <= max ? text : text[..max];
 }
+
 

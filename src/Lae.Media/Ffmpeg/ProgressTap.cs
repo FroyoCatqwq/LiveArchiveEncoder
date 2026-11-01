@@ -19,43 +19,25 @@ namespace Lae.Media;
 /// </summary>
 public sealed class ProgressTap : IDisposable
 {
-    private readonly CancellationTokenSource _stop = new();
-    private readonly Task _reader;
+    private readonly PipeLines _pipe;
     private Report _latest = new(new EncoderProgress());
+    private EncoderProgress _current;
 
     public ProgressTap(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        _reader = Task.Run(() => Drain(stream));
+        _pipe = PipeLines.Start(stream, OnLine);
     }
 
     /// <summary>The most recent report, or an empty one before FFmpeg has spoken.</summary>
     public EncoderProgress Current => Volatile.Read(ref _latest).Value;
 
-    private async Task Drain(Stream stream)
+    private void OnLine(string line)
     {
-        using var reader = new StreamReader(stream);
-        EncoderProgress current = default;
-
-        try
-        {
-            while (await reader.ReadLineAsync(_stop.Token).ConfigureAwait(false) is { } line)
-            {
-                if (FfmpegProgress.TryRead(line, ref current)) Volatile.Write(ref _latest, new Report(current));
-            }
-        }
-        catch (Exception exc) when (exc is OperationCanceledException or ObjectDisposedException or IOException)
-        {
-            // The run ended and the pipe went away.
-        }
+        if (FfmpegProgress.TryRead(line, ref _current)) Volatile.Write(ref _latest, new Report(_current));
     }
 
-    public void Dispose()
-    {
-        try { _stop.Cancel(); } catch (ObjectDisposedException) { /* already down */ }
-        try { _reader.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { /* shutdown race */ }
-        _stop.Dispose();
-    }
+    public void Dispose() => _pipe.Dispose();
 
     private sealed record Report(EncoderProgress Value);
 }
