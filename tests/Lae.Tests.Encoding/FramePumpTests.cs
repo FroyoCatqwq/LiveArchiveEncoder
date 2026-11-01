@@ -64,6 +64,15 @@ public sealed class FramePumpTests
     /// 120 ms at 200 fps is twenty-four frames' worth of queue, against a depth of
     /// six. On the old behaviour this fails by eighteen frames rather than
     /// whenever the build machine happens to be slow.</para>
+    ///
+    /// <para><b>Only <c>DroppedAtStart</c> is pinned, not the total.</b> Forty
+    /// slots at 200 fps is a 200 ms window with a six-deep queue, which leaves the
+    /// consumer 30 ms of slack; a CI box running six test projects at once
+    /// occasionally schedules it later than that. Measured: this passed locally and
+    /// failed on GitHub with <c>Dropped = 1</c> while <c>DroppedAtStart</c> stayed
+    /// 0. Pinning the total would pin the build machine's load. The startup window
+    /// is what this test guards, and that is the number it asserts -- on the old
+    /// behaviour it was 18 here, not 1.</para>
     /// </summary>
     [Test]
     public async Task TheEncoderOpeningItsFileCostsNoPictures()
@@ -79,7 +88,6 @@ public sealed class FramePumpTests
         await Assert.That(stats.Frames).IsEqualTo(40L);
         await Assert.That(stats.DroppedAtStart).IsEqualTo(0L)
             .Because("the producer is held until the encoder has taken its first frame");
-        await Assert.That(stats.Dropped).IsEqualTo(0L);
     }
 
     /// <summary>
