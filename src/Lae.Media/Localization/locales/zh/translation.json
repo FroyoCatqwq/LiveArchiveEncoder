@@ -366,6 +366,30 @@
       "machineRefused": "文件系统不让装（{{type}}：{{detail}}）"
     }
   },
+  "plugin": {
+    "error": {
+      "handshakeEmpty": "问插件要握手信息，它什么都没打印",
+      "handshakeNotJson": "握手不是合法 JSON：{{detail}}",
+      "handshakeSchema": "握手声明 schema {{given}}，而本版本只会读 {{supported}}",
+      "handshakeSchemaInvalid": "握手声明 schema {{given}}，这不是一个版本号",
+      "handshakeProtocol": "握手声明 protocol {{given}}，而本版本只会调 {{supported}}",
+      "handshakeId": "握手自称 '{{actual}}'，而设置里写的是 '{{expected}}'",
+      "handshakeNoStages": "握手没有声明任何 stage，没有可运行的东西",
+      "stageNoId": "第 {{index}} 个 stage 没有 id，没有可运行的子命令",
+      "stageNoPlacement": "stage '{{stage}}' 没有声明本版本认识的插入位置（{{given}}）",
+      "stageParamType": "stage '{{stage}}' 的参数 '{{name}}' 类型是 '{{type}}'，本版本没法校验它",
+      "mediaNotVideo": "这个插件处理 {{media}}，而本版本只会喂它视频",
+      "paramUnknown": "stage '{{stage}}' 没有参数 '{{name}}'",
+      "paramNumber": "参数 '{{name}}' = '{{value}}' 不是数字",
+      "paramInteger": "参数 '{{name}}' = '{{value}}' 不是整数",
+      "paramBool": "参数 '{{name}}' = '{{value}}' 不是 true 或 false",
+      "paramRange": "参数 '{{name}}' = {{value}} 超出 {{min}}..{{max}}"
+    },
+    "warn": {
+      "stagePlacement": "stage '{{stage}}' 声明了本版本没有的插入位置（{{given}}），已忽略",
+      "notDeterministic": "这一步不可复现：同样的输入和参数可能给出不同的结果"
+    }
+  },
   "history": {
     "desc": "查看之前的运行都做了什么。",
     "limitWarn": "ERROR: --limit 需要一个正整数。",

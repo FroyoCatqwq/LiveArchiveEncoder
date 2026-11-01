@@ -366,6 +366,30 @@
       "machineRefused": "the filesystem refused the install ({{type}}: {{detail}})"
     }
   },
+  "plugin": {
+    "error": {
+      "handshakeEmpty": "the plugin printed nothing when asked for its handshake",
+      "handshakeNotJson": "the handshake is not valid JSON: {{detail}}",
+      "handshakeSchema": "the handshake declares schema {{given}}; this build speaks {{supported}}",
+      "handshakeSchemaInvalid": "the handshake declares schema {{given}}, which is not a version",
+      "handshakeProtocol": "the handshake declares protocol {{given}}; this build speaks {{supported}}",
+      "handshakeId": "the handshake calls itself '{{actual}}', but the settings entry says '{{expected}}'",
+      "handshakeNoStages": "the handshake declares no stage, so there is nothing to run",
+      "stageNoId": "stage {{index}} has no id, so there is no subcommand to run",
+      "stageNoPlacement": "stage '{{stage}}' declares no placement this build knows ({{given}})",
+      "stageParamType": "stage '{{stage}}' declares parameter '{{name}}' of type '{{type}}', which this build cannot validate",
+      "mediaNotVideo": "the plugin works on {{media}}, and this build only ever feeds it video",
+      "paramUnknown": "stage '{{stage}}' has no parameter '{{name}}'",
+      "paramNumber": "parameter '{{name}}' = '{{value}}' is not a number",
+      "paramInteger": "parameter '{{name}}' = '{{value}}' is not a whole number",
+      "paramBool": "parameter '{{name}}' = '{{value}}' is not true or false",
+      "paramRange": "parameter '{{name}}' = {{value}} is outside {{min}}..{{max}}"
+    },
+    "warn": {
+      "stagePlacement": "stage '{{stage}}' declares placements this build does not have ({{given}}); ignored",
+      "notDeterministic": "this step is not reproducible: the same input and parameters may give a different result"
+    }
+  },
   "history": {
     "desc": "Show what previous runs did.",
     "limitWarn": "ERROR: --limit wants a positive number of rows.",

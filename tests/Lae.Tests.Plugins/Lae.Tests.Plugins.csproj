@@ -29,6 +29,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Lae.Core\Lae.Core.csproj" />
     <ProjectReference Include="..\..\src\Lae.Plugins\Lae.Plugins.csproj" />
+
+    <!-- For I18NextMessages: the handshake reader takes IMessages, and a test
+         that asserted on message keys instead of sentences would pass while the
+         user saw "plugin.error.handshakeId". -->
+    <ProjectReference Include="..\..\src\Lae.Media\Lae.Media.csproj" />
   </ItemGroup>
 
   <ItemGroup>

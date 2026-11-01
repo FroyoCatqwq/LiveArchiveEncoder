@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Lae.Core.Localization;
 using Lae.Core.Plugins;
+using Lae.Media.Localization;
 
 namespace Lae.Tests.Plugins;
 
@@ -111,6 +113,50 @@ public sealed class ContractDocumentTests
 
         await Assert.That(missing).IsEmpty()
             .Because("an example that shows one placement teaches that there is one placement");
+    }
+
+    /// <summary>
+    /// The example is not merely valid JSON -- it is what the host's own types
+    /// read.
+    ///
+    /// <para>The three tests above check the document from the outside: it parses,
+    /// it names the right words. This one checks that the <em>shape</em> matches
+    /// the code, which is the failure a plugin author would hit first and a
+    /// document review never catches. A handshake can be perfectly good JSON and
+    /// still describe a structure the host rejects -- <c>"default": 0.25</c> as a
+    /// number was exactly that until the parameter type learned to read it.</para>
+    /// </summary>
+    [Test]
+    public async Task TheHandshakeExampleReadsAsTheHostsOwnHandshakeType()
+    {
+        HandshakeVerdict verdict = HandshakeReader.Read(
+            FirstJsonBlock(ContractText()), "lae-damage", I18NextMessages.Create("en"));
+
+        await Assert.That(verdict.Ok).IsTrue()
+            .Because("the example is what an author copies; if the host refuses it, "
+                   + "the document is teaching a shape that does not work: "
+                   + string.Join(" | ", verdict.Problems));
+
+        PluginHandshake handshake = verdict.Handshake!;
+        await Assert.That(handshake.Stages.Count).IsEqualTo(1);
+
+        PluginStageDeclaration stage = handshake.Stages[0];
+        await Assert.That(stage.Id).IsEqualTo("damage");
+        await Assert.That(stage.Placement.Count).IsEqualTo(PluginStages.All.Count)
+            .Because("the example exists to show that one subcommand may sit at every placement");
+
+        PluginParamDeclaration intensity = stage.Params.Single(p => p.Name == "intensity");
+        await Assert.That(intensity.Kind).IsEqualTo(PluginParamType.Float);
+        await Assert.That(intensity.Min).IsEqualTo(0.0);
+        await Assert.That(intensity.Max).IsEqualTo(1.0);
+
+        // The contract writes the default as a bare number; it has to survive as
+        // the text a command line can carry.
+        await Assert.That(intensity.DefaultValue).IsEqualTo("0.25");
+
+        PluginParamDeclaration seed = stage.Params.Single(p => p.Name == "seed");
+        await Assert.That(seed.Kind).IsEqualTo(PluginParamType.Int);
+        await Assert.That(seed.DefaultValue).IsEqualTo("0");
     }
 
     /// <summary>

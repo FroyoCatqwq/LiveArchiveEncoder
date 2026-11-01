@@ -105,6 +105,33 @@ Lae.Cli  ──►  Lae.App ──┼──►  Lae.Plugins   ──┼──►
                         └────────────────────┘
 ```
 
+### 握手协议成了类型，而且文档里的示例真能读进去
+
+`Lae.Core/Plugins` 现在有握手的完整形状：`PluginHandshake` / `PluginStageDeclaration` /
+`PluginParamDeclaration`，加 `PluginProtocol` 的常量（`schema` 1、`protocol` 1、
+`--lae-handshake`、`run --stage --input --output --param`）。JSON 走源生成
+（`PluginJsonContext`），和 `SettingsJsonContext` 同一个理由：AOT/裁剪构建下反射序列化
+在**第一次**反序列化时才炸，而插件宿主正是程序里唯一和最不可控的第三方打交道的路径。
+
+两个纯函数，都在开跑之前用：
+
+| | 干什么 |
+| --- | --- |
+| `HandshakeReader.Read` | 一行 JSON → 可用的声明，或若干条拒绝理由。**从不抛** |
+| `PluginParams.Resolve` | 设置里的字符串 → 该 stage 的最终参数（默认值填好、类型与范围验过） |
+
+**默认值可以是 JSON 数字。** 契约写的是 `"default": 0.25`，不是 `"0.25"`。第一版把它读成
+`string?`，于是连文档自带的示例都反序列化失败——`JsonElement` 才是对的，再按
+`ValueKind` 渲染成命令行要的文本（数字取 `GetRawText()`，不经文化）。
+
+**"第一行就是全部"这条规则放宽了一次。** 契约说握手是单行 JSON，而**契约自己的示例是缩进的
+多行**——照着示例写插件的作者会被宿主告知"JSON 不合法"。现在第一行解析失败时再试整段
+stdout 一次；这不会掩盖错误（第一次已经失败了），而多行握手后面跟日志仍然会被拒。
+文档同步说明了两种写法的取舍。
+
+新增 29 条测试，其中一条把**契约文档里的示例**喂给真类型——它抓的正是上面那个
+`"default": 0.25`：示例是合法 JSON、字段名也全对，但形状和宿主对不上。
+
 ---
 
 ## v8.0.0-m2.4-canary（2026-11-01）
