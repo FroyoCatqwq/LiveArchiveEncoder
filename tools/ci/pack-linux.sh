@@ -66,9 +66,20 @@ rm -rf "$cfg"
 echo "--version ok: $reported"
 
 echo "== glibc floor of the bundle =="
-# The single file carries its native libraries, so the only honest way to see
-# the floor is to ask the extracted library. The runtime itself is 2.27.
-objdump -T "$stage/LiveArchiveEncoder" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1
+# The launcher is 2.27. What decides where the package runs is the native
+# libraries it carries, and those only exist on disk after the bundle unpacks
+# itself -- so unpack it once and ask them. Reading the launcher answers a
+# different question, and answers it confidently: 2.27, while the SQLite
+# library inside is 2.34.
+floor_extract=$(mktemp -d)
+DOTNET_BUNDLE_EXTRACT_BASE_DIR="$floor_extract" "$stage/LiveArchiveEncoder" --version >/dev/null
+launcher_floor=$(objdump -T "$stage/LiveArchiveEncoder" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1 || true)
+lib_floor=$(find "$floor_extract" -name '*.so*' -exec objdump -T {} \; \
+  | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1 || true)
+rm -rf "$floor_extract"
+echo "launcher:     ${launcher_floor:-unknown}"
+echo "bundled libs: ${lib_floor:-none found}"
+echo "floor:        ${lib_floor:-$launcher_floor}"
 
 echo "== package =="
 tar -czf "$out/LiveArchiveEncoder-$version-linux-x64.tar.gz" -C "$stage" .

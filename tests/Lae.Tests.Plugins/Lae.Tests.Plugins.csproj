@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests for Lae.Plugins: discovery, handshake, invocation, verification.
+
+    M3 fills this in. The project exists now because the first test worth
+    writing is not about the host: it is about the contract document the host
+    will be written against. A handshake example that stopped being valid JSON,
+    or a placement the code knows and the document forgot, costs an afternoon
+    to find by hand and nothing to check here.
+
+    These will start real processes once there is a plugin to start, so the
+    missing-executable rule from the other test projects applies: skip, do not
+    fail, on a machine that has no plugin binary.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>Lae.Tests.Plugins</RootNamespace>
+    <AssemblyName>Lae.Tests.Plugins</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
+    <PackageReference Include="TUnit" Version="1.75.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lae.Core\Lae.Core.csproj" />
+    <ProjectReference Include="..\..\src\Lae.Plugins\Lae.Plugins.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="TUnit.Core" />
+    <Using Include="TUnit.Assertions" />
+  </ItemGroup>
+
+</Project>
