@@ -459,4 +459,73 @@ public sealed class TomlSettingsStoreTests
             Directory.Delete(folder, recursive: true);
         }
     }
+
+    /// <summary>
+    /// The chain's keys are older than its type name, and both have to stay.
+    ///
+    /// <para>The code calls the collection <c>Steps</c> because a hop is no longer
+    /// always a recompress pass; the file still calls the section
+    /// <c>recompress</c> and the array <c>passes</c>, because renaming them means
+    /// re-rendering the document, and re-rendering it discards every comment the
+    /// user wrote. This test is the knot that keeps the two names tied together:
+    /// read the old keys, accept a plugin hop in the same array, and write the
+    /// old keys back.</para>
+    /// </summary>
+    [Test]
+    public async Task TheChainKeepsItsOldKeysAndLearnsPluginHops()
+    {
+        string folder = NewFolder();
+        try
+        {
+            const string text = """
+                [defaults.recompress]
+                enabled = true
+
+                # the user's own note, which a save must not eat
+                [[defaults.recompress.passes]]
+                args = "-c:v libx264 -crf 28"
+                container = "mp4"
+
+                [[defaults.recompress.passes]]
+                plugin = "lae-damage"
+                stage = "damage"
+
+                [defaults.recompress.passes.params]
+                intensity = "0.25"
+                """;
+
+            File.WriteAllText(Path.Combine(folder, "settings.toml"), text);
+
+            var store = new TomlSettingsStore(SettingsLocation.For(folder));
+            SettingsDocument read = store.Load();
+
+            await Assert.That(store.MigrationNotes.Count).IsEqualTo(0)
+                .Because("these are the keys this build writes; there is nothing to migrate");
+
+            ChainSettings chain = read.Defaults.Chain;
+            await Assert.That(chain.Enabled).IsTrue();
+            await Assert.That(chain.Steps.Count).IsEqualTo(2);
+            await Assert.That(chain.Steps[0].Kind).IsEqualTo(ChainStepKind.Ffmpeg);
+            await Assert.That(chain.Steps[0].Container).IsEqualTo("mp4");
+
+            await Assert.That(chain.Steps[1].Kind).IsEqualTo(ChainStepKind.Plugin);
+            await Assert.That(chain.Steps[1].Plugin).IsEqualTo("lae-damage");
+            await Assert.That(chain.Steps[1].Params!["intensity"]).IsEqualTo("0.25")
+                .Because("a plugin's parameters are free keys in a table, not a fixed set");
+
+            await Assert.That(store.TrySave(read)).IsNull();
+
+            string rewritten = File.ReadAllText(Path.Combine(folder, "settings.toml"));
+            await Assert.That(rewritten.Contains("[defaults.recompress]", StringComparison.Ordinal)).IsTrue();
+            await Assert.That(rewritten.Contains("[[defaults.recompress.passes]]", StringComparison.Ordinal)).IsTrue();
+            await Assert.That(rewritten.Contains("chain", StringComparison.Ordinal)).IsFalse()
+                .Because("the C# name must not leak into the user's file");
+            await Assert.That(rewritten.Contains("# the user's own note", StringComparison.Ordinal)).IsTrue()
+                .Because("the point of keeping the old keys is that the file stays the user's");
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
 }

@@ -42,7 +42,7 @@ public static partial class EncodeSession
 
         encode = encode with
         {
-            Recompress = new RecompressChain(),
+            Chain = new ChainSettings(),
             Subtitles = new SubtitleDefaults(),
         };
 
@@ -88,9 +88,9 @@ public static partial class EncodeSession
         // --recompress is one more transcode, in the order written;
         // --recompress-container is paired by position, and a hop without one
         // derives its container from the codec it names.
-        (RecompressChain? chain, string? chainError) = BuildChain(overrides, messages);
+        (ChainSettings? chain, string? chainError) = BuildChain(overrides, messages);
         if (chainError is not null) return (null, chainError);
-        if (chain is not null) encode = encode with { Recompress = chain };
+        if (chain is not null) encode = encode with { Chain = chain };
 
         // The encoder moves first, and the quality number moves with it. A stored
         // 8 means a 2004 stream's -q:v 8; handed to libx264 unchanged it becomes
@@ -180,7 +180,7 @@ public static partial class EncodeSession
     /// runs the same chain against a file that already exists, and a second copy of
     /// the pairing rules is how the two would drift apart.</para>
     /// </summary>
-    public static (RecompressChain? Chain, string? Error) BuildChain(EncodeOverrides overrides, IMessages messages)
+    public static (ChainSettings? Chain, string? Error) BuildChain(EncodeOverrides overrides, IMessages messages)
     {
         if (overrides.RecompressArgs is not { Count: > 0 } passes) return (null, null);
 
@@ -192,13 +192,16 @@ public static partial class EncodeSession
                 "encode.error.containerPairing", new { given = containers.Length, passes = passes.Count }));
         }
 
-        return (new RecompressChain
+        return (new ChainSettings
         {
             Enabled = true,
-            Passes =
+            Steps =
             [
-                .. passes.Select((args, index) =>
-                    new RecompressPass(args, index < containers.Length ? containers[index] : "")),
+                .. passes.Select((args, index) => new ChainStep
+                {
+                    Args = args,
+                    Container = index < containers.Length ? containers[index] : "",
+                }),
             ],
         }, null);
     }

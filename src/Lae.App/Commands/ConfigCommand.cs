@@ -105,8 +105,8 @@ public static class ConfigCommand
             Emit(terminal, messages, "defaults.parallel", d.Parallel);
             Emit(terminal, messages, "defaults.subtitles.mode", d.Subtitles.Mode);
             Emit(terminal, messages, "defaults.subtitles.files", d.Subtitles.Files.Count);
-            Emit(terminal, messages, "defaults.recompress.enabled", d.Recompress.Enabled);
-            Emit(terminal, messages, "defaults.recompress.passes", d.Recompress.Active().Count);
+            Emit(terminal, messages, "defaults.recompress.enabled", d.Chain.Enabled);
+            Emit(terminal, messages, "defaults.recompress.passes", d.Chain.Active().Count);
             Emit(terminal, messages, "customPresets", document.CustomPresets.Count);
             Emit(terminal, messages, "plugins", document.Plugins.Count);
 

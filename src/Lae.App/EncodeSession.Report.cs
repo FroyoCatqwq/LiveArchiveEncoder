@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Lae.App.Ui;
 using Lae.Core;
 using Lae.Core.Localization;
@@ -125,11 +125,11 @@ public static partial class EncodeSession
     /// pasted into a shell, so the chain has to be in it: a plan that shows the
     /// capture and hides three transcodes is not the plan.
     /// </summary>
-    private static void PrintChain(RecompressPlan plan, string ffmpeg, ITerminal terminal, IMessages messages)
+    private static void PrintChain(PostChainPlan plan, string ffmpeg, ITerminal terminal, IMessages messages)
     {
         terminal.Line();
         terminal.Line(messages["encode.chain.header"]);
-        foreach (RecompressStep step in plan.Steps)
+        foreach (PostChainStep step in plan.Steps)
             terminal.Line($"  {Quote(step.Command(ffmpeg, step.OutputPath))}");
     }
 
@@ -242,3 +242,4 @@ public static partial class EncodeSession
         return "\"" + inner + "\"";
     }
 }
+

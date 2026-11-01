@@ -232,7 +232,18 @@ public sealed record EncodeDefaults
 
     public SubtitleDefaults Subtitles { get; init; } = new();
 
-    public RecompressChain Recompress { get; init; } = new();
+    /// <summary>
+    /// The hops after the recording: FFmpeg transcodes, plugin calls, or both.
+    ///
+    /// <para>The TOML key is still <c>recompress</c>. The type is called
+    /// <c>Chain</c> because it stopped being only about recompressing the day a
+    /// plugin could be a hop, but the key cannot follow: <c>TomlSettingsStore</c>
+    /// rewrites the file surgically, and a section rename would mean re-rendering
+    /// the whole document, which discards every comment the user wrote. The name
+    /// stays wrong on disk so the file stays theirs.</para>
+    /// </summary>
+    [JsonPropertyName("recompress")]
+    public ChainSettings Chain { get; init; } = new();
 
     /// <summary>
     /// The same repair as <see cref="SettingsDocument.Normalised"/>, one level
@@ -247,7 +258,7 @@ public sealed record EncodeDefaults
         Deinterlace = Deinterlace ?? new(),
         X264 = X264 ?? new(),
         Subtitles = Subtitles is { } subtitles ? subtitles.Normalised() : new(),
-        Recompress = Recompress is { } chain ? chain.Normalised() : new(),
+        Chain = Chain is { } chain ? chain.Normalised() : new(),
     };
 }
 
@@ -360,40 +371,45 @@ public sealed record SubtitleDefaults
     };
 }
 
-/// <summary>One hop of the "upload it to a video site" chain.</summary>
-/// <param name="Args">Everything between <c>-i</c> and the output path.</param>
-/// <param name="Container">Container extension without the dot.</param>
-public sealed record RecompressPass(string Args, string Container);
-
 /// <summary>
-/// The second-pass chain. A recording can be published more than once -- a 2007
-/// portal first, then the 2011 one -- and each hop is a real transcode, so this
-/// is a list rather than one fragment.
+/// The hops after the recording. A recording can be published more than once --
+/// a 2007 portal first, then the 2011 one -- and each hop is a real transcode of
+/// the previous product, so this is a list rather than one fragment. Since the
+/// plugin host arrived, a hop may also be someone else's program.
 ///
 /// <para>It is a setting and never an implicit default: a run re-encodes its own
 /// output only when the command line says so. v7.9.8.6 shipped a release that
 /// merged the stored chain into the live run, and every plain encode silently
 /// recompressed itself until the e2e suite caught it.</para>
 /// </summary>
-public sealed record RecompressChain
+public sealed record ChainSettings
 {
     /// <summary>Whether the chain runs at all. Off means the list is kept but unused.</summary>
     public bool Enabled { get; init; }
 
-    public IReadOnlyList<RecompressPass> Passes { get; init; } = [];
-
-    /// <summary>Passes with a blank fragment are dropped; FFmpeg with no arguments is just a copy.</summary>
-    public IReadOnlyList<RecompressPass> Active() =>
-        [.. Passes.Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Args))];
+    /// <summary>
+    /// The hops, in order. The TOML key is still <c>passes</c>, for the same
+    /// reason the section is still <c>recompress</c>: renaming a key means
+    /// re-rendering the file, which discards the user's comments.
+    /// </summary>
+    [JsonPropertyName("passes")]
+    public IReadOnlyList<ChainStep> Steps { get; init; } = [];
 
     /// <summary>
-    /// Rebuild the pass list, dropping nulls. A hand-written
+    /// The hops that will run: those with something in them. An ambiguous hop is
+    /// kept -- the planner is where it gets reported, because dropping it here
+    /// would turn "you wrote both halves" into "one of them silently won".
+    /// </summary>
+    public IReadOnlyList<ChainStep> Active() => [.. Steps.Where(step => step.Kind != ChainStepKind.Empty)];
+
+    /// <summary>
+    /// Rebuild the step list, dropping nulls. A hand-written
     /// <c>"passes": [null]</c> would otherwise reach <see cref="Active"/> as a
     /// null array, and every read path would have to defend itself.
     /// </summary>
-    public RecompressChain Normalised() => this with
+    public ChainSettings Normalised() => this with
     {
-        Passes = Passes is { } passes ? [.. passes.Where(p => p is not null)] : [],
+        Steps = Steps is { } steps ? [.. steps.Where(step => step is not null)] : [],
     };
 }
 

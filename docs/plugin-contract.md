@@ -25,7 +25,7 @@ stdout、转发它的 stderr、然后校验它写出来的文件。崩溃的插�
 
 ### 1.1 链条关闭时 `between-passes` 没有位置
 
-`Recompress.Enabled = false` 时没有"遍与遍之间"。此时声明了 `between-passes` 的 hop
+`ChainSettings.Enabled = false` 时没有"遍与遍之间"。此时声明了 `between-passes` 的 hop
 **不运行**，宿主在报告里写一句"链条关闭，N 个 between-passes 的 hop 未运行"。
 静默跳过会让"我配了插件但它没动"变成一个查不出原因的现象。
 
@@ -195,12 +195,38 @@ M3 要为这条单独写测试。
 最小可用的假插件（M3 的测试夹具，约 20 行）要做四件事：响应 `--lae-handshake`、
 接受 `run --stage ...`、把输入复制/截断成输出、可选地返回一个坏产物用来测 §4。
 
-## 9. 未决（M3 期间定，定了写回这里）
+## 9. 已定与未决
+
+### 9.1 已定：hop 是一个联合，不是两个列表
+
+一个 step 要么是 FFmpeg 片段，要么是一次插件调用，由写了的字段决定（`ChainStep.Kind`）：
+
+```toml
+[[defaults.recompress.passes]]
+args = "-c:v libx264 -crf 28"     # → Ffmpeg
+container = "mp4"
+
+[[defaults.recompress.passes]]
+plugin = "lae-damage"             # → Plugin
+stage = "damage"
+
+[defaults.recompress.passes.params]
+intensity = "0.25"
+```
+
+两半都写 → `Ambiguous`，**报错而不是按优先级挑一个**：输掉的那一半会留在文件里，
+看起来还在起作用。
+
+**键名仍然是 `recompress` 和 `passes`**，虽然类型已经叫 `ChainSettings` / `Steps`。改键名
+意味着整体重渲文件，而重渲会丢掉用户写的每一行注释；`TomlSettingsStore` 是外科式回写的，
+这条不能破。代码里可以叫得诚实，文件里保持用户的。
+
+插件 hop 目前**在计划阶段被拒**（`plan.error.chainPluginNotReady`，exit 2），不是静默跳过：
+跳过会交付一个链没描述过的产物，而运行说"完成"、文件也在，用户没有任何线索。
+
+### 9.2 未决
 
 1. **插件能不能自己 spawn 别的插件**：默认**不能**，组合关系由宿主的 chain 表达。
    蓝图提过一个默认关闭的 `--allow-plugin-spawn` 逃生口，目前不实现。
-2. **chain 的 hop 类型怎么表达**：现在的 `RecompressPass` 是 `(Args, Container)`，
-   纯 FFmpeg，没有"这是一个插件"的位置。要么把它变成联合（`FfmpegHop | PluginHop`），
-   要么新开 `[[chain]]`。倾向前者——两套链编排就是两份会漂移的逻辑。
-3. **`between-passes` 在链有 3 遍时插几次**：暂定"每遍之间各一次"（N 遍 → N−1 次），
+2. **`between-passes` 在链有 3 遍时插几次**：暂定"每遍之间各一次"（N 遍 → N−1 次），
    首尾用 `post-encode` / `after-chain`。这条要拿 `lae-damage` 真跑一次再确认。

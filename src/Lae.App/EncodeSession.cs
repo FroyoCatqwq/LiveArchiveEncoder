@@ -258,7 +258,7 @@ public static partial class EncodeSession
         // fragment with "-i" in it, or a codec that cannot be written to the
         // container asked for, has to cost a sentence now -- not after a
         // full-length capture that then ends in a refusal.
-        RecompressPlan post = RecompressPlan.Create(request.Encode.Recompress, plan.DestinationPath, messages);
+        PostChainPlan post = PostChainPlan.Create(request.Encode.Chain, plan.DestinationPath, messages);
 
         foreach (string note in post.Notes) sink.Warn(note);
 

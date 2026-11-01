@@ -141,10 +141,10 @@ public sealed class SettingsTests
                 FpsLevels = [25, 12.5],
                 Deinterlace = new DeinterlaceSettings { Filter = "yadif", FieldMode = "send_field" },
                 Color = new ColorTags { Range = "tv", Space = "bt709" },
-                Recompress = new RecompressChain
+                Chain = new ChainSettings
                 {
                     Enabled = true,
-                    Passes = [new RecompressPass("-c:v libx264", "mp4")],
+                    Steps = [new ChainStep { Args = "-c:v libx264", Container = "mp4" }],
                 },
             },
         };
@@ -163,7 +163,7 @@ public sealed class SettingsTests
         await Assert.That(read.Defaults.FpsLevels.Count).IsEqualTo(2);
         await Assert.That(read.Defaults.Deinterlace.FieldMode).IsEqualTo("send_field");
         await Assert.That(read.Defaults.Color.Space).IsEqualTo("bt709");
-        await Assert.That(read.Defaults.Recompress.Active().Count).IsEqualTo(1);
+        await Assert.That(read.Defaults.Chain.Active().Count).IsEqualTo(1);
     }
 
     /// <summary>
@@ -298,23 +298,23 @@ public sealed class SettingsTests
     [Test]
     public async Task BothRecompressShapesBecomeOneOrderedChain()
     {
-        RecompressChain chain = LegacyV7Converter.Convert(SampleV7(), En).Document.Defaults.Recompress;
+        ChainSettings chain = LegacyV7Converter.Convert(SampleV7(), En).Document.Defaults.Chain;
 
         await Assert.That(chain.Enabled).IsTrue();
-        await Assert.That(chain.Passes.Count).IsEqualTo(2);
-        await Assert.That(chain.Passes[0].Args).IsEqualTo("-c:v libx264 -crf 28");
-        await Assert.That(chain.Passes[0].Container).IsEqualTo("mp4");
-        await Assert.That(chain.Passes[1].Container).IsEqualTo("webm");
+        await Assert.That(chain.Steps.Count).IsEqualTo(2);
+        await Assert.That(chain.Steps[0].Args).IsEqualTo("-c:v libx264 -crf 28");
+        await Assert.That(chain.Steps[0].Container).IsEqualTo("mp4");
+        await Assert.That(chain.Steps[1].Container).IsEqualTo("webm");
     }
 
     /// <summary>An empty first pass is dropped; FFmpeg with no arguments is a copy.</summary>
     [Test]
     public async Task BlankPassesAreNotRun()
     {
-        var chain = new RecompressChain
+        var chain = new ChainSettings
         {
             Enabled = true,
-            Passes = [new RecompressPass("   ", "mp4"), new RecompressPass("-c:v copy", "mkv")],
+            Steps = [new ChainStep { Args = "   ", Container = "mp4" }, new ChainStep { Args = "-c:v copy", Container = "mkv" }],
         };
 
         await Assert.That(chain.Active().Count).IsEqualTo(1);
@@ -469,10 +469,12 @@ public sealed class SettingsTests
         await Assert.That(repaired.Defaults.FpsThresholds).IsNotNull();
         await Assert.That(repaired.Defaults.Subtitles.Files).IsNotNull();
         await Assert.That(repaired.Defaults.Subtitles.CopyTracks).IsNotNull();
-        await Assert.That(repaired.Defaults.Recompress.Passes).IsNotNull();
+        await Assert.That(repaired.Defaults.Chain.Steps).IsNotNull();
 
         // And the result is usable: walking it must not throw.
-        await Assert.That(repaired.Defaults.Recompress.Active().Count).IsEqualTo(0);
+        await Assert.That(repaired.Defaults.Chain.Active().Count).IsEqualTo(0);
     }
 }
+
+
 

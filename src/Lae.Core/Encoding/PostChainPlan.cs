@@ -3,7 +3,7 @@ using Lae.Core.Settings;
 namespace Lae.Core;
 
 /// <summary>One hop of the post-encode chain, worked out ahead of time.</summary>
-public sealed record RecompressStep
+public sealed record PostChainStep
 {
     /// <summary>1-based position in the chain; also what the "_web2" suffix counts.</summary>
     public required int Number { get; init; }
@@ -16,8 +16,20 @@ public sealed record RecompressStep
     /// <summary>Container extension without the dot.</summary>
     public required string Container { get; init; }
 
-    /// <summary>The user's fragment, already split into tokens and checked.</summary>
-    public required IReadOnlyList<string> Args { get; init; }
+    /// <summary>Whether this step runs FFmpeg or a plugin.</summary>
+    public required ChainStepKind Kind { get; init; }
+
+    /// <summary>The user's fragment, already split into tokens and checked. FFmpeg hops only.</summary>
+    public IReadOnlyList<string> Args { get; init; } = [];
+
+    /// <summary>The plugin's id. Plugin hops only.</summary>
+    public string? Plugin { get; init; }
+
+    /// <summary>The plugin's own stage id, for <c>run --stage</c>. Plugin hops only.</summary>
+    public string? Stage { get; init; }
+
+    /// <summary>Plugin parameters, still as strings. Plugin hops only.</summary>
+    public IReadOnlyDictionary<string, string>? Params { get; init; }
 
     /// <summary>
     /// The command line, with the program's own ends around the user's middle.
@@ -28,8 +40,13 @@ public sealed record RecompressStep
     /// reading only named inputs has no business on the terminal.</para>
     /// </summary>
     public List<string> Command(string ffmpeg, string outputPath)
-        => [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+    {
+        if (Kind != ChainStepKind.Ffmpeg)
+            throw new InvalidOperationException("this step does not run FFmpeg");
+
+        return [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
             "-i", InputPath, .. Args, outputPath];
+    }
 }
 
 /// <summary>
@@ -41,22 +58,28 @@ public sealed record RecompressStep
 /// survives: they are each a real artefact of the process, and only the last one
 /// is the delivery.</para>
 ///
+/// <para>Since a hop may be a plugin rather than an FFmpeg command, this type
+/// plans both and stops caring which. What remains of the difference is in
+/// <see cref="PostChainStep.Kind"/>: a fragment has to be split and its codec
+/// checked against the container, and a plugin has neither.</para>
+///
 /// <para>Naming is derived from the <em>live product</em>, never from the hop
 /// before: <c>clip.avi</c> gives <c>clip_web.mp4</c>, then <c>clip_web2.webm</c>.
 /// Deriving hop 2 from hop 1's name gives <c>clip_web_web2</c>, which says
 /// nothing about the order the hops joined the chain in.</para>
 ///
 /// <para>Pure, like <see cref="EncodePlan"/>: everything a bad chain can be --
-/// an empty fragment, a codec that cannot be written to the container asked for,
-/// a stray output name -- comes back in <see cref="Problems"/> rather than as an
-/// exception, because the CLI has to answer with a sentence and exit 2.</para>
+/// an empty fragment, a step that names both a plugin and a fragment, a codec
+/// that cannot be written to the container asked for, a stray output name --
+/// comes back in <see cref="Problems"/> rather than as an exception, because the
+/// CLI has to answer with a sentence and exit 2.</para>
 /// </summary>
-public sealed record RecompressPlan
+public sealed record PostChainPlan
 {
     /// <summary>The recording the live pass wrote; never modified by any hop.</summary>
     public required string LivePath { get; init; }
 
-    public required IReadOnlyList<RecompressStep> Steps { get; init; }
+    public required IReadOnlyList<PostChainStep> Steps { get; init; }
 
     public IReadOnlyList<string> Notes { get; init; } = [];
 
@@ -74,27 +97,27 @@ public sealed record RecompressPlan
     /// Works out the chain against a live product. Never throws for user input.
     /// An unarmed chain plans nothing and says nothing -- that is the normal case.
     /// </summary>
-    public static RecompressPlan Create(
-        RecompressChain chain, string livePath, Localization.IMessages messages)
+    public static PostChainPlan Create(
+        ChainSettings chain, string livePath, Localization.IMessages messages)
     {
         string live = livePath;
         var problems = new List<string>();
         var notes = new List<string>();
 
-        if (!chain.Enabled) return new RecompressPlan { LivePath = live, Steps = [] };
+        if (!chain.Enabled) return new PostChainPlan { LivePath = live, Steps = [] };
 
-        IReadOnlyList<RecompressPass> passes = chain.Active();
+        IReadOnlyList<ChainStep> steps = chain.Active();
 
-        // Armed with only blank fragments: the user typed --recompress with
-        // nothing usable in it, which is a request that cannot be honoured and
-        // must not be mistaken for "no chain".
-        if (passes.Count == 0 && chain.Passes.Count > 0)
+        // Armed with only blank steps: the user typed --recompress with nothing
+        // usable in it, which is a request that cannot be honoured and must not
+        // be mistaken for "no chain".
+        if (steps.Count == 0 && chain.Steps.Count > 0)
         {
             problems.Add(messages["plan.error.chainAllBlank"]);
-            return new RecompressPlan { LivePath = live, Steps = [], Problems = problems };
+            return new PostChainPlan { LivePath = live, Steps = [], Problems = problems };
         }
 
-        var steps = new List<RecompressStep>(passes.Count);
+        var planned = new List<PostChainStep>(steps.Count);
         string input = live;
 
         // A hop that does not re-encode -- "-c:v copy", or a filter-only pass --
@@ -102,10 +125,40 @@ public sealed record RecompressPlan
         // own extension is what makes that the default rather than a guess.
         string container = Path.GetExtension(live).TrimStart('.').ToLowerInvariant();
 
-        for (int i = 0; i < passes.Count; i++)
+        for (int i = 0; i < steps.Count; i++)
         {
             int number = i + 1;
-            (List<string> tokens, string? error) = ArgsFragment.Parse(passes[i].Args, messages);
+            ChainStep step = steps[i];
+
+            if (step.Kind == ChainStepKind.Ambiguous)
+            {
+                problems.Add(messages.Format("plan.error.chainStepAmbiguous", new { number }));
+                continue;
+            }
+
+            if (step.Kind == ChainStepKind.Plugin)
+            {
+                // The model accepts plugin hops so a settings file written today
+                // keeps working tomorrow, but nothing can run one yet. Saying so
+                // here -- rather than dropping the hop -- is the difference
+                // between "you configured something this build cannot do" and a
+                // chain that quietly delivers the wrong product.
+                problems.Add(messages.Format("plan.error.chainPluginNotReady", new
+                {
+                    number,
+                    plugin = step.Plugin,
+                }));
+
+                continue;
+            }
+
+            if (step.Args is not { } fragment)
+            {
+                problems.Add(messages["plan.error.chainAllBlank"]);
+                continue;
+            }
+
+            (List<string> tokens, string? error) = ArgsFragment.Parse(fragment, messages);
 
             if (error is not null)
             {
@@ -113,8 +166,7 @@ public sealed record RecompressPlan
                 continue;
             }
 
-            (string next, string? containerError) = ResolveContainer(
-                passes[i], tokens, container, number, messages);
+            (string next, string? containerError) = ResolveContainer(step, tokens, container, number, messages);
 
             if (containerError is not null)
             {
@@ -131,12 +183,13 @@ public sealed record RecompressPlan
             // its first input.
             string output = DeriveOutputPath(live, next, number);
 
-            steps.Add(new RecompressStep
+            planned.Add(new PostChainStep
             {
                 Number = number,
                 InputPath = input,
                 OutputPath = output,
                 Container = next,
+                Kind = ChainStepKind.Ffmpeg,
                 Args = tokens,
             });
 
@@ -144,15 +197,15 @@ public sealed record RecompressPlan
             container = next;
         }
 
-        if (steps.Count > 0)
+        if (planned.Count > 0)
         {
             notes.Add(messages.Format("plan.note.chain", new
             {
-                hops = string.Join(" > ", steps.Select(s => $"{Path.GetFileName(s.OutputPath)} ({s.Container})")),
+                hops = string.Join(" > ", planned.Select(s => $"{Path.GetFileName(s.OutputPath)} ({s.Container})")),
             }));
         }
 
-        return new RecompressPlan { LivePath = live, Steps = steps, Notes = notes, Problems = problems };
+        return new PostChainPlan { LivePath = live, Steps = planned, Notes = notes, Problems = problems };
     }
 
     /// <summary>
@@ -165,15 +218,15 @@ public sealed record RecompressPlan
     /// several seconds in with a muxer message.</para>
     /// </summary>
     private static (string Container, string? Error) ResolveContainer(
-        RecompressPass pass, IReadOnlyList<string> tokens, string previous, int number,
+        ChainStep step, IReadOnlyList<string> tokens, string previous, int number,
         Localization.IMessages messages)
     {
         string? video = RecompressCodecs.DetectVideoCodec(tokens);
         string? audio = RecompressCodecs.DetectAudioCodec(tokens);
 
-        if (pass.Container.HasText)
+        if (step.Container.HasText)
         {
-            string wanted = pass.Container.Trim().TrimStart('.').ToLowerInvariant();
+            string wanted = step.Container.Trim().TrimStart('.').ToLowerInvariant();
 
             // Only checked when the fragment names a codec the catalogue knows;
             // a fragment doing something it cannot reason about (a filter that

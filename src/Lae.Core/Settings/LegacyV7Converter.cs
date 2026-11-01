@@ -153,7 +153,7 @@ public static class LegacyV7Converter
             // Never restore a nonsensical shard count from an older file.
             Parallel = Math.Max(1, old.Parallel ?? 1),
             Subtitles = Subtitles(old.Subtitles),
-            Recompress = Chain(old.Recompress),
+            Chain = Chain(old.Recompress),
         };
 
         // v7 stored which H.264 implementation a preset should use, because its
@@ -258,17 +258,17 @@ public static class LegacyV7Converter
         };
     }
 
-    private static RecompressChain Chain(LegacyRecompress? old)
+    private static ChainSettings Chain(LegacyRecompress? old)
     {
-        if (old is null) return new RecompressChain();
+        if (old is null) return new ChainSettings();
 
-        var passes = new List<RecompressPass>();
+        var steps = new List<ChainStep>();
 
         // v7.9.8.3 moved the first pass into the same shape as the rest, but kept
         // Args/Container at the top level so every earlier file still loaded.
         // Reading both here is that compatibility, in one place.
         if (Clean(old.Args) is { } first)
-            passes.Add(new RecompressPass(first, Clean(old.Container) ?? "mp4"));
+            steps.Add(new ChainStep { Args = first, Container = Clean(old.Container) ?? "mp4" });
 
         if (old.Extra is { } extra)
         {
@@ -276,11 +276,11 @@ public static class LegacyV7Converter
             {
                 if (pass is null) continue;
                 if (Clean(pass.Args) is not { } args) continue;
-                passes.Add(new RecompressPass(args, Clean(pass.Container) ?? "mp4"));
+                steps.Add(new ChainStep { Args = args, Container = Clean(pass.Container) ?? "mp4" });
             }
         }
 
-        return new RecompressChain { Enabled = old.Enabled, Passes = passes };
+        return new ChainSettings { Enabled = old.Enabled, Steps = steps };
     }
 
     /// <summary>

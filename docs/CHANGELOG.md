@@ -18,6 +18,70 @@
 
 ---
 
+## v8.0.0-m2.5（未发布）
+
+M3 的第一块地基：链条里的一步，从此可以是插件，而不只是 FFmpeg 片段。**这一版仍然没有插件
+宿主**——写了插件的一步会在开跑前被拒，而不是跑到一半才发现。
+
+### 一步是一个联合，不是两个列表
+
+`RecompressPass(Args, Container)` 只能表达 FFmpeg，所以插件 hop 除了"再写一条链"没有别的位置，
+而两条链就是两份会漂移的编排逻辑（`DiagnosticTap` / `ProgressTap` 那次就是这么来的）。
+
+现在一个 step 有两种形状，由写了的字段决定：
+
+```toml
+[[defaults.recompress.passes]]
+args = "-c:v libx264 -crf 28"     # FFmpeg
+container = "mp4"
+
+[[defaults.recompress.passes]]
+plugin = "lae-damage"             # 插件
+stage = "damage"
+
+[defaults.recompress.passes.params]
+intensity = "0.25"
+```
+
+- **两半都写是错误**（`ChainStepKind.Ambiguous`），不是按优先级挑一个。输掉的那一半会留在
+  文件里，看起来还在起作用——这类"配置写了但不算数"是最难查的一种。
+- **空白 step 仍被丢弃**（原有行为），但**有内容而无法执行的 step 不会**：丢弃等于交付一个
+  链没描述过的产物。
+
+### 类型改名，键名不动（⚠ 内部结构）
+
+| 之前 | 现在 |
+| --- | --- |
+| `RecompressChain` | `ChainSettings` |
+| `RecompressPass` | `ChainStep` |
+| `RecompressPlan` | `PostChainPlan` |
+| `RecompressStep` | `PostChainStep` |
+| `RecompressRun` | `ChainRunner` |
+| `EncodeDefaults.Recompress` | `EncodeDefaults.Chain` |
+
+**`settings.toml` 里的 `[defaults.recompress]` 与 `[[defaults.recompress.passes]]` 一个字母都
+没变**，靠 `[JsonPropertyName]` 钉住。理由不是懒惰：`TomlSettingsStore` 是外科式回写的，
+改段名要整体重渲文件，而重渲会丢掉用户写的每一行注释。代码里可以叫得诚实，文件里保持用户的。
+
+### 写了插件会明确被拒
+
+```
+ERROR: step 2 runs plugin 'lae-damage', but this build has no plugin host yet;
+       remove it from the chain to run the rest
+```
+
+退出码 2（请求不成立），发生在开跑之前。静默跳过会更糟：运行说"完成"、文件在场、
+用户配的那一步消失了，而输出里没有任何一句话解释。
+
+### 设置校验的两个修正
+
+- **`SettingsKeySchema` 现在认 `[JsonPropertyName]`**。它原来只读属性名，于是把
+  `Chain`（文件里叫 `recompress`）当成一个叫 `chain` 的键，程序自己写出的文件会被自己拒。
+- **参数字典不再被当成普通表**。`params` 是 `Dictionary<string,string>`，原来会按属性枚举
+  成 `comparer`/`count`/`keys`/`values`，于是用户写的每一个参数名都成了"未知键"。
+
+---
+
 ## v8.0.0-m2.4-canary（2026-11-01）
 
 M3 之前的三处地基。三件都不是用户看得见的功能，都是"现在不改，插件一接进来就得连改三遍"的东西。

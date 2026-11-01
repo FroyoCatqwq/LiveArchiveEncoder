@@ -155,6 +155,8 @@
       "chainAllBlank": "the recompress chain is armed but every pass is blank",
       "chainPass": "pass {{number}}: {{detail}}",
       "chainNoContainer": "pass {{number}}: {{video}} and {{audio}} share no container; name one with --recompress-container",
+      "chainStepAmbiguous": "step {{number}} names both a plugin and an FFmpeg fragment; write one or the other, not both",
+      "chainPluginNotReady": "step {{number}} runs plugin '{{plugin}}', but this build has no plugin host yet; remove it from the chain to run the rest",
       "unknownVideoCodec": "unknown video codec '{{codec}}'; known: {{known}}",
       "unknownAudioCodec": "unknown audio codec '{{codec}}'; known: {{known}}, or {{copy}}",
       "codecContainer": "{{codec}} cannot be written to .{{container}}; it supports {{containers}}",

@@ -41,7 +41,7 @@ public static partial class EncodeSession
     {
         IMessages messages = dependencies.Messages;
 
-        (RecompressChain? chain, string? chainError) = BuildChain(overrides, messages);
+        (ChainSettings? chain, string? chainError) = BuildChain(overrides, messages);
         if (chain is null)
         {
             terminal.ErrorLine(chainError is null
@@ -68,7 +68,7 @@ public static partial class EncodeSession
             return ExitCodes.Usage;
         }
 
-        RecompressPlan plan = RecompressPlan.Create(chain, input, messages);
+        PostChainPlan plan = PostChainPlan.Create(chain, input, messages);
 
         foreach (string note in plan.Notes) sink.Warn(note);
 
@@ -88,7 +88,7 @@ public static partial class EncodeSession
 
         sink.Stage(PluginStages.BetweenPasses);
 
-        PostChainOutcome outcome = dependencies.RunRecompress(
+        PostChainOutcome outcome = dependencies.RunPostChain(
             plan, ffmpeg,
             TimeSpan.FromSeconds(Math.Max(300.0, span * 4.0 + 120.0)),
             sink.Warn,
@@ -106,7 +106,7 @@ public static partial class EncodeSession
     /// how a script ends up publishing the wrong product.</para>
     /// </summary>
     private static int RunChain(
-        RecompressPlan plan, string ffmpeg, double span,
+        PostChainPlan plan, string ffmpeg, double span,
         EncodeDependencies dependencies, ITerminal terminal, IEventSink sink, CancellationToken token)
     {
         // A hop is a plain transcode, not a realtime one, so the budget is not
@@ -119,7 +119,7 @@ public static partial class EncodeSession
 
         sink.Stage(PluginStages.BetweenPasses);
 
-        PostChainOutcome outcome = dependencies.RunRecompress(
+        PostChainOutcome outcome = dependencies.RunPostChain(
             plan, ffmpeg, budget, sink.Warn, token);
 
         return ReportOutcome(outcome, plan, terminal, messages, withRecording: true);
@@ -134,7 +134,7 @@ public static partial class EncodeSession
     /// one.</para>
     /// </summary>
     private static int ReportOutcome(
-        PostChainOutcome outcome, RecompressPlan plan, ITerminal terminal, IMessages messages,
+        PostChainOutcome outcome, PostChainPlan plan, ITerminal terminal, IMessages messages,
         bool withRecording = false)
     {
         foreach (string path in outcome.Written)
@@ -153,4 +153,5 @@ public static partial class EncodeSession
         return ExitCodes.Failed;
     }
 }
+
 

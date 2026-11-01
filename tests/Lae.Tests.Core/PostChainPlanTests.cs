@@ -1,4 +1,4 @@
-using Lae.Core;
+﻿using Lae.Core;
 using Lae.Core.Settings;
 
 using static Lae.Tests.Core.TestMessages;
@@ -14,30 +14,30 @@ namespace Lae.Tests.Core;
 /// that cannot be written to the container asked for, a hop whose name would land
 /// on the recording it reads.</para>
 /// </summary>
-public sealed class RecompressPlanTests
+public sealed class PostChainPlanTests
 {
     private const string Live = "out.avi";
 
-    private static RecompressChain Chain(params RecompressPass[] passes) => new()
+    private static ChainSettings Chain(params ChainStep[] steps) => new()
     {
         Enabled = true,
-        Passes = passes,
+        Steps = steps,
     };
 
     /// <summary>An armed chain whose hops are bare fragments.</summary>
-    private static RecompressChain Armed(params string[] fragments)
-        => Chain([.. fragments.Select(f => new RecompressPass(f, ""))]);
+    private static ChainSettings Armed(params string[] fragments)
+        => Chain([.. fragments.Select(f => new ChainStep { Args = f, Container = "" })]);
 
     [Test]
     public async Task AnUnarmedChainPlansNothing()
     {
-        var chain = new RecompressChain
+        var chain = new ChainSettings
         {
             Enabled = false,
-            Passes = [new RecompressPass("-c:v libx264", "mp4")],
+            Steps = [new ChainStep { Args = "-c:v libx264", Container = "mp4" }],
         };
 
-        RecompressPlan plan = RecompressPlan.Create(chain, Live, En);
+        PostChainPlan plan = PostChainPlan.Create(chain, Live, En);
 
         await Assert.That(plan.Steps.Count).IsEqualTo(0);
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
@@ -48,7 +48,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task AnArmedChainWithNothingInItIsAProblem()
     {
-        RecompressPlan plan = RecompressPlan.Create(Chain(new RecompressPass("   ", "mp4")), Live, En);
+        PostChainPlan plan = PostChainPlan.Create(Chain(new ChainStep { Args = "   ", Container = "mp4" }), Live, En);
 
         await Assert.That(plan.Steps.Count).IsEqualTo(0);
         await Assert.That(plan.IsRunnable).IsFalse();
@@ -58,7 +58,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task HopsAreNumberedFromTheRecordingAndFeedEachOther()
     {
-        RecompressPlan plan = RecompressPlan.Create(
+        PostChainPlan plan = PostChainPlan.Create(
             Armed("-c:v libx264 -crf 30", "-c:v libvpx-vp9 -crf 34"), Live, En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
@@ -88,7 +88,7 @@ public sealed class RecompressPlanTests
     [Arguments("-c:v rv20 -q:v 6", "rm")]
     public async Task TheContainerComesFromTheCodec(string fragment, string expected)
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed(fragment), Live, En);
+        PostChainPlan plan = PostChainPlan.Create(Armed(fragment), Live, En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
         await Assert.That(plan.Steps[0].Container).IsEqualTo(expected);
@@ -97,8 +97,8 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task AnExplicitContainerWins()
     {
-        RecompressPlan plan = RecompressPlan.Create(
-            Chain(new RecompressPass("-c:v libx264 -crf 30", "mkv")), Live, En);
+        PostChainPlan plan = PostChainPlan.Create(
+            Chain(new ChainStep { Args = "-c:v libx264 -crf 30", Container = "mkv" }), Live, En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
         await Assert.That(plan.Steps[0].Container).IsEqualTo("mkv");
@@ -108,8 +108,8 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task ACodecThatCannotBeWrittenThereIsRefused()
     {
-        RecompressPlan plan = RecompressPlan.Create(
-            Chain(new RecompressPass("-c:v libx264 -crf 30", "rm")), Live, En);
+        PostChainPlan plan = PostChainPlan.Create(
+            Chain(new ChainStep { Args = "-c:v libx264 -crf 30", Container = "rm" }), Live, En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems[0]).Contains("libx264 cannot be written to .rm");
@@ -124,7 +124,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task ACopyHopKeepsTheContainerItWasHanded()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed("-c:v copy"), Live, En);
+        PostChainPlan plan = PostChainPlan.Create(Armed("-c:v copy"), Live, En);
 
         await Assert.That(plan.Problems.Count).IsEqualTo(0);
         await Assert.That(plan.Steps[0].Container).IsEqualTo("avi");
@@ -134,7 +134,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task AHopCannotTakeOverItsInput()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed("-i other.mkv -c:v libx264"), Live, En);
+        PostChainPlan plan = PostChainPlan.Create(Armed("-i other.mkv -c:v libx264"), Live, En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems[0]).Contains("'-i' is not allowed");
@@ -143,7 +143,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task AHopCannotNameItsOwnOutput()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed("-c:v libx264 -crf 30 clip.mp4"), Live, En);
+        PostChainPlan plan = PostChainPlan.Create(Armed("-c:v libx264 -crf 30 clip.mp4"), Live, En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems[0]).Contains("looks like an output name");
@@ -152,7 +152,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task AnEmptyFragmentIsAProblem()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed(""), Live, En);
+        PostChainPlan plan = PostChainPlan.Create(Armed(""), Live, En);
 
         await Assert.That(plan.IsRunnable).IsFalse();
         await Assert.That(plan.Problems[0]).Contains("every pass is blank");
@@ -161,7 +161,7 @@ public sealed class RecompressPlanTests
     [Test]
     public async Task TheCommandLineKeepsBothEnds()
     {
-        RecompressPlan plan = RecompressPlan.Create(Armed("-c:v libx264 -crf 30"), Live, En);
+        PostChainPlan plan = PostChainPlan.Create(Armed("-c:v libx264 -crf 30"), Live, En);
         List<string> command = plan.Steps[0].Command("ffmpeg", "out_web.part.mp4");
 
         await Assert.That(command[0]).IsEqualTo("ffmpeg");
@@ -172,6 +172,56 @@ public sealed class RecompressPlanTests
         await Assert.That(command[^1]).IsEqualTo("out_web.part.mp4");
         await Assert.That(command.IndexOf("-i") + 1).IsEqualTo(command.IndexOf(Live));
         await Assert.That(command.Contains("-c:v")).IsTrue();
+    }
+
+    /// <summary>
+    /// A plugin hop is refused, not skipped.
+    ///
+    /// <para>Skipping it would deliver a product the chain did not describe, and
+    /// the user would have no way to tell: the run says "done", the file exists,
+    /// and the step they wrote simply did not happen. Refusing costs a sentence
+    /// now and names the build's gap.</para>
+    /// </summary>
+    [Test]
+    public async Task APluginStepIsRefusedUntilThereIsAHost()
+    {
+        PostChainPlan plan = PostChainPlan.Create(
+            Chain(new ChainStep { Plugin = "lae-damage", Stage = "damage" }), Live, En);
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems[0]).Contains("lae-damage");
+        await Assert.That(plan.Problems[0]).Contains("no plugin host");
+    }
+
+    /// <summary>
+    /// Both halves in one step is a configuration mistake, and precedence is not
+    /// an answer: whichever half lost would sit in the file looking active.
+    /// </summary>
+    [Test]
+    public async Task AStepThatNamesBothAPluginAndAFragmentIsRefused()
+    {
+        PostChainPlan plan = PostChainPlan.Create(
+            Chain(new ChainStep { Args = "-c:v libx264", Plugin = "lae-damage" }), Live, En);
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems[0]).Contains("both a plugin and an FFmpeg fragment");
+    }
+
+    /// <summary>
+    /// One bad step stops the plan; it does not quietly plan the good ones and
+    /// run a shorter chain than the user wrote.
+    /// </summary>
+    [Test]
+    public async Task APluginStepAnywhereStopsTheWholePlan()
+    {
+        PostChainPlan plan = PostChainPlan.Create(
+            Chain(
+                new ChainStep { Args = "-c:v libx264 -crf 30", Container = "mp4" },
+                new ChainStep { Plugin = "lae-damage" }),
+            Live, En);
+
+        await Assert.That(plan.IsRunnable).IsFalse();
+        await Assert.That(plan.Problems[0]).Contains("step 2");
     }
 }
 
@@ -261,3 +311,5 @@ public sealed class ArgsFragmentTests
         await Assert.That(ArgsFragment.Validate(["-c:v", "", "libx264"], En)).IsNotNull();
     }
 }
+
+

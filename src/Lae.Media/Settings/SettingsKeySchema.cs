@@ -28,6 +28,17 @@ internal static class SettingsKeySchema
 
         /// <summary>An array of tables (<c>[[name]]</c>): every element is walked.</summary>
         TableArray,
+
+        /// <summary>
+        /// A table whose keys are not known ahead of time, mapped to scalars:
+        /// <c>[section.params]</c> with <c>intensity = "0.25"</c>.
+        ///
+        /// <para>Without this, a dictionary walks as an ordinary table and its
+        /// members come out as <c>Comparer</c>, <c>Count</c>, <c>Keys</c> and
+        /// <c>Values</c> -- so every key a user actually wrote is reported as
+        /// unknown. A plugin's parameters are exactly that shape.</para>
+        /// </summary>
+        Map,
     }
 
     private sealed record Node(Kind Kind, Dictionary<string, Node> Members);
@@ -82,6 +93,22 @@ internal static class SettingsKeySchema
                 case Kind.Value when pair.Value is TomlTable or TomlTableArray:
                     problems.Add($"'{path}{pair.Key}' takes a single value, not a table");
                     break;
+
+                case Kind.Map when pair.Value is TomlTable map:
+                    // The keys inside are free; the values still have to be
+                    // values, because a nested table here would be a shape the
+                    // reader cannot hand to a plugin as one parameter.
+                    foreach (KeyValuePair<string, object> entry in map)
+                    {
+                        if (entry.Value is TomlTable or TomlTableArray)
+                            problems.Add($"'{path}{pair.Key}.{entry.Key}' takes a single value, not a table");
+                    }
+
+                    break;
+
+                case Kind.Map:
+                    problems.Add($"'{path}{pair.Key}' is a table of values, but the file gives it a single value");
+                    break;
             }
         }
     }
@@ -105,6 +132,11 @@ internal static class SettingsKeySchema
     {
         type = Nullable.GetUnderlyingType(type) ?? type;
 
+        // Before ElementType: a dictionary is enumerable too, and walking it as
+        // an array of KeyValuePair would produce the same wrong members from the
+        // other direction.
+        if (IsMap(type)) return new Node(Kind.Map, []);
+
         if (ElementType(type) is { } element)
         {
             return IsScalar(element)
@@ -123,10 +155,39 @@ internal static class SettingsKeySchema
             if (!property.CanRead || property.GetIndexParameters().Length > 0) continue;
             if (property.GetCustomAttribute<JsonIgnoreAttribute>() is not null) continue;
 
-            members[JsonNamingPolicy.CamelCase.ConvertName(property.Name)] = For(property.PropertyType);
+            members[KeyOf(property)] = For(property.PropertyType);
         }
 
         return new Node(Kind.Table, members);
+    }
+
+    /// <summary>
+    /// The name this property has in the file: an explicit
+    /// <see cref="JsonPropertyNameAttribute"/> wins, otherwise camelCase.
+    ///
+    /// <para>Reading the property name alone would make a deliberate rename
+    /// illegal: <c>Chain</c> carries <c>[JsonPropertyName("recompress")]</c> so
+    /// the code can call it one thing while the file keeps another, and this
+    /// validator would report the key the program itself writes as unknown.</para>
+    /// </summary>
+    private static string KeyOf(PropertyInfo property)
+        => property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name
+           ?? JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+
+    /// <summary>Whether this is a string-keyed dictionary: free keys, scalar values.</summary>
+    private static bool IsMap(Type type)
+    {
+        foreach (Type candidate in type.GetInterfaces().Append(type))
+        {
+            if (!candidate.IsGenericType) continue;
+
+            Type definition = candidate.GetGenericTypeDefinition();
+            if (definition != typeof(IDictionary<,>) && definition != typeof(IReadOnlyDictionary<,>)) continue;
+
+            if (candidate.GetGenericArguments()[0] == typeof(string)) return true;
+        }
+
+        return false;
     }
 
     private static bool IsScalar(Type type)

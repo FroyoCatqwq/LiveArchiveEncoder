@@ -1,4 +1,4 @@
-using Lae.Core;
+﻿using Lae.Core;
 using Lae.Core.Settings;
 
 using static Lae.Tests.Core.TestMessages;
@@ -377,7 +377,7 @@ public sealed class EncodePlanTests
     /// <para>v7.9.8.6 shipped the opposite mistake -- the stored chain was merged
     /// into the run, so every plain encode silently recompressed itself. What is
     /// asserted here is that arming a chain changes nothing about the capture;
-    /// <c>RecompressPlan</c> is what turns it into work.</para>
+    /// <c>PostChainPlan</c> is what turns it into work.</para>
     /// </summary>
     [Test]
     public async Task AnArmedChainDoesNotDisturbTheLivePlan()
@@ -391,7 +391,7 @@ public sealed class EncodePlanTests
         {
             Encode = plain.Encode with
             {
-                Recompress = new RecompressChain { Enabled = true, Passes = [new RecompressPass("-c:v copy", "mp4")] },
+                Chain = new ChainSettings { Enabled = true, Steps = [new ChainStep { Args = "-c:v copy", Container = "mp4" }] },
             },
         };
 
@@ -749,3 +749,5 @@ public sealed class EncodePlanTests
         await Assert.That(plan.Muxer).IsEqualTo("avi");
     }
 }
+
+

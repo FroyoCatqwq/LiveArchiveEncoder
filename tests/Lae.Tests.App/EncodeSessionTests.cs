@@ -64,10 +64,10 @@ public sealed class EncodeSessionTests
         public bool Ran { get; private set; }
 
         /// <summary>What the post chain should answer; the default pretends every hop succeeded.</summary>
-        public Func<RecompressPlan, PostChainOutcome>? OnRecompress { get; init; }
+        public Func<PostChainPlan, PostChainOutcome>? OnRecompress { get; init; }
 
         /// <summary>The chain the session handed over, so a test can read what it planned.</summary>
-        public RecompressPlan? Chain { get; private set; }
+        public PostChainPlan? Chain { get; private set; }
 
         /// <summary>A warning the chain says out loud, so the event stream has one to carry.</summary>
         public string? ChainWarning { get; init; }
@@ -89,7 +89,7 @@ public sealed class EncodeSessionTests
                 return OnExtract?.Invoke(destination);
             },
             Runner = this,
-            RunRecompress = (plan, _, budget, warn, token) =>
+            RunPostChain = (plan, _, budget, warn, token) =>
             {
                 Chain = plan;
                 ChainBudget = budget;
@@ -297,7 +297,7 @@ public sealed class EncodeSessionTests
 
         // Compared by name, not by full path: the plan keeps the path it was
         // handed, and every platform spells a rooted path slightly differently.
-        RecompressPlan chain = deps.Chain!;
+        PostChainPlan chain = deps.Chain!;
         await Assert.That(chain.Steps.Count).IsEqualTo(2);
         await Assert.That(Path.GetFileName(chain.Steps[0].InputPath)).IsEqualTo("out.avi");
         await Assert.That(Path.GetFileName(chain.Steps[0].OutputPath)).IsEqualTo("out_web.mp4");
@@ -370,10 +370,10 @@ public sealed class EncodeSessionTests
         {
             Defaults = new EncodeDefaults
             {
-                Recompress = new RecompressChain
+                Chain = new ChainSettings
                 {
                     Enabled = true,
-                    Passes = [new RecompressPass("-c:v libx264 -crf 30", "mp4")],
+                    Steps = [new ChainStep { Args = "-c:v libx264 -crf 30", Container = "mp4" }],
                 },
             },
         };
@@ -788,4 +788,6 @@ public sealed class EncodeSessionTests
         });
     }
 }
+
+
 

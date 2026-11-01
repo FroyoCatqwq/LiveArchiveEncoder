@@ -155,6 +155,8 @@
       "chainAllBlank": "二次压缩链开了，但每一趟都是空的",
       "chainPass": "第 {{number}} 趟：{{detail}}",
       "chainNoContainer": "第 {{number}} 趟：{{video}} 和 {{audio}} 没有共同容器；用 --recompress-container 指定一个",
+      "chainStepAmbiguous": "第 {{number}} 步同时写了插件和 FFmpeg 参数；两者只能写一个",
+      "chainPluginNotReady": "第 {{number}} 步要跑插件 '{{plugin}}'，但本版本还没有插件宿主；把它从链里拿掉才能跑其余步骤",
       "unknownVideoCodec": "不认识的视频编码 '{{codec}}'；可用：{{known}}",
       "unknownAudioCodec": "不认识的音频编码 '{{codec}}'；可用：{{known}}，或 {{copy}}",
       "codecContainer": "{{codec}} 写不进 .{{container}}；它支持 {{containers}}",

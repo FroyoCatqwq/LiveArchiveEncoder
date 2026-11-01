@@ -1,4 +1,4 @@
-using Lae.App;
+﻿using Lae.App;
 using Lae.App.Commands;
 using Lae.App.Ui;
 using Lae.Core;
@@ -35,7 +35,7 @@ public sealed class EncodeRequestBuildingTests
             // Both of these must be dropped by a CLI run: they are only ever
             // switched on explicitly, on the command line.
             Subtitles = new SubtitleDefaults { Files = ["/subs/old.ass"] },
-            Recompress = new RecompressChain { Enabled = true, Passes = [new RecompressPass("-c:v copy", "mp4")] },
+            Chain = new ChainSettings { Enabled = true, Steps = [new ChainStep { Args = "-c:v copy", Container = "mp4" }] },
         },
     };
 
@@ -149,7 +149,7 @@ public sealed class EncodeRequestBuildingTests
         (EncodeRequest? request, _) = EncodeSession.BuildRequest("/media/in.mkv", new EncodeOverrides(), Stored(), En);
 
         await Assert.That(request!.Encode.Subtitles.Any).IsFalse();
-        await Assert.That(request.Encode.Recompress.Enabled).IsFalse();
+        await Assert.That(request.Encode.Chain.Enabled).IsFalse();
     }
 
     [Test]
@@ -255,3 +255,5 @@ public sealed class SetupReportTests
         await Assert.That(terminal.OutputLines.Any(l => l.Contains("/opt/ff", StringComparison.Ordinal))).IsTrue();
     }
 }
+
+

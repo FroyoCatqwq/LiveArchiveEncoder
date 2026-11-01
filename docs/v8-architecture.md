@@ -55,12 +55,12 @@ Lae.Cli  ──►  Lae.App  ──►  Lae.Plugins
               ├─ PrepareTrack        内嵌字幕轨：拆成临时文件（dry-run 不拆）
               ├─ ListEncoders        ffmpeg -encoders → 目录
               ├─ EncodePlan.Create   纯：两条命令行 + 问题清单，**从不抛**
-              ├─ RecompressPlan.Create 纯：每一趟的输入、输出、容器
+              ├─ PostChainPlan.Create 纯：每一步的输入、输出、容器，以及它是 FFmpeg 还是插件
               ├─ LiveEncode.Run      两个子进程 + 泵
-              └─ RunChain            PostChainRun：一趟一个 hop，FFmpeg 只是一类
+              └─ RunChain            ChainRunner → PostChainRun：一步一个 hop，FFmpeg 只是一类
 ```
 
-三个"纯"是重点：`BuildRequest`、`EncodePlan.Create`、`RecompressPlan.Create` 都不碰磁盘、不抛异常，所有错误进 `Problems`，由 CLI 变成一句 `ERROR:` 和退出码 2。这就是为什么坏参数在开跑前几毫秒就能被拒，而不是录完二十分钟之后。
+三个"纯"是重点：`BuildRequest`、`EncodePlan.Create`、`PostChainPlan.Create` 都不碰磁盘、不抛异常，所有错误进 `Problems`，由 CLI 变成一句 `ERROR:` 和退出码 2。这就是为什么坏参数在开跑前几毫秒就能被拒，而不是录完二十分钟之后。
 
 **退出码是契约**：0 完成、2 请求不成立、1 这台机器或这个素材做不到、3 有新版本、130 中断。
 

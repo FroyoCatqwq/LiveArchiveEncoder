@@ -57,12 +57,12 @@ public sealed record EncodeDependencies
 
     /// <summary>
     /// Runs the post-encode chain. A delegate rather than a call to
-    /// <see cref="RecompressRun"/> because the session is exercised without
+    /// <see cref="ChainRunner"/> because the session is exercised without
     /// FFmpeg, and the exit-code policy around a failed hop is exactly what needs
     /// a test.
     /// </summary>
-    public required Func<RecompressPlan, string, TimeSpan, Action<string>?, CancellationToken, PostChainOutcome>
-        RunRecompress { get; init; }
+    public required Func<PostChainPlan, string, TimeSpan, Action<string>?, CancellationToken, PostChainOutcome>
+        RunPostChain { get; init; }
 
     /// <summary>
     /// Where a finished run is remembered. A no-op by default so a test that does
@@ -98,8 +98,9 @@ public sealed record EncodeDependencies
         ListEncoders = FfmpegTools.ListEncoders,
         ExtractSubtitle = FfmpegTools.ExtractSubtitle,
         Runner = new LiveEncodeRunner(),
-        RunRecompress = RecompressRun.Run,
+        RunPostChain = ChainRunner.Run,
         Messages = I18NextMessages.Create(LanguageChoice.English),
     };
 }
+
 

@@ -1,13 +1,14 @@
 using Lae.Core;
+using Lae.Core.Settings;
 using Lae.Media;
 
 namespace Lae.Encoding;
 
 /// <summary>
-/// Runs the hops <see cref="RecompressPlan"/> worked out: one FFmpeg child per
-/// hop, each reading the hop before.
+/// Runs the hops <see cref="PostChainPlan"/> worked out: one child per hop, each
+/// reading the hop before.
 ///
-/// <para>Only the FFmpeg half lives here now. The chain's failure policy -- never
+/// <para>Only the FFmpeg half lives here. The chain's failure policy -- never
 /// touch the input, discard a failed hop's part product, stop at the first
 /// failure, keep what already finished, treat an interrupt as an interrupt --
 /// belongs to <see cref="PostChainRun"/> and is shared with every other kind of
@@ -17,31 +18,36 @@ namespace Lae.Encoding;
 /// <para>What is left is the part that really is about FFmpeg: a plan's step
 /// becomes a command line, and the child is given a deadline derived from the
 /// recording's length.</para>
+///
+/// <para>A plugin hop cannot arrive here today: the planner refuses one before
+/// anything is started. When the host exists, this is where the second branch
+/// goes -- and it must not become a second copy of the loop.</para>
 /// </summary>
-public static class RecompressRun
+public static class ChainRunner
 {
     public static PostChainOutcome Run(
-        RecompressPlan plan,
+        PostChainPlan plan,
         string ffmpeg,
         TimeSpan perStepBudget,
         Action<string>? warn,
         CancellationToken token)
     {
         if (!plan.IsRunnable)
-            throw new InvalidOperationException("the recompress plan has problems; nothing was started");
+            throw new InvalidOperationException("the post-encode plan has problems; nothing was started");
 
         return PostChainRun.Run(Hops(plan, ffmpeg, perStepBudget), plan.LivePath, warn, token);
     }
 
-    private static List<PostHop> Hops(RecompressPlan plan, string ffmpeg, TimeSpan budget)
+    private static List<PostHop> Hops(PostChainPlan plan, string ffmpeg, TimeSpan budget)
     {
         var hops = new List<PostHop>(plan.Steps.Count);
 
-        foreach (RecompressStep step in plan.Steps)
+        foreach (PostChainStep step in plan.Steps)
         {
             hops.Add(new PostHop
             {
                 Number = step.Number,
+
                 // Reads as the subject of the runner's failure sentence:
                 // "pass 2 (webm) failed: FFmpeg exited with code 1".
                 Label = $"pass {step.Number} ({step.Container})",
@@ -63,8 +69,11 @@ public static class RecompressRun
 
     /// <summary>One hop. Returns the reason it cannot be kept, or null on success.</summary>
     private static string? RunStep(
-        RecompressStep step, string ffmpeg, string part, TimeSpan budget, CancellationToken token)
+        PostChainStep step, string ffmpeg, string part, TimeSpan budget, CancellationToken token)
     {
+        if (step.Kind != ChainStepKind.Ffmpeg)
+            return $"step {step.Number} is not an FFmpeg hop; the planner let it through";
+
         ChildProcess child;
         try
         {
