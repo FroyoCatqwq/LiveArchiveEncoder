@@ -125,21 +125,42 @@ public sealed partial class DependencyDirectionTests
     }
 
     /// <summary>
-    /// Media and Plugins are siblings: neither may reach into the other, and
-    /// neither may reach into Encoding. Encoding is the only one allowed to sit
-    /// on top of Media.
+    /// <c>Lae.Encoding</c> is the top of the pipeline: nothing below or beside it
+    /// may reference it.
+    ///
+    /// <para>The direction is the whole point. The pipeline runs hops it is given;
+    /// it does not go looking for who produced them. A plugin reaching into
+    /// <c>Lae.Encoding</c> would let an extension drive the encode, and Media
+    /// reaching in would make the I/O layer depend on the thing built on top of
+    /// it.</para>
+    ///
+    /// <para>This test used to be called <c>MediaAndPluginsAreSiblings</c>, which
+    /// was accurate when both were leaves. It stopped being accurate the moment
+    /// the plugin host needed <c>ChildProcess</c>: Plugins now sits on Media. A
+    /// test whose name lies is worse than no test, because the next person
+    /// decides what to do from the name.</para>
     /// </summary>
     [Test]
-    public async Task MediaAndPluginsAreSiblings()
+    [Arguments("Lae.Media")]
+    [Arguments("Lae.Plugins")]
+    public async Task ThePipelineIsNeverReferencedFromBelow(string assembly)
     {
-        await Assert.That(ReferencedProjects("Lae.Media")).DoesNotContain("Lae.Encoding")
-            .Because("Lae.Encoding sits above Lae.Media, not the other way round");
+        await Assert.That(ReferencedProjects(assembly)).DoesNotContain("Lae.Encoding")
+            .Because("Lae.Encoding sits above Lae.Media and beside nothing; "
+                   + "the pipeline executes hops, it does not know who made them");
+    }
 
-        await Assert.That(ReferencedProjects("Lae.Plugins")).DoesNotContain("Lae.Encoding")
-            .Because("plugins are orchestrated by the host, not by the pipeline");
-
+    /// <summary>
+    /// The media layer must not know that plugins exist. One-way only: Plugins
+    /// references Media for <c>ChildProcess</c>, and that is the direction the
+    /// layering allows.
+    /// </summary>
+    [Test]
+    public async Task MediaKnowsNothingOfPlugins()
+    {
         await Assert.That(ReferencedProjects("Lae.Media")).DoesNotContain("Lae.Plugins")
-            .Because("media handling must not know that plugins exist");
+            .Because("media handling must not know that plugins exist; "
+                   + "plugins may use Media, never the reverse");
     }
 
     /// <summary>

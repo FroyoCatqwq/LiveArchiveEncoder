@@ -11,22 +11,28 @@ v7 把这两件事写在一个 465 行的方法里，所以任何判断都只能
 ## 2. 六个程序集，一个方向
 
 ```
-Lae.Cli  ──►  Lae.App  ──►  Lae.Plugins
-                 │              │
-                 ├──►  Lae.Encoding  ──►  Lae.Media  ──►  Lae.Core
-                 └──────────────────────────┘
+                        ┌──►  Lae.Encoding  ──┐
+Lae.Cli  ──►  Lae.App ──┼──►  Lae.Plugins   ──┼──►  Lae.Media  ──►  Lae.Core
+                        └────────────────────┘
 ```
 
 | 程序集 | 里面有什么 | 不许有什么 |
 | --- | --- | --- |
 | `Lae.Core` | 规划、换算、阶梯（`FpsLadder`）、字幕链、设置模型、预设 | 任何项目引用；`Console`/`File`/`Directory`/`Process`/`HttpClient`/`Environment.Exit`；`Thread`/`Stopwatch`/`Timer`/`CancellationTokenSource` |
-| `Lae.Media` | FFmpeg 进程、管道、part 文件、设置文件、工具链探测 | 对 `Lae.Encoding` 的引用（方向反了） |
+| `Lae.Media` | FFmpeg 进程、管道、part 文件、设置文件、工具链探测 | 对 `Lae.Encoding` 或 `Lae.Plugins` 的引用（两个方向都反了） |
 | `Lae.Encoding` | 一次实时编码的生命周期、帧泵与节拍（`FramePump`/`FrameChannel`/`FineTimer`）、二次压缩链、通用的 post 链执行器（`PostChainRun`） | 对 `Lae.App` 的引用；`FramePump` 之外再起线程 |
-| `Lae.Plugins` | 插件宿主（M3） | 对 `Lae.Encoding` 的引用 |
+| `Lae.Plugins` | 插件宿主（M3）：发现、握手、调用、产物校验 | 对 `Lae.Encoding` 的引用（管道不该知道谁造了 hop） |
 | `Lae.App` | 命令树、会话编排、终端抽象、事件流、REPL | 启动进程（必须走 `ChildProcess`）；自己起线程 |
 | `Lae.Cli` | `Program.cs`，52 行 | 任何业务逻辑 |
 
-`Lae.Media` 和 `Lae.Plugins` 是兄弟，互不引用：媒体处理不该知道插件存在，插件由宿主编排。
+**`Lae.Plugins → Lae.Media` 这条边是被规则逼出来的，不是选的。** 插件是子进程，而
+`ProcessesAreOnlyStartedThroughChildProcess` 的扫描范围包含 `Lae.Plugins`——宿主不能自己
+`Process.Start`，只能用 `Lae.Media` 的 `ChildProcess`。代价是插件宿主顺带背上 Media 的
+TOML、SQLite 和下载器；为省这点拆 Media 要两个程序集，评审时算过，不值。
+
+方向是一条单行道：**插件可以用 Media，Media 永远不知道插件存在**。这也就是为什么原来那句
+"Media 和 Plugins 是兄弟"必须改掉——它曾经准确，在宿主需要 `ChildProcess` 的那一刻就不准了，
+而一条名字撒谎的架构测试比没有更糟：下一个人会照着名字做决定。
 
 `Path` 在 Core 里是允许的——它是纯字符串运算，禁掉只会把路径拼接推给每个调用方。
 

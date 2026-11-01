@@ -80,6 +80,31 @@ ERROR: step 2 runs plugin 'lae-damage', but this build has no plugin host yet;
 - **参数字典不再被当成普通表**。`params` 是 `Dictionary<string,string>`，原来会按属性枚举
   成 `comparer`/`count`/`keys`/`values`，于是用户写的每一个参数名都成了"未知键"。
 
+### 插件宿主现在站在 Media 上（⚠ 内部结构）
+
+`Lae.Plugins` 加了对自己唯一的 `Lae.Media` 引用，为的是 `ChildProcess` 这一个类型。
+
+这不是可选项：`ProcessesAreOnlyStartedThroughChildProcess` 的扫描范围包含 `Lae.Plugins`，
+插件宿主不许自己 `Process.Start`。代价是宿主顺带背上 Media 的 TOML、SQLite 和下载器——
+为省这点拆 Media 要两个程序集，评估过不值。
+
+随之改掉两处**说错了的话**（代码没变，名字和文档变了）：
+
+- 架构测试 `MediaAndPluginsAreSiblings` 拆成 `ThePipelineIsNeverReferencedFromBelow`
+  （Media、Plugins 都不得引用 `Lae.Encoding`，参数化两份）与 `MediaKnowsNothingOfPlugins`。
+  "兄弟"在宿主需要 `ChildProcess` 的那一刻就不成立了；**一条名字撒谎的测试比没有更糟**，
+  因为下一个人会照着名字做决定。
+- `docs/v8-architecture.md` §2 的依赖图与那句"互不引用"改成单行道：插件可以用 Media，
+  Media 永远不知道插件存在。
+
+新的依赖图（单行）：
+
+```
+                        ┌──►  Lae.Encoding  ──┐
+Lae.Cli  ──►  Lae.App ──┼──►  Lae.Plugins   ──┼──►  Lae.Media  ──►  Lae.Core
+                        └────────────────────┘
+```
+
 ---
 
 ## v8.0.0-m2.4-canary（2026-11-01）

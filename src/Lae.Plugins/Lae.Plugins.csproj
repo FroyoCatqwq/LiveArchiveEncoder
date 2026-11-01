@@ -1,11 +1,20 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Lae.Plugins — third-party extension protocol. Discovery, handshake, invoke,
+    Lae.Plugins 鈥?third-party extension protocol. Discovery, handshake, invoke,
     output verification, and the declarative chain the host executes.
 
-    Depends on Lae.Core only: the protocol types live in Core (they are part of
-    the public contract), while spawning and stream handling live here.
+    Depends on Lae.Core (the protocol types are part of the public contract) and
+    on Lae.Media, for exactly one type: ChildProcess. A plugin is a child
+    process, and ProcessesAreOnlyStartedThroughChildProcess forbids spawning any
+    other way 鈥?so this reference is forced by that rule, not chosen. The cost is
+    that the plugin host also carries Media's TOML, SQLite and download code as a
+    transitive dependency; splitting Media to shave that off was considered and
+    rejected as not worth two assemblies.
+
+    The arrow points one way: plugins may use Media, Media never learns that
+    plugins exist, and neither may reference Lae.Encoding. The pipeline does not
+    know what a plugin is; the host hands it finished hops.
 
     Plugins are separate processes in any language; nothing is loaded in-proc,
     so a crashing plugin costs one exit code, not the whole encode.
@@ -19,6 +28,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Lae.Core\Lae.Core.csproj" />
+    <ProjectReference Include="..\Lae.Media\Lae.Media.csproj" />
   </ItemGroup>
 
 </Project>
+
