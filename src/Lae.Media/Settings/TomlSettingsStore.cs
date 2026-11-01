@@ -61,6 +61,8 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
 
     public string Location => _location.File;
 
+    public string? DataDirectory => _location.Directory;
+
     /// <summary>What the last <see cref="Load"/> did to the file, for the caller to report.</summary>
     public IReadOnlyList<string> MigrationNotes { get; private set; } = [];
 
@@ -154,6 +156,13 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
             _source = text;
             return null;
         }
+        catch (InvalidDataException exc)
+        {
+            // The file's own structure is the problem, not the disk: said
+            // separately so a caller does not report it as "could not write",
+            // which sends the user looking at permissions.
+            return exc.Message;
+        }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
                                         or NotSupportedException or ArgumentException)
         {
@@ -174,7 +183,7 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
     {
         string[] lines = source.Replace("\r\n", "\n").Split('\n');
 
-        int start = Array.FindIndex(lines, line => line.StartsWith(PresetHeader, StringComparison.Ordinal));
+        int start = Array.FindIndex(lines, IsPresetHeader);
         string section = PresetSection(document.CustomPresets);
 
         if (start < 0)
@@ -193,8 +202,7 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
             return section.Length == 0 ? source : Trim(source) + Environment.NewLine + section;
         }
 
-        int end = start + 1;
-        while (end < lines.Length && !lines[end].StartsWith('[')) end++;
+        int end = PresetBlockEnd(lines, start);
 
         var kept = new List<string>(lines.Length);
         kept.AddRange(lines[..start]);
@@ -219,13 +227,44 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
         string full = Render(new SettingsDocument { CustomPresets = presets }).Replace("\r\n", "\n");
         string[] lines = full.Split('\n');
 
-        int start = Array.FindIndex(lines, line => line.StartsWith(PresetHeader, StringComparison.Ordinal));
+        int start = Array.FindIndex(lines, IsPresetHeader);
         if (start < 0) throw new InvalidDataException("the presets could not be rendered as TOML");
 
-        int end = start + 1;
-        while (end < lines.Length && !lines[end].StartsWith('[')) end++;
-
+        int end = PresetBlockEnd(lines, start);
         return string.Join('\n', lines[start..end]).TrimEnd() + "\n";
+    }
+
+    /// <summary>
+    /// True for <c>[[customPresets]]</c> and anything indented in front of it.
+    /// TOML allows leading whitespace before a header, so an exact prefix test on
+    /// the raw line is not enough.
+    /// </summary>
+    private static bool IsPresetHeader(string line)
+        => line.TrimStart().StartsWith(PresetHeader, StringComparison.Ordinal);
+
+    /// <summary>True for any table or array-of-tables header.</summary>
+    private static bool IsTableHeader(string line) => line.TrimStart().StartsWith('[');
+
+    /// <summary>
+    /// One past the last line belonging to the run of preset blocks that starts at
+    /// <paramref name="start"/>.
+    ///
+    /// <para><b>Not "the next line starting with a bracket".</b> The presets are an
+    /// array of tables, so every preset *is* a header: stopping at the first one
+    /// made a save keep all but the first block and append a fresh copy of the
+    /// first, which lost every preset added after the first and turned a removal
+    /// into a rotation. Measured, not reasoned: file <c>[a]</c> plus document
+    /// <c>[a,b]</c> wrote back <c>[a]</c> while the command had already printed
+    /// "stored b".</para>
+    ///
+    /// <para>Comments and blank lines between two preset blocks belong to the run,
+    /// so they are replaced along with it -- they were written about the presets.</para>
+    /// </summary>
+    private static int PresetBlockEnd(string[] lines, int start)
+    {
+        int end = start + 1;
+        while (end < lines.Length && !(IsTableHeader(lines[end]) && !IsPresetHeader(lines[end]))) end++;
+        return end;
     }
 
     private static bool IsKeyAssignment(string line, string key)
@@ -241,15 +280,33 @@ public sealed class TomlSettingsStore(SettingsLocation location) : ISettingsStor
     private void WriteAtomically(string text)
     {
         string temporary = _location.File + ".tmp";
-        using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
-        using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+        try
         {
-            writer.Write(text);
-            writer.Flush();
-            stream.Flush(flushToDisk: true);
-        }
+            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+            {
+                writer.Write(text);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
 
-        File.Move(temporary, _location.File, overwrite: true);
+            File.Move(temporary, _location.File, overwrite: true);
+        }
+        finally
+        {
+            // A crash between the write and the move leaves a file next to the
+            // settings that looks like a backup and is not one. The move takes it
+            // away on success, so this only ever fires on a failure path.
+            try
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+            {
+                // Best effort: the settings themselves are the thing that matters,
+                // and failing here would replace the real error with this one.
+            }
+        }
     }
 
     /// <summary>

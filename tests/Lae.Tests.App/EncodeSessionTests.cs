@@ -76,11 +76,11 @@ public sealed class EncodeSessionTests
             ProbeToolchain = _ => ToolchainPresent
                 ? new ToolchainProbeResult { Ffmpeg = "/usr/bin/ffmpeg", Ffprobe = "/usr/bin/ffprobe" }
                 : new ToolchainProbeResult(),
-            ProbeSource = (_, _) => SourceReadable
+            ProbeSource = (_, _, _) => SourceReadable
                 ? (ProbedSource, null)
                 : (null, "no such stream"),
-            ListEncoders = _ => (Encoders, EncoderListError),
-            ExtractSubtitle = (ffmpeg, source, index, destination) =>
+            ListEncoders = (_, _) => (Encoders, EncoderListError),
+            ExtractSubtitle = (ffmpeg, source, index, destination, _) =>
             {
                 Unwrapped = (ffmpeg, source, index, destination);
                 return OnExtract?.Invoke(destination);

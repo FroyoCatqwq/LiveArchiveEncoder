@@ -33,7 +33,9 @@ public sealed record LiveRun
 ///
 /// <para>Failure policy, in one place: kill both children, remove the part file,
 /// rethrow. A caller never has to clean up after a failed run, and a half-written
-/// output never survives it.</para>
+/// output never survives it. The exception is a failure <em>after</em> the part
+/// file became the real one: that recording is finished, so it is kept and the
+/// failure is a sentence rather than a deletion.</para>
 /// </summary>
 public static class LiveEncode
 {
@@ -69,6 +71,14 @@ public static class LiveEncode
             plan.DecodeCommand(ffmpeg), new ChildSpec { ReadOutput = true });
 
         ChildProcess? encoder = null;
+
+        // Two separate facts, and conflating them cost a finished recording.
+        // "complete" means the encoder wrote every frame and exited cleanly, so
+        // the part file holds a whole recording. "promoted" means it has since
+        // become the real file. A failure between those two points is a rename
+        // that did not happen, not a run that failed.
+        bool complete = false;
+        bool promoted = false;
         try
         {
             // A failed encoder start used to leave the decoder reading a network
@@ -135,15 +145,20 @@ public static class LiveEncode
                     $"the encoder exited with code {encoder.ExitCode}; {Diagnostics(encoder)}");
             }
 
-            if (stats.SourceEnded && plan.TargetFrames > stats.Frames && warn is not null)
+            // Everything the recorder was going to write has been written.
+            complete = true;
+
+            if (stats.FrozenAtEnd > 0 && warn is not null)
             {
-                warn($"the source ended after {stats.Frames} of {plan.TargetFrames} slots");
+                warn($"the source ran out {stats.FrozenAtEnd} slot(s) before the end of the timeline; "
+                   + "the tail repeats the last frame");
             }
 
             // Promote first, measure second. Measuring the part file first meant a
             // missing output surfaced as "Could not find file ...", while Promote
             // has a sentence about what actually happened.
             PartFile.Promote(partPath, finalPath);
+            promoted = true;
             long bytes = new FileInfo(finalPath).Length;
 
             return new LiveRun
@@ -160,7 +175,27 @@ public static class LiveEncode
             encoder?.KillTree();
             decoder.KillTree();
 
-            if (PartFile.Discard(partPath) is { } leftover) warn?.Invoke(leftover);
+            // Only a run that never reached its destination is disposable. Once
+            // the part file has been promoted, the recording is complete and sits
+            // in the user's folder: a failure in the reporting that follows (a
+            // length read, a stat) must not turn twenty minutes of capture into a
+            // deleted file. Before this flag, a rename that failed because a
+            // player had the target open took the finished recording with it.
+            if (promoted)
+            {
+                warn?.Invoke($"the recording is complete at {finalPath}; the failure below came after it");
+            }
+            else if (complete)
+            {
+                // The bytes are all there; only the rename failed. Naming the part
+                // file is the one useful thing left to do.
+                warn?.Invoke($"the recording is complete but could not be renamed into place; it is at {partPath}");
+            }
+            else if (PartFile.Discard(partPath) is { } leftover)
+            {
+                warn?.Invoke(leftover);
+            }
+
             throw;
         }
         finally

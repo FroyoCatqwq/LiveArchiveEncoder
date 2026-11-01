@@ -14,7 +14,8 @@ OutputEncoding.EnsureUtf8WhenRedirected();
 // the runtime killing the process with children still attached.
 Interrupt.Install();
 
-ParseResult parsed = CommandTree.Build(AppHost.CreateDefault()).Parse(args);
+AppHost host = AppHost.CreateDefault();
+ParseResult parsed = CommandTree.Build(host).Parse(args);
 
 // System.CommandLine installs its own catch around the action and answers with
 // exit 1. That would make this program's two documented outcomes unreachable:
@@ -31,6 +32,12 @@ if (parsed.Errors.Count > 0)
 
     return ExitCodes.Usage;
 }
+
+// A settings file that could not be read, or one that was migrated a moment ago.
+// Said once, here, because the command's own read cannot reproduce it: the read
+// that migrates also writes. Running an encode on defaults without ever saying so
+// is how a user concludes the program ignored their settings.
+host.ReportStartupNotes();
 
 try
 {

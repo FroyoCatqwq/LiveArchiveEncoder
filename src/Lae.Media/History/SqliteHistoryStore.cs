@@ -35,9 +35,14 @@ public sealed class SqliteHistoryStore(string path) : IRunHistory
     /// <summary>The first reason this store could not answer; sticky on purpose.</summary>
     private string? _problem;
 
+    /// <summary>Rows the last read could not parse. Reset by each read.</summary>
+    private int _unreadable;
+
     public string Location => path;
 
     public string? Problem => _problem;
+
+    public int Unreadable => _unreadable;
 
     public string? Append(RunRecord record)
     {
@@ -91,6 +96,7 @@ public sealed class SqliteHistoryStore(string path) : IRunHistory
 
     public IReadOnlyList<RunRecord> Recent(int limit)
     {
+        _unreadable = 0;
         if (limit <= 0 || !File.Exists(path)) return [];
         if (TryOpen(out _) is not { } connection) return [];
 
@@ -104,7 +110,23 @@ public sealed class SqliteHistoryStore(string path) : IRunHistory
 
                 var records = new List<RunRecord>(Math.Min(limit, 256));
                 using SqliteDataReader reader = command.ExecuteReader();
-                while (reader.Read()) records.Add(Read(reader));
+                while (reader.Read())
+                {
+                    // One bad row must not end the command. A row with a started_at
+                    // that is not a timestamp -- hand-edited, or written by something
+                    // else -- throws out of Read, and since the row does not go away
+                    // by itself, `lae history` would fail on every run from then on.
+                    try
+                    {
+                        records.Add(Read(reader));
+                    }
+                    catch (Exception exc) when (exc is FormatException or InvalidCastException
+                                                    or ArgumentException or OverflowException)
+                    {
+                        _unreadable++;
+                    }
+                }
+
                 return records;
             }
             catch (Exception exc) when (IsEnvironmentFailure(exc))

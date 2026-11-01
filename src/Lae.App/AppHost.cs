@@ -44,18 +44,45 @@ public sealed class AppHost
 
     private static readonly IMessages DefaultMessages = I18NextMessages.Create(LanguageChoice.English);
 
+    /// <summary>
+    /// The folder the settings live in, which is where a managed FFmpeg install
+    /// goes. Null for a store with no disk location.
+    /// </summary>
+    public string? ConfigRoot => Settings.DataDirectory;
+
+    /// <summary>
+    /// What the very first read of the settings had to say -- a migration that
+    /// happened, or a file that could not be read and is being run on defaults.
+    ///
+    /// <para>Captured here rather than read by each command because it cannot be
+    /// reproduced: the read that notices a migration also performs it, so the
+    /// command's own read afterwards sees a clean file and says nothing. v8 used to
+    /// drop this list on the floor, which made "your settings could not be read, so
+    /// these are the defaults" a thing the user never found out.</para>
+    /// </summary>
+    public IReadOnlyList<string> StartupNotes { get; init; } = [];
+
+    /// <summary>Prints the startup notes once, on standard error, in the chosen language.</summary>
+    public void ReportStartupNotes()
+    {
+        foreach (string note in StartupNotes)
+            Terminal.ErrorLine(Messages.Format("note.prefixed", new { text = note }));
+    }
+
     /// <summary>Real machine: settings beside the user's application data.</summary>
     public static AppHost CreateDefault()
     {
         SettingsLocation location = SettingsLocation.Resolve();
         var settings = new TomlSettingsStore(location);
 
-        // The settings are read once here to answer "which language", and again by
-        // whichever command runs. That is a second read of a small text file, and
-        // it buys not threading the document through every command's constructor.
+        // The settings are read once here to answer "which language" and to catch
+        // what that read had to do -- a migration, or a file that will not parse.
+        // Commands read them again; that is a second read of a small text file,
+        // and it buys not threading the document through every constructor.
+        SettingsDocument first = settings.Load();
         string language = LanguageChoice.Pick(
             Environment.GetEnvironmentVariable("LAE_LANG"),
-            settings.Load().Ui.Language);
+            first.Ui.Language);
 
         return new()
         {
@@ -63,6 +90,7 @@ public sealed class AppHost
             History = new SqliteHistoryStore(location.HistoryFile),
             Messages = I18NextMessages.Create(language),
             Terminal = new SystemTerminal(),
+            StartupNotes = settings.MigrationNotes,
         };
     }
 

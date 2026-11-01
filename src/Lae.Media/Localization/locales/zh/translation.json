@@ -11,6 +11,9 @@
       "version": "打印版本号后退出。"
     }
   },
+  "note": {
+    "prefixed": "提示：{{text}}"
+  },
   "repl": {
     "desc": "带行内补全的交互式提示符。",
     "needsTerminal": "ERROR: 'repl' 需要交互式终端；stdin 或 stdout 被重定向了。"
@@ -74,6 +77,8 @@
       "motionRung": "（第 {{rung}} 档）",
       "skipped": "跳过",
       "skippedValue": "编码器启动追帧时跳过 {{dropped}} 个解码帧；阶梯没有动过",
+      "frozenTail": "截断",
+      "frozenTailValue": "源早结束了 {{slots}} 个槽位；尾部是重复的最后一帧",
       "framesWritten": "[{{seconds}}s] 写入 {{frames}} 帧",
       "framesRepeated": "（{{repeated}} 帧重复）"
     },
@@ -174,8 +179,81 @@
     "notFound": "（未找到）",
     "ready": "就绪。试试：lae encode <input> --dry-run",
     "missing": "缺少：",
-    "fix": "修法：把 ffmpeg 和 ffprobe 放进 PATH（或让 toolchain.ffmpegPath 指向\n一个构建），然后重新运行 'lae setup'。",
-    "noDownload": "下载命令排在插件里程碑；这个构建不下载任何东西。"
+    "sourceNotInstalled": "选定的来源 '{{id}}' 还没装到这台机器上。",
+    "fix": "修法：运行 'lae toolchain install'（BtbN 快照，约 80 MB），然后重新运行\n'lae setup'。或者把 ffmpeg 和 ffprobe 放进 PATH，或者让\ntoolchain.ffmpegPath 指向你已有的构建。",
+    "noDownload": "这个命令只做检查。它不会背着你下载任何东西：真正下载的是\n'lae toolchain install'。"
+  },
+  "toolchain": {
+    "desc": "安装、列出、选择本程序使用的 FFmpeg。",
+    "list": {
+      "desc": "列出装在这里的构建，以及正在用哪个。",
+      "root": "安装位置 {{path}}",
+      "empty": "这里还什么都没装。",
+      "hint": "装一个：lae toolchain install <id>   （{{ids}}）",
+      "pathSelected": "当前来源是 'path'：用这台机器自己的 ffmpeg。"
+    },
+    "install": {
+      "desc": "下载并解包一个 FFmpeg 构建，放进本程序自己的目录。",
+      "arg": {
+        "id": "装哪个：btbn（默认）或 nonfree。"
+      },
+      "opt": {
+        "proxy": "下载用的 HTTP 代理，例如 http://127.0.0.1:10808。",
+        "front": "经 GitHub 加速前缀下载，例如 gh-proxy.com。会记住这个选择。",
+        "noFront": "直连 GitHub，并记住这个选择。",
+        "from": "从磁盘上已有的压缩包安装，而不是下载。"
+      },
+      "dist": "正在安装 {{label}}",
+      "done": "已安装：{{path}}",
+      "notSelected": "装好了，但没被选中；要用它编码请运行 'lae toolchain use {{id}}'。"
+    },
+    "remove": {
+      "desc": "删除一个已安装的构建。",
+      "arg": {
+        "id": "删哪个。"
+      },
+      "done": "已删除 '{{id}}'。",
+      "wasSelected": "'{{id}}' 正是当前选中的来源。用 'lae toolchain use <id>' 换一个，或用 'lae toolchain use path'。"
+    },
+    "use": {
+      "desc": "选择编码时用哪个已安装的构建。",
+      "arg": {
+        "id": "用哪个，或 'path' 表示用机器自带的。"
+      },
+      "done": "来源已改为 '{{id}}'。",
+      "unknownSource": "'{{id}}' 不是可用来源；可选：{{ids}}",
+      "notInstalled": "'{{id}}' 还没安装；先运行 'lae toolchain install {{id}}'。"
+    },
+    "path": {
+      "desc": "打印编码时会运行的 ffmpeg；找不到时退出码 1。",
+      "none": "ERROR: 找不到 ffmpeg；运行 'lae toolchain install' 或 'lae setup'"
+    },
+    "log": {
+      "url": "来自 {{url}}",
+      "archive": "来自 {{path}}",
+      "unpacking": "正在解包……",
+      "progress": "  {{done}} / {{total}} MB（{{percent}}%）",
+      "progressUnknown": "  {{done}} MB"
+    },
+    "error": {
+      "unknownSource": "'{{id}}' 不是这个版本认识的来源；可选：{{ids}}",
+      "wrongPlatform": "'{{id}}' 是给 {{platform}} 用的构建，而这台机器是 {{current}}",
+      "archiveMissing": "'{{path}}' 没有这个压缩包",
+      "notAnArchiveName": "'{{path}}' 不是 .zip 或 .tar.xz 压缩包",
+      "notAnArchive": "下载到的数据不是 {{kind}} 压缩包",
+      "htmlInsteadOfArchive": "服务器返回的是一个网页而不是压缩包；通常是被拦了或撞上中间页——重试一次，或用 --proxy / --front",
+      "noFfmpegInside": "压缩包解开了，但里面没有 ffmpeg",
+      "finishedWithoutFfmpeg": "解包完成了，但 {{path}} 里没有 ffmpeg",
+      "httpStatus": "HTTP {{code}} {{reason}}{{detail}}",
+      "badProxy": "'{{value}}' 不是合法的代理地址",
+      "stalled": "下载卡住了：{{seconds}} 秒没有任何数据，已收 {{mb}} MB",
+      "noTar": ".tar.xz 压缩包需要 tar；装一下 xz-utils（Debian/Ubuntu）或 xz（RHEL/AlmaLinux）",
+      "tarFailed": "tar 退出码 {{code}}：{{detail}}——xz-utils 装了吗？",
+      "tarTimeout": "tar 超过十分钟还没结束，已中止",
+      "zipFailed": "解包失败：{{detail}}",
+      "notInstalled": "'{{id}}' 没有安装",
+      "removeFailed": "删不掉 {{path}}：{{detail}}"
+    }
   },
   "history": {
     "desc": "查看之前的运行都做了什么。",

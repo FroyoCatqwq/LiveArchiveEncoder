@@ -195,7 +195,12 @@ public static class EncodeCommand
                 parseResult.GetValue(inputArgument)!,
                 overrides,
                 store.Load(),
-                EncodeDependencies.Default with { History = history, Messages = messages },
+                EncodeDependencies.Default with
+                {
+                    History = history,
+                    Messages = messages,
+                    ConfigRoot = store.DataDirectory,
+                },
                 terminal,
                 parseResult.GetValue(dryRunOption),
                 Interrupt.Token);

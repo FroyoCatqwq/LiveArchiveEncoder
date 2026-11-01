@@ -2,6 +2,7 @@ using System.CommandLine;
 using Lae.App.Ui;
 using Lae.Core.Localization;
 using Lae.Core.Settings;
+using Lae.Core.Toolchain;
 using Lae.Media.Toolchain;
 
 namespace Lae.App.Commands;
@@ -29,8 +30,9 @@ public static class SetupCommand
         command.SetAction(_ =>
         {
             SettingsDocument settings = store.Load();
-            ToolchainProbeResult probe = ToolchainProbe.Probe(EncodeSession.ToolchainDirectory(settings));
-            return SetupReport.Run(settings, store.Location, probe, terminal, messages);
+            string? directory = EncodeSession.ToolchainDirectory(settings, store.DataDirectory);
+            ToolchainProbeResult probe = ToolchainProbe.Probe(directory);
+            return SetupReport.Run(settings, store.Location, directory, probe, terminal, messages);
         });
 
         return command;
@@ -52,15 +54,14 @@ public static class SetupCommand
 public static class SetupReport
 {
     public static int Run(
-        SettingsDocument settings, string settingsPath, ToolchainProbeResult probe, ITerminal terminal,
-        IMessages messages)
+        SettingsDocument settings, string settingsPath, string? directory, ToolchainProbeResult probe,
+        ITerminal terminal, IMessages messages)
     {
         terminal.Line($"Settings   {settingsPath}");
 
         // The configured source wins over PATH, because that is what an encode
         // will use; reporting a PATH copy that the run ignores would be worse
         // than saying nothing.
-        string? directory = EncodeSession.ToolchainDirectory(settings);
         terminal.Line($"Source     {settings.Toolchain.FfmpegSource}"
             + (directory is null ? "" : $" ({directory})"));
         terminal.Line($"ffmpeg     {probe.Ffmpeg ?? messages["setup.notFound"]}");
@@ -76,6 +77,17 @@ public static class SetupReport
         terminal.Line();
         terminal.Line(messages["setup.missing"]);
         foreach (string line in probe.Missing()) terminal.Line($"  - {line}");
+
+        // "Nothing is installed" and "you have no FFmpeg" are different problems
+        // with different fixes, and only this line tells them apart: the source is
+        // named in the settings, the machine just does not have it yet.
+        if (directory is null
+            && settings.Toolchain.FfmpegPath is not { Length: > 0 }
+            && FfmpegCatalog.Find(settings.Toolchain.FfmpegSource) is { } dist)
+        {
+            terminal.Line();
+            terminal.Line(messages.Format("setup.sourceNotInstalled", new { id = dist.Id }));
+        }
 
         // The advice is one sentence broken over two lines in the resource file:
         // the break belongs to the layout, not to the sentence, so it is kept

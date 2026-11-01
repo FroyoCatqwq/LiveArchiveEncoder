@@ -264,7 +264,7 @@ public sealed record EncodePlan
         if (request.DestinationPath is { } named)
         {
             string extension = Path.GetExtension(named).TrimStart('.').ToLowerInvariant();
-            if (extension.Length > 0 && !string.Equals(extension, container, StringComparison.Ordinal))
+            if (extension.Length > 0 && !SameFormatFamily(container, extension))
             {
                 problems.Add(
                     $"'{Path.GetFileName(named)}' is named .{extension} but {encoder.Name} writes {container}; "
@@ -331,11 +331,24 @@ public sealed record EncodePlan
         // The transport format is the source's own when the encoder takes it;
         // otherwise the closest thing both can agree on.
         string? requested = PixelFormatCatalog.Normalise(request.Encode.PixFmt);
-        string transport = requested is { Length: > 0 }
-            ? requested
-            : encoder.Caps is { } caps
-                ? PixelFormatUtil.ChooseTransportPixFmt(source.PixelFormat, caps)
-                : PixelFormatCatalog.Normalise(source.PixelFormat) is { Length: > 0 } own ? own : "yuv420p";
+        string transport;
+        try
+        {
+            transport = requested is { Length: > 0 }
+                ? requested
+                : encoder.Caps is { } caps
+                    ? PixelFormatUtil.ChooseTransportPixFmt(source.PixelFormat, caps)
+                    : PixelFormatCatalog.Normalise(source.PixelFormat) is { Length: > 0 } own ? own : "yuv420p";
+        }
+        catch (ArgumentException exc)
+        {
+            // An encoder that lists pixel formats none of which this build has ever
+            // seen -- an old build, an exotic codec -- reaches here. Collecting it
+            // rather than letting it fly keeps this method's promise: a bad request
+            // exits 2 with a sentence, not 1 with a stack trace.
+            problems.Add(exc.Message);
+            transport = "yuv420p";
+        }
 
         if (requested is { Length: > 0 } && !requested.Equals(transport, StringComparison.Ordinal))
             notes.Add($"the requested pixel format '{requested}' was not usable; encoding as '{transport}'");
@@ -429,6 +442,31 @@ public sealed record EncodePlan
             Problems = problems,
             SubtitleTracks = carries,
         };
+    }
+
+    /// <summary>
+    /// Whether a file name's extension is the same format as the container the plan
+    /// settled on.
+    ///
+    /// <para>Not string equality: <c>mp4</c> and <c>m4v</c> are one muxer, and so are
+    /// <c>mov</c>/<c>qt</c>, <c>mkv</c> (whose format is called matroska) and
+    /// <c>mpg</c>/<c>mpeg</c>/<c>vob</c>. Comparing the two names directly refused
+    /// <c>--out clip.m4v</c> with the sentence "libx264 writes mp4; rename it to
+    /// .mp4" -- advice that contradicts the program's own table of legal
+    /// extensions, and that a user cannot be expected to argue with.</para>
+    /// </summary>
+    private static bool SameFormatFamily(string container, string extension)
+    {
+        string left = "." + container;
+        string right = "." + extension;
+        if (string.Equals(left, right, StringComparison.Ordinal)) return true;
+
+        foreach (IReadOnlySet<string> family in Constants.FormatExtensions.Values)
+        {
+            if (family.Contains(left) && family.Contains(right)) return true;
+        }
+
+        return false;
     }
 
     /// <summary>

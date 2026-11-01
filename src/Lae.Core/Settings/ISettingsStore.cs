@@ -29,6 +29,17 @@ public interface ISettingsStore
 
     /// <summary>Human-readable location, for <c>lae config path</c> and error messages.</summary>
     string Location { get; }
+
+    /// <summary>
+    /// The folder this store keeps its files in, or null when it keeps none.
+    ///
+    /// <para>Needed because the managed FFmpeg installs live beside the settings on
+    /// purpose: the program is published as a single file that unpacks itself into
+    /// a temporary folder, so anything stored next to the executable is gone by the
+    /// next run. A store with no disk location (the in-memory one) answers null, and
+    /// that is honest rather than a made-up path.</para>
+    /// </summary>
+    string? DataDirectory { get; }
 }
 
 /// <summary>
@@ -40,6 +51,8 @@ public sealed class MemorySettingsStore(SettingsDocument? initial = null) : ISet
     private SettingsDocument _document = initial ?? new SettingsDocument();
 
     public string Location => "(memory)";
+
+    public string? DataDirectory => null;
 
     public SettingsDocument Load() => _document;
 

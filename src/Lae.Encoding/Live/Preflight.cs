@@ -71,7 +71,9 @@ public static class Preflight
         if (first is null) return new PreflightResult { Plan = plan, Trialed = true };
 
         // A cancelled trial is the user's doing, not a verdict on the plan.
-        if (first is OperationCanceledException) throw first;
+        // Rethrown with its own stack: `throw first` would reset the trace to
+        // this line and hide where the wait actually was.
+        if (first is OperationCanceledException) Rethrow(first);
 
         string method = plan.Encode.Hwaccel;
         bool hardware = !string.IsNullOrWhiteSpace(method)
@@ -85,7 +87,7 @@ public static class Preflight
         // guarantee, and a recording in software beats an error message.
         EncodePlan software = plan.WithHwaccel("off");
         Exception? second = Try(software, ffmpeg, run, token);
-        if (second is OperationCanceledException) throw second;
+        if (second is OperationCanceledException) Rethrow(second);
 
         if (second is not null)
         {
@@ -163,4 +165,8 @@ public static class Preflight
     /// </summary>
     private static string Explain(Exception exc)
         => "the three-frame trial failed, so nothing was recorded: " + exc.Message;
+
+    /// <summary>Re-throw a caught exception without losing the place it came from.</summary>
+    private static void Rethrow(Exception exc)
+        => System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(exc);
 }

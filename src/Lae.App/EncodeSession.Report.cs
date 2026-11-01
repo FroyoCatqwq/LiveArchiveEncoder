@@ -185,17 +185,43 @@ public static partial class EncodeSession
                 dropped = run.Pump.Dropped,
             }));
         }
+
+        // A source that ran out before its own stated duration. Worth its own line
+        // because the file is otherwise indistinguishable from a good one: the
+        // duration is right, the exit code is 0, and the last stretch is one frozen
+        // picture. This is the v7 complaint ("a frozen tail and a successful exit
+        // code") arriving by the other door.
+        if (run.Pump.FrozenAtEnd > 0)
+        {
+            Field(terminal, messages, "encode.result.frozenTail", messages.Format(
+                "encode.result.frozenTailValue", new { slots = run.Pump.FrozenAtEnd }));
+        }
     }
 
     /// <summary>
     /// Renders a command line the way it would be typed. A dry run exists to be
-    /// pasted into a shell and tried, so arguments with spaces get quoted -- and
-    /// an argument that already contains a double quote gets the inner ones
-    /// escaped, or the pasted command would be truncated at the first one.
+    /// pasted into a shell and tried, so arguments with spaces get quoted -- and an
+    /// argument that already contains a double quote gets its inner ones escaped,
+    /// or the pasted command would be truncated at the first one.
+    ///
+    /// <para>The escape differs by platform and v8 used the wrong one on Windows for
+    /// a while: <c>cmd</c> and PowerShell double a quote (<c>""</c>), while a POSIX
+    /// shell backslash-escapes it (<c>\"</c>). Writing <c>\"</c> on Windows left the
+    /// backslash in the argument and lost the quote, so the one thing a dry run is
+    /// for -- pasting it -- produced a different command line than the one
+    /// printed.</para>
     /// </summary>
     private static string Quote(IReadOnlyList<string> command)
-        => string.Join(' ', command.Select(a =>
-            !a.Any(char.IsWhiteSpace) && !a.Contains('"')
-                ? a
-                : "\"" + a.Replace("\"", "\\\"", StringComparison.Ordinal) + "\""));
+        => string.Join(' ', command.Select(QuotedArgument));
+
+    private static string QuotedArgument(string argument)
+    {
+        if (!argument.Any(char.IsWhiteSpace) && !argument.Contains('"')) return argument;
+
+        string inner = OperatingSystem.IsWindows()
+            ? argument.Replace("\"", "\"\"", StringComparison.Ordinal)
+            : argument.Replace("\"", "\\\"", StringComparison.Ordinal);
+
+        return "\"" + inner + "\"";
+    }
 }

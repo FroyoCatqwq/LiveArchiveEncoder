@@ -43,12 +43,21 @@ public static class Interrupt
     /// </summary>
     public static void Reset()
     {
+        CancellationTokenSource? previous;
+
         lock (_gate)
         {
             if (!_source.IsCancellationRequested) return;
+
+            previous = _source;
             _source = new CancellationTokenSource();
             _presses = 0;
         }
+
+        // Disposed outside the lock, and after the swap: every holder of the old
+        // token has already been cancelled and returned, and leaving it alive leaks
+        // one source per interruption for the rest of a long prompt session.
+        previous.Dispose();
     }
 
     public static void Install()

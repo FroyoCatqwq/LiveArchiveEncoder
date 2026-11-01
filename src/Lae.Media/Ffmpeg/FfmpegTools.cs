@@ -118,7 +118,6 @@ public static class FfmpegTools
     /// which for <c>ffmpeg -encoders</c> is a real possibility on a build with
     /// many encoders, and for ffprobe on a source with many streams.</para>
     /// </summary>
-    /// </summary>
     private static (string Output, string Error, int ExitCode) Run(
         string executable, IReadOnlyList<string> args, int timeoutSeconds, CancellationToken cancellationToken)
     {
@@ -151,10 +150,14 @@ public static class FfmpegTools
             try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { /* already gone */ }
             catch (System.ComponentModel.Win32Exception) { /* already gone */ }
 
-            string why = cancellationToken.IsCancellationRequested
-                ? "cancelled"
-                : string.Create(CultureInfo.InvariantCulture, $"did not answer within {timeoutSeconds}s");
-            return ("", $"{Path.GetFileName(executable)} {why}", -1);
+            // A user's Ctrl+C is not "the source could not be read". Rethrowing
+            // lets the caller print "stopped" and exit 130; only a real deadline
+            // becomes a sentence here. Probing may take five minutes on a share,
+            // so this was the longest stretch in the program during which Ctrl+C
+            // did nothing at all.
+            if (cancellationToken.IsCancellationRequested) throw;
+
+            return ("", $"{Path.GetFileName(executable)} did not answer within {timeoutSeconds}s", -1);
         }
 
         // A completed process has closed both pipes, so these finish; the wait is

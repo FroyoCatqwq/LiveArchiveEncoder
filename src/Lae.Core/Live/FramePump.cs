@@ -93,6 +93,19 @@ public sealed record PumpSpec
     /// so 30 s means "not slow, wedged".
     /// </summary>
     public TimeSpan WriteDeadline { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long the decoder may take to deliver the first whole frame before the
+    /// run is declared wedged.
+    ///
+    /// <para>The wait for that first frame is the only place in the loop with no
+    /// deadline: until a frame arrives the pacing clock has not started, so
+    /// <see cref="WriteDeadline"/> has nothing to guard. A 4K source through
+    /// <c>nnedi</c>, a <c>-ss</c> that landed inside a long GOP, or a stalled
+    /// network read all sit in it, and a cancel is the only way out. Same order of
+    /// magnitude as the write deadline for the same reason: not slow, wedged.</para>
+    /// </summary>
+    public TimeSpan StartDeadline { get; init; } = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>What a pump run did, for the report and for the comparison matrix.</summary>
@@ -115,6 +128,18 @@ public sealed record PumpStats
 
     /// <summary>Decoded frames thrown away because the ladder was throttling or the consumer lagged.</summary>
     public long Dropped { get; init; }
+
+    /// <summary>
+    /// Slots written after the source had run out, repeating the last picture.
+    ///
+    /// <para>Separate from <see cref="Repeated"/> because the two mean different
+    /// things to the person reading the report: <c>Repeated</c> is what a still
+    /// picture looks like, and this is a truncated source -- the file says eleven
+    /// minutes and the last ninety seconds are one frozen frame. v8 reported both
+    /// as an ordinary success, which is the v7 complaint the rewrite was meant to
+    /// answer.</para>
+    /// </summary>
+    public long FrozenAtEnd { get; init; }
 
     /// <summary>The rung the run finished on; 0 means the ladder never moved.</summary>
     public int FinalRung { get; init; }
@@ -170,7 +195,14 @@ public static class FramePump
     private static readonly TimeSpan EndGrace = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
-    /// Pump until the target slot count is reached or the source runs out.
+    /// Pump until the target slot count is reached, or -- when the length is
+    /// unknown -- until the source runs out.
+    ///
+    /// <para>A known-length run that loses its source early does <b>not</b> stop:
+    /// it pads the rest of the timeline with the last picture, because a file
+    /// whose duration follows the timeline is the thing being archived. What it
+    /// must not do is call that an ordinary success, so the padding is counted in
+    /// <see cref="PumpStats.FrozenAtEnd"/> and the run reports it.</para>
     ///
     /// <para><paramref name="tick"/> runs once per slot before the frame is
     /// written: it is where the caller checks that both children are still alive,
@@ -205,6 +237,7 @@ public static class FramePump
         long emitted = 0;
         long fresh = 0;
         long repeated = 0;
+        long frozenAtEnd = 0;
         long discarded;
 
         // The cadence counter. At full rate it adds 1.0 per slot and always
@@ -249,13 +282,27 @@ public static class FramePump
                 if (!started)
                 {
                     bool got = false;
+                    long giveUp = Stopwatch.GetTimestamp()
+                                + (long)(spec.StartDeadline.TotalSeconds * Stopwatch.Frequency);
+                    int spins = 0;
+
                     while (true)
                     {
                         if (channel.TryTake(frame)) { got = true; break; }
                         if (channel.Completed) break;
                         token.ThrowIfCancellationRequested();
                         capture.ThrowIfFailed();
-                        Thread.Sleep(1);
+
+                        // Timed, and backed off. Spinning at 1000 Hz for half a
+                        // minute is 30 000 wasted wake-ups, and without the
+                        // deadline it is not half a minute but forever.
+                        if (Stopwatch.GetTimestamp() >= giveUp)
+                        {
+                            throw new InvalidOperationException(
+                                $"the decoder produced no frame within {spec.StartDeadline.TotalSeconds:F0}s");
+                        }
+
+                        Thread.Sleep(spins++ < 100 ? 1 : 5);
                     }
 
                     // The source produced nothing at all.
@@ -289,18 +336,29 @@ public static class FramePump
                         // at the end -- counting it here as well double-counted
                         // every skipped frame.
                         if (channel.TryTakeNewest(frame, out _)) { fresh++; }
-                        else { if (target is null && channel.Completed) break; repeated++; }
+                        else
+                        {
+                            if (target is null && channel.Completed) break;
+                            repeated++;
+                            if (channel.Completed) frozenAtEnd++;
+                        }
                     }
                     else if (wantsFresh)
                     {
                         if (channel.TryTake(frame)) fresh++;
-                        else { if (target is null && channel.Completed) break; repeated++; }
+                        else
+                        {
+                            if (target is null && channel.Completed) break;
+                            repeated++;
+                            if (channel.Completed) frozenAtEnd++;
+                        }
                     }
                     else
                     {
                         // Throttled and not this slot's turn: repeat. The frame
                         // still in the buffer is the previous one by construction.
                         repeated++;
+                        if (channel.Completed) frozenAtEnd++;
                     }
                 }
 
@@ -349,6 +407,7 @@ public static class FramePump
                 Seconds = elapsed,
                 SourceEnded = capture.Ended,
                 Dropped = discarded,
+                FrozenAtEnd = frozenAtEnd,
                 FinalRung = control?.Ladder.Rung ?? 0,
                 MotionFps = control?.Ladder.CurrentFps ?? spec.Fps,
                 MeasuredKbps = measured,
@@ -421,16 +480,24 @@ public static class FramePump
     private static void WriteFrame(
         Stream sink, byte[] payload, int count, TimeSpan deadline, CancellationToken token)
     {
+        // Held in a local so the timeout path can observe it. Without that, a write
+        // that outlives its deadline finishes as a faulted task nobody awaits: the
+        // run reports "the encoder stopped accepting frames", which is the right
+        // sentence, while the actual reason stays in an unobserved exception.
+        Task write = sink.WriteAsync(payload.AsMemory(0, count), token).AsTask();
+
         try
         {
-            sink.WriteAsync(payload.AsMemory(0, count), token)
-                .AsTask()
-                .WaitAsync(deadline, token)
-                .GetAwaiter()
-                .GetResult();
+            write.WaitAsync(deadline, token).GetAwaiter().GetResult();
         }
         catch (TimeoutException exc)
         {
+            _ = write.ContinueWith(
+                finished => _ = finished.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
             // Told apart from a cancel on purpose: a cancelled run is the user's
             // decision and exits 130, while a wedged encoder is a failure that has
             // to say how long it waited. Without this the report is the word

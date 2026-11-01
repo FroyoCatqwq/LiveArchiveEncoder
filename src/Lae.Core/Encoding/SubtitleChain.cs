@@ -58,10 +58,16 @@ public static class SubtitleChain
 
         var problems = new List<string>();
         var notes = new List<string>();
-        (int, int) aspect = Aspect(subtitles.BoxAspect, problems);
 
         if (subtitles.Mode == "off")
             return new SubtitleBurn("", default, problems, notes);
+
+        // Only parsed once something will actually be burned. A box aspect is a
+        // layout instruction for libass; reading it up front meant a typo in a
+        // setting this run does not use refused the whole encode with "unknown
+        // subtitle box aspect" -- a video-encoding request blocked by a caption
+        // option that would never have been looked at.
+        (int, int) aspect = (0, 0);
 
         // An embedded track is an input, not a file: it has to be unwrapped before
         // the filter can see it, and that is the host's job (it is the only layer
@@ -102,6 +108,11 @@ public static class SubtitleChain
         }
 
         var parts = new List<string>(files.Count * 2 + 2);
+
+        // Here, and not a line earlier: from this point on captions are really
+        // being drawn, so this is the first place the box shape means anything.
+        aspect = Aspect(subtitles.BoxAspect, problems);
+        if (problems.Count > 0) return new SubtitleBurn("", default, problems, notes);
 
         // Push the timeline forward so the file's own times line up with the
         // excerpt, then put it back. Both halves are required: leaving the second

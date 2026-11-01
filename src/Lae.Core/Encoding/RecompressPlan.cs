@@ -119,12 +119,14 @@ public sealed record RecompressPlan
                 continue;
             }
 
+            // No "would this overwrite the recording" check here, because the naming
+            // rule already makes it impossible: every hop's name is the live
+            // product's stem plus "_web"/"_webN", and N differs per hop. A guard was
+            // carried here for a while and could never fire -- which made the
+            // comment above it a claim about a defence that did not exist. The real
+            // protection is that the live product is never a hop's output, only ever
+            // its first input.
             string output = DeriveOutputPath(live, next, number);
-            if (string.Equals(output, live, StringComparison.Ordinal))
-            {
-                problems.Add($"pass {number} would overwrite the recording it reads");
-                continue;
-            }
 
             steps.Add(new RecompressStep
             {

@@ -110,6 +110,20 @@ public interface IRunHistory
     /// of printing an empty table that looks like truth.</para>
     /// </summary>
     string? Problem { get; }
+
+    /// <summary>
+    /// Rows the last <see cref="Recent"/> could not parse and skipped.
+    ///
+    /// <para>A row is data, and data can be wrong: a hand-edited database, another
+    /// tool's idea of a timestamp, a column written by a build that spelled a value
+    /// differently. One such row used to end <c>lae history</c> with an exception on
+    /// every run afterwards, because the row does not go away by itself. Skipping it
+    /// silently would be the opposite mistake -- the list would look complete.</para>
+    ///
+    /// <para>Defaulted rather than required: a store that keeps no rows has nothing
+    /// to skip, and a test double should not have to say so.</para>
+    /// </summary>
+    int Unreadable => 0;
 }
 
 /// <summary>

@@ -48,7 +48,8 @@ public static partial class EncodeSession
             return ExitCodes.Usage;
         }
 
-        ToolchainProbeResult tools = dependencies.ProbeToolchain(ToolchainDirectory(settings));
+        ToolchainProbeResult tools = dependencies.ProbeToolchain(
+            ToolchainDirectory(settings, dependencies.ConfigRoot));
         if (tools.Ffmpeg is not { } ffmpeg)
         {
             foreach (string line in tools.Missing())
@@ -81,7 +82,7 @@ public static partial class EncodeSession
         if (dryRun) return ExitCodes.Ok;
 
         double span = tools.Ffprobe is { } ffprobe
-            ? dependencies.ProbeSource(ffprobe, input).Info?.DurationSeconds ?? 0
+            ? dependencies.ProbeSource(ffprobe, input, token).Info?.DurationSeconds ?? 0
             : 0;
 
         RecompressOutcome outcome = dependencies.RunRecompress(

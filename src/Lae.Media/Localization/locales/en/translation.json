@@ -11,6 +11,9 @@
       "version": "Print the version and exit."
     }
   },
+  "note": {
+    "prefixed": "note: {{text}}"
+  },
   "repl": {
     "desc": "Interactive prompt with inline completion.",
     "needsTerminal": "ERROR: 'repl' needs an interactive terminal; stdin or stdout is redirected."
@@ -74,6 +77,8 @@
       "motionRung": " (rung {{rung}})",
       "skipped": "skipped",
       "skippedValue": "{{dropped}} decoded frames skipped while the encoder caught up; the ladder never moved",
+      "frozenTail": "truncated",
+      "frozenTailValue": "the source ran out {{slots}} slot(s) early; the tail repeats the last frame",
       "framesWritten": "[{{seconds}}s] {{frames}} frames written",
       "framesRepeated": " ({{repeated}} repeated)"
     },
@@ -174,8 +179,81 @@
     "notFound": "(not found)",
     "ready": "Ready. Try: lae encode <input> --dry-run",
     "missing": "Missing:",
-    "fix": "To fix it: put ffmpeg and ffprobe on PATH (or point toolchain.ffmpegPath at\na build), then run 'lae setup' again.",
-    "noDownload": "A download command is planned for the plugin milestone; this build does not\nfetch anything."
+    "sourceNotInstalled": "The selected source '{{id}}' is not installed here yet.",
+    "fix": "To fix it: run 'lae toolchain install' (BtbN snapshot, about 80 MB), then\n'lae setup' again. Or put ffmpeg and ffprobe on PATH, or point\n toolchain.ffmpegPath at a build you already have.",
+    "noDownload": "This command only reports. Nothing is downloaded behind your back: 'lae\ntoolchain install' is the one that fetches."
+  },
+  "toolchain": {
+    "desc": "Install, list and choose the FFmpeg this program uses.",
+    "list": {
+      "desc": "Show the builds installed here and which one is in use.",
+      "root": "installs in {{path}}",
+      "empty": "Nothing installed here yet.",
+      "hint": "Install one with: lae toolchain install <id>   ({{ids}})",
+      "pathSelected": "Source is 'path': whatever ffmpeg this machine offers."
+    },
+    "install": {
+      "desc": "Download and unpack an FFmpeg build into this program's own folder.",
+      "arg": {
+        "id": "Which build to install: btbn (default) or nonfree."
+      },
+      "opt": {
+        "proxy": "HTTP proxy for the download, e.g. http://127.0.0.1:10808.",
+        "front": "Fetch through a GitHub front, e.g. gh-proxy.com. Remembered for next time.",
+        "noFront": "Go straight to GitHub, and remember that choice.",
+        "from": "Install from an archive already on disk instead of downloading one."
+      },
+      "dist": "Installing {{label}}",
+      "done": "Installed: {{path}}",
+      "notSelected": "It is installed but not selected; run 'lae toolchain use {{id}}' to encode with it."
+    },
+    "remove": {
+      "desc": "Delete an installed build.",
+      "arg": {
+        "id": "Which build to delete."
+      },
+      "done": "Removed '{{id}}'.",
+      "wasSelected": "'{{id}}' was the selected source. Choose another with 'lae toolchain use <id>', or 'lae toolchain use path'."
+    },
+    "use": {
+      "desc": "Choose which installed build an encode uses.",
+      "arg": {
+        "id": "Which build to use, or 'path' for the machine's own."
+      },
+      "done": "Source is now '{{id}}'.",
+      "unknownSource": "'{{id}}' is not a source; available: {{ids}}",
+      "notInstalled": "'{{id}}' is not installed yet; run 'lae toolchain install {{id}}' first."
+    },
+    "path": {
+      "desc": "Print the ffmpeg an encode would run, and exit 1 when there is none.",
+      "none": "ERROR: no ffmpeg found; run 'lae toolchain install' or 'lae setup'"
+    },
+    "log": {
+      "url": "from {{url}}",
+      "archive": "from {{path}}",
+      "unpacking": "unpacking...",
+      "progress": "  {{done}} / {{total}} MB ({{percent}}%)",
+      "progressUnknown": "  {{done}} MB"
+    },
+    "error": {
+      "unknownSource": "'{{id}}' is not a source this build knows; available: {{ids}}",
+      "wrongPlatform": "'{{id}}' is built for {{platform}}, and this machine runs {{current}}",
+      "archiveMissing": "there is no archive at '{{path}}'",
+      "notAnArchiveName": "'{{path}}' is not a .zip or .tar.xz archive",
+      "notAnArchive": "the downloaded data is not a {{kind}} archive",
+      "htmlInsteadOfArchive": "the server answered with a web page instead of the archive; that is a block or an interstitial -- try again, or use --proxy / --front",
+      "noFfmpegInside": "the archive unpacked, but there is no ffmpeg inside it",
+      "finishedWithoutFfmpeg": "unpacking finished but no ffmpeg landed in {{path}}",
+      "httpStatus": "HTTP {{code}} {{reason}}{{detail}}",
+      "badProxy": "'{{value}}' is not a valid proxy address",
+      "stalled": "the download stopped delivering data for {{seconds}}s, after {{mb}} MB",
+      "noTar": "a .tar.xz archive needs tar; install xz-utils (Debian/Ubuntu) or xz (RHEL/AlmaLinux)",
+      "tarFailed": "tar exited with {{code}}: {{detail}} -- is xz-utils installed?",
+      "tarTimeout": "tar took longer than ten minutes and was stopped",
+      "zipFailed": "could not unpack the archive: {{detail}}",
+      "notInstalled": "'{{id}}' is not installed",
+      "removeFailed": "could not remove {{path}}: {{detail}}"
+    }
   },
   "history": {
     "desc": "Show what previous runs did.",

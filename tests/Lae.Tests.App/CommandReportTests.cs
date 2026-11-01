@@ -4,6 +4,7 @@ using Lae.App.Ui;
 using Lae.Core;
 using Lae.Core.Localization;
 using Lae.Core.Settings;
+using Lae.Core.Toolchain;
 using Lae.Media.Localization;
 using Lae.Media.Toolchain;
 
@@ -192,7 +193,7 @@ public sealed class SetupReportTests
         var terminal = new BufferedTerminal();
         var probe = new ToolchainProbeResult { Ffmpeg = "/usr/bin/ffmpeg", Ffprobe = "/usr/bin/ffprobe" };
 
-        int code = SetupReport.Run(Settings(), "/home/x/settings.json", probe, terminal, En);
+        int code = SetupReport.Run(Settings(), "/home/x/settings.json", null, probe, terminal, En);
 
         await Assert.That(code).IsEqualTo(ExitCodes.Ok);
         await Assert.That(terminal.OutputLines.Any(l => l.Contains("Ready.", StringComparison.Ordinal))).IsTrue();
@@ -201,15 +202,16 @@ public sealed class SetupReportTests
 
     /// <summary>
     /// A dead end is what this command exists to prevent, so the failure text must
-    /// name both tools and a next step, and must not promise a download command
-    /// this build does not have.
+    /// name both tools and a next step -- and the next step it names must be a
+    /// command that exists. v7 shipped one pointing at a menu entry nobody had
+    /// written; the fix is not "recommend something plausible".
     /// </summary>
     [Test]
     public async Task AMachineWithNothingInstalledGetsBothToolsAndANextStep()
     {
         var terminal = new BufferedTerminal();
 
-        int code = SetupReport.Run(Settings(), "/home/x/settings.json", new ToolchainProbeResult(), terminal, En);
+        int code = SetupReport.Run(Settings(), "/home/x/settings.json", null, new ToolchainProbeResult(), terminal, En);
 
         await Assert.That(code).IsEqualTo(ExitCodes.Failed);
 
@@ -217,12 +219,29 @@ public sealed class SetupReportTests
         await Assert.That(text.Contains("ffmpeg", StringComparison.Ordinal)).IsTrue();
         await Assert.That(text.Contains("ffprobe", StringComparison.Ordinal)).IsTrue();
         await Assert.That(text.Contains("PATH", StringComparison.Ordinal)).IsTrue();
-        await Assert.That(text.Contains("does not", StringComparison.Ordinal)).IsTrue();
 
-        // And it must not send the user to a command that does not exist. v7
-        // shipped exactly that -- a next step pointing at a menu entry nobody had
-        // written -- and the fix is not "recommend something plausible".
-        await Assert.That(text.Contains("lae toolchain install", StringComparison.Ordinal)).IsFalse();
+        // The download command exists now, and naming it is the whole fix.
+        await Assert.That(text.Contains("lae toolchain install", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>
+    /// "Nothing is installed" and "this machine has no FFmpeg" are different
+    /// problems: the first has a one-command fix and the second may not. The source
+    /// line has to tell them apart, or the advice reads as if nothing is configured.
+    /// </summary>
+    [Test]
+    public async Task AConfiguredSourceThatIsNotInstalledSaysSo()
+    {
+        var terminal = new BufferedTerminal();
+        var settings = new SettingsDocument
+        {
+            Toolchain = new ToolchainSettings { FfmpegSource = FfmpegCatalog.DefaultId },
+        };
+
+        SetupReport.Run(settings, "/home/x/settings.toml", null, new ToolchainProbeResult(), terminal, En);
+
+        string text = string.Join('\n', terminal.OutputLines);
+        await Assert.That(text.Contains("is not installed here yet", StringComparison.Ordinal)).IsTrue();
     }
 
     [Test]
@@ -231,7 +250,7 @@ public sealed class SetupReportTests
         var terminal = new BufferedTerminal();
         var probe = new ToolchainProbeResult { Ffmpeg = "/opt/ff/bin/ffmpeg" };
 
-        SetupReport.Run(Settings("/opt/ff"), "/home/x/settings.json", probe, terminal, En);
+        SetupReport.Run(Settings("/opt/ff"), "/home/x/settings.json", "/opt/ff", probe, terminal, En);
 
         await Assert.That(terminal.OutputLines.Any(l => l.Contains("/opt/ff", StringComparison.Ordinal))).IsTrue();
     }

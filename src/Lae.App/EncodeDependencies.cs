@@ -35,9 +35,15 @@ public sealed record EncodeDependencies
 {
     public required Func<string?, ToolchainProbeResult> ProbeToolchain { get; init; }
 
-    public required Func<string, string, (SourceInfo? Info, string? Error)> ProbeSource { get; init; }
+    /// <summary>
+    /// Reads the source. Takes a token because probing is the slowest thing that
+    /// happens before an encode and it starts a child process: a five-minute wait
+    /// on a shared volume that ignores Ctrl+C is the worst place in the program to
+    /// be unable to stop.
+    /// </summary>
+    public required Func<string, string, CancellationToken, (SourceInfo? Info, string? Error)> ProbeSource { get; init; }
 
-    public required Func<string, (List<EncoderInfo> Encoders, string? Error)> ListEncoders { get; init; }
+    public required Func<string, CancellationToken, (List<EncoderInfo> Encoders, string? Error)> ListEncoders { get; init; }
 
     /// <summary>
     /// Unwraps one embedded subtitle track into a file, or explains why it could
@@ -45,7 +51,7 @@ public sealed record EncodeDependencies
     /// interesting part -- refusing a bitmap track, deleting the file afterwards --
     /// is on this side of the call.
     /// </summary>
-    public required Func<string, string, int, string, string?> ExtractSubtitle { get; init; }
+    public required Func<string, string, int, string, CancellationToken, string?> ExtractSubtitle { get; init; }
 
     public required IEncodeRunner Runner { get; init; }
 
@@ -77,13 +83,20 @@ public sealed record EncodeDependencies
     /// </summary>
     public required IMessages Messages { get; init; }
 
+    /// <summary>
+    /// The folder the settings live in, which is also where a managed FFmpeg
+    /// install goes. Null when there is no such folder (the in-memory store), in
+    /// which case a distribution id can only mean PATH -- the honest answer for a
+    /// host that has no disk.
+    /// </summary>
+    public string? ConfigRoot { get; init; }
+
     public static EncodeDependencies Default { get; } = new()
     {
         ProbeToolchain = ToolchainProbe.Probe,
-        ProbeSource = (ffprobe, path) => FfmpegTools.ProbeSource(ffprobe, path),
-        ListEncoders = ffmpeg => FfmpegTools.ListEncoders(ffmpeg),
-        ExtractSubtitle = (ffmpeg, source, index, destination)
-            => FfmpegTools.ExtractSubtitle(ffmpeg, source, index, destination),
+        ProbeSource = FfmpegTools.ProbeSource,
+        ListEncoders = FfmpegTools.ListEncoders,
+        ExtractSubtitle = FfmpegTools.ExtractSubtitle,
         Runner = new LiveEncodeRunner(),
         RunRecompress = RecompressRun.Run,
         Messages = I18NextMessages.Create(LanguageChoice.English),

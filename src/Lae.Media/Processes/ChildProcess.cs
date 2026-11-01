@@ -176,21 +176,27 @@ public sealed class ChildProcess : IDisposable
 
         private async Task Drain(StreamReader reader)
         {
-            try
+            // Owned here, closed here. Relying on Process.Dispose to release it means
+            // the reader outlives the run that used it, which on Windows is one more
+            // handle on a pipe whose child is already gone.
+            using (reader)
             {
-                while (await reader.ReadLineAsync(_stop.Token).ConfigureAwait(false) is { } line)
+                try
                 {
-                    if (line.Length == 0) continue;
-                    lock (_gate)
+                    while (await reader.ReadLineAsync(_stop.Token).ConfigureAwait(false) is { } line)
                     {
-                        _lines.Enqueue(line.Trim());
-                        while (_lines.Count > _capacity) _lines.Dequeue();
+                        if (line.Length == 0) continue;
+                        lock (_gate)
+                        {
+                            _lines.Enqueue(line.Trim());
+                            while (_lines.Count > _capacity) _lines.Dequeue();
+                        }
                     }
                 }
-            }
-            catch (Exception exc) when (exc is OperationCanceledException or ObjectDisposedException or IOException)
-            {
-                // The run is over and the pipe went away; nothing to report.
+                catch (Exception exc) when (exc is OperationCanceledException or ObjectDisposedException or IOException)
+                {
+                    // The run is over and the pipe went away; nothing to report.
+                }
             }
         }
 

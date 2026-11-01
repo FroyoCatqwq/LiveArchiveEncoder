@@ -3,6 +3,7 @@ using Lae.Core;
 using Lae.Core.History;
 using Lae.Core.Localization;
 using Lae.Core.Settings;
+using Lae.Core.Toolchain;
 using Lae.Encoding;
 using Lae.Media.Toolchain;
 
@@ -60,7 +61,8 @@ public static partial class EncodeSession
 
         // The toolchain comes next: "no FFmpeg" is a setup problem with its own
         // command, not an encode failure, and it must not be reported as one.
-        ToolchainProbeResult tools = dependencies.ProbeToolchain(ToolchainDirectory(settings));
+        ToolchainProbeResult tools = dependencies.ProbeToolchain(
+            ToolchainDirectory(settings, dependencies.ConfigRoot));
         if (tools.Ffmpeg is not { } ffmpeg || tools.Ffprobe is null)
         {
             foreach (string line in tools.Missing())
@@ -69,7 +71,7 @@ public static partial class EncodeSession
             return ExitCodes.Failed;
         }
 
-        (SourceInfo? source, string? probeError) = dependencies.ProbeSource(tools.Ffprobe, input);
+        (SourceInfo? source, string? probeError) = dependencies.ProbeSource(tools.Ffprobe, input, token);
         if (source is null)
         {
             terminal.ErrorLine(messages.Format("encode.error.cannotRead", new { path = input, detail = probeError }));
@@ -88,7 +90,7 @@ public static partial class EncodeSession
         // An embedded track cannot be burned where it is: the filter wants a file.
         // The host unwraps it here, the plan then sees an ordinary subtitle file,
         // and the copy is deleted whether the run succeeded or not.
-        TrackPreparation track = PrepareTrack(request, source, ffmpeg, dependencies, dryRun);
+        TrackPreparation track = PrepareTrack(request, source, ffmpeg, dependencies, dryRun, token);
         if (track.Request is null)
         {
             terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = track.Message }));
@@ -133,7 +135,7 @@ public static partial class EncodeSession
     /// </summary>
     private static TrackPreparation PrepareTrack(
         EncodeRequest request, SourceInfo source, string ffmpeg,
-        EncodeDependencies dependencies, bool dryRun)
+        EncodeDependencies dependencies, bool dryRun, CancellationToken token)
     {
         if (request.Encode.Subtitles.Stream is not { } index) return TrackPreparation.Done(request);
 
@@ -152,7 +154,7 @@ public static partial class EncodeSession
         string temporary = SubtitleTrack.TemporaryPath(output, index, Guid.NewGuid().ToString("N")[..8]);
 
         if (!dryRun
-            && dependencies.ExtractSubtitle(ffmpeg, request.SourcePath, index, temporary) is { } failure)
+            && dependencies.ExtractSubtitle(ffmpeg, request.SourcePath, index, temporary, token) is { } failure)
         {
             return TrackPreparation.Refused(ExitCodes.Failed, failure);
         }
@@ -208,7 +210,7 @@ public static partial class EncodeSession
         CancellationToken token)
     {
         IMessages messages = dependencies.Messages;
-        (List<EncoderInfo> encoders, string? listError) = dependencies.ListEncoders(ffmpeg);
+        (List<EncoderInfo> encoders, string? listError) = dependencies.ListEncoders(ffmpeg, token);
         if (listError is not null)
         {
             terminal.ErrorLine(messages.Format("encode.error.generic", new { detail = listError }));
@@ -370,15 +372,14 @@ public static partial class EncodeSession
 
     /// <summary>
     /// The folder an encode would look in, or null for "whatever is on PATH".
-    /// Only an explicit path can name a folder; a distribution id such as
-    /// <c>btbn</c> points at a managed install, which does not exist until the
-    /// toolchain command runs.
+    ///
+    /// <para>Two settings can name a build and the resolution rule lives in
+    /// <see cref="ToolchainSource"/>: an explicit path wins, then the managed
+    /// install of the configured distribution -- but only when that install is
+    /// really there. Pointing the search at a folder that does not exist would hide
+    /// the very problem <c>lae setup</c> exists to name.</para>
     /// </summary>
-    public static string? ToolchainDirectory(SettingsDocument settings)
-    {
-        string? explicitPath = settings.Toolchain.FfmpegPath;
-        if (string.IsNullOrWhiteSpace(explicitPath)) return null;
-        if (File.Exists(explicitPath)) return Path.GetDirectoryName(explicitPath);
-        return Directory.Exists(explicitPath) ? explicitPath : null;
-    }
+    public static string? ToolchainDirectory(SettingsDocument settings, string? configRoot)
+        => ToolchainSource.Folder(
+            settings.Toolchain, configRoot, path => File.Exists(path) || Directory.Exists(path));
 }
