@@ -95,7 +95,16 @@ public sealed class UpdateReport
 /// </summary>
 public static class SelfUpdate
 {
-    public const string Repo = "fr0yo0v0/LiveArchiveEncoder";
+    /// <summary>
+    /// The repository this build updates from.
+    ///
+    /// <para>v7.9.8.7: this was <c>fr0yo0v0/LiveArchiveEncoder</c>, the account the
+    /// repository used to live under. That account was suspended and the API
+    /// answers 404 for everything on it, so every update check failed with "the
+    /// release feed did not return a JSON object" and there was nothing the user
+    /// could do about it. The live repository is <c>FroyoCatqwq/LiveArchiveEncoder</c>.</para>
+    /// </summary>
+    public const string Repo = "FroyoCatqwq/LiveArchiveEncoder";
 
     /// <summary>The release feed, GitHub's own shape.</summary>
     public const string PublicFeed = "https://api.github.com/repos/" + Repo + "/releases/latest";

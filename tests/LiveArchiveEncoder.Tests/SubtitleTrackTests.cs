@@ -162,16 +162,27 @@ public sealed class SubtitleTrackTests
     }
 
     [Test]
-    public async Task Plan_RefusesBitmapSubtitles()
+    public async Task Plan_BurnsBitmapSubtitlesWithOverlay()
     {
-        // dvdsub is a subpicture: carrying it works, rendering it is OCR.
+        // v7.9.8.7: dvdsub/PGS used to be refused here ("rendering it is OCR").
+        // They are pictures of the whole frame, and overlay composites them --
+        // which is the normal case for a WEB-DL whose only subtitles are PGS.
         SourceInfo source = Source(Video(0), Sub(1, "dvdsub"));
         var burn = new SubtitleSettings([], 1, SubtitleMode.Burn, null);
         var copy = new SubtitleSettings([], 1, SubtitleMode.Copy, null);
 
-        await Assert.That(() => SubtitleTrack.Plan(
-                source, burn, "avi", Filters, Encoders, "ff", "x.mp4"))
-            .Throws<ArgumentException>();
+        SubtitlePlan? burned = SubtitleTrack.Plan(source, burn, "avi", Filters, Encoders, "ff", "x.mp4");
+
+        await Assert.That(burned).IsNotNull();
+        await Assert.That(burned!.BitmapStream).IsEqualTo(1);
+        await Assert.That(burned.BurnFiles.Count).IsEqualTo(0);
+
+        // The compositor addresses the stream, in front of the scale chain.
+        VideoFilter filter = SubtitleTrack.BurnInto("scale=320:240", burned, 320, 240, "yuv420p", "0:v");
+
+        await Assert.That(filter.IsGraph).IsTrue();
+        await Assert.That(filter.Graph!.StartsWith("[0:v][0:1]overlay=", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(filter.Graph.Contains("[vmain]scale=320:240[vout]", StringComparison.Ordinal)).IsTrue();
 
         SubtitlePlan? carried = SubtitleTrack.Plan(source, copy, "avi", Filters, Encoders, "ff", "x.mp4");
         await Assert.That(carried).IsNotNull();

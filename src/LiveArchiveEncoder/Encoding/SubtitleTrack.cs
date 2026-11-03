@@ -60,6 +60,15 @@ public sealed class SubtitlePlan : IDisposable
     /// <summary>Files to render into the picture, in order.</summary>
     public IReadOnlyList<string> BurnFiles { get; init; } = [];
 
+    /// <summary>
+    /// v7.9.8.7: absolute index of a bitmap subtitle stream to composite, or null.
+    ///
+    /// <para>A bitmap track produces no <see cref="BurnFiles"/>: libass renders
+    /// text, and a PGS track is pictures. The index goes into the filter graph
+    /// instead, where <c>overlay</c> decodes the stream and composites it.</para>
+    /// </summary>
+    public int? BitmapStream { get; init; }
+
     /// <summary>File to open as an extra input in copy mode (a sidecar, or the
     /// source itself when the pick is an embedded track).</summary>
     public string? CopyFile { get; init; }
@@ -198,6 +207,22 @@ public static class SubtitleTrack
                 $"--subtitle-stream {index} is a {stream.Type} stream, not a subtitle."
                 + $"\n{StreamSelection.Describe(source)}");
         }
+        // v7.9.8.7: a bitmap track is neither refused nor staged. overlay reads
+        // the stream straight out of the source, which is one process and one
+        // temporary file fewer -- and on a read-only share it is the difference
+        // between working and failing before the encode starts.
+        if (IsBitmapCodec(stream.Codec))
+        {
+            return new SubtitlePlan
+            {
+                Mode = SubtitleMode.Burn,
+                BitmapStream = index,
+                FontDir = settings.FontDir,
+                FallbackFont = settings.FallbackFont,
+                BoxAspect = Constants.ParseAspect(settings.BoxAspect),
+            };
+        }
+
         RejectBitmap(stream.Codec, $"subtitle stream {index} ({stream.Codec})");
 
         // The subtitles filter reads a file, not a stream, so the track is
@@ -279,6 +304,10 @@ public static class SubtitleTrack
             Mode = SubtitleMode.Copy, CopyFile = null, CopyStream = index, CopyCodec = codec,
         };
     }
+
+    /// <summary>True for a codec that is pictures rather than characters.</summary>
+    private static bool IsBitmapCodec(string? codec) =>
+        codec is { Length: > 0 } name && Constants.BitmapSubtitleCodecs.Contains(name);
 
     private static void RejectBitmap(string? codec, string what)
     {
@@ -362,6 +391,24 @@ public static class SubtitleTrack
         string chain, SubtitlePlan plan, int frameW, int frameH,
         string transportFmt, string input, double startSeconds = 0)
     {
+        // v7.9.8.7: bitmap subtitles are pictures of the whole frame, so they are
+        // composited before the scale/pad chain, at the source's resolution. The
+        // captions then go through exactly the same transform as the picture and
+        // need no second set of offsets -- and because the graph reads the stream
+        // rather than a file, an input seek moves both together, so the text-clock
+        // shift below is not needed either.
+        if (plan.BitmapStream is { } bitmap)
+        {
+            string src = input.Split(':')[0];
+            string overlay =
+                $"[{input}][{src}:{bitmap}]overlay=format=auto:eof_action=pass[vmain]";
+            string graph = chain.Length == 0
+                ? $"{overlay};[vmain]null[vout]"
+                : $"{overlay};[vmain]{chain}[vout]";
+
+            return new VideoFilter("", graph, "vout");
+        }
+
         string burn = Shifted(
             AppendBurn("", plan.BurnFiles, plan.FontDir, plan.FallbackFont), startSeconds);
         if (plan.BoxAspect is not { } aspect)

@@ -25,7 +25,7 @@ public static class Constants
     /// compares <c>tag_name</c> from the feed with this value, so a forgotten
     /// bump makes the program offer its own version as an upgrade forever.</para>
     /// </summary>
-    public const string Version = "7.9.8.6";
+    public const string Version = "7.9.8.7";
 
     public const int DefaultWidth = 256;
     public const int DefaultHeight = 192;
@@ -216,8 +216,18 @@ public static class Constants
     /// subpicture is a picture, and turning it into text needs OCR, which FFmpeg
     /// does not do. So these can be carried (copy) but not burned.
     /// </summary>
+    /// <summary>
+    /// Codecs that are pictures of text rather than characters.
+    ///
+    /// <para>v7.9.8.7 adds <c>hdmv_pgs_subtitle</c> (and its short alias
+    /// <c>pgssub</c>). It was missing, so a PGS track was not recognised as a
+    /// bitmap at all: the planner tried to unwrap it into ASS, FFmpeg refused, and
+    /// the run died with "could not extract subtitle stream N" -- which reads like
+    /// a broken file rather than a codec this build does not handle. PGS is what a
+    /// WEB-DL carries; it is the common case, not the corner.</para>
+    /// </summary>
     public static readonly FrozenSet<string> BitmapSubtitleCodecs =
-        new[] { "dvdsub", "dvbsub", "dvb_subtitle", "dvd_subtitle", "xsub" }
+        new[] { "dvdsub", "dvbsub", "dvb_subtitle", "dvd_subtitle", "xsub", "hdmv_pgs_subtitle", "pgssub" }
             .ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>Sidecar subtitle files this tool recognises, e.g. clip.sc.ass.</summary>
