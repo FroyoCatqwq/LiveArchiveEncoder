@@ -316,6 +316,29 @@ public sealed class CliOptions
     public IReadOnlyList<int> RecompressAudioKbpsList { get; init; } = [];
 
     /// <summary>
+    /// v7.9.8.8: video bitrate per named-codec pass, in kbps. Only meaningful
+    /// for a codec with no quality flag -- libopenh264 -- where it is the only
+    /// dial there is; omitted, the codec's catalog default is used. The parser
+    /// refuses zero and negatives rather than treating them as "unset", because
+    /// <c>-b:v 0k</c> is a different (and broken) request.
+    /// </summary>
+    public IReadOnlyList<int> RecompressVideoKbps { get; init; } = [];
+
+    /// <summary>
+    /// v7.9.8.8: OpenH264's rate-control mode. Null means the default,
+    /// <c>bitrate</c>; see <see cref="Core.OpenH264RateControl"/> for the two
+    /// values this program refuses and why.
+    /// </summary>
+    public string? OpenH264Rc { get; init; }
+
+    /// <summary>
+    /// v7.9.8.8: let OpenH264 skip frames to hit the target bitrate. Off by
+    /// default -- the ladder owns frame rate, and a second mechanism dropping
+    /// frames behind its back hides the cause of the drop from the ladder.
+    /// </summary>
+    public bool OpenH264SkipFrames { get; init; }
+
+    /// <summary>
     /// v7.9.8.6: true when this run replaces the saved recompress chain rather
     /// than adjusting it. Only the flags that describe the chain count: a lone
     /// --recompress-quality is a modifier for a chain the shell already has, and
@@ -511,6 +534,9 @@ public static class CliParser
         var recompressQualities = new List<int>();
         var recompressAudioCodecs = new List<string>();
         var recompressAudioKbpsList = new List<int>();
+        var recompressVideoKbps = new List<int>();
+        string? openH264Rc = null;
+        bool openH264SkipFrames = false;
         bool eraModern = false;
         bool eraNative = false;
         string? era = null;
@@ -972,6 +998,22 @@ public static class CliParser
                         return (null, "--recompress-audio-kbps requires a non-negative integer");
                     recompressAudioKbpsList.Add(rcabValue);
                     break;
+                case "--recompress-video-kbps":
+                    if (!TryValue(out string rcvRaw) || !int.TryParse(rcvRaw, out int rcvValue)
+                        || rcvValue <= 0)
+                        return (null, "--recompress-video-kbps requires a positive integer");
+                    recompressVideoKbps.Add(rcvValue);
+                    break;
+                case "--openh264-rc":
+                    if (!TryValue(out string oh264Mode))
+                        return (null, "--openh264-rc requires a value");
+                    // buffer/off are legal FFmpeg values and useless here; the
+                    // message says what was measured instead of just "invalid".
+                    if (LiveArchiveEncoder.Core.OpenH264RateControl.Problem(oh264Mode) is { } rcProblem)
+                        return (null, rcProblem);
+                    openH264Rc = LiveArchiveEncoder.Core.OpenH264RateControl.Normalize(oh264Mode);
+                    break;
+                case "--openh264-skip-frames": openH264SkipFrames = true; break;
                 case "--era-modern": eraModern = true; break;
                 case "--era-native": eraNative = true; break;
 
@@ -1153,6 +1195,9 @@ public static class CliParser
             RecompressQualities = recompressQualities,
             RecompressAudioCodecs = recompressAudioCodecs,
             RecompressAudioKbpsList = recompressAudioKbpsList,
+            RecompressVideoKbps = recompressVideoKbps,
+            OpenH264Rc = openH264Rc,
+            OpenH264SkipFrames = openH264SkipFrames,
             EraModern = eraModern,
             EraNative = eraNative,
             Era = era,
@@ -1295,6 +1340,12 @@ public static class CliParser
                                         + "passes after it)"),
             ("--recompress-audio-codec", "NAME", $"audio codec for --recompress-codec: {PostProcess.RecompressCodecs.AudioIdList}, or copy (repeatable)"),
             ("--recompress-audio-kbps", "N", "audio bitrate for --recompress-codec (repeatable; default: the codec's)"),
+            ("--recompress-video-kbps", "N", "video bitrate for a bitrate-only --recompress-codec "
+                                            + "(libopenh264; repeatable; default: 300)"),
+            ("--openh264-rc", "MODE", "OpenH264 rate control: bitrate, quality or timestamp "
+                                      + "(default bitrate; buffer and off are refused -- neither holds a ceiling)"),
+            ("--openh264-skip-frames", "", "let OpenH264 drop frames to hit the bitrate (default off: the "
+                                           + "fps ladder owns frame rate, and a second dropper hides its cause)"),
             ("--recompress-container", "EXT", "container for a pass (repeatable, paired by position; "
                                             + "default: implied by the codec)"),
             ("--recompress-only", "", "skip the live encode and apply the recompress pass to an "

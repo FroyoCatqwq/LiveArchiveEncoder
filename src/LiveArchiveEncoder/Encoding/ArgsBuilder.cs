@@ -13,8 +13,18 @@ public static class ArgsBuilder
     /// <para>v7.9.7: OpenH264 has no <c>-crf</c> and no <c>-q:v</c>; handing it
     /// either leaves it in its default buffer mode, which overshoots the target
     /// by 3x (measured: 700 kbps asked, 2.1 Mbps delivered). It wants a bitrate
-    /// and <c>-rc_mode bitrate</c>, so the preset's ceiling becomes exactly
+    /// and a rate-control mode, so the preset's ceiling becomes exactly
     /// that.</para>
+    ///
+    /// <para>v7.9.8.8: the mode is a choice now instead of always
+    /// <c>bitrate</c>, because OpenH264's own <c>quality</c> mode is the
+    /// closest thing it has to a quality knob -- it spends about 20% over
+    /// <c>-b:v</c> to keep the picture (<paramref name="rcMode"/>, see
+    /// <see cref="OpenH264RateControl"/>). <paramref name="allowSkipFrames"/>
+    /// is what makes the bitrate true rather than approximate: the wrapper
+    /// passes it to <c>bEnableFrameSkip</c>, and without it OpenH264 says so
+    /// itself -- "bitrate can't be controlled ... without enabling skip
+    /// frame". Measured at 300 kbps: 354 kbps off, 302 kbps on.</para>
     ///
     /// <para>v7.9.8.2: libx264 used to be the only CRF encoder here, and a
     /// preset's MPEG quantiser went straight into <c>-crf</c> -- the 2007 row's
@@ -29,16 +39,27 @@ public static class ArgsBuilder
     /// do -- a fixed quantiser and a tight VBV are contradictory requests, which
     /// is why this cap is CRF-only).</para>
     /// </summary>
-    public static List<string> VideoQualityArgs(string name, int quality, double? limitKbps = null)
+    public static List<string> VideoQualityArgs(
+        string name, int quality, double? limitKbps = null,
+        string? rcMode = null, bool allowSkipFrames = false, bool supportsRcMode = true)
     {
         double ceiling = limitKbps is { } kbps && kbps > 0 ? kbps : FallbackCeilingKbps;
 
         switch (EncoderMath.ScaleOf(name))
         {
             case EncoderMath.QualityScale.Bitrate:
-                // Bitrate mode already pins the average; -maxrate/-bufsize would
-                // only re-state it, and OpenH264 reads neither.
-                return ["-rc_mode", "bitrate", "-b:v", $"{ceiling.ToString("G6", CultureInfo.InvariantCulture)}k"];
+                // -maxrate is deliberately absent: the wrapper computes
+                // iMaxBitrate = FFMAX(rc_max_rate, bit_rate), so with no maxrate
+                // the two are the same number and the flag would only restate
+                // -b:v. (The comment here used to claim OpenH264 "reads
+                // neither", which was wrong -- it reads maxrate, it just cannot
+                // use a second ceiling that equals the first.)
+                var rate = new List<string>();
+                if (supportsRcMode)
+                    rate.AddRange(["-rc_mode", OpenH264RateControl.Normalize(rcMode)]);
+                rate.AddRange(["-b:v", $"{ceiling.ToString("G6", CultureInfo.InvariantCulture)}k"]);
+                if (allowSkipFrames) rate.AddRange(["-allow_skip_frames", "1"]);
+                return rate;
 
             case EncoderMath.QualityScale.Crf:
                 // The buffer is two seconds of the ceiling: long enough that a

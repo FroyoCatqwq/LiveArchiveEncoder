@@ -53,9 +53,13 @@ public static class Preflight
         string dither = "auto",
         // v7.9.7: OpenH264's only quality knob is a bitrate, so the trial has to
         // carry the same ceiling the real run uses or it would open the encoder
-        // in its default mode and prove nothing.
+        // in its default mode and prove nothing. v7.9.8.8 adds the mode and the
+        // skip-frames switch for the same reason: a trial that runs a different
+        // command than the encode proves nothing about the encode.
         double? limitKbps = null,
-        string? transportFmt = null)
+        string? transportFmt = null,
+        string? openH264Rc = null,
+        bool openH264SkipFrames = false)
     {
         string tempDir = Path.Combine(Path.GetTempPath(),
             "live_archive_preflight_" + Guid.NewGuid().ToString("N"));
@@ -116,7 +120,13 @@ public static class Preflight
                 if (audio.Rate is not null && audio.Rate.Value != 0)
                     cmd.AddRange(["-ar", audio.Rate.Value.ToString()]);
             }
-            cmd.AddRange(ArgsBuilder.VideoQualityArgs(encoder.Name, quality, limitKbps));
+            cmd.AddRange(ArgsBuilder.VideoQualityArgs(
+                encoder.Name, quality, limitKbps, openH264Rc, openH264SkipFrames,
+                // Undecided caps mean "assume the build has it": the option has
+                // been in the wrapper since 2014, and the probe exists to catch
+                // the rare build that dropped it, not to make every caller
+                // prove it ran one.
+                encoder.Caps is null || encoder.Caps.HasRcMode));
             // v7.9.6: an explicit request is also pinned on the encoder side, so
             // the output really keeps it instead of being quietly retuned to the
             // encoder's own default.

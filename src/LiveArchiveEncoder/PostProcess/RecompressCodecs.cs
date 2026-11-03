@@ -20,12 +20,20 @@ namespace LiveArchiveEncoder.PostProcess;
 /// "" when the encoder only understands a bitrate.</param>
 /// <param name="DefaultQuality">Value used when the user did not pick one.</param>
 /// <param name="ExtraArgs">Arguments this codec needs to produce a playable file.</param>
+/// <param name="DefaultKbps">
+/// v7.9.8.8: the bitrate used when a bitrate-only codec is named without one.
+/// Zero means "this codec has a quality flag, so a bitrate was never needed".
+/// Before this, naming such a codec and giving no bitrate emitted the bare
+/// encoder name, OpenH264 fell back to its built-in 2 Mbps target, and the
+/// pass produced a file several times the size the preset asked for.
+/// </param>
 public sealed record SecondPassVideoCodec(
     string Name,
     string[] Containers,
     string QualityFlag,
     int DefaultQuality,
-    string[] ExtraArgs);
+    string[] ExtraArgs,
+    int DefaultKbps = 0);
 
 /// <summary>An audio encoder the second pass may use.</summary>
 public sealed record SecondPassAudioCodec(
@@ -57,8 +65,14 @@ public static class RecompressCodecs
         // soft, slightly-smeared look of a 2012 360p stream far better than
         // x264's psychovisual tricks do. It has no constant-quality mode: the
         // bitrate is the knob, which is why QualityFlag is empty.
+        //
+        // v7.9.8.8: and the knob did nothing. -rc_mode was never emitted, so
+        // every pass ran in OpenH264's default quality mode with its built-in
+        // 2 Mbps target -- measured on 640x480 testsrc2, 300 kbps asked / 2002
+        // kbps produced. The mode is now explicit and the 300 kbps default is
+        // the size of a 2012 360p delivery.
         new("libopenh264", ["mp4", "mkv", "mov", "flv"], "", 0,
-            ["-pix_fmt", "yuv420p"]),
+            ["-rc_mode", "bitrate", "-pix_fmt", "yuv420p"], DefaultKbps: 300),
         // HEVC in MP4 only opens in a player that understands the hvc1 tag;
         // without it QuickTime and Windows' own player refuse the file.
         new("libx265", ["mp4", "mkv", "mov"], "-crf", 30,
@@ -206,15 +220,29 @@ public static class RecompressCodecs
     /// <summary>
     /// The video half of a fragment: the codec, its quality knob and whatever
     /// else the encoder needs. Bitrate is used only where there is no quality
-    /// knob at all.
+    /// knob at all -- and there it is always emitted, falling back to the
+    /// catalog's default, because a bitrate-only encoder given no bitrate runs
+    /// on its own built-in target.
     /// </summary>
     public static string VideoArgs(SecondPassVideoCodec codec, int? quality, int? kbps = null)
     {
         var parts = new List<string> { "-c:v", codec.Name };
-        if (codec.QualityFlag.Length > 0 && quality is { } q)
-            parts.AddRange([codec.QualityFlag, q.ToString(CultureInfo.InvariantCulture)]);
-        else if (kbps is { } k)
-            parts.AddRange(["-b:v", $"{k}k"]);
+
+        if (codec.QualityFlag.Length > 0)
+        {
+            if (quality is { } q)
+                parts.AddRange([codec.QualityFlag, q.ToString(CultureInfo.InvariantCulture)]);
+        }
+        else
+        {
+            // v7.9.8.8: OpenH264 at its built-in target produced 2002 kbps for a
+            // pass that asked for 300. `quality` is meaningless here (there is no
+            // QP flag to put it in), so the bitrate is the only way to say
+            // anything at all.
+            int effective = kbps ?? codec.DefaultKbps;
+            if (effective > 0)
+                parts.AddRange(["-b:v", $"{effective.ToString(CultureInfo.InvariantCulture)}k"]);
+        }
 
         parts.AddRange(codec.ExtraArgs);
         return string.Join(' ', parts);

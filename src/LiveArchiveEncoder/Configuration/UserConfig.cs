@@ -62,6 +62,17 @@ public sealed class UserConfig
     public double Recover { get; set; } = 150.0;
     public double Window { get; set; } = 2.0;
     public int Qv { get; set; } = 8;
+
+    /// <summary>
+    /// v7.9.8.8: OpenH264's rate-control mode (bitrate / quality / timestamp).
+    /// A string here rather than an enum because the value travels into an
+    /// FFmpeg option and a settings file people read and edit; an unknown value
+    /// is normalised back to <c>bitrate</c> on load instead of failing the file.
+    /// </summary>
+    public string OpenH264Rc { get; set; } = Core.OpenH264RateControl.Bitrate;
+
+    /// <summary>v7.9.8.8: let OpenH264 skip frames to reach the target bitrate.</summary>
+    public bool OpenH264SkipFrames { get; set; }
     public int Threads { get; set; } = 16;
     public int BufferFrames { get; set; } = 6;
     public int AudioKbps { get; set; } = 32;
@@ -436,6 +447,8 @@ public static class ConfigStore
         Recover = c.Recover,
         Window = c.Window,
         Qv = c.Qv,
+        OpenH264Rc = c.OpenH264Rc,
+        OpenH264SkipFrames = c.OpenH264SkipFrames,
         Threads = c.Threads,
         BufferFrames = c.BufferFrames,
         AudioKbps = c.AudioKbps,
@@ -559,6 +572,13 @@ public static class ConfigStore
         c.Recover = stored.Recover;
         c.Window = stored.Window;
         c.Qv = stored.Qv;
+        // A stored mode this build cannot honour (hand-edited file, older
+        // beta) falls back to the default rather than failing to load: the
+        // setting is an optimisation, not a reason to refuse the run.
+        c.OpenH264Rc = Core.OpenH264RateControl.Problem(stored.OpenH264Rc) is null
+            ? Core.OpenH264RateControl.Normalize(stored.OpenH264Rc)
+            : Core.OpenH264RateControl.Bitrate;
+        c.OpenH264SkipFrames = stored.OpenH264SkipFrames;
         c.Threads = stored.Threads;
         c.BufferFrames = stored.BufferFrames;
         c.AudioKbps = stored.AudioKbps;

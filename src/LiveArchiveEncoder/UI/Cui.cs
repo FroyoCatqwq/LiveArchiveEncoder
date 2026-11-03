@@ -656,6 +656,32 @@ public static partial class Cui
     }
 
     /// <summary>
+    /// v7.9.8.8: pick OpenH264's rate-control mode.
+    ///
+    /// <para>The list is <see cref="Core.OpenH264RateControl.Usable"/> -- the
+    /// same one the parser validates against, so the menu cannot offer a value
+    /// the command line refuses. That drift is exactly what this project paid
+    /// for once already, with a menu row that said "q:v 9" for an encoder that
+    /// has no such flag.</para>
+    /// </summary>
+    private static string PickRateControl(string current)
+    {
+        string[] allowed = [.. Core.OpenH264RateControl.Usable];
+        Console.WriteLine($"\n{L.T("param.oh264rc")}: {string.Join(", ", allowed)}");
+
+        string raw = ReadRaw(L.T("param.prompt.oh264rc", current)).Trim().ToLowerInvariant();
+        if (raw.Length == 0) return current;
+
+        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index))
+        {
+            if (index < 1 || index > allowed.Length) throw new FormatException(L.T("param.oh264rcbad"));
+            return allowed[index - 1];
+        }
+        if (Core.OpenH264RateControl.Problem(raw) is { } problem) throw new FormatException(problem);
+        return raw;
+    }
+
+    /// <summary>
     /// v7.9: pick which video and audio track of a multi-stream source to use.
     ///
     /// The source is probed here so the menu can show the indexes -- that is the
@@ -1472,6 +1498,14 @@ public static partial class Cui
             Row(29, L.T("param.cropanchor"), c.FitMode == "crop" ? c.CropAnchor : "-");
             Row(30, L.T("param.padcolor"), c.FitMode == "fit" ? c.PadColor : "-");
             Row(31, L.T("param.sizepreset"), L.T("param.sizepreset.hint"));
+            // v7.9.8.8: OpenH264's two dials. Shown only for that encoder,
+            // because for every other one the row would be a setting that never
+            // reaches FFmpeg -- the "q:v 9 under libopenh264" mistake again.
+            if (enc == "libopenh264")
+            {
+                Row(32, L.T("param.oh264rc"), c.OpenH264Rc);
+                Row(33, L.T("param.oh264skip"), L.YesNo(c.OpenH264SkipFrames));
+            }
             // v7.9.6: the pixel format lives in its own menu (there is a list to
             // choose from), but it is a setting like any other, so the parameter
             // screen says what it currently is.
@@ -1523,6 +1557,12 @@ public static partial class Cui
                         break;
                     case "6":
                         c.Qv = ReadInt(L.T("param.prompt.quality", qualityLabel, c.Qv), c.Qv);
+                        break;
+                    case "32" when enc == "libopenh264":
+                        c.OpenH264Rc = PickRateControl(c.OpenH264Rc);
+                        break;
+                    case "33" when enc == "libopenh264":
+                        c.OpenH264SkipFrames = !c.OpenH264SkipFrames;
                         break;
                     case "7":
                         c.Threads = ReadInt(L.T("param.prompt.threads", c.Threads), c.Threads);
@@ -2782,7 +2822,16 @@ public static partial class Cui
             (List<string> tokens, _) = PostProcess.PostArgs.Parse(c.Recompress.Args);
             string video = PostProcess.RecompressCodecs.DetectVideoCodec(tokens) ?? "-";
             string audio = PostProcess.RecompressCodecs.DetectAudioCodec(tokens) ?? "-";
-            string quality = QualityOf(tokens);
+            // v7.9.8.8: row 6 is the codec's own knob, and for a bitrate-only
+            // codec that knob is a bitrate. Labelling it "Quality (crf / q:v)"
+            // over libopenh264 would describe a setting that never reaches
+            // FFmpeg -- the mistake this project already paid for once.
+            SecondPassVideoCodec? menuCodec = PostProcess.RecompressCodecs.FindVideo(video);
+            bool bitrateOnly = menuCodec is { } picked && picked.QualityFlag.Length == 0;
+            string quality = bitrateOnly
+                ? (BitrateOf(tokens)?.ToString(CultureInfo.InvariantCulture) ?? "auto") + " kbps"
+                : QualityOf(tokens);
+            string qualityRow = bitrateOnly ? L.T("rc.menu.vbitrate") : L.T("rc.menu.quality");
 
             Console.WriteLine($"\n== {L.T("rc.menu")} ==");
             Console.WriteLine($" 1. {L.Pad(L.T("rc.menu.enable"), 30)} = {(c.Recompress.Enabled ? "on" : L.T("value.off"))}");
@@ -2791,7 +2840,7 @@ public static partial class Cui
             // v7.9.5: the stage no longer needs a live recording in front of it.
             Console.WriteLine($" 4. {L.Pad(L.T("rc.menu.only"), 30)}");
             Console.WriteLine($" 5. {L.Pad(L.T("rc.menu.codec"), 30)} = {video}");
-            Console.WriteLine($" 6. {L.Pad(L.T("rc.menu.quality"), 30)} = {quality}");
+            Console.WriteLine($" 6. {L.Pad(qualityRow, 30)} = {quality}");
             Console.WriteLine($" 7. {L.Pad(L.T("rc.menu.audio"), 30)} = {audio}");
             // v7.9.8.4: the chain beyond the first pass. This is the menu row
             // whose strings shipped in v7.9.8.3 with nothing wired to them, so a
@@ -3017,8 +3066,36 @@ public static partial class Cui
             return;
         }
 
-        string current = QualityOf(tokens);
-        Console.Write(L.T("rc.prompt.quality", current.Length > 0 ? current : "auto", codec.QualityFlag));
+        string audio = PostProcess.RecompressCodecs.DetectAudioCodec(tokens)
+            ?? PostProcess.RecompressCodecs.RecommendedAudio(codec.Name);
+
+        // v7.9.8.8: a codec with no quality flag (libopenh264) has a bitrate
+        // instead, and the bitrate is the only thing that reaches FFmpeg. This
+        // row used to ask for a 1-63 number, store it and print "quality set",
+        // while ComposeSecondPass dropped it for that codec -- so the pass kept
+        // running at the catalog default and the menu had confirmed a change
+        // that never happened. Ask for the number that is actually used.
+        if (codec.QualityFlag.Length == 0)
+        {
+            int? current = BitrateOf(tokens);
+            Console.Write(L.T("rc.prompt.vbitrate",
+                current?.ToString(CultureInfo.InvariantCulture) ?? "auto", codec.DefaultKbps));
+            string rawKbps = Ask().Trim();
+            if (rawKbps.Length == 0) return;
+            if (!int.TryParse(rawKbps, NumberStyles.Integer, CultureInfo.InvariantCulture, out int kbps)
+                || kbps <= 0 || kbps > 100_000)
+            {
+                Console.WriteLine(L.T("param.badvalue", rawKbps));
+                return;
+            }
+
+            c.Recompress.Args = ComposeSecondPass(tokens, codec, null, audio, null, kbps);
+            Console.WriteLine(L.T("rc.vbitrate.set", kbps));
+            return;
+        }
+
+        string currentQuality = QualityOf(tokens);
+        Console.Write(L.T("rc.prompt.quality", currentQuality.Length > 0 ? currentQuality : "auto", codec.QualityFlag));
         string raw = Ask().Trim();
         if (raw.Length == 0) return;
         if (!int.TryParse(raw, out int quality) || quality < 1 || quality > 63)
@@ -3027,8 +3104,6 @@ public static partial class Cui
             return;
         }
 
-        string audio = PostProcess.RecompressCodecs.DetectAudioCodec(tokens)
-            ?? PostProcess.RecompressCodecs.RecommendedAudio(codec.Name);
         c.Recompress.Args = ComposeSecondPass(tokens, codec, quality, audio, null);
         Console.WriteLine(L.T("rc.quality.set", quality));
     }
@@ -3037,9 +3112,9 @@ public static partial class Cui
     /// Rewrite a fragment around a codec choice: the filter chain the user wrote
     /// is kept, the codec/quality/audio arguments are replaced.
     /// </summary>
-    private static string ComposeSecondPass(
+    internal static string ComposeSecondPass(
         IReadOnlyList<string> tokens, SecondPassVideoCodec codec, int? quality,
-        string audioCodec, int? audioKbps)
+        string audioCodec, int? audioKbps, int? videoKbps = null)
     {
         var parts = new List<string>();
 
@@ -3053,7 +3128,15 @@ public static partial class Cui
             }
         }
 
-        parts.Add(PostProcess.RecompressCodecs.VideoArgs(codec, quality ?? codec.DefaultQuality));
+        // v7.9.8.8: a bitrate-only codec keeps whatever -b:v the fragment
+        // already carried. Every caller rewrites the whole video half, so
+        // without this an unrelated edit (the audio codec, say) would drop the
+        // number back to the catalog default and call it unchanged.
+        int? bitrate = codec.QualityFlag.Length > 0 ? null : videoKbps ?? BitrateOf(tokens);
+        parts.Add(PostProcess.RecompressCodecs.VideoArgs(
+            codec,
+            codec.QualityFlag.Length > 0 ? quality ?? codec.DefaultQuality : null,
+            bitrate));
         parts.Add(PostProcess.RecompressCodecs.AudioArgs(audioCodec, audioKbps, null, null));
         return string.Join(' ', parts);
     }
@@ -3066,6 +3149,23 @@ public static partial class Cui
             if (tokens[i] is "-crf" or "-q:v" or "-qscale:v") return tokens[i + 1];
         }
         return "";
+    }
+
+    /// <summary>
+    /// Whatever follows <c>-b:v</c>, in kbps, or null when the fragment carries
+    /// none. The fragments this program writes spell it <c>300k</c>.
+    /// </summary>
+    private static int? BitrateOf(IReadOnlyList<string> tokens)
+    {
+        for (int i = 0; i < tokens.Count - 1; i++)
+        {
+            if (tokens[i] != "-b:v") continue;
+            string raw = tokens[i + 1].Trim();
+            if (raw.EndsWith('k') || raw.EndsWith('K')) raw = raw[..^1];
+            return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int kbps)
+                && kbps > 0 ? kbps : null;
+        }
+        return null;
     }
 
     /// <summary>

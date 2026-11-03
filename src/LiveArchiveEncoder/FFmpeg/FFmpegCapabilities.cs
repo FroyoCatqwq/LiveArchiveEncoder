@@ -34,6 +34,14 @@ public static partial class FFmpegCapabilities
     private static partial Regex QscaleOption();
 
     /// <summary>
+    /// The libopenh264 rate-control switch. Undocumented in the manual, present
+    /// in the wrapper's AVOption table, so it has to be read off the build being
+    /// used rather than assumed.
+    /// </summary>
+    [GeneratedRegex(@"^\s*-rc_mode\s+", RegexOptions.Multiline)]
+    private static partial Regex RcModeOption();
+
+    /// <summary>
     /// <c>ffmpeg -encoders</c> subtitle lines: <c> S..... ass    ASS (...)</c>.
     /// v7.9 goal 2 asked for subtitle support "以 ffmpeg -encoders 为准", so the
     /// set is read from the binary in use rather than hard-coded.
@@ -217,6 +225,7 @@ public static partial class FFmpegCapabilities
             SupportedRates = [.. rates.Select(x => Math.Round(x, 6)).Distinct().Order()],
             HasCrf = CrfOption().IsMatch(text),
             HasQscale = QscaleOption().IsMatch(text),
+            HasRcMode = RcModeOption().IsMatch(text),
         };
     }
 }

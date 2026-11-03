@@ -32,6 +32,25 @@ public sealed record RealtimeOptions
     public int Threads { get; init; } = 16;
     public double LimitKbps { get; init; } = 200.0;
     public double RecoverKbps { get; init; } = 150.0;
+
+    /// <summary>
+    /// v7.9.8.8: how OpenH264 drives its rate control -- <c>bitrate</c> (hold
+    /// the ceiling), <c>quality</c> (spend over it to keep the picture) or
+    /// <c>timestamp</c> (distribute by presentation time). Only read when the
+    /// encoder is <c>libopenh264</c>; every other encoder ignores it, the same
+    /// way it ignores <see cref="Quality"/> when that number is in another
+    /// scale. See <see cref="Core.OpenH264RateControl"/>.
+    /// </summary>
+    public string OpenH264Rc { get; init; } = Core.OpenH264RateControl.Bitrate;
+
+    /// <summary>
+    /// v7.9.8.8: let OpenH264 drop frames to reach the target bitrate. Off by
+    /// default because the fps ladder already owns frame rate on purpose; a
+    /// second dropper working behind its back makes the measured rate fall for
+    /// a cause the ladder cannot see, and the run would report a healthy rate
+    /// while silently losing frames.
+    /// </summary>
+    public bool OpenH264SkipFrames { get; init; }
     public double WindowSeconds { get; init; } = 2.0;
     public int BufferFrames { get; init; } = 6;
     public string? AudioEncoder { get; init; } = "libmp3lame";

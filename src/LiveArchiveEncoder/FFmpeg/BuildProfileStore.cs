@@ -30,7 +30,13 @@ public sealed class BuildProfile
     // v7.9.7: bumped from 2 because the cached encoder list is now expected to
     // contain libopenh264 (the era presets select it); a profile written by an
     // older build would silently claim the encoder does not exist.
-    public const int SchemaVersion = 3;
+    //
+    // v7.9.8.8: bumped from 3 because EncoderCaps gained HasRcMode. A cached
+    // profile has no such field, so it would deserialize to false and the
+    // program would decide -- for every user who has ever run it -- that their
+    // FFmpeg cannot do -rc_mode, then quietly keep the old command. The feature
+    // would ship dead, and only on upgraded installs.
+    public const int SchemaVersion = 4;
 
     public int Schema { get; set; } = SchemaVersion;
 
@@ -254,7 +260,7 @@ public static class BuildProfileStore
         };
     }
 
-    private static BuildProfile? TryRead(string path, string identity)
+    internal static BuildProfile? TryRead(string path, string identity)
     {
         try
         {

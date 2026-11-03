@@ -194,6 +194,14 @@ public static class OptionCatalog
         new Spec("--recompress-quality", Kind.Value, []),
         new Spec("--recompress-audio-codec", Kind.Value, []),
         new Spec("--recompress-audio-kbps", Kind.Value, []),
+        new Spec("--recompress-video-kbps", Kind.Value, []),
+
+        // ---- OpenH264 rate control (v7.9.8.8) ----
+        // Only the modes that hold a ceiling are completed: buffer and off are
+        // refused by the parser, so offering them here would advertise an
+        // option value that cannot be used.
+        new Spec("--openh264-rc", Kind.Value, [.. Core.OpenH264RateControl.Usable]),
+        new Spec("--openh264-skip-frames", Kind.Flag, []),
 
         // ---- era presets (v7.9.5 / v7.9.7) ----
         new Spec("--era", Kind.Value, [.. PostProcess.EraPresets.All.Select(p => p.Id)]),

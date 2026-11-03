@@ -70,6 +70,20 @@ public sealed class EncoderCaps
     public List<double> SupportedRates { get; init; } = [];
     public bool HasCrf { get; init; }
     public bool HasQscale { get; init; }
+
+    /// <summary>
+    /// v7.9.8.8: true when <c>ffmpeg -h encoder=NAME</c> lists an
+    /// <c>-rc_mode</c> option.
+    ///
+    /// <para>This one is not like the other two. <c>-rc_mode</c> is in
+    /// <c>libavcodec/libopenh264enc.c</c> (five values, default
+    /// <c>quality</c>) and therefore in every build since 2014, but the
+    /// official manual's libopenh264 section does not document it at all.
+    /// Probing means a build that lacks it keeps the old flags instead of
+    /// dying on "Unrecognized option", and a build that has it gets the rate
+    /// control it was always meant to have.</para>
+    /// </summary>
+    public bool HasRcMode { get; init; }
 }
 
 /// <summary>A video encoder discovered from `ffmpeg -encoders`.</summary>
@@ -173,6 +187,28 @@ public sealed class Config
     public double Recover { get; set; } = 150.0;
     public double Window { get; set; } = 2.0;
     public int Qv { get; set; } = 8;
+
+    /// <summary>
+    /// v7.9.8.8: how OpenH264's rate control is driven -- <c>bitrate</c> (the
+    /// default, and the only mode that holds a ceiling), <c>quality</c> (spend
+    /// up to ~20% over the ceiling to keep the picture) or <c>timestamp</c>
+    /// (distribute by presentation time, for a source whose frame intervals
+    /// wander). <see cref="Core.OpenH264RateControl"/> owns the list and the
+    /// refusals; this field is only storage.
+    /// </summary>
+    public string OpenH264Rc { get; set; } = Core.OpenH264RateControl.Bitrate;
+
+    /// <summary>
+    /// v7.9.8.8: let OpenH264 drop frames to hit the target bitrate.
+    ///
+    /// <para>Off by default, because this program already owns frame rate: the
+    /// ladder lowers it deliberately, and a second mechanism dropping frames
+    /// behind the ladder's back would make the measured rate fall for a reason
+    /// the ladder cannot see. On when the bitrate matters more than every
+    /// frame -- measured at 300 kbps, 354 kbps without it and 302 with
+    /// it.</para>
+    /// </summary>
+    public bool OpenH264SkipFrames { get; set; }
     public int Threads { get; set; } = 16;
     public int BufferFrames { get; set; } = 6;
     public int AudioKbps { get; set; } = 32;

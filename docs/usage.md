@@ -291,6 +291,9 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--recompress-quality` | 编码器默认 | **v7.9.5.1**：`-crf`（x264/x265/vp9/av1）或 `-q:v`（MPEG 家族）。**v7.9.8.4** 可重复，按位置与 `--recompress-codec` 配对；只写一次覆盖整条链 |
 | `--recompress-audio-codec` | 按视频编码器推荐 | **v7.9.5.1**：`aac` / `libmp3lame` / `libopus` / `libvorbis` / `ac3` / `flac` / `copy`。**v7.9.8.4** 可重复 |
 | `--recompress-audio-kbps` | 编码器默认 | **v7.9.5.1**：第二遍音频码率。**v7.9.8.4** 可重复 |
+| `--recompress-video-kbps` | 300 | **v7.9.8.8**：只有码率旋钮的编码器（`libopenh264`）的视频码率，kbps。可重复。以前不给这个值时命令里连 `-b:v` 都没有，编码器落回自带的 2 Mbps |
+| `--openh264-rc` | `bitrate` | **v7.9.8.8**：OpenH264 码控模式 `bitrate` / `quality` / `timestamp`。`buffer` 与 `off` 被拒绝（前者不看码率，实测要 300k 给 3.1 Mbps；后者锁死内部 QP 26 且改不了） |
+| `--openh264-skip-frames` | 关 | **v7.9.8.8**：允许 OpenH264 丢帧凑目标码率。不开时码率是"目标"，开了才是"上限"（实测 300k：354 vs 302 kbps）。默认关，因为帧率由自适应阶梯负责 |
 | `--recompress-only` | 关 | **v7.9.5**：跳过直播编码，直接对已有文件做二次压缩（见 §7.12） |
 | `--no-recompress` | — | 关掉二次压缩（优先于上面两个） |
 | `--era ID` | 无 | **v7.6 / v7.9.7**：应用预设，id 是 `site/year`（`youku/2007`、`bilibili/2012`、`generic/1998`）；旧 id 仍可用并提示已更名（见 §7.12） |
@@ -347,7 +350,7 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
 14. Era preset        时代/站点预设（5 个"时代" + 18 个"站点" + 自定义，见 §7.12）；
                       子菜单里 n/e/d 维护自定义预设、m 切"原生/现代"渲染
 15. Recompress        二次压缩；1 开关、2 参数段、3 容器、4 只压一个已有文件、
-                      5/6/7 第二遍的视频编码器 / 质量 / 音频编码器（见 §7.12）
+                      5/6/7 第二遍的视频编码器 / 质量或码率 / 音频编码器（见 §7.12）
 16. Streams           视频/音频流选择（见 §7.16）
 17. Subtitles         字幕：烧录 / 封装 / 关闭（见 §7.16）
 18. Command line      把当前设置打印成一条等价命令行（见 §7.6）
@@ -1495,7 +1498,7 @@ LiveArchiveEncoder.exe src.mp4 out.rm --recompress --recompress-args ^
 相关选项：`--recompress`（启用）、`--recompress-args "…"`（设参数并启用）、
 `--recompress-container EXT`（默认由编码器决定）、`--recompress-codec NAME`、
 `--recompress-quality N`、`--recompress-audio-codec NAME`、`--recompress-audio-kbps N`、
-`--no-recompress`。
+`--recompress-video-kbps N`（v7.9.8.8，只有码率旋钮的编码器用）、`--no-recompress`。
 
 #### 第二遍的编码器（v7.9.5.1）
 
@@ -1515,6 +1518,7 @@ LiveArchiveEncoder.exe clip.mkv --recompress-only --recompress-codec libx265 --r
 | 视频编码器 | 可写容器（第一个是默认） | 质量参数 |
 | --- | --- | --- |
 | `libx264` | mp4, mkv, mov, avi, flv | `-crf` |
+| `libopenh264` | mp4, mkv, mov, flv | **没有质量参数**，只有码率：`-b:v` + `-rc_mode bitrate`。用 `--recompress-video-kbps`，不给则 300（**v7.9.8.8**：以前不给就什么都不写，编码器落回自带 2 Mbps） |
 | `libx265` | mp4, mkv, mov（带 `-tag:v hvc1`） | `-crf` |
 | `libvpx-vp9` | webm, mkv | `-crf` + `-b:v 0` |
 | `libvpx`（VP8） | webm, mkv | `-crf` + `-b:v 1M` |
@@ -1529,14 +1533,19 @@ LiveArchiveEncoder.exe clip.mkv --recompress-only --recompress-codec libx265 --r
 `rv10`/`rv20` 自动配 `real_144`（RealAudio 1.0，8 kHz 单声道）——不点名也是它，
 因为 `.rm` 里放 AAC 只是"能装"，不是当年那个文件。
 
-三条硬规则：
+四条硬规则：
 
 1. **写不通的组合在开跑前就报错**（退出码 2），而不是二十秒后由 FFmpeg 抛一句
    muxer 消息：`libvpx-vp9` + `mp4` 会被拒，并把可用容器列出来；
 2. `-c:v` 写在 `--recompress-args` 里也照样识别：`-c:v libvpx-vp9` 不指定容器时，
    `_web` 的扩展名会自动变成 `.webm`；
 3. 编码器**不在当前 FFmpeg 构建里**时直接说清楚
-   （`this FFmpeg build has no 'x' encoder`），不会跑到一半才失败。
+   （`this FFmpeg build has no 'x' encoder`），不会跑到一半才失败；
+4. **码率与质量参数不能张冠李戴**（v7.9.8.8）：`--recompress-quality` 给一条全是
+   `libopenh264` 的链会报错（它没有质量旗标，数字只会被丢掉），反过来
+   `--recompress-video-kbps` 给一条全是 `-crf` 编码器的链也报错。以前这两种都给得进去，
+   然后什么也不发生。两种编码器混在一条链上时，两个数字各落到用得上的一遍，用不上的
+   那遍会打印一行 NOTE 说明它被跳过。
 
 #### 多遍压缩（v7.9.8.3）
 

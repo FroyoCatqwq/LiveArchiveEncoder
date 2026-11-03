@@ -18,6 +18,104 @@
 
 ---
 
+## v7.9.8.8（2026-11-04）
+
+主题是**把 OpenH264 的两个旋钮接上**：一个从来没被拧过（二次压制），一个一直拧错了方向
+（码率模式）。产物格式没变，但用 `libopenh264` 的二次压制**体积会明显变小**——那是修好的
+证据，不是退化。
+
+### 1. 二次压制选 libopenh264 时，参数是空的
+
+`RecompressCodecs.VideoArgs` 对"没有质量旗标"的编码器只在调用方给了码率时才写 `-b:v`，
+而 CLI 只传质量号、不传码率。于是 `--recompress-codec libopenh264` 生成的命令是：
+
+```
+-c:v libopenh264 -pix_fmt yuv420p
+```
+
+没有码率、没有模式，OpenH264 落在自带的 2 Mbps 目标上。实测 640x480 testsrc2：要 300 kbps，
+产出 **2002 kbps**，6.7 倍。用户看到的是"预设应用了"，拿到的是一个大七倍的文件。
+
+修法：目录里的 `libopenh264` 补上 `-rc_mode bitrate` 和 `DefaultKbps = 300`；`VideoArgs`
+对这类编码器**永远**写码率（显式值 → 目录默认值），不再裸奔。新增
+`--recompress-video-kbps` 供显式指定。
+
+同一类"静默吞掉"还修了两处：
+
+- `--recompress-quality` 给一条**没有任何质量旗标**的链（`libopenh264`）现在**报错退出 2**，
+  说明该编它的码率；以前那个数字被丢掉，命令看起来却像是生效了。
+- `--recompress-video-kbps` 给一条只有 `-crf` 编码器的链同样报错，指出该用
+  `--recompress-quality`。
+- 两种编码器混在一条链上（`libx264` 出观看版、`libopenh264` 出站点版）是合法的写法，
+  这时两种数字**各落到用得上的一遍**，对用不上的那遍打印一行 NOTE —— 报错会让这种链
+  根本写不出来（一个数字没法跳过某一遍，写两遍也一样）。
+
+### 2. OpenH264 的码率模式（`-rc_mode`）
+
+以前无论什么情况都发 `-rc_mode bitrate`，用户无从选择。现在三个可用值：
+
+| 模式 | 含义 | 实测（640x480，目标 300k） |
+| --- | --- | --- |
+| `bitrate`（默认） | 严格按码率 | 354 kbps |
+| `quality` | 优先画质，`-b:v` 只作目标 | 362 kbps |
+| `timestamp` | 按时间戳分配（实时/可变帧率） | 358 kbps |
+
+`buffer` 和 `off` **被拒绝**，理由带实测数字：
+
+- `buffer` 官方文档自己写着 "no bitrate control"，实测要 300 kbps 给 **3.1 Mbps**。
+- `off` 把 QP 锁死在库内部的 26，而 FFmpeg 没有提供改它的入口（见下一条）。
+
+CLI 是 `--openh264-rc <bitrate|quality|timestamp>`，CUI 在参数菜单 32/33 行（只在
+`libopenh264` 时出现，别的编码器上那两行等于不存在）。
+
+### 3. 为什么没有 QP：`-qp` 在这个编码器上不存在
+
+网上流传 `-rc_mode off -qp 23` 的写法。查 `libavcodec/libopenh264enc.c`：选项表里没有
+`qp`，`svc_encode_init` 也从没读过 `avctx->global_quality`。FFmpeg 会把这句话说得很清楚：
+
+```
+AVOption qp (Quantization parameter (luma)) has not been used for any stream.
+```
+
+`-qmin/-qmax` 倒是会被写进 `param.iMinQp/iMaxQp`，但在 `RC_OFF_MODE` 下不起作用——实测
+qmin = qmax 取 10、26、51，产出**字节完全相同**（1840204 B）。所以这个编码器的"质量"
+只能是码率的函数，`-rc_mode quality` 是它唯一接近质量控制的模式。
+
+### 4. 可选跳帧
+
+`-allow_skip_frames 1` 是码率真正落地的前提。源码 `param.bEnableFrameSkip = skip_frames`，
+OpenH264 自己也在日志里说："bitrate can't be controlled ... without enabling skip frame"。
+实测 300 kbps：不开 354 kbps，开 302 kbps。
+
+默认**不开**：这个程序的帧率由自适应阶梯掌握，让编码器再偷偷丢一层，阶梯会看到一个
+自己没造成的码率下降，原因就查不清了。要严格码率时用 `--openh264-skip-frames`。
+
+### 5. 顺带
+
+- `EncoderCaps.HasRcMode`：从 `ffmpeg -h encoder=NAME` 读 `-rc_mode` 是否存在。这个选项
+  在源码里，但**官方手册的 libopenh264 一节没有记载**；探测到没有就不发，退回旧参数，
+  而不是让整个运行死在 "Unrecognized option"。
+- **`BuildProfile.SchemaVersion` 3 → 4**。`EncoderCaps` 多了一个字段，而它是**磁盘缓存的
+  一部分**：旧缓存里没有 `HasRcMode`，反序列化出来就是 `false`，于是程序会认为所有人的
+  FFmpeg 都不支持 `-rc_mode`，整个功能**只在升级过的机器上静默失效**。代价是升级后第一次
+  运行要重新扫一遍 FFmpeg（四次进程启动）。
+- 改正一条撒谎的注释：`ArgsBuilder` 曾说 OpenH264 "reads neither `-maxrate` nor
+  `-bufsize`"。实际是 `iMaxBitrate = FFMAX(rc_max_rate, bit_rate)`——它读，只是当
+  `maxrate == bitrate` 时两者相同，那个旗标没有信息量。
+- `--openh264-rc` / `--openh264-skip-frames` 只对 `libopenh264` 有意义，给了别的编码器
+  现在**报错退出 2**（`--recompress-only` 这种没有直播编码器的路径也一样），不再静默忽略。
+- CUI 第二遍的第 6 行：`libopenh264` 时标题变成"码率（kbps）"、问的是码率，改音频编码器
+  这类无关操作也不会再把已设的码率抹回默认值。
+
+### 数
+
+单测 **639**（638 通过 / 1 跳过），零警告。本轮新增的 7 组断言各做了一次变异验证
+（缓存 schema、混合链、码率保留、目录默认值、0 码率、旗标守卫），每一组都变红并指名；
+上一轮那 11 条同法验过。真素材（`[晚街与灯][Re Zero 4th - 04]` 20 秒片段）：默认 300k
+实测 346 kbps、显式 700k 实测 622 kbps，两条拒绝路径均 exit 2。
+
+---
+
 ## v7.9.8.7（2026-11-03）
 
 两件事，都是"以前根本用不了"：**检查更新永远是失败的**，**PGS 内封字幕不能烧**。

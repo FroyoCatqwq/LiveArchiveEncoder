@@ -133,6 +133,17 @@ public static class Cli
             encoder.Caps ??= caps.EncoderCaps(encoder);
         }
 
+        // v7.9.8.8: the two OpenH264 dials are about one encoder, so a run that
+        // encodes with another one has no use for them. Saying so is the whole
+        // point of this version: a flag that is accepted and never reaches
+        // FFmpeg is indistinguishable from one that works, which is how the
+        // "q:v 9 under libopenh264" row survived for three releases.
+        if (OpenH264FlagProblem(args, encoder.Name) is { } openH264Problem)
+        {
+            Console.Error.WriteLine($"ERROR: {openH264Problem}");
+            return 2;
+        }
+
         // v7.9: an HTTP(S) URL is an input too. It has no FileInfo and no
         // existence check -- the probe inside the encoder decides whether it is
         // any good, and its error names the URL either way.
@@ -426,6 +437,12 @@ public static class Cli
                 // pre-v7.9.8.2 behaviour: 28 for libx264 no matter which year
                 // was asked for, which for a 2007 row is a third of its rate.
                 Qv = args.Qv ?? era?.QualityFor(encoder.Name) ?? EncoderMath.DefaultQuality(encoder.Name),
+                // v7.9.8.8: OpenH264's rate control. A build whose -h output has
+                // no rc_mode line does not get the flag -- passing an option the
+                // binary does not know aborts the run, and the old flags still
+                // produce a valid file.
+                OpenH264Rc = args.OpenH264Rc ?? Core.OpenH264RateControl.Bitrate,
+                OpenH264SkipFrames = args.OpenH264SkipFrames,
                 Threads = args.Threads,
                 BufferFrames = args.BufferFramesExplicit
                     ? args.BufferFrames
@@ -620,6 +637,8 @@ public static class Cli
             Threads = config.Threads,
             LimitKbps = config.Limit,
             RecoverKbps = config.Recover,
+            OpenH264Rc = config.OpenH264Rc,
+            OpenH264SkipFrames = config.OpenH264SkipFrames,
             WindowSeconds = config.Window,
             BufferFrames = config.BufferFrames,
             AudioEncoder = audioEncoder,
@@ -734,6 +753,18 @@ public static class Cli
     /// </summary>
     private static int RunRecompressOnly(CliOptions args, string ffmpeg, FFmpeg.Capabilities caps)
     {
+        // v7.9.8.8: these two describe the *live* encoder, and this path has
+        // none -- the second pass gets its parameters from the codec catalog and
+        // the preset. Accepted silently they would look like they had done
+        // something, which is the defect this version is about.
+        if (args.OpenH264Rc is not null || args.OpenH264SkipFrames)
+        {
+            Console.Error.WriteLine(
+                "ERROR: --openh264-rc / --openh264-skip-frames describe the live encoder; "
+                + "--recompress-only has none (use --recompress-codec libopenh264 --recompress-video-kbps)");
+            return 2;
+        }
+
         if (string.IsNullOrEmpty(args.Input))
         {
             Console.Error.WriteLine("ERROR: --recompress-only requires an input file");
@@ -925,6 +956,24 @@ public static class Cli
     }
 
     /// <summary>
+    /// v7.9.8.8: null when the run's OpenH264 flags agree with the encoder it
+    /// picked, otherwise the sentence to print before exiting 2.
+    ///
+    /// <para>Separate from <see cref="Run"/> so it can be tested without an
+    /// FFmpeg, a source file or a capability sweep -- the rule is about two
+    /// names, not about either of those.</para>
+    /// </summary>
+    internal static string? OpenH264FlagProblem(CliOptions args, string encoderName)
+    {
+        if (string.Equals(encoderName, "libopenh264", StringComparison.OrdinalIgnoreCase)) return null;
+        if (args.OpenH264Rc is not null)
+            return $"--openh264-rc only applies to libopenh264; this run encodes with {encoderName}";
+        if (args.OpenH264SkipFrames)
+            return $"--openh264-skip-frames only applies to libopenh264; this run encodes with {encoderName}";
+        return null;
+    }
+
+    /// <summary>
     /// The subtitle block this run asked for, laid over the stored one so a flag
     /// that names one field does not discard the rest.
     /// </summary>
@@ -939,7 +988,7 @@ public static class Cli
         BoxAspect = args.SubtitleAspect ?? saved.BoxAspect,
     };
 
-    private static (RecompressSettings Settings, string? Error) ResolveRecompress(
+    internal static (RecompressSettings Settings, string? Error) ResolveRecompress(
         CliOptions args, PostProcess.EraPreset? era, bool eraNative, (int W, int H)? eraSize = null,
         string? h264Impl = null)
     {
@@ -949,6 +998,19 @@ public static class Cli
         // chain is the single era pass (or a single blank mp4 pass that the
         // Enabled flag keeps from running).
         int count = Math.Max(1, Math.Max(args.RecompressArgs.Count, args.RecompressCodecs.Count));
+
+        // v7.9.8.8: what this chain can do with a quality number and with a
+        // bitrate. A property of the chain, not of the pass being built -- see
+        // the refusal below.
+        bool anyQualityPass = false;
+        bool anyBitratePass = false;
+        foreach (string name in args.RecompressCodecs)
+        {
+            SecondPassVideoCodec? known = RecompressCodecs.FindVideo(name);
+            if (known is null) continue;        // reported as an unknown codec in the loop
+            if (known.QualityFlag.Length > 0) anyQualityPass = true;
+            else anyBitratePass = true;
+        }
         for (int i = 0; i < count; i++)
         {
             string? fragment = i < args.RecompressArgs.Count ? args.RecompressArgs[i] : null;
@@ -969,8 +1031,54 @@ public static class Cli
                         + $"known: {RecompressCodecs.AudioIdList}, or copy");
 
                 int kbps = At(args.RecompressAudioKbpsList, i) ?? 0;
+                int? quality = At(args.RecompressQualities, i);
+                int? videoKbps = At(args.RecompressVideoKbps, i);
+
+                // v7.9.8.8: these two flags used to only half-exist. A quality
+                // number handed to libopenh264 was dropped on the floor (no
+                // QualityFlag to put it in) and a bitrate handed to libx264 was
+                // ignored, both silently -- the pass then ran on the encoder's
+                // own default and looked like the flag had done something.
+                //
+                // A number is a mistake only when *no* pass in the chain can
+                // use it; that is the trap (one pass, the wrong kind of number).
+                // A chain of both kinds -- x264 for the viewing copy, OpenH264
+                // for the site's look -- is legitimate, and there one number
+                // per kind is the only way to say what each pass gets, so it
+                // applies where it applies and says so.
+                if (quality is not null && codec.QualityFlag.Length == 0)
+                {
+                    if (!anyQualityPass)
+                    {
+                        return (rc, $"--recompress-quality does not apply to {codec.Name} (pass {i + 1}): "
+                            + "it has no quality flag, so the number would be dropped; "
+                            + "give its bitrate with --recompress-video-kbps instead");
+                    }
+                    if (!args.Quiet)
+                    {
+                        Console.WriteLine($"NOTE: --recompress-quality does not apply to "
+                            + $"{codec.Name} (pass {i + 1}); it uses --recompress-video-kbps");
+                    }
+                }
+                if (videoKbps is not null && codec.QualityFlag.Length > 0)
+                {
+                    if (!anyBitratePass)
+                    {
+                        return (rc, $"--recompress-video-kbps does not apply to {codec.Name} (pass {i + 1}): "
+                            + $"it is driven by {codec.QualityFlag}; use --recompress-quality");
+                    }
+                    if (!args.Quiet)
+                    {
+                        Console.WriteLine($"NOTE: --recompress-video-kbps does not apply to "
+                            + $"{codec.Name} (pass {i + 1}); it is driven by {codec.QualityFlag}");
+                    }
+                }
+
                 fragment = string.Join(' ',
-                    RecompressCodecs.VideoArgs(codec, At(args.RecompressQualities, i) ?? codec.DefaultQuality),
+                    RecompressCodecs.VideoArgs(
+                        codec,
+                        codec.QualityFlag.Length > 0 ? quality ?? codec.DefaultQuality : null,
+                        videoKbps),
                     RecompressCodecs.AudioArgs(audio, kbps > 0 ? kbps : null, null, null));
                 container ??= RecompressCodecs.DefaultContainer(codec.Name, audio) ?? codec.Containers[0];
             }

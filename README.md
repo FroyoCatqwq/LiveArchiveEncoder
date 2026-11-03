@@ -8,6 +8,22 @@ a "video site" recompress pass and per-era presets sit on top of the realtime
 encoder, all of them off by default — with no flags given, the output is still
 exactly what v6.3.3 would have produced.
 
+> **v7.9.8.8:** OpenH264's knobs are connected. The second pass used to emit
+> `-c:v libopenh264` with **nothing else** when no bitrate was typed — no
+> `-b:v`, no `-rc_mode` — so the encoder ran on its built-in 2 Mbps target: a
+> 300 kbps request produced **2002 kbps** (measured, 640x480). It now always
+> carries a bitrate (`--recompress-video-kbps`, default 300) and an explicit
+> mode. The mode is selectable — `bitrate` (holds the ceiling), `quality`
+> (spends ~20% over to keep the picture) or `timestamp` — and two values are
+> refused with the measurement that justifies it: `buffer` ignores the bitrate
+> (300 kbps asked, 3.1 Mbps produced) and `off` pins QP to the library's
+> internal 26 with no exposed way to change it. On that last point: there is no
+> `-qp` in this encoder. The wrapper never reads `global_quality`, FFmpeg says
+> so out loud, and `-qmin/-qmax` change nothing at `RC_OFF_MODE` (qmin = qmax of
+> 10 and of 51 produce byte-identical files). `--openh264-skip-frames` is opt-in:
+> without it the bitrate is a target, with it a ceiling (354 vs 302 kbps at
+> 300k), and the fps ladder already owns frame rate.
+
 > **v7.9.1:** the static text watermark stage was retired (code archived under
 > `archive/retired/`, so it can come back as a separate project). Subtitle
 > burning/copying, added in v7.9, covers the "put text on the picture" job.
@@ -305,9 +321,12 @@ Two flags are additions rather than ports:
 | `--audio-mode inline\|separate\|auto` | audio routing; `inline` (default) is v6.3.3 behaviour, see below |
 | `--hwaccel NAME` | hardware decode; `off` (default), `auto`, or any method from `ffmpeg -hwaccels`. The method is probed by actually decoding one frame and falls back to software when it fails |
 | `--recompress`, `--recompress-args ARGS` | re-encode the result the way a video site would. You write the middle of the FFmpeg command (`-vf scale=320:240,fps=15 -c:v libx264 -crf 28 …`); the program owns `-i` and the output path, and the fragment is tokenised and vetted so a stray path cannot overwrite your source. Off by default |
-| `--recompress-codec NAME` | pick the second pass's codec by name instead of writing a fragment — `libx264`, `libx265`, `libvpx-vp9`, `libvpx`, `libaom-av1`, `libsvtav1`, `flv`, `mpeg4`, `mpeg2video`, `mjpeg`, `wmv2`, `h263`. The container follows the codec (VP9 → `.webm`, x265 → `.mp4`), and a pair the muxer cannot hold is refused before anything runs |
+| `--recompress-codec NAME` | pick the second pass's codec by name instead of writing a fragment — `libx264`, `libopenh264`, `libx265`, `libvpx-vp9`, `libvpx`, `libaom-av1`, `libsvtav1`, `flv`, `mpeg4`, `mpeg2video`, `mjpeg`, `wmv2`, `h263`, `rv10`, `rv20`. The container follows the codec (VP9 → `.webm`, x265 → `.mp4`), and a pair the muxer cannot hold is refused before anything runs |
 | `--recompress-quality N` | the codec's own knob: `-crf` for x264/x265/VP9/AV1, `-q:v` for the MPEG family. Repeatable since v7.9.8.4 — each value pairs with the `--recompress-codec` at the same position, because 26 is a sensible CRF and an absurd MPEG quantiser; a single value still covers the whole chain |
 | `--recompress-audio-codec NAME` | `aac`, `libmp3lame`, `libopus`, `libvorbis`, `ac3`, `flac` or `copy`, with the same container check |
+| `--recompress-video-kbps N` (v7.9.8.8) | bitrate for a pass whose codec has no quality flag (`libopenh264`); repeatable, default 300. Without it the command used to carry no bitrate at all and the encoder fell back to its built-in 2 Mbps. A chain that mixes both kinds of codec — `libx264` then `libopenh264` — takes both numbers, each on the pass that can use it, and says so with a note on the pass that cannot |
+| `--openh264-rc MODE` (v7.9.8.8) | OpenH264 rate control: `bitrate` (default, holds the ceiling), `quality` (spends ~20% over to keep the picture) or `timestamp`. `buffer` and `off` are refused — the first ignores the bitrate (300 kbps asked, 3.1 Mbps produced), the second pins QP to an internal 26 that no flag can move |
+| `--openh264-skip-frames` (v7.9.8.8) | let OpenH264 drop frames to reach the target bitrate. Off by default: the fps ladder owns frame rate, and a second dropper behind its back makes a rate drop look like a source problem. Measured at 300 kbps: 354 kbps without, 302 with |
 | `--subtitle-font FAMILY`, `--subtitle-font-dir DIR` | force a font family over the one an ASS file names (also gives SRT/VTT one, which they never specify), and add an extra font directory |
 | `--list-subtitle-fonts`, `--font-import PATH` | report the fonts a subtitle file asks for and whether this machine has them; copy font files into the program's own `fonts` directory |
 | `--recompress-only` | run that pass on an existing file and stop — no live encode, no encoder discovery (`LiveArchiveEncoder clip.mkv --recompress-only --era youku07`) |
