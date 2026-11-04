@@ -44,6 +44,16 @@ public sealed class OutputAndAudioDefaultsTests
     [Test]
     public async Task ANetworkSourceDoesNotWriteItsCaptureBackOverTheShare()
     {
+        // A UNC path is only a network path to Windows: on Unix the same string
+        // is a relative name with no separator at all, and the rule there reads
+        // the mount table (/proc/self/mountinfo), which a test cannot fake.
+        // The Windows job in CI runs this; the Linux job skips it.
+        if (!OperatingSystem.IsWindows())
+        {
+            Skip.Test("UNC semantics are Windows-only; a Linux share needs a real mount");
+            return;
+        }
+
         // A UNC path needs no server to be recognised: the shape of the string
         // is the whole test, which is also what the rule is based on.
         (FileInfo path, bool moved) = OutputNaming.ForSource(
