@@ -104,6 +104,18 @@ public static class Validation
         if (c.BufferFrames <= 0) throw new ArgumentException("capture buffer must be > 0");
         if (c.Width <= 0 || c.Height <= 0) throw new ArgumentException("resolution must be positive");
         if (c.Qv < 0) throw new ArgumentException("quality must be >= 0");
+        // v7.9.8.10: only the lower bound was checked. --qv 999 (or -q:v 0 on
+        // an MPEG encoder) reached FFmpeg and died in preflight with an opaque
+        // "Video preflight failed", while QualityRange already knew the scale.
+        // Bitrate-scale encoders have no quality number, so their (0, 0) range
+        // is skipped rather than used.
+        if (c.Encoder is not null)
+        {
+            (int qMin, int qMax) = EncoderMath.QualityRange(EncoderMath.ScaleOf(c.Encoder.Name));
+            if (qMax > qMin && (c.Qv < qMin || c.Qv > qMax))
+                throw new ArgumentException(
+                    $"quality for {c.Encoder.Name} must be between {qMin} and {qMax}, not {c.Qv}");
+        }
         if (c.AudioKbps <= 0) throw new ArgumentException("audio bitrate must be > 0");
         if (c.AudioChannels <= 0) throw new ArgumentException("audio channels must be > 0");
         if (c.AudioRate is not null && c.AudioRate <= 0)

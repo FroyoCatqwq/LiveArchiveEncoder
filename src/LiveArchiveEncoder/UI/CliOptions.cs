@@ -1318,12 +1318,15 @@ public static class CliParser
             ("--nnedi-status", "", "print the installed NNEDI3 weights, then exit"),
             ("--nnedi-weights", "PATH", "use this weights file (or folder) instead of the installed one"),
             ("--version", "", "print the program version and exit"),
+            ("--cpu-info", "", "print the runtime's instruction sets and Vector<byte>.Count, then exit"),
             ("--update-check", "", "ask the release feed for a newer build, then exit "
                                  + "(0 = up to date, 3 = newer available, 2 = could not check)"),
             ("--update", "", "download and install the newest build in place, then exit "
-                           + "(honours --proxy and --gh-proxy)"),
+                           + "(honours --proxy and --gh-proxy; a release with no SHA-256 "
+                           + "digest is refused)"),
             ("--update-feed", "URL", "ask this release feed instead of GitHub's; it has to "
-                                   + "return GitHub release JSON (a mirror or a local server)"),
+                                   + "return GitHub release JSON (a mirror or a local server). "
+                                   + "Asset URLs must be https, or loopback http for local feeds"),
             ("--no-update-check", "", "do not look for a newer build when the shell starts"),
             ("--play", "MODE", "after encoding: off, ffplay or external (default: off)"),
             ("--player", "PATH", "external player executable (default: system file association)"),
@@ -1331,7 +1334,7 @@ public static class CliParser
             ("--recompress-args", "ARGS", "FFmpeg arguments for one pass; -i and the output are "
                                         + "supplied. Repeatable: each occurrence is one more "
                                         + "transcode, applied to the previous one's output "
-                                        + "(e.g. -args '-c:v libx264 -crf 26' -args '-c:v flv -q:v 9' "
+                                        + "(e.g. --recompress-args '-c:v libx264 -crf 26' --recompress-args '-c:v flv -q:v 9' "
                                         + "= two hops)"),
             ("--recompress-codec", "NAME", $"a pass's video codec instead of a fragment: {PostProcess.RecompressCodecs.VideoIdList}"
                                          + " (repeatable, paired by position with the fragments)"),

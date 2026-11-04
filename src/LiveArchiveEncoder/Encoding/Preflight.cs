@@ -95,6 +95,13 @@ public static class Preflight
                 cmd.AddRange(["-map", StreamSelection.VideoMap(videoStream)]);
             cmd.AddRange(vf.Args());
             cmd.AddRange([
+                // v7.9.8.10: -frames:v only caps the VIDEO stream. With an audio
+                // track the trial used to encode the whole soundtrack before it
+                // returned -- on an hour-long or remote source that is not a
+                // "fail in seconds" trial, and it could hit the 120 s cap below
+                // and abort a perfectly valid configuration. Halve a second of
+                // output is enough to open both encoders.
+                "-t", "0.5",
                 "-frames:v", "3",
                 "-c:v", encoder.Name,
             ]);

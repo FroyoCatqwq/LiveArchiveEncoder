@@ -78,13 +78,16 @@ def test_recompress_stages_and_only_then_promotes(exe, workdir):
     halfway left a short file under the real name and the previous delivery gone.
 
     The check here is the seam itself rather than a mid-encode failure: the
-    destination is occupied by a directory, so the rename has to fail. What must
-    happen is a clean error, the occupant untouched, and no ".part" left behind --
-    the three things that used to be "the product is gone and a half file is in
-    its place".
+    destination is occupied by a directory, so the rename has to fail. The
+    occupant must be untouched. v7.9.8.10 changed the third expectation: the
+    encode DID finish, so the finished .part is now kept (and its path printed)
+    instead of being deleted by the catch that used to Discard() it on any error.
     """
     out = workdir("realmedia")
     live = out / "stage.avi"
+    for stale in out.glob("*.part*"):
+        if stale.is_file():
+            stale.unlink()
     first = run([str(exe), str(harness.SRC), str(live), "--encoder", "mpeg4",
                  "--end", "00:00:03", "--ffmpeg-source", "path"])
     assert first.returncode == 0, first.stderr[-300:]
@@ -104,4 +107,8 @@ def test_recompress_stages_and_only_then_promotes(exe, workdir):
 
     assert proc.returncode != 0, "a rename that cannot succeed must fail the run"
     assert blocked.is_dir(), "the occupant was removed by the failed pass"
-    assert not (out / "stage_web.part.mp4").exists(), "a .part file was left behind"
+    parts = [p for p in out.glob("*.part*") if p.is_file()]
+    assert parts, "the finished encode was discarded when only its rename failed"
+    assert any(p.stat().st_size > 0 for p in parts), "the kept part is empty"
+    combined = (proc.stdout + proc.stderr).lower()
+    assert "kept" in combined, "the user was not told where the finished file is"

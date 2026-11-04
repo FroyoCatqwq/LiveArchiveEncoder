@@ -409,10 +409,25 @@ public static class AudioCatalog
         if (info is null) return (8, 640, []);
         if (info.KbpsBands.Length == 0) return (info.MinKbps, info.MaxKbps, []);
 
+        // v7.9.8.10: with no rate the old loop fell through to the LAST band --
+        // the highest sample rate and therefore the narrowest set of bitrates.
+        // That contradicted the "widest band" promise above and rejected values
+        // (mp2 at 16 kbps, libvorbis at 16 kbps) that FFmpeg happily accepts at
+        // a lower rate. Until the source is probed, accept the union of all
+        // bands; Validate and NearestKbps both read this result.
+        if (rate is null)
+        {
+            int min = info.KbpsBands.Min(band => band.MinKbps);
+            int max = info.KbpsBands.Max(band => band.MaxKbps);
+            int[] values = info.KbpsBands.SelectMany(band => band.Values)
+                .Distinct().Order().ToArray();
+            return (min, max, values);
+        }
+
         (int Rate, int MinKbps, int MaxKbps, int[] Values) chosen = info.KbpsBands[0];
         foreach ((int Rate, int MinKbps, int MaxKbps, int[] Values) band in info.KbpsBands)
         {
-            if (rate is null || band.Rate <= rate.Value) chosen = band;
+            if (band.Rate <= rate.Value) chosen = band;
         }
         return (chosen.MinKbps, chosen.MaxKbps, chosen.Values);
     }

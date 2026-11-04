@@ -458,7 +458,11 @@ public static class Program
             // Interrupt.Request() already reported it on the way in.
             return 130;
         }
-        catch (Exception exc) when (exc is FileNotFoundException or InvalidOperationException
+        // v7.9.8.10: IOException itself was missing (only its FileNotFound
+        // subclass was listed). A full disk, a dropped share, a target held by
+        // a player or an overlong path therefore escaped as an unhandled
+        // exception with a stack trace instead of an "ERROR:" line and exit 1.
+        catch (Exception exc) when (exc is IOException or InvalidOperationException
                                         or ArgumentException or TimeoutException
                                         or UnauthorizedAccessException)
         {
@@ -543,8 +547,6 @@ public static class Program
                 Console.Error.WriteLine(L.T("update.page", page));
             return 1;
         }
-
-        if (report.DigestMissing) Console.WriteLine(L.T("update.digestmissing"));
 
         if (report.Kind == Update.Outcome.UpToDate)
         {

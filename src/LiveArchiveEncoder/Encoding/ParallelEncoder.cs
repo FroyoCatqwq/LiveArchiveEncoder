@@ -1,4 +1,3 @@
-using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
 using LiveArchiveEncoder.FFmpeg;
@@ -60,6 +59,8 @@ public static class ParallelEncoder
         // The join lands in a ".part" sibling and is renamed onto the real name
         // only once it has passed the checks below.
         FileInfo part = Core.OutputFile.PartPath(dst);
+        // v7.9.8.10: once every join check has passed, the part is the product.
+        bool finished = false;
 
         try
         {
@@ -162,7 +163,11 @@ public static class ParallelEncoder
             if (string.Equals(dst.Extension, ".mkv", StringComparison.OrdinalIgnoreCase))
             {
                 // The join already is the final container: no second pass.
-                File.Move(joinedPath, part.FullName, overwrite: true);
+                // v7.9.8.10: %TEMP% and the output directory can be on different
+                // volumes (a share, another disk). A rename is then unavailable
+                // and the whole shard run used to be lost at this last step.
+                try { File.Move(joinedPath, part.FullName, overwrite: true); }
+                catch (IOException) { File.Copy(joinedPath, part.FullName, overwrite: true); }
             }
             else
             {
@@ -235,6 +240,7 @@ public static class ParallelEncoder
             }
 
             // Every check passed, so the part file can take the real name.
+            finished = true;
             Core.OutputFile.Promote(part, dst);
             double measuredDuration = joined ?? span;
 
@@ -262,9 +268,10 @@ public static class ParallelEncoder
                 ElapsedSeconds = results.Max(r => r.ElapsedSeconds),
             };
         }
-        catch
+        catch (Exception exc)
         {
-            Core.OutputFile.Discard(part);
+            if (finished) Core.OutputFile.Keep(part, dst, exc.Message);
+            else Core.OutputFile.Discard(part);
             throw;
         }
         finally

@@ -72,6 +72,12 @@ public static class RealtimeEncoder
 
         (int? audioRate, int audioChannels, int audioKbps) = Validation.EffectiveAudioSettings(
             o.Encoder, o.AudioEncoder, o.AudioRate, o.AudioChannels, o.AudioKbps);
+        // v7.9.8.10: write the snapped numbers back. BuildEncoderCommand, the
+        // preflight trial and the rate maths used to read o.AudioKbps while
+        // validation and the separate audio track used the snapped value --
+        // three different -b:a for one run, and a preflight that could fail on
+        // a bitrate the real encode never used.
+        o = o with { AudioRate = audioRate, AudioChannels = audioChannels, AudioKbps = audioKbps };
 
         var config = new Config
         {
@@ -245,6 +251,9 @@ public static class RealtimeEncoder
                 threads: o.Threads, vf: filter, muxer: muxer,
                 stream: stream,
                 videoStream: o.VideoStream,
+                // v7.9.8.10: the trial has to open the selected track, not 0:a:0,
+                // or it proves nothing about -ac/-ar on the real command.
+                audioStream: o.AudioStream,
                 x264Preset: o.Encoder.Name == "libx264" ? o.X264Preset : null,
                 x264Tune: o.Encoder.Name == "libx264" ? o.X264Tune : null,
                 x264Profile: o.Encoder.Name == "libx264" ? o.X264Profile : null,
@@ -362,17 +371,23 @@ public static class RealtimeEncoder
 
         // An embedded track was staged to a temp directory for the filter; it
         // goes away whether the encode worked or not, exactly like the part file.
+        // v7.9.8.10: cleanup is only for a run that did NOT finish. Once Execute
+        // has returned, the part IS the product; a rename failure (target held
+        // by a player, share refusing the replace) must keep it, not delete it.
+        bool finished = false;
         try
         {
             EncodeResult result = Execute(
                 o, part, decCmd, encCmd, frameSize, targetSlots, duration, hasAudio,
                 stream.PixFmt, transportFmt, width, height, scaleAlgo, resolvedEnd, cancellationToken);
+            finished = true;
             Core.OutputFile.Promote(part, dst);
             return result;
         }
-        catch
+        catch (Exception exc)
         {
-            Core.OutputFile.Discard(part);
+            if (finished) Core.OutputFile.Keep(part, dst, exc.Message);
+            else Core.OutputFile.Discard(part);
             throw;
         }
         finally
@@ -454,6 +469,12 @@ public static class RealtimeEncoder
 
         (int? audioRate, int audioChannels, int audioKbps) = Validation.EffectiveAudioSettings(
             o.Encoder, o.AudioEncoder, o.AudioRate, o.AudioChannels, o.AudioKbps);
+        // v7.9.8.10: write the snapped numbers back. BuildEncoderCommand, the
+        // preflight trial and the rate maths used to read o.AudioKbps while
+        // validation and the separate audio track used the snapped value --
+        // three different -b:a for one run, and a preflight that could fail on
+        // a bitrate the real encode never used.
+        o = o with { AudioRate = audioRate, AudioChannels = audioChannels, AudioKbps = audioKbps };
 
         // Probe muxability with a 3-frame synthetic clip before spending the whole
         // realtime video pass on it. Legacy muxers can accept the encode and still
@@ -478,6 +499,9 @@ public static class RealtimeEncoder
         // %TEMP%\live_archive_v7_* outlived the command.
         using var audioStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         Task<CaptureResult>? audioTask = null;
+        // v7.9.8.10: set once the muxed part has passed every check, so a
+        // failure after that point keeps the product instead of discarding it.
+        bool finished = false;
 
         try
         {
@@ -540,6 +564,7 @@ public static class RealtimeEncoder
             // drops the copied video stream. Verify the streams actually landed
             // -- on the part file, before it replaces anything.
             VerifyMuxedOutput(o.FFprobe, part, expectedAudio: true, expectedDuration: span);
+            finished = true;
             Core.OutputFile.Promote(part, dst);
 
             // The video-only pass measures the video bitrate directly; the final
@@ -571,9 +596,10 @@ public static class RealtimeEncoder
                 ElapsedSeconds = video.ElapsedSeconds,
             };
         }
-        catch
+        catch (Exception exc)
         {
-            Core.OutputFile.Discard(part);
+            if (finished) Core.OutputFile.Keep(part, dst, exc.Message);
+            else Core.OutputFile.Discard(part);
             throw;
         }
         finally

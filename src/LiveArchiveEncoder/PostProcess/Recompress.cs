@@ -115,8 +115,11 @@ public static class Recompress
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
                                        or InvalidOperationException)
         {
-            OutputFile.Discard(part);
-            return (false, $"could not put the recompressed file in place: {exc.Message}");
+            // v7.9.8.10: the second pass already succeeded. Discard() used to
+            // delete the only good copy here; keep it and say where instead.
+            OutputFile.Keep(part, dst, exc.Message);
+            return (false, $"could not put the recompressed file in place: {exc.Message}; "
+                + $"the finished file is kept at {part.FullName}");
         }
 
         return (true, null);

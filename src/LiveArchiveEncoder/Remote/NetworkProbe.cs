@@ -119,9 +119,6 @@ public static class NetworkProbe
         return measured;
     }
 
-    /// <summary>Forget every cached measurement (used by the diagnostics path).</summary>
-    public static void Reset() => Cache.Clear();
-
     private static NetworkMeasurement? FromReads(string source, double requiredKbps)
     {
         try

@@ -142,18 +142,58 @@ public sealed class ResilienceTests
     // ---- the ".part" output scheme ---------------------------------------
 
     [Test]
-    [Arguments("/tmp/x/out.mp4", "/tmp/x/out.part.mp4")]
-    [Arguments("/tmp/x/out.tar.gz", "/tmp/x/out.tar.part.gz")]
-    [Arguments("/tmp/x/noext", "/tmp/x/noext.part")]
-    public async Task ThePartSiblingKeepsTheExtension(string final, string expected)
+    [Arguments("/tmp/x/out.mp4", ".mp4")]
+    [Arguments("/tmp/x/out.tar.gz", ".gz")]
+    // With no extension of its own, the part ends in ".part" -- exactly what
+    // the pre-7.9.8.10 fixed name did, so FFmpeg sees the same (absent) hint.
+    [Arguments("/tmp/x/noext", ".part")]
+    public async Task ThePartSiblingKeepsTheExtension(string final, string extension)
     {
         // Both sides go through FileInfo: a rooted-but-drive-less path such as
-        // "/tmp/x/out.mp4" is "D:\tmp\x\out.mp4" to Windows, and comparing the
-        // raw strings failed on the drive letter rather than on where the
-        // ".part" landed.
+        // "/tmp/x/out.mp4" is "D:\tmp\x\out.mp4" to Windows.
         string path = final.Replace('/', Path.DirectorySeparatorChar);
-        string want = new FileInfo(expected.Replace('/', Path.DirectorySeparatorChar)).FullName;
-        await Assert.That(OutputFile.PartPath(new FileInfo(path)).FullName).IsEqualTo(want);
+        var target = new FileInfo(path);
+        FileInfo part = OutputFile.PartPath(target);
+        await Assert.That(part.Extension).IsEqualTo(extension);
+        await Assert.That(part.Name).Contains(".part");
+        await Assert.That(part.DirectoryName).IsEqualTo(target.DirectoryName);
+        await Assert.That(part.FullName).IsNotEqualTo(target.FullName);
+    }
+
+    [Test]
+    public async Task EveryRunGetsItsOwnPartName()
+    {
+        // v7.9.8.10: a fixed "clip.part.mp4" could BE a user's finished file
+        // (a manual resume), and two runs aimed at the same output -- or two
+        // outputs differing only in case on Windows -- shared one part name.
+        var target = new FileInfo(Path.Combine(Path.GetTempPath(), "clip.mp4"));
+        FileInfo first = OutputFile.PartPath(target);
+        FileInfo second = OutputFile.PartPath(target);
+        await Assert.That(first.FullName).IsNotEqualTo(second.FullName);
+        await Assert.That(first.Name).IsNotEqualTo("clip.part.mp4");
+    }
+
+    [Test]
+    public async Task KeepingAFinishedPartNeverDeletesIt()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"lae-keep-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var final = new FileInfo(Path.Combine(dir, "clip.mp4"));
+        try
+        {
+            FileInfo part = OutputFile.PartPath(final);
+            await File.WriteAllTextAsync(part.FullName, "a two-hour capture");
+
+            // What the callers now do when Promote fails after a complete run.
+            OutputFile.Keep(part, final, "the destination is held by a player");
+
+            await Assert.That(File.Exists(part.FullName)).IsTrue();
+            await Assert.That(await File.ReadAllTextAsync(part.FullName)).IsEqualTo("a two-hour capture");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     /// <summary>

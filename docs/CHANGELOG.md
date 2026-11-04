@@ -18,6 +18,101 @@
 
 ---
 
+## v7.9.8.10（2026-11-04）
+
+一次全项目审查加清理，**没有新功能**。五路只读审查（正确性、资源与生命周期、
+CLI/CUI 与文档契约、死代码、测试有效性）逐条复核后，修的都是"绿着但其实坏了"
+或"只在老用户/长任务上暴露"的那一类。
+
+### 1. CUI 选编码器时吞掉异常，还跳过半段同步（P0）
+
+`encoder.containers` 模板要两个参数，`Cui.cs` 只传了一个；`string.Format` 抛
+`FormatException`，被 `ChooseEncoder` 的 catch 打成"Invalid selection"。而此时
+`c.Encoder` 已经换掉，**后面的 fps、尺寸、质量、音频、默认输出路径全部没跑**——
+菜单显示新编码器，配置却是旧编码器的。`audio.replaced` 是同一个错误（三个槽传两个）。
+两处都补齐，并加了一条参数化断言：两种语言里每个带占位符的模板都必须能用自己的
+参数格式化，且参数不被吞。还补了一条 CUI e2e，直接钉住"选编码器后不能出现
+Invalid selection、必须打印容器列表"。
+
+### 2. 编码成功但改名失败时，唯一的好成品被删掉（P0）
+
+目标被播放器占用、共享盘拒绝替换、路径过长——这些只会让 `OutputFile.Promote` 失败，
+编码其实已经完整结束。三处调用方（inline / split / 分片）的 catch 一律 `Discard(part)`，
+于是几十分钟的实时录制被删得只剩一句"could not put ... in place"。现在用
+`finished` 标志把"编码失败"与"改名失败"分开：后者保留 part、打印路径让用户手工改名
+（`OutputFile.Keep`）。二次压缩那条同样修了，`test_realmedia.py` 的断言从
+"不许留 .part" 改成"必须留下非空的 part 并告知路径"。
+
+顺带把 `.part` 名加上进程 ID + 随机标签：固定的 `clip.part.mp4` 可能正好是用户
+自己的成品，而 Windows 上只有大小写不同的两个输出会共用同一个 part 互相截断。
+分片合并从 `%TEMP%` 跨卷搬到目标目录时 `File.Move` 也加了 copy 回退。
+
+### 3. 自更新的三条信任边界（P0）
+
+- `LAE_UPDATE_TOKEN` 以前会发给 `--update-feed` 指定的**任意主机**；现在只有
+  GitHub 官方域名才带凭据。
+- 资产 URL 现在只认 https（本地测试用的回环 http 保留），明文下载可执行二进制不再可能。
+- **⚠ 行为变化**：发布没有 SHA-256 摘要时，以前"只校验大小"照样解压、跑
+  `--version`、交出程序，而脚本还拿到 exit 0。现在直接 `Outcome.Failed`（exit 1）。
+  size 和 URL 出自同一份不可信 JSON，不构成完整性证明。
+- `TryReplace` 的注释声称"中途失败会留下完整的旧版本"，实现却相反：前 N-1 个文件
+  已被覆盖且没有备份。现在先把每个目标复制进 staging 的 `.rollback`，任一文件失败
+  就从副本恢复；同时不再只复制 `LiveArchiveEncoder*` 前缀文件。
+
+### 4. 参数与命令的一致性
+
+- `--era-native` 以前解析了却没人读，`--era-modern --era-native` 会反向生效；
+  现在显式的 native 优先，编码与 `--recompress-only` 共用 `Cli.EraNativeOf`。
+- `AudioCatalog.KbpsBand(codec, null)` 以前返回**最后**（最窄）那一档，与"最宽 band"
+  的注释相反：`--audio-kbps 16` 配 `mp2`/`libvorbis` 被判非法，或悄悄改成 32。
+  rate 未知时现在取所有 band 的并集；显式 rate 仍旧按窄档校验。
+- CUI 应用 era 预设时没有调用 `AudioCatalog.Effective`，内置 rv20/rm 预设写下
+  16000 Hz 而 `real_144` 只认 8000，点"开始编码"就拒绝**程序自带的预设**，CLI 却能跑。
+- `--qv 999` / `-q:v 0` 以前只在 preflight 里以一句无关的 "Video preflight failed"
+  晚失败。现在按 `EncoderMath.QualityRange` 在校验阶段报出区间；无质量刻度的
+  `libopenh264` 跳过。
+- `RealtimeOptions` 的音频码率现在把 snap 后的值写回，校验、preflight、inline 的
+  `-b:a`、分离音轨、码率估算五处同源；preflight 也终于拿到 `--audio-stream` 选中的轨。
+- preflight 只限了视频 3 帧，带音轨的长源会把整条音轨编完再撞 120 秒上限；
+  现在加 `-t 0.5`。
+- `Program.Main` 的顶层 catch 漏了 `IOException` 本身（只列了 `FileNotFoundException`），
+  磁盘满/UNC 断开会变成带 stack trace 的崩溃。
+
+### 5. 资源、进程与测试基础设施
+
+- `Smb.cs` 重定向了 stderr 却从不读：PowerShell 写满 4 KB 管道就死锁，
+  `WaitForExit(15000)` 超时后共享盘一律显示"未连接"。现在并发抽干两条管道并在
+  查询失败时打印原因。
+- `ProcessRunner` 超时/取消时丢弃两个读取 Task，FFmpeg 的最后一句诊断全丢，
+  还会留下未观察异常；现在先 drain 再把已读到的输出附进异常。
+- `tools/e2e.py` 把 pytest 的 exit 5（0 个用例）无条件当成功——marker 写错、
+  模块改名、xdist 全挂都会打印"both phases green"而一个测试没跑。现在每个 phase
+  先 `--collect-only` 核对收集数，只有用户显式传 `-k` 且确实 0 个用例才容忍。
+- 4 个交互提示传了可用编码器清单却没在模板里显示，现在真的列出来。
+
+### 6. 清理（零引用，逐项 grep 复核）
+
+- 16 个 en/zh 成对残留的本地化 key、5 个零引用成员（`DefaultDither`、
+  `ModernRecompressArgs`、`ForSite`、`RefreshEncoderCaps`、`NetworkProbe.Reset`）、
+  8 个未使用的 using，以及随"无 digest 仍可更新"一起失效的 `DigestMissing` 字段、
+  两处打印和 `update.digestmissing` 文案。
+- `docs/runs/` 下 12 份历史 harness 输出（含 3 份字节级完全相同的错误日志）与
+  `docs/parallel-split-verification.md`（结论推荐已被删除的 Turbo，引用不存在的
+  `WaitUntil`）；`README.md` 的目录树、`archive/README.md` 的归档清单、
+  `.slnx` 里悬空的 `Watermark.cs` 一并校正。
+- 文档里照抄即失败的命令：`-o`（本程序没有这个旗标，输出是第二个位置参数）、
+  `-args`、`--size`、`--list-encoders`；`--help` 补上一直没列的 `--cpu-info`；
+  退出码表补 3、参数页补 32/33、单测数与编解码器清单对齐、GitHub CI 的
+  `dotnet test` 改回 MTP 需要的 `--solution` 写法。
+
+### 数
+
+单测 **654**（653 通过 / 1 跳过）、零警告；完整 v7 e2e 绿。新增断言逐组做过
+变异验证（把修复改回去必须变红并指名）。这一版只出依赖版（JIT），Linux 包仍
+只做结构核对。
+
+---
+
 ## v7.9.8.9（2026-11-04）
 
 三个"默认值站错了地方"，都属于**不该让用户为程序的默认选择买单**。
@@ -34,7 +129,7 @@
 ```
 
 （就是 `config.json` 所在的那个目录，启动横幅里一直印着它。）**路径照样可以改**：菜单里的
-输出路径、命令行的 `-o` 都还是原样，用户给了路径就再也不动它；不给时每次按规则重算。
+输出路径、命令行给的输出位置参数都还是原样，用户给了路径就再也不动它；不给时每次按规则重算。
 程序会打印一行说明它去了哪里。
 
 ### 2. mp4 + H.264 的音频默认是 AAC
@@ -53,7 +148,7 @@
 后缀，并打印 `'.rm' is not a container libx264 can write; the file is written as .mp4`。
 
 更正出来的名字**不会覆盖没人指名的文件**：`out.mp4` 已存在就写 `out (2).mp4`；更正后正好
-是源文件（`-o src.rm`，源是 `src.mp4`）时同样让位成 `src (2).mp4`。CLI 与 CUI 走同一条规则。
+是源文件（`src.rm`，源是 `src.mp4`）时同样让位成 `src (2).mp4`。CLI 与 CUI 走同一条规则。
 
 ### 顺带
 
@@ -63,7 +158,7 @@
 ### 数
 
 单测 **645**（644 通过 / 1 跳过），零警告。新增 6 组断言，全部做过变异验证。
-真机验证：`out.rm` → `out.mp4`、`out.mp4` 已存在 → `out (2).mp4`、`-o src.rm` → `src (2).mp4`
+真机验证：`out.rm` → `out.mp4`、`out.mp4` 已存在 → `out (2).mp4`、`src.rm` → `src (2).mp4`
 （源文件字节数不变）；CUI 带一份 mp3 设置启动，横幅后打印换用 AAC，菜单第 6 行显示 aac，
 退出后设置里存的是 aac。
 

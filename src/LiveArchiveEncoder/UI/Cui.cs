@@ -494,8 +494,6 @@ public static partial class Cui
             return;
         }
 
-        if (report.DigestMissing) Console.WriteLine(L.T("update.digestmissing"));
-
         if (report.Kind == Update.Outcome.UpToDate)
         {
             Console.WriteLine(L.T("update.uptodate", report.Tag ?? "?"));
@@ -1305,7 +1303,12 @@ public static partial class Cui
                 EncoderMath.AllowedContainers(effective);
             if (containers.Count > 1)
             {
-                Console.WriteLine(L.T("encoder.containers",
+                // v7.9.8.10: the template takes the encoder name AND the list.
+                // Passing only the list made string.Format throw; ChooseEncoder
+                // caught it as "Invalid selection" *after* c.Encoder had already
+                // been replaced, so the whole audio/fps/size sync below was
+                // skipped while the menu showed a new encoder.
+                Console.WriteLine(L.T("encoder.containers", effective.Name,
                     string.Join(", ", containers.Select(x => x.Format))));
             }
 
@@ -1326,12 +1329,18 @@ public static partial class Cui
             // current codec when it no longer muxed and then unconditionally
             // overwrite it on the next line, so the "keep what still works"
             // intent was never reached. Say what is being replaced, then pick.
-            if (c.AudioEncoder is { Length: > 0 } current
-                && !AudioCatalog.SupportsContainer(current, effective.FormatName))
-            {
-                Console.WriteLine(L.T("audio.replaced", current, effective.FormatName));
-            }
+            // v7.9.8.10: pick first, then say what replaced what. The template
+            // has three slots; this used to pass two (and did not yet know the
+            // replacement), so string.Format threw inside the same try that
+            // reports "Invalid selection" and aborted the rest of the sync.
+            string? previousAudio = c.AudioEncoder;
             c.AudioEncoder = EncoderMath.ChooseAudioEncoder(effective.FormatName, audioAvailable);
+            if (previousAudio is { Length: > 0 } current
+                && !AudioCatalog.SupportsContainer(current, effective.FormatName)
+                && c.AudioEncoder is { Length: > 0 } replacement)
+            {
+                Console.WriteLine(L.T("audio.replaced", current, effective.FormatName, replacement));
+            }
             (c.AudioRate, c.AudioChannels, c.AudioKbps) = AudioCatalog.Effective(
                 c.AudioEncoder, c.AudioRate, c.AudioChannels, c.AudioKbps, effective.FormatName);
 
@@ -2503,7 +2512,7 @@ public static partial class Cui
         };
 
     /// <summary>Apply a preset to a live config; shared by the menu and the wizard.</summary>
-    private static void ApplyPreset(
+    internal static void ApplyPreset(
         Config c, PostProcess.EraPreset preset, List<EncoderInfo> encoders, HashSet<string> audioAvailable)
     {
         // v7.9.7: an empty H264Impl means "follow the preset", so the effective
@@ -2539,6 +2548,15 @@ public static partial class Cui
             if (usable is { Count: > 0 } && (c.AudioEncoder is null || !usable.Contains(c.AudioEncoder)))
                 c.AudioEncoder = usable[0];
         }
+        // v7.9.8.10: ApplyLive writes the site's own rate/kbps/channels verbatim,
+        // but the audio codec may have just been swapped for one with different
+        // limits (rv20/rm -> real_144 only takes 8000 Hz). Every other CUI path
+        // calls Effective; this one did not, so ValidateCommonConfig refused
+        // built-in presets that the CLI ran after snapping. Keep the three
+        // numbers in the same shape the encoder will actually be started with.
+        if (c.AudioEncoder is { Length: > 0 })
+            (c.AudioRate, c.AudioChannels, c.AudioKbps) = AudioCatalog.Effective(
+                c.AudioEncoder, c.AudioRate, c.AudioChannels, c.AudioKbps, c.Encoder?.FormatName);
         if (c.OutputIsAuto && c.InputPath is not null && c.Encoder is not null)
             c.OutputPath = DefaultOutput(c.InputPath, c.Encoder);
 

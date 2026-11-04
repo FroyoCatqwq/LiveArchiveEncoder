@@ -83,7 +83,7 @@ AOT 版在 Ubuntu 22.04.5 上链接（glibc 2.35），**要求目标机的 glibc
 
 > **注意发行版自带的 FFmpeg。** 很多 Linux 发行版为了许可证原因裁掉了 rv20、
 > roqvideo 等编码器，桌面版 Ubuntu 的 `ffmpeg` 也可能来自受限仓库。用
-> `--list-encoders` 确认，或者直接让本工具下载一份完整构建。
+> `--list-filters` 看滤镜、进菜单第 3 项看探测出来的编码器列表，或者直接让本工具下载一份完整构建。
 
 ### 构建（Windows）
 
@@ -94,8 +94,8 @@ dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
 
 # 或者用构建脚本，顺便出 NativeAOT 单文件版
 tools\build.ps1 -Aot
-# -> publish\jit\LiveArchiveEncoder.exe       162 KB，需要 .NET 10 / .NET 11 运行时
-# -> publish\aot\LiveArchiveEncoder.exe       3.8 MB，单个文件、零依赖
+# -> publish\jit\LiveArchiveEncoder.exe       体积很小，需要 .NET 10 / .NET 11 运行时
+# -> publish\aot\LiveArchiveEncoder.exe       单个文件、零依赖
 
 # 按 .NET 11 目标框架构建（默认是 net10.0，见下）
 tools\build.ps1 -Tfm net11.0
@@ -270,7 +270,7 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--nnedi-status` | — | **v7.9.8.3**：打印已装权重的版本、大小、sha256、安装时间 |
 | `--nnedi-weights` | 已装的那份 | **v7.9.8.3**：用这个权重文件（或解压目录）代替受管安装 |
 | `--gh-proxy` / `--no-gh-proxy` | 自动探测 | **v7.9.8.3**：GitHub 下载走前沿（默认 `https://gh-proxy.com/`），`--no-gh-proxy` 表示不要并记住（见 §7.10）。**v7.9.8.5** 起程序自身的更新也走它 |
-| `--version` | — | **v7.9.8.5**：只打印版本号（如 `7.9.8.5`）然后退出 |
+| `--version` | — | 只打印版本号（如 `7.9.8.10`）然后退出 |
 | `--update-check` | — | **v7.9.8.5**：问一次发布页有没有新版，然后退出（**0**＝已最新，**3**＝有新版，**2**＝读不到） |
 | `--update` | — | **v7.9.8.5**：下载并就地安装最新版本，然后退出（替换正在运行的可执行文件，见 §7.18） |
 | `--update-feed URL` | GitHub | **v7.9.8.5**：改问这个发布源；必须是 GitHub release 形状的 JSON（镜像、内网服务器、测试用本地服务都行） |
@@ -321,6 +321,7 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `0` | 成功 |
 | `1` | 编码过程中出错（输入损坏、FFmpeg 失败、超时） |
 | `2` | 命令行/配置/环境问题（参数非法、找不到 ffmpeg、扩展名不匹配） |
+| `3` | `--update-check` 发现新版（不是错误） |
 | `130` | 被 Ctrl+C 中断 |
 
 Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `finally` 里把子 FFmpeg
@@ -385,6 +386,7 @@ Ctrl+C 会被接管而不是立刻杀进程：先取消编码循环，再在 `fi
                     （21–24 仅在编码器是 libx264 时出现）
 25. segment start   26. segment end     27. level bitrates
 28. container       29. crop anchor     30. bar colour      31. resolution presets
+32. OpenH264 rc    33. OpenH264 skip frames   (libopenh264 下才出现)
  0. Back
 ```
 
@@ -834,7 +836,7 @@ CUI 主菜单第 10 项 `Language / 界面语言` 可直接切换，并写进配
 接受 `en` / `zh` / `zh-CN` / `中文` 等写法。优先级：**命令行 `--lang` > 配置里存的
 语言 > 默认英文**。
 
-已翻译的范围：主菜单、参数页 31 项、编码器选择页、`Show configuration`、编码结果
+已翻译的范围：主菜单、参数页最多 33 项、编码器选择页、`Show configuration`、编码结果
 摘要、进度横幅里的标签（PixFmt / Output size / Time range 之类）、SMB 提示、
 字幕菜单（v7.9.1）。
 
@@ -1079,7 +1081,7 @@ archive.org、各种 CDN 都是）。FFmpeg 原生会说这两个协议，本工
 `注意：“.rm”是 libx264 写不出的容器，文件按 .mp4 输出。`。更正后的名字**不会覆盖**：
 
 - 已有 `out.mp4` → 写 `out (2).mp4`；
-- 更正后正好是源文件（`-o src.rm`，源是 `src.mp4`）→ 写 `src (2).mp4`。
+- 更正后正好是源文件（`src.rm`，源是 `src.mp4`）→ 写 `src (2).mp4`。
 
 **mp4 + H.264 的音频默认是 AAC**：`libx264` / `libopenh264` 配 mp4 时，音频默认 `aac`。
 设置文件里留着的旧选择（比如 2007 年 FLV 预设写下的 `libmp3lame`）在启动、换编码器、
@@ -1714,7 +1716,7 @@ libass 永远画在**交给它的那一帧**上，所以字幕文件的排版比
 
 ```powershell
 # 4:3 的老动画交付成 16:9 的站点尺寸：字幕仍按 4:3 排版
-LiveArchiveEncoder.exe ep01.mkv --encoder mpeg4 --size 640x360 ^
+LiveArchiveEncoder.exe ep01.mkv ep01_4x3.mp4 --encoder mpeg4 --width 640 --height 360 ^
   --subtitle ep01.sc.ass --subtitle-aspect 4:3
 ```
 

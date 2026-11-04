@@ -142,16 +142,6 @@ public sealed class Capabilities
         return caps;
     }
 
-    /// <summary>
-    /// Re-probe one encoder's capabilities, replacing whatever the cache had.
-    /// Used by the interactive "rescan encoders" entry.
-    /// </summary>
-    public EncoderCaps RefreshEncoderCaps(EncoderInfo encoder)
-    {
-        _profile.Caps.Remove(encoder.Name);
-        encoder.Caps = null;
-        return EncoderCaps(encoder);
-    }
 }
 
 /// <summary>Reading, sweeping and writing <see cref="BuildProfile"/>.</summary>

@@ -1,7 +1,7 @@
 <Project>
 
   <!--
-    Shared MSBuild properties for LiveArchiveEncoder (v7.8.1).
+    Shared MSBuild properties for LiveArchiveEncoder (v7).
 
     Target framework
     ~~~~~~~~~~~~~~~~

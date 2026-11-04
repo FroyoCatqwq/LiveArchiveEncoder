@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using LiveArchiveEncoder.Core;
@@ -417,7 +416,10 @@ public static class Toolchain
             client.DefaultRequestHeaders.UserAgent.ParseAdd(BrowserUserAgent);
             // v7.9.8.5: only reached with a token when the caller supplied one;
             // the header stays in this process rather than in an argument list.
-            if (bearer.HasText)
+            // v7.9.8.10: the download URL is feed-supplied. A bearer token is
+            // only ever meant for GitHub's API/asset hosts, never for a mirror
+            // or a URL a third-party release JSON pointed at.
+            if (bearer.HasText && GitHubProxy.CanWrap(url))
             {
                 client.DefaultRequestHeaders.Authorization =
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearer!.Trim());

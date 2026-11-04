@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -44,9 +45,11 @@ ROOT = Path(__file__).resolve().parent.parent
 EXCLUSIVE = "timing or shared_config"
 SHARED = "not (timing or shared_config)"
 
-# pytest's "no tests were collected" is a success for a phase that a -k filter
-# emptied out; anything else non-zero is a real failure.
-OK_CODES = {0, 5}
+# v7.9.8.10: pytest's exit 5 ("no tests collected") used to be treated as
+# success unconditionally. A broken marker, a renamed module, a typo'd -k or
+# xdist workers that all collected nothing would print "both phases green"
+# without a single test having run. An empty phase is only legitimate when the
+# caller explicitly filtered with -k; otherwise both phases MUST collect items.
 
 
 def cpu_budget() -> int:
@@ -63,14 +66,48 @@ def cpu_budget() -> int:
     return max(2, min(8, total - 1))
 
 
-def run_phase(name: str, argv: list[str]) -> int:
+def _collected(argv: list[str]) -> int:
+    """How many test items this phase can see. -n is dropped for the probe."""
+    # A -q passed through to pytest stacks on top of ours. Two -q's make
+    # --collect-only print per-file counts instead of node ids, so normalise
+    # to exactly one -q here rather than trusting the caller's argv.
+    tail = [a for a in argv[3:] if a != "-q"]
+    if "-n" in tail:
+        i = tail.index("-n")
+        del tail[i:i + 2]
+    probe = [*argv[:3], "--collect-only", "-q", *tail]
+    try:
+        done = subprocess.run(probe, cwd=ROOT, capture_output=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        return -1
+    text = done.stdout.decode("utf-8", "replace") + done.stderr.decode("utf-8", "replace")
+    if done.returncode != 0:
+        return -1
+    items = sum(1 for line in text.splitlines() if "::" in line)
+    if items == 0:
+        # pytest can also summarise ("196/225 tests collected"). Accept that
+        # form so a display-format change never looks like an empty phase.
+        for line in text.splitlines():
+            found = re.search(r"(\d+)(?:/\d+)?\s+tests? collected", line)
+            if found:
+                return int(found.group(1))
+    return items
+
+
+def run_phase(name: str, argv: list[str], filtered: bool) -> int:
     print(f"\n=== {name} ===\n  {' '.join(argv[3:])}", flush=True)
+    expected = _collected(argv)
     started = time.monotonic()
     code = subprocess.call(argv, cwd=ROOT)
     elapsed = time.monotonic() - started
-    verdict = "ok" if code in OK_CODES else f"FAILED (exit {code})"
+
+    allowed_empty = filtered and expected == 0
+    ok = code == 0 or (code == 5 and allowed_empty)
+    if expected < 0 or (expected == 0 and not allowed_empty):
+        ok = False
+    verdict = "ok" if ok else f"FAILED (exit {code}, collected {expected})"
     print(f"  {name}: {verdict} in {elapsed:.0f}s", flush=True)
-    return 0 if code in OK_CODES else code
+    return 0 if ok else (code or 1)
 
 
 def main(argv: list[str]) -> int:
@@ -99,10 +136,14 @@ def main(argv: list[str]) -> int:
         else:
             phases.append(("phase 2: parallel", [*base, "-n", str(workers), "-m", SHARED]))
 
-    failed = [name for name, cmd in phases if run_phase(name, cmd) != 0]
+    filtered = any(a == "-k" or a.startswith("-k=") for a in extra)
+    failed = [name for name, cmd in phases if run_phase(name, cmd, filtered) != 0]
     print()
     if failed:
         print(f"e2e FAILED: {', '.join(failed)}")
+        return 1
+    if not phases:
+        print("e2e FAILED: no phases selected")
         return 1
     print("e2e passed: both phases green")
     return 0

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using LiveArchiveEncoder.Localization;
 using LiveArchiveEncoder.Core;
 
@@ -360,14 +359,30 @@ public static class Smb
 
             using Process? proc = Process.Start(start);
             if (proc is null) return null;
+            // v7.9.8.10: stderr was redirected but never read. PowerShell only
+            // has to write ~4 KB of warnings before it blocks on that pipe and
+            // WaitForExit(15000) times out; the share then always looked
+            // "not connected" after a 15 s wait. Drain both pipes concurrently.
+            Task<string> stdout = proc.StandardOutput.ReadToEndAsync();
+            Task<string> stderr = proc.StandardError.ReadToEndAsync();
             if (!proc.WaitForExit(15000))
             {
                 try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+                Observe(stdout, stderr);
                 return null;
             }
 
-            string text = proc.StandardOutput.ReadToEnd().Trim();
-            if (text.Length == 0) return null;
+            string text = stdout.GetAwaiter().GetResult().Trim();
+            string diagnostic = stderr.GetAwaiter().GetResult().Trim();
+            if (text.Length == 0)
+            {
+                // A missing module or a denied query used to be indistinguishable
+                // from "share not connected". Say which one it is, once.
+                if (diagnostic.Length > 0)
+                    Console.Error.WriteLine("NOTE: SMB dialect query failed: "
+                        + (diagnostic.Length > 200 ? diagnostic[..200] : diagnostic));
+                return null;
+            }
 
             SmbDialect dialect = text.StartsWith('3') ? SmbDialect.Smb3
                 : text.StartsWith('2') ? SmbDialect.Smb2
@@ -379,6 +394,12 @@ public static class Smb
         {
             return null;
         }
+    }
+
+    /// <summary>Do not leave a killed child's pipe reads as unobserved tasks.</summary>
+    private static void Observe(Task<string> stdout, Task<string> stderr)
+    {
+        try { Task.WaitAll([stdout, stderr], 1000); } catch { /* killed child */ }
     }
 
     /// <summary>

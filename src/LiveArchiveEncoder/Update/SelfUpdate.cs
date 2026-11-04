@@ -63,9 +63,6 @@ public sealed class UpdateReport
     /// <summary>The asset that was fetched, when one was.</summary>
     public string? Asset { get; init; }
 
-    /// <summary>True when a download could not be hash-checked because the release carried no digest.</summary>
-    public bool DigestMissing { get; init; }
-
     /// <summary>True when the replacement will relaunch the program afterwards.</summary>
     public bool Restarting { get; init; }
 
@@ -353,12 +350,18 @@ public static class SelfUpdate
         // A feed is somebody else's JSON. A relative or garbled download URL used
         // to reach HttpClient as-is and surface as an unhandled
         // InvalidOperationException, which is a crash where an error belongs.
+        // v7.9.8.10: the asset URL comes from the same untrusted JSON as the
+        // rest of the release. Only https is accepted for a real download;
+        // loopback http is kept for the local-feed e2e harness. Plain http to a
+        // remote host would let anything on the wire replace the binary that
+        // this process is about to execute.
         if (!Uri.TryCreate(asset.Url, UriKind.Absolute, out Uri? assetUri)
-            || (assetUri.Scheme != Uri.UriSchemeHttp && assetUri.Scheme != Uri.UriSchemeHttps))
+            || (assetUri.Scheme != Uri.UriSchemeHttp && assetUri.Scheme != Uri.UriSchemeHttps)
+            || (assetUri.Scheme == Uri.UriSchemeHttp && !assetUri.IsLoopback))
         {
             return Fail(release, asset,
-                $"the feed gives '{asset.Url}' as the download URL for {asset.Name}, "
-                + "which is not an absolute http(s) URL");
+                $"the feed gives '{asset.Url}' as the download URL for {asset.Name}; "
+                + "only https (or a loopback http URL for local tests) is accepted");
         }
 
         string staging = Path.Combine(installDir, StagingPrefix + SafeName(release.Tag));
@@ -388,7 +391,6 @@ public static class SelfUpdate
         if (!downloaded)
             return Fail(release, asset, $"download failed: {downloadError}");
 
-        bool digestMissing = false;
         if (asset.Sha256.HasText)
         {
             string actual = Sha256(partial);
@@ -403,15 +405,16 @@ public static class SelfUpdate
         }
         else
         {
-            digestMissing = true;
-            Say("NOTE: this release carries no digest, so the download is only size-checked.");
-            long size = new FileInfo(partial).Length;
-            if (asset.Size > 0 && size != asset.Size)
-            {
-                TryDelete(partial);
-                return Fail(release, asset,
-                    $"the download is {size:N0} bytes, the release says {asset.Size:N0}");
-            }
+            // v7.9.8.10: size is just another field from the same feed that
+            // supplied the URL. "Only size-checked" used to still unpack the
+            // archive, run its --version and hand the program over to it, while
+            // Program returned exit 0 so scripts thought the update succeeded.
+            // An unverified binary is never executed.
+            TryDelete(partial);
+            return Fail(release, asset,
+                "the release carries no SHA-256 digest; refusing to run an unverified binary. "
+                + "Download this build by hand, or point --update-feed at a release "
+                + "that publishes a digest.");
         }
 
         try
@@ -458,7 +461,6 @@ public static class SelfUpdate
             Tag = release.Tag,
             Asset = asset.Name,
             Release = release,
-            DigestMissing = digestMissing,
             Restarting = restart,
         };
     }
@@ -655,10 +657,12 @@ public static class SelfUpdate
     /// Copy the payload over the install directory.
     ///
     /// <para>Each file lands as <c>name.new</c> first and is then moved onto the
-    /// target, so a failure halfway leaves the old build complete rather than a
-    /// mixture of two. Retries cover the Windows case where the just-exited
-    /// process's image, an antivirus scanner or the shell's icon cache still holds
-    /// the old file for a few hundred milliseconds.</para>
+    /// target. v7.9.8.10: the old claim that "a failure halfway leaves the old
+    /// build complete" was false -- files 1..N-1 had already been overwritten and
+    /// there was no backup to restore them from. Every target is now backed up
+    /// before the swap and restored on any failure. Retries cover the Windows
+    /// case where the just-exited process's image, an antivirus scanner or the
+    /// shell's icon cache still holds the old file for a few hundred ms.</para>
     /// </summary>
     private static bool TryReplace(string payloadDir, string installDir, out string? error)
     {
@@ -666,7 +670,10 @@ public static class SelfUpdate
         string[] names;
         try
         {
-            names = Directory.GetFiles(payloadDir, "LiveArchiveEncoder*")
+            // v7.9.8.10: copy every file in the payload, not just those whose
+            // names start with the product. A new dependency or a renamed
+            // runtimeconfig used to be silently dropped.
+            names = Directory.GetFiles(payloadDir)
                 .Select(Path.GetFileName)
                 .Where(n => n.HasText)
                 .Select(n => n!)
@@ -680,7 +687,20 @@ public static class SelfUpdate
 
         if (names.Length == 0)
         {
-            error = $"no LiveArchiveEncoder files in {payloadDir}";
+            error = $"no files in {payloadDir}";
+            return false;
+        }
+
+        // The rollback copies live next to the payload (NOT inside it), so a
+        // later FindExecutable scanning the payload cannot mistake a saved old
+        // exe for the downloaded one. The caller keeps the staging area on
+        // failure, which is exactly where these copies are useful.
+        string backup = Path.GetFullPath(Path.Combine(payloadDir, "..", ".rollback"));
+        var replaced = new List<string>();
+        try { Directory.CreateDirectory(backup); }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            error = $"cannot create the rollback directory: {exc.Message}";
             return false;
         }
 
@@ -692,12 +712,18 @@ public static class SelfUpdate
 
             try
             {
+                // Save the old file before the first overwrite. Without this a
+                // failure on a later file left a mixed install that could not
+                // start and had nothing to restore from.
+                if (File.Exists(target))
+                    File.Copy(target, Path.Combine(backup, name), overwrite: true);
                 File.Copy(source, staged, overwrite: true);
             }
             catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
             {
                 error = $"cannot write {staged}: {exc.Message}";
                 TryDelete(staged);
+                Rollback(backup, installDir, replaced, ref error);
                 return false;
             }
 
@@ -718,9 +744,11 @@ public static class SelfUpdate
                 {
                     error = $"cannot replace {target}: {exc.Message}";
                     TryDelete(staged);
+                    Rollback(backup, installDir, replaced, ref error);
                     return false;
                 }
             }
+            replaced.Add(name);
 
             if (!OperatingSystem.IsWindows() && !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
             {
@@ -735,12 +763,36 @@ public static class SelfUpdate
                                                 or PlatformNotSupportedException)
                 {
                     error = $"cannot make {target} executable: {exc.Message}";
+                    Rollback(backup, installDir, replaced, ref error);
                     return false;
                 }
             }
         }
 
+        TryDeleteDirectory(backup);
         return true;
+    }
+
+    /// <summary>Put the old build back after a swap that failed halfway.</summary>
+    private static void Rollback(string backup, string installDir,
+        List<string> replaced, ref string? error)
+    {
+        foreach (string name in replaced)
+        {
+            string saved = Path.Combine(backup, name);
+            if (!File.Exists(saved)) continue;
+            try { File.Copy(saved, Path.Combine(installDir, name), overwrite: true); }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+            {
+                error += $" [rollback of {name} failed: {exc.Message}]";
+            }
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException) { /* best effort */ }
     }
 
     /// <summary>Unpack a <c>.zip</c> or <c>.tar.gz</c>, refusing anything that would escape <paramref name="destination"/>.</summary>
@@ -976,8 +1028,11 @@ public static class SelfUpdate
             // would be a credential in a file people copy to each other, and the
             // whole reason to have one here is a repository that cannot be read
             // anonymously -- which is exactly the case where it is a secret.
+            // v7.9.8.10: the feed URL can be overridden (--update-feed /
+            // LAE_UPDATE_FEED), and a token sent to whatever host it names is a
+            // leaked GitHub PAT. Only GitHub's own hosts ever see credentials.
             string? token = Environment.GetEnvironmentVariable("LAE_UPDATE_TOKEN");
-            if (token.HasText)
+            if (token.HasText && GitHubProxy.CanWrap(url))
                 client.DefaultRequestHeaders.Authorization =
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token!.Trim());
 

@@ -8,10 +8,18 @@ a "video site" recompress pass and per-era presets sit on top of the realtime
 encoder, all of them off by default — with no flags given, the output is still
 exactly what v6.3.3 would have produced.
 
+> **v7.9.8.10:** a full-project audit, not a feature release. Fixing the CUI
+> encoder row (a swallowed `FormatException` that skipped half of the settings
+> sync), keeping a finished encode when only its final rename fails, and
+> tightening self-update so a release without a SHA-256 digest is refused
+> instead of executed. **Behaviour change:** `--update` now fails on feeds that
+> publish no digest; asset URLs must be https (loopback http is kept for local
+> test feeds). See `docs/CHANGELOG.md` for the full list and the cleanup.
+>
 > **v7.9.8.9:** three defaults moved to where they belong. A source on a network
 > share no longer writes its `_live` capture back over the same link — the
 > automatic output goes to `%LOCALAPPDATA%\LiveArchiveEncoder\output\` instead,
-> with the path still printed and still overridable (`-o`, or the output row; a
+> with the path still printed and still overridable (the second positional argument, or the output row; a
 > path you type is remembered and never re-derived). mp4 with `libx264` /
 > `libopenh264` now defaults to **AAC** even when the settings file carries MP3
 > from an older FLV-era run (MP3 does mux into mp4, which is why nothing ever
@@ -120,8 +128,8 @@ dotnet build src/LiveArchiveEncoder/LiveArchiveEncoder.csproj -c Release
 # -> src\LiveArchiveEncoder\bin\Release\net10.0\LiveArchiveEncoder.exe
 
 tools\build.ps1 -Aot
-# -> publish\jit\LiveArchiveEncoder.exe       (~230 KB + shared framework)
-# -> publish\aot\LiveArchiveEncoder.exe       (8.5 MB, single file, no deps)
+# -> publish\jit\LiveArchiveEncoder.exe       (small; needs a .NET 10 / 11 runtime)
+# -> publish\aot\LiveArchiveEncoder.exe       (single file, no deps; built with -Aot)
 ```
 
 **Two flavours, two runtimes.** Only JIT and AOT are built. The JIT build targets
@@ -194,7 +202,7 @@ distributions should take the JIT build. FFmpeg is still needed either way.
 
 ```bash
 # TUnit unit tests — identical command on both platforms (runs on MTP since v7.8.3)
-dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 408 on Windows
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 654 on Windows
 # and the same suite against the other runtime:
 dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 ```
@@ -339,9 +347,9 @@ Two flags are additions rather than ports:
 | `--audio-mode inline\|separate\|auto` | audio routing; `inline` (default) is v6.3.3 behaviour, see below |
 | `--hwaccel NAME` | hardware decode; `off` (default), `auto`, or any method from `ffmpeg -hwaccels`. The method is probed by actually decoding one frame and falls back to software when it fails |
 | `--recompress`, `--recompress-args ARGS` | re-encode the result the way a video site would. You write the middle of the FFmpeg command (`-vf scale=320:240,fps=15 -c:v libx264 -crf 28 …`); the program owns `-i` and the output path, and the fragment is tokenised and vetted so a stray path cannot overwrite your source. Off by default |
-| `--recompress-codec NAME` | pick the second pass's codec by name instead of writing a fragment — `libx264`, `libopenh264`, `libx265`, `libvpx-vp9`, `libvpx`, `libaom-av1`, `libsvtav1`, `flv`, `mpeg4`, `mpeg2video`, `mjpeg`, `wmv2`, `h263`, `rv10`, `rv20`. The container follows the codec (VP9 → `.webm`, x265 → `.mp4`), and a pair the muxer cannot hold is refused before anything runs |
+| `--recompress-codec NAME` | pick the second pass's codec by name instead of writing a fragment — `libx264`, `libopenh264`, `libx265`, `libvpx-vp9`, `libvpx`, `libaom-av1`, `libsvtav1`, `mpeg1video`, `flv`, `mpeg4`, `mpeg2video`, `mjpeg`, `wmv2`, `h263`, `rv10`, `rv20`. The container follows the codec (VP9 → `.webm`, x265 → `.mp4`), and a pair the muxer cannot hold is refused before anything runs |
 | `--recompress-quality N` | the codec's own knob: `-crf` for x264/x265/VP9/AV1, `-q:v` for the MPEG family. Repeatable since v7.9.8.4 — each value pairs with the `--recompress-codec` at the same position, because 26 is a sensible CRF and an absurd MPEG quantiser; a single value still covers the whole chain |
-| `--recompress-audio-codec NAME` | `aac`, `libmp3lame`, `libopus`, `libvorbis`, `ac3`, `flac` or `copy`, with the same container check |
+| `--recompress-audio-codec NAME` | `aac`, `libmp3lame`, `libopus`, `libvorbis`, `ac3`, `flac`, `wmav2`, `real_144` or `copy`, with the same container check |
 | `--recompress-video-kbps N` (v7.9.8.8) | bitrate for a pass whose codec has no quality flag (`libopenh264`); repeatable, default 300. Without it the command used to carry no bitrate at all and the encoder fell back to its built-in 2 Mbps. A chain that mixes both kinds of codec — `libx264` then `libopenh264` — takes both numbers, each on the pass that can use it, and says so with a note on the pass that cannot |
 | `--openh264-rc MODE` (v7.9.8.8) | OpenH264 rate control: `bitrate` (default, holds the ceiling), `quality` (spends ~20% over to keep the picture) or `timestamp`. `buffer` and `off` are refused — the first ignores the bitrate (300 kbps asked, 3.1 Mbps produced), the second pins QP to an internal 26 that no flag can move |
 | `--openh264-skip-frames` (v7.9.8.8) | let OpenH264 drop frames to reach the target bitrate. Off by default: the fps ladder owns frame rate, and a second dropper behind its back makes a rate drop look like a source problem. Measured at 300 kbps: 354 kbps without, 302 with |
@@ -504,7 +512,6 @@ docs/
   CHANGELOG.md                version history, Python v6.2.2 -> now
   usage.md                    full user guide (CLI, CUI, FFmpeg toolchain, playback)
   test-report-v7.md           measured porting results
-  runs/                       archived harness output from past verification runs
 ```
 
 ## How this differs from v6.3.3

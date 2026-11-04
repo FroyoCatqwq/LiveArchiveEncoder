@@ -17,10 +17,23 @@ namespace LiveArchiveEncoder.Core;
 /// </summary>
 public static class OutputFile
 {
-    /// <summary>The sibling this encode writes to before it is put in place.</summary>
-    public static FileInfo PartPath(FileInfo final) => new(Path.Combine(
-        Path.GetDirectoryName(final.FullName) ?? "",
-        $"{Path.GetFileNameWithoutExtension(final.Name)}.part{final.Extension}"));
+    /// <summary>
+    /// The sibling this encode writes to before it is put in place.
+    ///
+    /// <para>v7.9.8.10: the name carries a per-run tag. A fixed
+    /// <c>clip.part.mp4</c> could BE a user's finished file (a manual resume),
+    /// and two outputs differing only in case share the same part name on
+    /// Windows -- FFmpeg's <c>-y</c> would then truncate one run's product for
+    /// another. The name still ends in the real extension, because FFmpeg picks
+    /// the muxer from it.</para>
+    /// </summary>
+    public static FileInfo PartPath(FileInfo final)
+    {
+        string dir = Path.GetDirectoryName(final.FullName) ?? "";
+        string stem = Path.GetFileNameWithoutExtension(final.Name);
+        string tag = $"{Environment.ProcessId:x}{Guid.NewGuid().ToString("N")[..8]}";
+        return new(Path.Combine(dir, $"{stem}.{tag}.part{final.Extension}"));
+    }
 
     /// <summary>
     /// Move a finished part file onto its real name, replacing an older copy.
@@ -32,6 +45,22 @@ public static class OutputFile
         if (!part.Exists || part.Length == 0)
             throw new InvalidOperationException($"output is empty: {final.FullName}");
         File.Move(part.FullName, final.FullName, overwrite: true);
+    }
+
+    /// <summary>
+    /// Report a completed encode whose final rename failed, and KEEP the part.
+    /// Until v7.9.8.10 every caller's catch ran <see cref="Discard"/> on any
+    /// exception, so a destination held by a player or a share that refused the
+    /// replace deleted the only good copy of a long realtime capture. The user
+    /// gets the path and can rename it by hand.
+    /// </summary>
+    public static void Keep(FileInfo part, FileInfo final, string reason)
+    {
+        part.Refresh();
+        Console.Error.WriteLine(
+            $"ERROR: the encode finished but could not be placed at {final.FullName}: {reason}");
+        if (part.Exists)
+            Console.Error.WriteLine($"       the finished file is kept at: {part.FullName}");
     }
 
     /// <summary>

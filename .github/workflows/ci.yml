@@ -40,7 +40,7 @@ jobs:
         run: dotnet build LiveArchiveEncoder.V7.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test LiveArchiveEncoder.V7.slnx -c Release --no-build
+        run: dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release --no-build
 
 # The pytest suite under tests/e2e/ is deliberately NOT run here: it
 # compares this build against the v6.3.3 baseline and needs an FFmpeg with the

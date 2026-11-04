@@ -110,6 +110,57 @@ public sealed partial class LocalizationTests
         await Assert.That(L.T("banner.legacycount", 35)).IsEqualTo("35 detected from ffmpeg -encoders");
     }
 
+    /// <summary>
+    /// v7.9.8.10: key parity is not enough. A template with two slots called with
+    /// one argument throws FormatException inside string.Format; in the CUI that
+    /// was swallowed as "Invalid selection" after the state had already changed.
+    /// Walk every template in both languages with exactly the arguments its
+    /// highest slot asks for, and make sure none of them disappear.
+    /// </summary>
+    [Test]
+    public async Task EveryPlaceholderFormatsInEveryLanguage()
+    {
+        foreach (string language in L.Languages)
+        {
+            L.SetLanguage(language);
+            foreach (string key in L.AllKeys)
+            {
+                string template = L.T(key);          // zero args returns the raw text
+                MatchCollection slots = Regex.Matches(template, @"\{(\d+)");
+                if (slots.Count == 0) continue;
+                int highest = slots.Cast<Match>().Max(m => int.Parse(m.Groups[1].Value));
+                object?[] args = [.. Enumerable.Range(0, highest + 1)
+                    .Select(i => (object?)$"<{i}>")];
+                string rendered = L.T(key, args);   // throws on a malformed template
+                for (int i = 0; i <= highest; i++)
+                    await Assert.That(rendered).Contains($"<{i}>")
+                        .Because($"{language}/{key} lost argument {i}");
+            }
+        }
+    }
+
+    private static int[] Slots(string template) =>
+        [.. Regex.Matches(template, @"\{(\d+)").Cast<Match>()
+            .Select(m => int.Parse(m.Groups[1].Value)).Distinct().Order()];
+
+    /// <summary>
+    /// A Chinese template that quietly loses a {1} renders fine in English and
+    /// throws FormatException in the CUI. Key parity alone cannot see this.
+    /// </summary>
+    [Test]
+    public async Task BothLanguagesUseTheSamePlaceholders()
+    {
+        L.SetLanguage(L.English);
+        Dictionary<string, int[]> english = L.AllKeys.ToDictionary(k => k, k => Slots(L.T(k)));
+        L.SetLanguage(L.Chinese);
+        foreach (string key in L.AllKeys)
+        {
+            int[] chinese = Slots(L.T(key));
+            await Assert.That(chinese).IsEquivalentTo(english[key])
+                .Because($"{key}: en=[{string.Join(",", english[key])}] zh=[{string.Join(",", chinese)}]");
+        }
+    }
+
     [Test]
     public async Task YesNoFollowsTheLanguage()
     {

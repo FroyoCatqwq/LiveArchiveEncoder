@@ -22,7 +22,6 @@ public static class L
         ["env.memory"] = "about {0} GB of memory; the documented minimum is {1} GB",
         ["env.disk"] = "{0} GB free at the destination; the documented minimum is {1} GB "
             + "(a sharded run needs room for the shards as well)",
-        ["env.doc"] = "Documented system and hardware requirements: docs/requirements.md",
         ["env.os.windows"] = "Windows build {0}; the documented minimum is {1} "
             + "(Windows Server 2019 / 10.0.17763)",
         ["env.os.glibc"] = "glibc {0}; the documented minimum is {1} "
@@ -74,10 +73,6 @@ public static class L
         // v7.9.1: a network source is encoded in a single pass on purpose --
         // every shard opens its own reader over the same link, which is what
         // stalls a connection that comes and goes.
-        ["parallel.networkoff"] = "Parallel sharding is off while the input is on a network drive.",
-        ["parallel.networkrefused"] = "The input is on a network drive, so sharding stays off: "
-            + "each shard would open its own reader over the same link, which is what stalls "
-            + "a connection that comes and goes.",
         ["parallel.netmeasurefailed"] = "The link to the source could not be measured, so sharding "
             + "stays off ({0:F0} kbps would have to be sustained).",
         ["parallel.nettooslow"] = "The link measured {0} -- not enough headroom, so sharding stays off.",
@@ -139,13 +134,7 @@ public static class L
 
         // v7.9.8.3: the shape the burned text is laid out in.
         ["sub.menu.aspect"] = "Layout shape (source / 4:3 / 16:9)",
-        ["sub.menu.aspect.value"] = "{0}",
-        ["sub.prompt.aspect"] = "Layout shape [source/4:3/16:9] [{0}]: ",
         ["sub.aspect.set"] = "Subtitles are laid out in a {0} box.",
-        ["sub.aspect.source"] = "whole picture",
-        ["sub.aspect.bad"] = "Choose source, 4:3 or 16:9.",
-        ["sub.aspect.note"] = "The text is scaled and centred inside a box of that shape; the "
-            + "picture itself is untouched.",
         ["sub.codec.copyonly"] = "The codec only applies to copy mode.",
         ["sub.codec.container"] = "Codecs the '{0}' container can hold: {1}",
         ["sub.prompt.codec"] = "Copy-mode codec (blank = keep, '-' = automatic) [{0}]: ",
@@ -193,7 +182,6 @@ public static class L
         ["profile.pick"] = "Number to load, s = save current as, p = load a path, d = delete, 0 = back: ",
         ["profile.saveprompt"] = "Name for this settings file: ",
         ["profile.saved"] = "Saved as {0}.",
-        ["profile.savefailed"] = "Could not write {0}.",
         ["profile.badname"] = "That name cannot be used; try a plain file name.",
         ["profile.notfound"] = "No such settings file: {0}",
         ["profile.loaded"] = "Loaded {0} ({1}).",
@@ -417,8 +405,6 @@ public static class L
         ["note.shardingskipped"] = "Sharding skipped: {0}",
         ["note.hwaccelfallback"] = "NOTE: {0} decoded the probe frame but failed the real preflight; "
             + "using software decode.",
-        ["note.levelsclamped"] = "NOTE: {0} exceeded the base FPS {1} and was dropped; a motion "
-            + "level can never be faster than the base rate.",
 
         ["shard.heading"] = "Sharding",
         ["shard.label"] = "Shards",
@@ -426,7 +412,6 @@ public static class L
         ["shard.progress.open"] = "{0}/{1} done, {2} slots {3}",
 
         ["param.levelkbps"] = "level bitrates (per rung)",
-        ["param.levelsyntax"] = "use FPS, FPS:drop or FPS:drop:rise per entry, e.g. 12:128,5:140",
         ["param.levelstoofast"] = "level {0} is faster than the base FPS {1}; a motion level may "
             + "not exceed the base rate",
         ["param.rung.heading"] = "=== Motion FPS rung bitrates ===",
@@ -587,8 +572,6 @@ public static class L
         ["nnedi.updok"] = "NNEDI3 weights {0} installed: {1}",
         ["nnedi.updcurrent"] = "NNEDI3 weights are already the latest ({0}).",
         ["nnedi.updfail"] = "could not install the NNEDI3 weights: {0}",
-        ["nnedi.buildnofilter"] = "Note: this FFmpeg build has no nnedi filter, so the "
-            + "deinterlacer cannot be selected with it.",
         ["report.ghproxy"] = "GitHub front",
         ["report.nnedi"] = "NNEDI3 weights",
         ["report.nnedi.value"] = "{0} ({1})",
@@ -621,7 +604,6 @@ public static class L
         ["update.page"] = "release page: {0}",
         ["update.staged"] = "{0} is in place; start the program again to use it.",
         ["update.stagedrestart"] = "{0} is in place; restarting...",
-        ["update.digestmissing"] = "NOTE: this release carries no SHA-256 digest, so only its size was checked.",
 
         // First run: no FFmpeg at all, and somebody is at the keyboard.
         ["firstrun.heading"] = "No FFmpeg found on this machine.",
@@ -674,15 +656,14 @@ public static class L
         ["rc.menu.quality"] = "Quality (crf / q:v)",
         ["rc.menu.vbitrate"] = "Bitrate (kbps)",
         ["rc.menu.audio"] = "Audio codec",
-        ["rc.prompt.codec"] = "Video codec [{0}] (blank = keep): ",
+        ["rc.prompt.codec"] = "Video codec [{0}] (blank = keep; available: {1}): ",
         ["rc.codec.set"] = "Second-pass video codec: {0}.",
         ["rc.prompt.quality"] = "Quality [{0}] ({1}): ",
         ["rc.quality.set"] = "Second-pass quality: {0}.",
         ["rc.prompt.vbitrate"] = "Bitrate in kbps [{0}] (default {1}): ",
         ["rc.vbitrate.set"] = "Second-pass bitrate: {0} kbps.",
-        ["rc.prompt.audio"] = "Audio codec [{0}] (blank = keep): ",
+        ["rc.prompt.audio"] = "Audio codec [{0}] (blank = keep; available: {1}): ",
         ["rc.audio.set"] = "Second-pass audio codec: {0}.",
-        ["rc.only.codec"] = "Codec    : {0} / {1} in .{2}",
         ["rc.autoderived"] = "Second pass: {0} + {1} in .{2} (container chosen from the codec).",
         ["rc.menu.extra"] = "Further passes (chain)",
         ["rc.chain"] = "{0} passes",
@@ -698,9 +679,6 @@ public static class L
             + "_web2, _web3, ...",
 
         ["era.menu"] = "Era preset",
-        ["era.menu.pick"] = "Apply an era preset (sets the live pass and the recompress pass)",
-        ["era.menu.back"] = "Back",
-        ["era.choose"] = "Era presets: {0}",
         ["era.prompt"] = "Preset [{0}]: ",
         ["era.applied"] = "Applied \"{0}\": {1}x{2}, {3} fps, {4} kbps ceiling; recompress armed.",
         ["era.encoderapplied"] = "Live encoder set to {0} -- the codec \"{1}\" actually served.",
@@ -767,8 +745,8 @@ public static class L
         ["era.custom.fps"] = "Second-pass frame rate [{0}]: ",
         ["era.custom.vkbps"] = "Second-pass video bitrate kbps [{0}]: ",
         ["era.custom.akbps"] = "Second-pass audio bitrate kbps [{0}]: ",
-        ["era.custom.vcodec"] = "Second-pass video codec [{0}]: ",
-        ["era.custom.acodec"] = "Second-pass audio codec [{0}]: ",
+        ["era.custom.vcodec"] = "Second-pass video codec [{0}] (available: {1}): ",
+        ["era.custom.acodec"] = "Second-pass audio codec [{0}] (available: {1}): ",
         ["era.custom.container"] = "Container [{0}] ({1}): ",
         ["era.custom.note"] = "One-line description [{0}]: ",
         ["era.custom.live"] = "Live layer: encoder, frame size, fps, ceiling (blank = keep each)",
@@ -787,7 +765,6 @@ public static class L
         ["env.cores"] = "只有 {0} 个 CPU 核心；文档给出的下限是 {1}",
         ["env.memory"] = "内存约 {0} GB；文档给出的下限是 {1} GB",
         ["env.disk"] = "输出所在盘剩余 {0} GB；文档给出的下限是 {1} GB（分片运行时还要放得分片）",
-        ["env.doc"] = "系统与硬件需求见 docs/requirements.md",
         ["env.os.windows"] = "Windows 版本 {0}；文档最低要求是 {1}（Windows Server 2019 / 10.0.17763）",
         ["env.os.glibc"] = "glibc {0}；文档最低要求是 {1}（AlmaLinux 8 / RHEL 8）。"
             + "AOT 产物是按发布机的 glibc 链接的，更老的系统请用 JIT 产物。",
@@ -833,9 +810,6 @@ public static class L
             + "会真正分片，其余容器自动回退为单次编码。",
         ["parallel.off"] = "并行分片已关闭。",
         ["parallel.clamped"] = "已限制到 1..{0} 范围内。",
-        ["parallel.networkoff"] = "输入位于网络驱动器，并行分片已关闭。",
-        ["parallel.networkrefused"] = "输入位于网络驱动器，并行分片保持关闭：每个分片都会独立读取同一条链路，"
-            + "这正是网络时连时断时卡住的原因。",
         ["parallel.netmeasurefailed"] = "无法测量到源的链路，并行分片保持关闭（需要维持 {0:F0} kbps）。",
         ["parallel.nettooslow"] = "链路实测 {0}——余量不足，并行分片保持关闭。",
         ["parallel.netok"] = "链路实测：{0}——可以并行分片。",
@@ -891,12 +865,7 @@ public static class L
 
         // v7.9.8.3：烧录字幕的排版方框。
         ["sub.menu.aspect"] = "排版比例（source / 4:3 / 16:9）",
-        ["sub.menu.aspect.value"] = "{0}",
-        ["sub.prompt.aspect"] = "排版比例 [source/4:3/16:9] [{0}]：",
         ["sub.aspect.set"] = "字幕按 {0} 方框排版显示。",
-        ["sub.aspect.source"] = "整幅画面",
-        ["sub.aspect.bad"] = "请选择 source、4:3 或 16:9。",
-        ["sub.aspect.note"] = "文字在该比例的方框内缩放并居中，画面本身不动。",
         ["sub.codec.copyonly"] = "该编码器仅对封装模式生效。",
         ["sub.codec.container"] = "'{0}' 容器可承载的字幕编码器：{1}",
         ["sub.prompt.codec"] = "封装模式编码器（留空=不变，'-'=自动）[{0}]：",
@@ -941,7 +910,6 @@ public static class L
         ["profile.pick"] = "编号＝载入，s＝把当前设置另存，p＝按路径载入，d＝删除，0＝返回：",
         ["profile.saveprompt"] = "这份配置的名字：",
         ["profile.saved"] = "已保存为 {0}。",
-        ["profile.savefailed"] = "无法写入 {0}。",
         ["profile.badname"] = "这个名字不能用，换个普通的文件名。",
         ["profile.notfound"] = "没有这个配置文件：{0}",
         ["profile.loaded"] = "已载入 {0}（{1}）。",
@@ -1149,7 +1117,6 @@ public static class L
         ["note.subtitleinline"] = "注意：字幕以内嵌字幕轨方式承载，已跳过分离音频通路——合并时会丢失该轨。",
         ["note.shardingskipped"] = "已跳过分片：{0}",
         ["note.hwaccelfallback"] = "注意：{0} 通过了探测帧，但在正式预检中失败，改用软件解码。",
-        ["note.levelsclamped"] = "注意：{0} 超过基础 FPS {1}，已忽略；动态档位不得快于基础帧率。",
 
         ["shard.heading"] = "分片",
         ["shard.label"] = "分片进度",
@@ -1157,7 +1124,6 @@ public static class L
         ["shard.progress.open"] = "{0}/{1} 已完成，{2} 帧槽 {3}",
 
         ["param.levelkbps"] = "档位码率（每档）",
-        ["param.levelsyntax"] = "每项可写 FPS、FPS:降档码率 或 FPS:降档码率:升档码率，如 12:128,5:140",
         ["param.levelstoofast"] = "档位 {0} 快于基础 FPS {1}；动态档位不得超过基础帧率",
         ["param.rung.heading"] = "=== 动态 FPS 档位码率 ===",
         ["param.rung.base"] = "基础 FPS",
@@ -1316,7 +1282,6 @@ public static class L
         ["nnedi.updok"] = "已安装 NNEDI3 权重 {0}：{1}",
         ["nnedi.updcurrent"] = "NNEDI3 权重已是最新（{0}）。",
         ["nnedi.updfail"] = "无法安装 NNEDI3 权重：{0}",
-        ["nnedi.buildnofilter"] = "注意：该 FFmpeg 构建没有 nnedi 滤镜，无法用它做反交错。",
         ["report.ghproxy"] = "GitHub 代理",
         ["report.nnedi"] = "NNEDI3 权重",
         ["report.nnedi.value"] = "{0}（{1}）",
@@ -1349,7 +1314,6 @@ public static class L
         ["update.page"] = "发布页：{0}",
         ["update.staged"] = "{0} 已就位；重新启动程序即可使用。",
         ["update.stagedrestart"] = "{0} 已就位；正在重启……",
-        ["update.digestmissing"] = "注意：这个发布没有 SHA-256 摘要，只校验了大小。",
 
         // 首次启动：机器上完全没有 FFmpeg，且有人在键盘前。
         ["firstrun.heading"] = "这台机器上找不到 FFmpeg。",
@@ -1400,15 +1364,14 @@ public static class L
         ["rc.menu.quality"] = "质量（crf / q:v）",
         ["rc.menu.vbitrate"] = "码率（kbps）",
         ["rc.menu.audio"] = "音频编码器",
-        ["rc.prompt.codec"] = "视频编码器 [{0}]（留空保持）：",
+        ["rc.prompt.codec"] = "视频编码器 [{0}]（留空保持；可选：{1}）：",
         ["rc.codec.set"] = "第二遍视频编码器：{0}。",
         ["rc.prompt.quality"] = "质量 [{0}]（{1}）：",
         ["rc.quality.set"] = "第二遍质量：{0}。",
         ["rc.prompt.vbitrate"] = "码率 kbps [{0}]（默认 {1}）：",
         ["rc.vbitrate.set"] = "第二遍码率：{0} kbps。",
-        ["rc.prompt.audio"] = "音频编码器 [{0}]（留空保持）：",
+        ["rc.prompt.audio"] = "音频编码器 [{0}]（留空保持；可选：{1}）：",
         ["rc.audio.set"] = "第二遍音频编码器：{0}。",
-        ["rc.only.codec"] = "编码     : {0} / {1}，.{2}",
         ["rc.autoderived"] = "第二遍：{0} + {1} 写进 .{2}（容器按编码器推导）。",
         ["rc.menu.extra"] = "追加压缩遍数（链式）",
         ["rc.chain"] = "{0} 遍",
@@ -1423,9 +1386,6 @@ public static class L
         ["rc.extra.hint"] = "新增一遍的容器按编码器推导；产物命名为 _web2、_web3 ……",
 
         ["era.menu"] = "时代预设",
-        ["era.menu.pick"] = "应用时代预设（同时设置直播编码与二次压缩）",
-        ["era.menu.back"] = "返回",
-        ["era.choose"] = "时代预设：{0}",
         ["era.prompt"] = "预设 [{0}]：",
         ["era.applied"] = "已应用“{0}”：{1}x{2}、{3} fps、码率上限 {4} kbps，并已准备好二次压缩参数。",
         ["era.encoderapplied"] = "直播编码器已改为 {0} —— “{1}”当年真正用的编码器。",
@@ -1491,8 +1451,8 @@ public static class L
         ["era.custom.fps"] = "第二遍帧率 [{0}]：",
         ["era.custom.vkbps"] = "第二遍视频码率 kbps [{0}]：",
         ["era.custom.akbps"] = "第二遍音频码率 kbps [{0}]：",
-        ["era.custom.vcodec"] = "第二遍视频编码器 [{0}]：",
-        ["era.custom.acodec"] = "第二遍音频编码器 [{0}]：",
+        ["era.custom.vcodec"] = "第二遍视频编码器 [{0}]（可选：{1}）：",
+        ["era.custom.acodec"] = "第二遍音频编码器 [{0}]（可选：{1}）：",
         ["era.custom.container"] = "容器 [{0}]（可选 {1}）：",
         ["era.custom.note"] = "一句话描述 [{0}]：",
         ["era.custom.live"] = "直播层：编码器、尺寸、帧率、码率上限（每项留空即保持）",

@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace LiveArchiveEncoder.Encoding;
 
 /// <summary>One shard's slice of the selected time range.</summary>

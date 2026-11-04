@@ -182,6 +182,7 @@ class Feed:
         tag = str(self.kw.pop("tag", "v9.9.9"))
         marker = bool(self.kw.pop("marker", True))
         digest = self.kw.pop("digest", None)
+        no_digest = bool(self.kw.pop("no_digest", False))
         suffix = self.kw.pop("asset_suffix", None) or _suffix(files)
         if self.kw:
             raise AssertionError(f"unexpected keys: {self.kw}")
@@ -195,17 +196,19 @@ class Feed:
         self._server = _Server(self.root)
         base = self._server.__enter__()
 
+        asset = {
+            "name": archive_name,
+            "size": archive.stat().st_size,
+            "browser_download_url": f"{base}/{archive_name}",
+        }
+        if not no_digest:
+            asset["digest"] = "sha256:" + (str(digest) if digest else _sha256(archive))
         document = {
             "tag_name": tag,
             "name": f"{tag} - a test release",
             "body": "notes",
             "html_url": "https://example.invalid/releases/tag/" + tag,
-            "assets": [{
-                "name": archive_name,
-                "size": archive.stat().st_size,
-                "browser_download_url": f"{base}/{archive_name}",
-                "digest": "sha256:" + (str(digest) if digest else _sha256(archive)),
-            }],
+            "assets": [asset],
         }
         (self.root / "release.json").write_text(json.dumps(document), encoding="utf-8")
         return base + "/release.json"
@@ -311,6 +314,24 @@ def test_a_wrong_digest_stops_the_update(exe, tmp_path):
     assert "digest" in proc.stderr.lower(), proc.stderr
     time.sleep(1.0)
     assert not marker.exists(), "a download that failed its digest was installed anyway"
+
+
+def test_a_release_without_a_digest_is_refused(exe, tmp_path):
+    """v7.9.8.10: size is another field from the same feed that supplied the
+    URL. An unverified binary must not be unpacked, run for --version or handed
+    the program over to -- and a script must not see exit 0."""
+    install = _install_copy(exe, tmp_path / "install")
+    marker = install.parent / MARKER
+
+    with Feed(tmp_path, exe, no_digest=True) as url:
+        proc = run([str(install), "--update", "--update-feed", url,
+                    "--no-gh-proxy", "--lang", "en"],
+                   timeout=180, input="", env=_env(tmp_path / "cfg"))
+
+    assert proc.returncode == 1, f"exit={proc.returncode}\n{proc.stdout}\n{proc.stderr}"
+    assert "digest" in proc.stderr.lower(), proc.stderr
+    time.sleep(1.0)
+    assert not marker.exists(), "an unverified build was installed anyway"
 
 
 def test_a_release_without_an_asset_for_this_build_is_refused(exe, tmp_path):

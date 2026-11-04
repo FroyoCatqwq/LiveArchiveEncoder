@@ -64,15 +64,24 @@ public static class ProcessRunner
         int budgetMs = timeoutSeconds * 1000;
         while (!proc.WaitForExit(250))
         {
+            // v7.9.8.10: drain both pipes BEFORE the process is disposed. These
+            // two tasks used to be abandoned on timeout/cancel, so they became
+            // unobserved exceptions and FFmpeg's last words ("No space left on
+            // device", "Could not write header") were lost -- the user saw only
+            // "did not finish within 30s" with no idea why.
             if (cancellationToken.IsCancellationRequested)
             {
                 Kill(proc);
-                cancellationToken.ThrowIfCancellationRequested();
+                string why = Drain(stdoutTask, stderrTask);
+                throw new OperationCanceledException(
+                    $"{Path.GetFileName(args[0])} was cancelled" + Suffix(why), cancellationToken);
             }
             if (clock.ElapsedMilliseconds >= budgetMs)
             {
                 Kill(proc);
-                throw new TimeoutException($"{Path.GetFileName(args[0])} did not finish within {timeoutSeconds}s");
+                string why = Drain(stdoutTask, stderrTask);
+                throw new TimeoutException(
+                    $"{Path.GetFileName(args[0])} did not finish within {timeoutSeconds}s" + Suffix(why));
             }
         }
 
@@ -85,6 +94,26 @@ public static class ProcessRunner
     }
 
     public static CaptureResult Run(string exe, params string[] args) => Run([exe, .. args]);
+
+    /// <summary>
+    /// Collect whatever the killed child already wrote. A read from a killed
+    /// process can fault (the pipe closes under it), so this never throws.
+    /// </summary>
+    private static string Drain(Task<string> stdout, Task<string> stderr)
+    {
+        try { Task.WaitAll([stdout, stderr], 2000); } catch { /* killed child */ }
+        string text = "";
+        foreach (Task<string> task in new[] { stdout, stderr })
+        {
+            if (!task.IsCompletedSuccessfully) continue;
+            string chunk = task.Result.Trim();
+            if (chunk.Length > 0) text = chunk;         // stderr is read last: it wins
+        }
+        return text.Length > 400 ? text[..400] : text;
+    }
+
+    private static string Suffix(string diagnostic) =>
+        diagnostic.Length > 0 ? $"\n  last output: {diagnostic}" : "";
 
     /// <summary>Kill a child and everything it spawned, then give it a moment to die.</summary>
     private static void Kill(Process proc)

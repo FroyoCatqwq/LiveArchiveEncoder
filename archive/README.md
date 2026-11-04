@@ -27,5 +27,8 @@ decision can be re-read later with its original context intact.
 | `retired/RetiredTurbo.cs` | v7.9 | The Turbo mode: `RealtimeOptions.Turbo`, the three slot-loop branches plus `FrameBufferPool.WaitForFrame`/`Close`, the `--turbo` CLI plumbing and its seven localisation keys per language. Removed outright after two releases of deprecation — it fought the live-recording simulation the tool exists to produce. |
 | `retired/RetiredHelpers.cs` | v7.9.3.1 | Unreferenced duplicate helpers found by a full declaration/reference sweep: `Probe.HasAudio` and `Probe.Stream` (both superseded by the single-run `Probe.Source`), `SubtitleTrack.FormatMode`, the last copy of the transport-format preference list, and the boolean "crop 4:3" filter chain from v7.7. |
 
+| `retired/RetiredWatermark.cs` | v7.9.1 | The static text watermark stage (its `WatermarkSettings`, argument builder and menu strings). Removed at the user's request; the recompress pass is now the only post-processing stage. |
+| `retired/RetiredFontPicking.cs` | v7.9.1 | The drawtext-era font picker (`Find` / `PickFrom` / `SeedFromSystemFonts`, `ToFilterPath`, `InstallHint`). The watermark was its only consumer; subtitle fonts now come from `SubtitleFonts`. |
+
 Every entry carries the version it was retired in and what replaced it, so
 restoring one is a copy-paste rather than an archaeology exercise.

@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.FFmpeg;

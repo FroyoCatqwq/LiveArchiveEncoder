@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import pytest
 
@@ -381,4 +382,28 @@ def test_run14_recompress_chain(exe, cui_config):
         c.check("fragment kept", extra[0].get("Args") == "-c:v flv -q:v 9", str(extra[0]))
         c.check("container follows the codec", extra[0].get("Container") == "flv",
                 str(extra[0]))
+    c.finish()
+
+
+def test_encoder_row_renders_both_arguments(exe, cui_config):
+    """v7.9.8.10: menu 3 passed ONE argument to the two-slot
+    "encoder.containers" template. string.Format threw, ChooseEncoder swallowed
+    it as "Invalid selection" AFTER c.Encoder had been replaced -- so the audio,
+    fps, quality and size sync below never ran while the menu showed a new
+    encoder. Find libx264's row number first: it differs between FFmpeg builds.
+    """
+    if cui_config.exists():
+        cui_config.unlink()
+    args = ["--lang", "en"]
+
+    listing = harness.cui(exe, args, "3\nr\n0\n")
+    match = re.search(r"^\s*(\d+)\.\s+libx264\b", listing.stdout, re.M)
+    assert match, "libx264 missing from the encoder list:\n" + listing.stdout[-800:]
+
+    picked = harness.cui(exe, args, f"3\n{match.group(1)}\n0\n")
+    text = picked.stdout + picked.stderr
+    c = Checks()
+    c.check("exit code 0", picked.returncode == 0, f"rc={picked.returncode}")
+    c.check("no swallowed FormatException", "Invalid selection" not in text, text[-600:])
+    c.check("the container list actually rendered", "can be written to:" in text, text[-600:])
     c.finish()

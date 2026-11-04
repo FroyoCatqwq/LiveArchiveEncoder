@@ -9,6 +9,14 @@ namespace LiveArchiveEncoder.UI;
 /// <summary>CLI entry path, ported from cli_main().</summary>
 public static class Cli
 {
+    /// <summary>
+    /// v7.9.8.10: --era-native used to be parsed and then never read. An
+    /// explicit "use the site's own codec" now wins over --era-modern; omitting
+    /// both still means native. Shared by the encode and --recompress-only paths
+    /// so they cannot drift apart again.
+    /// </summary>
+    public static bool EraNativeOf(CliOptions args) => args.EraNative || !args.EraModern;
+
     public static int Run(
         CliOptions args, string ffmpeg, string ffprobe, FFmpeg.Capabilities caps,
         CancellationToken cancellationToken = default)
@@ -32,7 +40,10 @@ public static class Cli
         // taken its defaults from there, and a menu toggle from yesterday must
         // not change what today's script produces. (`stored.EraNative` is the
         // shell's memory, exposed as --era-native for a script that wants it.)
-        bool eraNative = !args.EraModern;
+        // v7.9.8.10: --era-native used to be parsed and then never read, so it
+        // could not override --era-modern. An explicit "use the site's codec"
+        // now wins; omitting both still means native, as it always did.
+        bool eraNative = EraNativeOf(args);
 
         // v7.9.5: every capability this run needs comes from the build profile.
         // Both lists used to be a separate `ffmpeg -encoders` launch each.
@@ -813,7 +824,7 @@ public static class Cli
             return 2;
         }
 
-        bool eraNative = !args.EraModern;
+        bool eraNative = EraNativeOf(args);
         string h264Impl = era?.EffectiveH264(args.H264Impl) ?? args.H264Impl ?? "libx264";
         // The second pass is the only pass here, so the encoder whose limits
         // matter is the one the preset delivers with.

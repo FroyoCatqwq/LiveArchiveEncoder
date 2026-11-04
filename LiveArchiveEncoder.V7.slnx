@@ -53,12 +53,14 @@
     <File Path="src/LiveArchiveEncoder/Localization/Strings.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/PostProcess/">
+    <File Path="src/LiveArchiveEncoder/PostProcess/EraAspect.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/EraPreset.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/FontResolver.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/PostArgs.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/PostPipeline.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/Recompress.cs" />
-    <File Path="src/LiveArchiveEncoder/PostProcess/Watermark.cs" />
+    <File Path="src/LiveArchiveEncoder/PostProcess/RecompressCodecs.cs" />
+    <File Path="src/LiveArchiveEncoder/PostProcess/SubtitleFonts.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/RateControl/">
     <File Path="src/LiveArchiveEncoder/RateControl/OutputMonitor.cs" />

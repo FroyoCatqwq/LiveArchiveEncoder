@@ -395,9 +395,6 @@ public sealed class EraPreset
     /// </summary>
     public string RecompressArgs => Fragment(native: true);
 
-    /// <summary>Same profile, rendered with libx264/aac so any player opens it.</summary>
-    public string ModernRecompressArgs => Fragment(native: false);
-
     /// <summary>
     /// The fragment at a frame shape resolved by <see cref="EraAspects"/>
     /// (v7.9.6.3): the second pass has to deliver the same shape the live pass
@@ -807,10 +804,6 @@ public static class EraPresets
                 .ThenBy(g => g.Site, StringComparer.OrdinalIgnoreCase)];
         }
     }
-
-    /// <summary>The rows of one site, oldest first.</summary>
-    public static IReadOnlyList<EraPreset> ForSite(string site) =>
-        [.. All.Where(p => Same(p.Site, site)).OrderBy(p => p.Year)];
 
     public static IReadOnlyList<EraPreset> Custom
     {

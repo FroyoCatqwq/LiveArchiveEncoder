@@ -43,7 +43,7 @@ NOTE: '.rm' is not a container libx264 can write; the file is written as .mp4.
 反方向一样（`out.mp4` 配 `rv20` → `out.rm`）。更正出来的名字**不覆盖任何人**：
 
 - 更正后已存在（`taken.rm` 有了）→ `taken (2).rm`；
-- 更正后正好是源文件（`-o clip.rm`，源是 `clip.mp4`）→ `clip (2).mp4`，源文件字节不变。
+- 更正后正好是源文件（`clip.rm`，源是 `clip.mp4`）→ `clip (2).mp4`，源文件字节不变。
 
 CLI 与 CUI 走同一条规则。
 
@@ -59,8 +59,8 @@ CLI 与 CUI 走同一条规则。
 
 | 平台 | 文件 | 要求 |
 | --- | --- | --- |
-| Windows x64 | `LiveArchiveEncoder-v7.9.8.9-win-x64.zip` | **.NET 10 运行时** |
-| Linux x64 | `LiveArchiveEncoder-v7.9.8.9-linux-x64.tar.gz` | **.NET 10 运行时** |
+| Windows x64 | `LiveArchiveEncoder-v7.9.8.9-win-x64.zip` | **.NET 10 或 .NET 11 运行时** |
+| Linux x64 | `LiveArchiveEncoder-v7.9.8.9-linux-x64.tar.gz` | **.NET 10 或 .NET 11 运行时** |
 
 只出依赖版（JIT）。Linux 包这次同样只做**结构核对**：ELF 头、可执行位 755、
 `runtimeconfig` 要求 `Microsoft.NETCore.App 10.0.0`、清单与上一版一致，dll 里能找到
@@ -83,7 +83,7 @@ CLI 与 CUI 走同一条规则。
 
 - `out.rm` + libx264 → `NOTE ... written as .mp4`，产物 `out.mp4`；
 - `out.mp4` 已存在时再来一次 → `out (2).mp4`，原文件未被改；
-- `-o src.rm`（源是 `src.mp4`）→ `src (2).mp4`，源文件仍是 110,817 B；
+- `src.rm`（源是 `src.mp4`）→ `src (2).mp4`，源文件仍是 110,817 B；
 - 一份写着 `libmp3lame` 的设置启动 CUI → 打印换用 AAC，菜单第 6 行是 `aac`，
   退出后设置里存的也是 `aac`。
 
