@@ -83,6 +83,9 @@ public static partial class Cui
             Console.WriteLine($"{L.Pad(L.T("config.restored"), 17)}: "
                 + (stored.SavedAt is null ? L.T("value.yes") : $"{stored.SavedAt.Value.LocalDateTime:G}"));
         }
+        // v7.9.8.9: mp4 + H.264 defaults to AAC, including for a settings file
+        // that remembered the codec of an earlier container (see DefaultAudioFor).
+        if (c.Encoder is not null) DefaultAudioFor(c, c.Encoder, audioAvailable);
         // v7.9.6.3: a remembered shard count belongs to whatever input it was
         // chosen for, but a network input no longer cancels it here -- the
         // encoder measures the link and decides, and zeroing the value at
@@ -328,8 +331,41 @@ public static partial class Cui
         return "";
     }
 
-    private static FileInfo DefaultOutput(FileInfo src, EncoderInfo encoder) =>
-        new(Path.Combine(src.DirectoryName ?? ".", $"{Path.GetFileNameWithoutExtension(src.Name)}_live.{encoder.Extension}"));
+    /// <summary>
+    /// v7.9.8.9: keep the audio on the codec its container and video codec
+    /// assume -- AAC for mp4 with H.264.
+    ///
+    /// <para>The rule has to run at all three places the pair is settled (start,
+    /// encoder row, container row), because the settings file carries a codec
+    /// chosen for an earlier container: a 2007 FLV run leaves MP3, and MP3 is
+    /// legal inside mp4, so <see cref="AudioCatalog.SupportsContainer"/> is
+    /// happy and nothing would ever replace it. Only a default is changed -- a
+    /// codec the user types in row 20 still wins until the pair changes.</para>
+    /// </summary>
+    internal static void DefaultAudioFor(Config c, EncoderInfo video, HashSet<string> audioAvailable)
+    {
+        if (!EncoderMath.PrefersAac(video.FormatName, video.Name)) return;
+        if (c.AudioEncoder is not { Length: > 0 } current) return;      // "no audio" was a choice
+        if (string.Equals(current, "aac", StringComparison.OrdinalIgnoreCase)) return;
+        if (!audioAvailable.Contains("aac")) return;                    // this build cannot mux it
+        c.AudioEncoder = "aac";
+        Console.WriteLine(L.T("audio.aacdefault", current));
+    }
+
+    /// <summary>
+    /// The automatic output for a source. v7.9.8.9: a source on a network share
+    /// no longer writes its capture back over that same share -- see
+    /// <see cref="OutputNaming"/>. The path is recomputed whenever the encoder
+    /// or the input changes, so the rule follows the source; a path the user
+    /// typed sets <c>OutputIsAuto = false</c> and is never touched.
+    /// </summary>
+    private static FileInfo DefaultOutput(FileInfo src, EncoderInfo encoder)
+    {
+        (FileInfo path, bool movedOffNetwork) = OutputNaming.ForSource(src, encoder.Extension);
+        if (movedOffNetwork)
+            Console.WriteLine(L.T("note.outputoffline", path.DirectoryName ?? "."));
+        return path;
+    }
 
     /// <summary>
     /// Menu summary of the update state (v7.9.8.5): what the last check saw,
@@ -1872,6 +1908,9 @@ public static partial class Cui
                 ? L.T("audio.none", resolved.FormatName)
                 : L.T("audio.replaced", current, resolved.FormatName, c.AudioEncoder));
         }
+        // v7.9.8.9: mp4 + H.264 means AAC even when the carried codec would mux
+        // (MP3 does), which is the FLV-era leftover this rule exists for.
+        DefaultAudioFor(c, resolved, audioAvailable);
         (c.AudioRate, c.AudioChannels, c.AudioKbps) = AudioCatalog.Effective(
             c.AudioEncoder, c.AudioRate, c.AudioChannels, c.AudioKbps, resolved.FormatName);
 
@@ -2063,15 +2102,19 @@ public static partial class Cui
             Console.WriteLine(L.T("input.select"));
             return;
         }
+        // Held in a local: the property is checked once and never assigned again
+        // in this method, and the nullable analysis stops trusting it the moment
+        // another member of the same object is written.
+        FileInfo source = c.InputPath;
         if (c.Encoder is null)
         {
             Console.WriteLine(L.T("encoder.selectfirst"));
             return;
         }
 
-        c.OutputPath ??= DefaultOutput(c.InputPath, c.Encoder);
+        c.OutputPath ??= DefaultOutput(source, c.Encoder);
         c.OutputPath.Directory?.Create();
-        if (string.Equals(Path.GetFullPath(c.OutputPath.FullName), Path.GetFullPath(c.InputPath.FullName),
+        if (string.Equals(Path.GetFullPath(c.OutputPath.FullName), Path.GetFullPath(source.FullName),
                 StringComparison.OrdinalIgnoreCase))
         {
             Console.WriteLine(L.T("output.sameasinput"));
@@ -2086,6 +2129,17 @@ public static partial class Cui
             Console.WriteLine(L.T("note.containerfromext",
                 c.Encoder.Name, c.OutputPath.Extension, byExtension.FormatName));
             c.Encoder = byExtension;
+        }
+
+        // v7.9.8.9: a name this encoder cannot write ("out.rm" with libx264) is
+        // corrected instead of refused -- the same rule as the CLI, including
+        // "never fold onto the source, never onto a file nobody named".
+        (FileInfo corrected, string? wasExt, string? nowExt) =
+            OutputNaming.CorrectExtension(c.OutputPath, c.Encoder, source.FullName);
+        if (nowExt is not null)
+        {
+            Console.WriteLine(L.T("note.extcorrected", wasExt ?? "", c.Encoder.Name, nowExt));
+            c.OutputPath = corrected;
         }
 
         try
@@ -2170,7 +2224,7 @@ public static partial class Cui
             {
                 FFmpeg = ffmpeg,
                 FFprobe = ffprobe,
-                SourcePath = c.InputPath.FullName,
+                SourcePath = source.FullName,
                 DestinationPath = c.OutputPath.FullName,
                 Encoder = c.Encoder,
                 Fps = c.Fps,

@@ -494,6 +494,21 @@ public static class EncoderMath
         return encoder;
     }
 
+    /// <summary>
+    /// v7.9.8.9: true when the audio a <em>default</em> should land on for this
+    /// container and video codec is AAC.
+    ///
+    /// <para>mp4 with H.264 means AAC -- the pair every player and every 2010s
+    /// upload carried, and the one the second pass already picks. The rule is
+    /// needed because a codec remembered from some other container is legal
+    /// here too: MP3 muxes into mp4, so nothing else would ever replace the
+    /// MP3 left behind by a 2007 FLV run.</para>
+    /// </summary>
+    public static bool PrefersAac(string container, string videoEncoder) =>
+        string.Equals(container, "mp4", StringComparison.OrdinalIgnoreCase)
+        && (string.Equals(videoEncoder, "libx264", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(videoEncoder, "libopenh264", StringComparison.OrdinalIgnoreCase));
+
     public static string? ChooseAudioEncoder(string container, ICollection<string> available)
     {
         if (Constants.NoAudioFormats.Contains(container)) return null;

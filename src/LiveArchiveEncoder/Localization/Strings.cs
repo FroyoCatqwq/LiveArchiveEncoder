@@ -243,6 +243,7 @@ public static class L
         ["audio.channelsadjusted"] = "{0} channels is not supported; using {1}.",
         ["audio.kbpsadjusted"] = "{0} kbps is outside what this encoder takes at this rate; using {1} kbps.",
         ["audio.replaced"] = "'{0}' does not fit the new container '{1}'; using '{2}' instead.",
+        ["audio.aacdefault"] = "mp4 with H.264 uses AAC; '{0}' was replaced.",
         ["encoder.rescanok"] = "Rescan complete: {0} legacy video encoders detected.",
 
         ["output.prompt"] = "Output file path (blank=auto): ",
@@ -386,6 +387,10 @@ public static class L
         ["note.transportadjusted"] = "Adjusted output size for {0}: {1}x{2}",
         ["note.containerfromext"] = "NOTE: {0} writes {2} for this output; "
             + "the '{1}' extension selected it.",
+        ["note.extcorrected"] = "NOTE: '.{0}' is not a container {1} can write; "
+            + "the file is written as .{2}.",
+        ["note.outputoffline"] = "NOTE: the source is on a network share, so this capture "
+            + "goes to {0} instead of back over the link. Set the output path to change it.",
         ["note.eranative"] = "NOTE: preset \"{0}\" renders the second pass with {1} in .{2} -- "
             + "the codec that site actually served. Add --era-modern for an H.264 viewing copy.",
         ["note.eramodern"] = "NOTE: preset \"{0}\" renders the second pass with {1} in .{2} -- "
@@ -986,6 +991,7 @@ public static class L
         ["audio.channelsadjusted"] = "{0} 声道不受支持，已改用 {1}。",
         ["audio.kbpsadjusted"] = "{0} kbps 超出该编码器在当前采样率下的范围，已改用 {1} kbps。",
         ["audio.replaced"] = "“{0}”不适用于新容器“{1}”，已改用“{2}”。",
+        ["audio.aacdefault"] = "mp4 + H.264 默认用 AAC，已把“{0}”换掉。",
         ["encoder.rescanok"] = "重新扫描完成：检测到 {0} 个复古视频编码器。",
 
         ["output.prompt"] = "输出文件路径（留空=自动）: ",
@@ -1123,6 +1129,9 @@ public static class L
         ["note.sizeadjusted"] = "已把 {0} 调整为受支持的输出尺寸：{1}x{2}",
         ["note.transportadjusted"] = "已按 {0} 调整输出尺寸：{1}x{2}",
         ["note.containerfromext"] = "注意：{0} 按输出扩展名 {1} 改用 {2} 容器。",
+        ["note.extcorrected"] = "注意：“.{0}”是 {1} 写不出的容器，文件按 .{2} 输出。",
+        ["note.outputoffline"] = "注意：源文件在网络驱动器上，这次的文件写到 {0}，"
+            + "不再往那条链路上回写。要改就用输出路径那一项。",
         ["note.eranative"] = "注意：预设“{0}”的第二遍用 {1} 写进 .{2} —— 也就是当年那个站点真正用的编码器；"
             + "加 --era-modern 可改成 H.264 观看版。",
         ["note.eramodern"] = "注意：预设“{0}”的第二遍用 {1} 写进 .{2} —— 现代观看版，不是站点当年用的编码器。",

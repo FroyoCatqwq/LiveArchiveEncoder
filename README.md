@@ -8,6 +8,17 @@ a "video site" recompress pass and per-era presets sit on top of the realtime
 encoder, all of them off by default — with no flags given, the output is still
 exactly what v6.3.3 would have produced.
 
+> **v7.9.8.9:** three defaults moved to where they belong. A source on a network
+> share no longer writes its `_live` capture back over the same link — the
+> automatic output goes to `%LOCALAPPDATA%\LiveArchiveEncoder\output\` instead,
+> with the path still printed and still overridable (`-o`, or the output row; a
+> path you type is remembered and never re-derived). mp4 with `libx264` /
+> `libopenh264` now defaults to **AAC** even when the settings file carries MP3
+> from an older FLV-era run (MP3 does mux into mp4, which is why nothing ever
+> replaced it). And an extension the chosen encoder cannot write — `out.rm` with
+> libx264 — is corrected to `.mp4` with a note instead of failing the run,
+> without overwriting an existing file or the source (`out (2).mp4`).
+
 > **v7.9.8.8:** OpenH264's knobs are connected. The second pass used to emit
 > `-c:v libopenh264` with **nothing else** when no bitrate was typed — no
 > `-b:v`, no `-rc_mode` — so the encoder ran on its built-in 2 Mbps target: a
@@ -302,6 +313,13 @@ No input argument opens the interactive menu. `--list-filters` shows the
 deinterlacers/scalers the selected FFmpeg exposes, `--help` prints the
 argparse-equivalent usage text, and `--cpu-info` prints the instruction sets and
 `Vector<byte>.Count` the runtime reports.
+
+With no output argument the file is named after the source (`_live`) in the
+source's own folder — unless that folder is a network share, in which case it
+goes to `%LOCALAPPDATA%\LiveArchiveEncoder\output\` and the run says so. An
+extension the chosen encoder cannot write is corrected (`.mp4` for `out.rm` with
+libx264) instead of failing, and a corrected name never lands on the source or on
+a file you did not name.
 
 All v6.3.3 flags are supported with identical names and defaults:
 `--start-time/--start`, `--end-time/--end`, `--encoder`, `--audio-encoder`,

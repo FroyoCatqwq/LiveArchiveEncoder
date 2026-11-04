@@ -329,6 +329,17 @@ public static class ConfigStore
 
     public static string DefaultPath => Path.Combine(RootDirectory, "config.json");
 
+    /// <summary>
+    /// v7.9.8.9: where an automatic output goes when the source's own folder is
+    /// a network share.
+    ///
+    /// <para>Its own <c>output</c> folder rather than the root, so wiping the
+    /// settings -- the thing people do when the program misbehaves -- does not
+    /// wipe the captures with them. Under the same root as <c>config.json</c>,
+    /// which the banner already prints, so there is one place to look.</para>
+    /// </summary>
+    public static string CaptureDirectory => Path.Combine(RootDirectory, "output");
+
     public static UserConfig Load(string? path = null)
         => TryLoad(path ?? DefaultPath) ?? new UserConfig();
 

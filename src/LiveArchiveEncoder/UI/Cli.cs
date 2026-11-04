@@ -190,6 +190,19 @@ public static class Cli
             }
         }
 
+        // v7.9.8.9: a name this encoder cannot write ("out.rm" with libx264) is
+        // corrected instead of refused -- the user asked for a file, not for a
+        // muxer message. The corrected name never lands on the source or on a
+        // file that already exists: a correction must not overwrite something
+        // nobody named.
+        (FileInfo corrected, string? wasExt, string? nowExt) =
+            OutputNaming.CorrectExtension(dst, encoder, src?.FullName);
+        if (nowExt is not null)
+        {
+            Console.WriteLine(L.T("note.extcorrected", wasExt ?? "", encoder.Name, nowExt));
+            dst = corrected;
+        }
+
         try { Validation.ValidateOutputExtension(dst, encoder); }
         catch (ArgumentException exc) { Console.Error.WriteLine($"ERROR: {exc.Message}"); return 2; }
 
@@ -421,6 +434,11 @@ public static class Cli
                 // the run itself carries it in RealtimeOptions.SourcePath.
                 InputPath = urlInput ? null : src,
                 OutputPath = dst,
+                // v7.9.8.9: a path this run did not type is still an automatic
+                // one -- the next session may compute a different default (the
+                // source moved, or the network rule now applies), while a path
+                // the user typed is theirs to keep.
+                OutputIsAuto = !args.Output.HasText,
                 StartTimeSeconds = args.StartTime,
                 EndTimeSeconds = args.EndTime,
                 Encoder = encoder,
@@ -1197,8 +1215,15 @@ public static class Cli
             string stem = Remote.HttpSource.FileNameFromUrl(url);
             int dot = stem.LastIndexOf('.');
             if (dot > 0) stem = stem[..dot];
-            return new(Path.Combine(".", $"{stem}_live.{encoder.Extension}"));
+            return OutputNaming.ForUrl(stem, encoder.Extension);
         }
-        return new(Path.Combine(src!.DirectoryName ?? ".", $"{Path.GetFileNameWithoutExtension(src.Name)}_live.{encoder.Extension}"));
+
+        // v7.9.8.9: a network source no longer drags its output along. Writing
+        // the capture back over the same share both doubles the traffic and
+        // parks the archive on the machine that was only serving it.
+        (FileInfo path, bool movedOffNetwork) = OutputNaming.ForSource(src!, encoder.Extension);
+        if (movedOffNetwork)
+            Console.WriteLine(L.T("note.outputoffline", path.DirectoryName ?? "."));
+        return path;
     }
 }

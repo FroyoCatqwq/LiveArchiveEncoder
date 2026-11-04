@@ -1052,6 +1052,40 @@ archive.org、各种 CDN 都是）。FFmpeg 原生会说这两个协议，本工
   编码很慢，20 秒之后才发现共享是只读的太亏了。
 - 输出为远程路径时在 banner 里同样打印协商到的协议版本（`SMB output : ...`）。
 
+### 默认输出位置（v7.9.8.9）
+
+不给输出路径时，文件是"源文件旁边 + `_live` + 编码器扩展名"。**源目录在网络驱动器上时
+例外**（UNC、映射盘符、Linux 的 cifs/nfs 挂载）：默认改到
+
+```
+%LOCALAPPDATA%\LiveArchiveEncoder\output\
+```
+
+理由有两条——读和写挤同一条链路，以及产物不该落在那台只负责共享的机器上。程序会打印
+
+```
+注意：源文件在网络驱动器上，这次的文件写到 C:\Users\<你>\AppData\Local\LiveArchiveEncoder\output，
+不再往那条链路上回写。要改就用输出路径那一项。
+```
+
+- **照样能改**：菜单的「2. Output file」留空才是自动，填了就是你说了算（`OutputIsAuto=false`，
+  写进设置，下次直接用它）；命令行的第二个位置参数同理。
+- 自动路径每次按规则重算（换了输入、换了编码器都跟着变），所以不存在"上次那份自动名字
+  被永久记住"的问题。
+- `config.json` 里存的是 `outputIsAuto`，CLI 跑完也会写对：手写路径不再是"自动"。
+
+**扩展名写错自动更正**：`out.rm` 配 `libx264` 这种"这个容器装不了这个编码器"的组合，
+以前在开跑前报错（退出码 2）。现在按编码器真正能写的扩展名更正，并打印
+`注意：“.rm”是 libx264 写不出的容器，文件按 .mp4 输出。`。更正后的名字**不会覆盖**：
+
+- 已有 `out.mp4` → 写 `out (2).mp4`；
+- 更正后正好是源文件（`-o src.rm`，源是 `src.mp4`）→ 写 `src (2).mp4`。
+
+**mp4 + H.264 的音频默认是 AAC**：`libx264` / `libopenh264` 配 mp4 时，音频默认 `aac`。
+设置文件里留着的旧选择（比如 2007 年 FLV 预设写下的 `libmp3lame`）在启动、换编码器、
+换容器这三处都会被换成 aac 并说明——因为 MP3 也能封进 mp4，不主动换就永远不会换。
+手工在「6. Audio encoder」里选的编码器仍然算数。
+
 ### SMB 版本协商
 
 **版本协商是操作系统做的，应用程序无法直接指定。** 本程序能做的是把实际协商
@@ -1077,7 +1111,6 @@ Linux 挂载点识别不出来的常见原因：用了 symlink（指向别处的
 
 在 Linux 上搭一个测试共享（Fedora/RHEL 系，SELinux 会拦 samba 的家目录共享，
 测试时先放宽）：
-
 ```bash
 sudo dnf install samba samba-client cifs-utils
 sudo mkdir -p /srv/lae && sudo chmod 777 /srv/lae

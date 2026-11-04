@@ -14,7 +14,10 @@ from harness import run
 
 CASES = [
     ("unknown_encoder",  ["--encoder", "not_a_codec"]),
-    ("bad_extension",    ["--encoder", "rv20", "--output-override", "x"]),
+    # v7.9.8.9: "bad_extension" used to live here -- an extension the encoder
+    # cannot write was an error in v6.3.3 and the port had to agree. It is now
+    # corrected instead (rv20 + .mp4 becomes .rm), which is a deliberate break
+    # from the baseline, so the case moved to test_output_naming.py.
     ("missing_input",    []),
     ("bad_timecode",     ["--encoder", "rv20", "--start-time", "99:99:99"]),
     ("end_before_start", ["--encoder", "rv20", "--start-time", "00:00:05", "--end-time", "00:00:02"]),
@@ -31,8 +34,6 @@ def _args_for(name: str, extra: list[str], work, src) -> list[str]:
     out = work / f"err_{name}"
     if name == "missing_input":
         return [str(work / "does_not_exist.mp4"), str(out) + ".rm", "--encoder", "rv20"]
-    if name == "bad_extension":
-        return [str(src), str(out) + ".mp4", "--encoder", "rv20"]
     ext = ".roq" if next((extra[i + 1] for i, v in enumerate(extra)
                           if v == "--encoder"), "rv20") == "roqvideo" else ".rm"
     return [str(src), str(out) + ext, "--end-time", "00:00:02", *extra]
