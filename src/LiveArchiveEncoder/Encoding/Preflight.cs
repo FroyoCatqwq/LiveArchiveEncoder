@@ -115,6 +115,9 @@ public static class Preflight
                 // is to open the same encoder/rate/channel combination the
                 // encode will, and to fail before a realtime pass starts.
                 cmd.AddRange(["-map", StreamSelection.AudioMap(0, audioStream), "-c:a", audio.Encoder]);
+                // v7.9.8.11.1: the trial has to prove the real command, which
+                // normalises the audio PTS; keep the two in step.
+                cmd.AddRange(ArgsBuilder.AudioAlignArgs());
 
                 // ADPCM/DPCM/PCM have no rate control; -b:a is silently ignored.
                 if (!EncoderMath.AudioIgnoresBitrate(audio.Encoder) && audio.Kbps > 0)

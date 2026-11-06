@@ -311,6 +311,31 @@ public static class RealtimeEncoder
             subs?.Dispose();
             throw;
         }
+        // v7.9.8.11.1: MJPEG has no rate control -- -q:v fixes the frame size,
+        // so dropping fps can never reach an unrealistic --limit. Calibrate the
+        // quantiser against this source before the run starts (the command line
+        // cannot change mid-pipe) and raise the ladder's ceiling to what is
+        // physically reachable, so the frame rate stops collapsing to its last rung.
+        if (IntraQuality.IsIntraOnly(o.Encoder.Name) && o.LimitKbps > 0)
+        {
+            ColorOverride intraColors = ColorOverride.Parse(
+                o.ColorRange, o.ColorSpace, o.ColorPrimaries, o.ColorTransfer);
+            Action<string>? sayIntra = o.Verbose ? Console.WriteLine : null;
+            (int q, _, double baselineKbps) = IntraQuality.Calibrate(
+                o.FFmpeg, sourcePath, o.Encoder.Name, filter, transportFmt, stream,
+                o.VideoStream, o.StartSeconds, o.QualityExplicit ? o.Quality : null,
+                Math.Max(1.0, o.LimitKbps - (hasAudio ? o.AudioKbps : 0.0)), o.Fps,
+                intraColors, sayIntra);
+
+            double raised = Math.Max(o.LimitKbps, baselineKbps * 1.15);
+            o = o with
+            {
+                Quality = q,
+                LimitKbps = raised,
+                RecoverKbps = raised * (o.RecoverKbps / o.LimitKbps),
+            };
+        }
+
         // The encoder writes a ".part" sibling; Promote puts it in place only once
         // the run has actually succeeded.
         FileInfo part = Core.OutputFile.PartPath(dst);
@@ -681,6 +706,10 @@ public static class RealtimeEncoder
             cmd.AddRange(Remote.HttpSource.ReadArgs(o.SourcePath));
             cmd.AddRange(Remote.Smb.RemoteReadArgs(o.SourcePath));
             if (o.StartSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(o.StartSeconds)]);
+            // v7.9.8.11.1: bound this second read of the source to the same span
+            // as the video pipe. Without it the audio input keeps being read
+            // after the pipe reaches EOF, leaving a sound-only tail.
+            if (duration is not null) cmd.AddRange(["-t", ArgsBuilder.FloatArg(duration.Value)]);
             cmd.AddRange(["-i", o.SourcePath]);
             nextInput++;
         }
@@ -728,6 +757,8 @@ public static class RealtimeEncoder
         {
             if (o.AudioEncoder is null) throw new InvalidOperationException("internal error: audio encoder vanished");
             cmd.AddRange(["-c:a", o.AudioEncoder]);
+            // v7.9.8.11.1: start the audio clock at zero, like the raw pipe.
+            cmd.AddRange(ArgsBuilder.AudioAlignArgs());
 
             // No rate control on these: FFmpeg silently ignores -b:a, so emitting
             // it only misleads whoever reads the command.
@@ -996,11 +1027,34 @@ public static class RealtimeEncoder
                 double totalRate = monitor.RateKbps();
                 double videoRate = Math.Max(0.0, totalRate - (hasAudio ? o.AudioKbps : 0.0));
 
-                if (videoRate >= o.LimitKbps)
+                // v7.9.8.11.1: with a calibrated quantiser an intra-only encoder
+                // is already at its reachable bitrate floor. Dropping fps cannot
+                // shrink a JPEG frame, it only makes the picture stutter, and the
+                // early (small-window) rate estimate used to send the ladder to
+                // its last rung with no way back. Keep the ladder out unless the
+                // estimate is wildly off -- three times the ceiling, which also
+                // covers the first second's 2-3x spike from a tiny sample window.
+                if (IntraQuality.IsIntraOnly(o.Encoder.Name) && videoRate < o.LimitKbps * 3.0)
+                {
+                    // Also undo any rung the first, tiny-window estimate already
+                    // took: the calibrated quantiser owns the bitrate now.
+                    currentLevel = 0;
+                    highSince = null;
+                    lowSince = null;
+                }
+                else if (videoRate >= o.LimitKbps)
                 {
                     lowSince = null;
                     highSince ??= now;
-                    int target = EncoderMath.TargetLevel(videoRate, ladder);
+                    // v7.9.8.11.1: for an intra-only encoder bitrate is
+                    // bytes/frame * fps. Pick the shallowest rung that can
+                    // actually fit the limit instead of walking to the deepest;
+                    // when no rung fits, stay put (RungFor returns 0).
+                    int target = IntraQuality.IsIntraOnly(o.Encoder.Name)
+                        ? IntraQuality.RungFor(
+                            videoRate * 1000.0 / 8.0 / Math.Max(0.1, effectiveFps),
+                            levels, o.LimitKbps)
+                        : EncoderMath.TargetLevel(videoRate, ladder);
                     if (target > currentLevel)
                     {
                         double hold = videoRate >= o.LimitKbps * 1.25 ? 0.18 : 0.30;
@@ -1251,6 +1305,11 @@ public static class RealtimeEncoder
             videoCmd.AddRange(ArgsBuilder.VideoQualityArgs(
                 o.Encoder.Name, o.Quality, o.LimitKbps, o.OpenH264Rc, o.OpenH264SkipFrames,
                 o.Encoder.Caps is null || o.Encoder.Caps.HasRcMode));
+            // v7.9.8.11.1: the probe must carry the same picture flags as the
+            // real encode, or MJPEG fails its full-range check here and the
+            // split route silently falls back to inline.
+            videoCmd.AddRange(ArgsBuilder.EncoderPixFmtArgs(o.Encoder.Name, "yuv420p", false));
+            videoCmd.AddRange(ArgsBuilder.ColorArgs(new StreamInfo(), null, o.Encoder.Name));
             videoCmd.AddRange(["-f", o.Encoder.FormatName, "-y", videoPath]);
             CaptureResult video = ProcessRunner.Run(videoCmd, 60);
             if (video.ExitCode != 0)

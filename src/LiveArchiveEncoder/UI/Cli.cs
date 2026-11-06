@@ -663,6 +663,7 @@ public static class Cli
             FpsLevels = levels,
             FpsLevelKbps = levelKbps,
             Quality = config.Qv,
+            QualityExplicit = args.Qv.HasValue,
             Threads = config.Threads,
             LimitKbps = config.Limit,
             RecoverKbps = config.Recover,

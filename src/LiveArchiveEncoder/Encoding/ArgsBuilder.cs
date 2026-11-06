@@ -96,19 +96,6 @@ public static class ArgsBuilder
     }
 
     /// <summary>
-    /// Colour metadata for the output stream.
-    ///
-    /// v7.9.6: an explicit value wins over what the source declared, so a DVD
-    /// rip that says "unknown" can be told it is bt470bg + tv range without
-    /// re-encoding the picture twice. Only the field the user named changes;
-    /// the rest still follow the source.
-    ///
-    /// These are tags, not conversions: FFmpeg writes the numbers into the
-    /// stream header and leaves the samples alone. A wrong tag therefore looks
-    /// worse than no tag -- which is why the CLI only accepts values from a
-    /// known list rather than passing arbitrary text through.
-    /// </summary>
-    /// <summary>
     /// v7.9.8.11: FFmpeg's MJPEG encoder refuses a limited-range picture at the
     /// default strictness. <c>libavcodec/mjpegenc_common.c:569</c>
     /// (<c>ff_mjpeg_encode_check_pix_fmt</c>) returns EINVAL when
@@ -150,6 +137,22 @@ public static class ArgsBuilder
         return explicitRequest ? ["-pix_fmt", transportFmt] : [];
     }
 
+    /// <summary>
+    /// v7.9.8.11.1: the audio track is read from the source a second time while
+    /// the video arrives over a rawvideo pipe whose timestamps start at zero by
+    /// construction. Normalise the audio's first PTS so a container offset, an
+    /// encoder delay or an imprecise input seek cannot leave the two streams
+    /// shifted. Applied to the output audio stream, and mirrored by
+    /// <see cref="Preflight"/> so the trial still proves the real command.
+    /// </summary>
+    public static List<string> AudioAlignArgs() => ["-af", "asetpts=PTS-STARTPTS"];
+
+    /// <summary>
+    /// Colour metadata for the output stream. These are tags, not conversions:
+    /// an explicit value wins over what the source declared, but the samples
+    /// themselves are left alone. A MJPEG output is pinned to <c>pc</c> by
+    /// <see cref="NeedsJpegRange"/>.
+    /// </summary>
     public static List<string> ColorArgs(StreamInfo info, ColorOverride? over = null, string? encoder = null)
     {
         var args = new List<string>();

@@ -29,6 +29,13 @@ public sealed record RealtimeOptions
     /// </summary>
     public List<FpsRungSetting> FpsLevelKbps { get; init; } = [];
     public int Quality { get; init; } = 8;
+
+    /// <summary>
+    /// v7.9.8.11.1: true when the user typed <c>--qv</c>. An era preset's
+    /// quality is not an explicit request, so intra-only calibration may retune
+    /// it toward the bitrate limit; a typed number is measured but never changed.
+    /// </summary>
+    public bool QualityExplicit { get; init; }
     public int Threads { get; init; } = 16;
     public double LimitKbps { get; init; } = 200.0;
     public double RecoverKbps { get; init; } = 150.0;

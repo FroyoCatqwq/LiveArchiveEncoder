@@ -121,6 +121,11 @@ public static class AudioTrack
             "-map", "1:a:0",
             "-c:v", "copy",
             "-c:a", "copy",
+            // v7.9.8.11.1: both inputs are finished files here, so the shortest
+            // one may safely end the mux. Without this a longer audio track
+            // leaves a tail with no picture (ffmpeg-all: "-shortest -- Finish
+            // encoding when the shortest output stream ends").
+            "-shortest",
             "-t", ArgsBuilder.FloatArg(duration),
             "-f", muxer,
             "-y", outputPath,

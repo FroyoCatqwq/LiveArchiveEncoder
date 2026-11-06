@@ -18,6 +18,44 @@
 
 ---
 
+## v7.9.8.11.1（2026-11-07）
+
+修 mjpeg 使用中暴露的两个问题。
+
+### 1. 音画不同步（开不开并发都一样）
+
+* 实时通路里视频是 rawvideo 管道（时间戳按帧号从 0 生成），音频是**第二次读源文件**，
+  自带容器时间戳、没有输入级时长上限、也没有 PTS 归一化。FFmpeg 官方手册把 `-shortest`
+  定义为"Finish encoding when the shortest output stream ends"，并说明 `-fps_mode cfr`
+  的输出时间戳"may be further modified by the muxer"。
+* 修复：音频输入加 `-t <duration>`（与视频管道同跨度，避免 pipe 结束后留下纯声音尾巴）；
+  输出音频流加 `-af asetpts=PTS-STARTPTS`（把 seek / 容器偏移归零）；
+  `--audio-mode separate/auto` 的合流加 `-shortest`。预检同步携带同一组参数。
+* 顺带修 `CanSplitMux` 探测漏掉 `-pix_fmt yuvj420p` / `-color_range pc`：mjpeg 会在这次
+  探测里因 full-range 检查失败，使 `--audio-mode auto/separate` 静默退回 inline。
+* 本地理想素材（含带 0.7 s 音频偏移的合成源）未复现可测偏移，因此新增 e2e 钉住
+  inline / auto / parallel 三种模式的首包时刻与流时长差，作为回归基线。
+
+### 2. 码率设置与 `-q:v` 不生效、fps 暴跌
+
+* **量化实测**（256×192 yuvj420p）：q:v 2 / 6 / 16 / 31 约 10465 / 6616 / 3866 / 2548 B 每帧；
+  13 fps 下 688~265 kbps，连最差画质的 q:v 31 都达不到默认 `--limit 200`。q:v 6 降到
+  3 fps 仍有 159 kbps > `--recover 150`，阶梯一旦到底就回不来（旧测试报告
+  `fresh=24 repeat=41` 即此现象）。
+* 根因：`VideoQualityArgs` 的 Qv 分支只返回 `-q:v`，`limitKbps` 从未变成任何 FFmpeg 参数；
+  FFmpeg 的 MJPEG 编码器（Doxygen `mjpegenc.c` / `mjpegenc_common.c`）只有固定量化器、
+  没有 CBR/VBV，`--limit` 对它只是降档阈值而不是编码器上限。
+* 修复：新增 `IntraQuality` —— 编码前用真实源的 4 帧试编码二分标定 q:v（用户显式 `--qv`
+  时只测量、不覆盖），把 `--limit` 落到量化器；再把阶梯上限抬到物理可达码率的 1.15 倍，
+  并让已标定的 intra-only 编码不因小窗口码率估算误降帧率（保留 3 倍上限的安全阀；
+  严重超标时按每帧字节数选最浅可达档，无解则不降）。
+* 实测（5 s / 13 fps / 默认参数）：`Fresh frames` 22 → **60 / 65 槽**，`motion` 3fps → **13fps**，
+  视频平均码率 688 → **300 kbps**，不再 THROTTLED。
+* **⚠ 行为变化**：mjpeg 未显式给 `--qv` 时，量化器由 `--limit` 标定；显式值仍完全生效，
+  只是不再触发无意义的帧率阶梯。
+
+---
+
 ## v7.9.8.11（2026-11-06）
 
 修 `--encoder mjpeg` 在预检阶段直接失败，并清理文档。
