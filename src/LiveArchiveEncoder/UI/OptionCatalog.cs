@@ -161,6 +161,7 @@ public static class OptionCatalog
         new Spec("--ffmpeg-archive", Kind.File, []),
         new Spec("--ffmpeg-delete", Kind.Value, FfmpegIds()),
         new Spec("--ffmpeg-list", Kind.Flag, []),
+        new Spec("--ffmpeg-env", Kind.Value, ["auto", "powershell", "pwsh", "cmd", "bash", "zsh", "fish"]),
         new Spec("--list-filters", Kind.Flag, []),
         new Spec("--proxy", Kind.Value,
             ["http://127.0.0.1:10808", "http://127.0.0.1:7890", "socks5://127.0.0.1:10808"]),

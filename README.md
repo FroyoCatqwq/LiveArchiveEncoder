@@ -8,87 +8,6 @@ a "video site" recompress pass and per-era presets sit on top of the realtime
 encoder, all of them off by default — with no flags given, the output is still
 exactly what v6.3.3 would have produced.
 
-> **v7.9.8.10:** a full-project audit, not a feature release. Fixing the CUI
-> encoder row (a swallowed `FormatException` that skipped half of the settings
-> sync), keeping a finished encode when only its final rename fails, and
-> tightening self-update so a release without a SHA-256 digest is refused
-> instead of executed. **Behaviour change:** `--update` now fails on feeds that
-> publish no digest; asset URLs must be https (loopback http is kept for local
-> test feeds). See `docs/CHANGELOG.md` for the full list and the cleanup.
->
-> **v7.9.8.9:** three defaults moved to where they belong. A source on a network
-> share no longer writes its `_live` capture back over the same link — the
-> automatic output goes to `%LOCALAPPDATA%\LiveArchiveEncoder\output\` instead,
-> with the path still printed and still overridable (the second positional argument, or the output row; a
-> path you type is remembered and never re-derived). mp4 with `libx264` /
-> `libopenh264` now defaults to **AAC** even when the settings file carries MP3
-> from an older FLV-era run (MP3 does mux into mp4, which is why nothing ever
-> replaced it). And an extension the chosen encoder cannot write — `out.rm` with
-> libx264 — is corrected to `.mp4` with a note instead of failing the run,
-> without overwriting an existing file or the source (`out (2).mp4`).
-
-> **v7.9.8.8:** OpenH264's knobs are connected. The second pass used to emit
-> `-c:v libopenh264` with **nothing else** when no bitrate was typed — no
-> `-b:v`, no `-rc_mode` — so the encoder ran on its built-in 2 Mbps target: a
-> 300 kbps request produced **2002 kbps** (measured, 640x480). It now always
-> carries a bitrate (`--recompress-video-kbps`, default 300) and an explicit
-> mode. The mode is selectable — `bitrate` (holds the ceiling), `quality`
-> (spends ~20% over to keep the picture) or `timestamp` — and two values are
-> refused with the measurement that justifies it: `buffer` ignores the bitrate
-> (300 kbps asked, 3.1 Mbps produced) and `off` pins QP to the library's
-> internal 26 with no exposed way to change it. On that last point: there is no
-> `-qp` in this encoder. The wrapper never reads `global_quality`, FFmpeg says
-> so out loud, and `-qmin/-qmax` change nothing at `RC_OFF_MODE` (qmin = qmax of
-> 10 and of 51 produce byte-identical files). `--openh264-skip-frames` is opt-in:
-> without it the bitrate is a target, with it a ceiling (354 vs 302 kbps at
-> 300k), and the fps ladder already owns frame rate.
-
-> **v7.9.1:** the static text watermark stage was retired (code archived under
-> `archive/retired/`, so it can come back as a separate project). Subtitle
-> burning/copying, added in v7.9, covers the "put text on the picture" job.
-
-> **v7.9.8.3:** `--nnedi-update` fetches the NNEDI3 weights the `nnedi`
-> deinterlacer cannot start without (13,574,928 B from `sekrit-twc/znedi3`,
-> verified by letting the filter initialise on the blob), and `--gh-proxy` routes
-> GitHub downloads through a front — measured: `raw.githubusercontent.com`
-> delivers **nothing** to a mainland line (0 bytes in 20 s) while the same URL
-> through `gh-proxy.com` answers `206` with a correct `Content-Range`. Also new:
-> repeatable recompress passes (`_web` → `_web2` → `_web3`) and
-> `--subtitle-aspect 4:3|16:9`, which lays burned text out in a box of that shape
-> instead of stretching it across a picture of another one.
-
-> **v7.9.8.4:** a burned subtitle track now follows the **source's** clock, not
-> the segment's. `--start-time` makes FFmpeg rebase the picture to 00:00:00 while
-> the subtitle file still counts from the beginning of the source, so from
-> `00:22:45` the whole track landed 22 minutes late and no line was ever drawn;
-> the burn filter is now wrapped in `setpts=PTS±offset/TB`. Also: the CUI can
-> build a recompress **chain** (menu 15 → 8), `--recompress-quality` /
-> `-audio-codec` / `-audio-kbps` pair with the pass they follow, and the shell
-> exits instead of redrawing forever when stdin closes.
-
-> **v7.9.8.6:** a pass over the whole codebase rather than a feature. Fifteen
-> defects, the kind that only surface when the tool is used for an hour: a plain
-> `--encoder` run rewrote the settings file from scratch and wiped the shell's
-> recompress chain, subtitle block, GitHub front and NNEDI3 weights path;
-> `--deinterlace nnedi` together with `--parallel` refused to run, claiming the
-> weights file was missing (the copy handed to each shard dropped the path); typing
-> a letter where a number was expected took the interactive shell down with a stack
-> trace; and the frame write had no deadline, so a stalled pipe made Ctrl+C do
-> nothing and left two FFmpeg children behind. The completion scripts are now
-> generated from the same option table the parser is checked against -- they had
-> fallen **43 options** behind -- and every run says the one thing nobody guesses:
-> it runs at the source's pace.
-
-> **v7.9.8.5:** the program updates itself. `--update` downloads the newest release,
-> checks it against the `sha256:` digest GitHub recorded at upload, runs the
-> downloaded build's `--version` to prove it starts and is not older, then hands
-> over to it — because Windows will not let a process replace its own running
-> image. The files are copied one at a time after the old process exits, so a
-> failed update leaves a complete old build rather than a mixture of two.
-> `--update-check` answers 0 / 3 / 2 for scripts, `--version` prints the number,
-> and the shell gains menu 21 (check / install / check-on-start, cached a day,
-> silent when offline). Proxy and `--gh-proxy` apply here too.
-
 Full user guide: [`docs/usage.md`](docs/usage.md); system and hardware requirements:
 [`docs/requirements.md`](docs/requirements.md). Version history, from Python
 v6.2.2 to the current release: [`docs/CHANGELOG.md`](docs/CHANGELOG.md). Where
@@ -202,7 +121,7 @@ distributions should take the JIT build. FFmpeg is still needed either way.
 
 ```bash
 # TUnit unit tests — identical command on both platforms (runs on MTP since v7.8.3)
-dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # 654 on Windows
+dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release      # MTP runner, both platforms
 # and the same suite against the other runtime:
 dotnet test --solution LiveArchiveEncoder.V7.slnx -c Release -p:LaeTfm=net11.0
 ```
@@ -227,7 +146,7 @@ put that build's `bin` on `PATH` first):
 ```bash
 pip install -r tests/e2e/requirements.txt   # pytest==9.1.1 + pytest-xdist
 python tools/e2e.py                          # two-phase run (see below)
-pytest                                       # same 162 cases, one at a time
+pytest                                       # the same cases, one at a time
 pytest tests/e2e/test_compare_matrix.py -k wmv2   # a single case
 CS_EXE=publish/aot/LiveArchiveEncoder pytest      # point at another build
 ```
@@ -271,7 +190,7 @@ them alone first, then everything else under xdist:
 
 ```
 python tools/e2e.py                  # 794 s serial -> 492 s on a 32-core box
-python tools/e2e.py --phase serial   # only the 25 exclusive cases
+python tools/e2e.py --phase serial   # only the exclusive cases
 python tools/e2e.py -k era_flv       # extra args go to pytest
 ```
 
@@ -405,53 +324,11 @@ pipeline when the muxer rejects the split. Measured numbers are in
 
 ## Changes since the port
 
-Version-by-version history moved to **[`docs/CHANGELOG.md`](docs/CHANGELOG.md)** —
-it covers Python v6.2.2 through the current release, with what changed, why, and
-whether an output changes. This file stays about *how to use* the tool.
-
-The short version of the last few releases: v7.9 added stream selection,
-subtitles (burn or carry), HTTP input and removed Turbo; v7.9.1 retired the
-watermark stage, added the subtitle menu, forced single-pass on network drives,
-and added `--emit-args` / `--save-config`; v7.9.2 fixed a corrupted picture when
-parallel shards were joined straight into FLV; v7.9.3 added the equivalent
-command line (menu 18) and named settings files (menu 19); v7.9.3.1 is a
-full-project review — presets no longer override explicit flags, and a handful
-of crash paths are gone; v7.9.4 fixes three encoder defects (msrle's black
-picture, AVI being refused for mpeg1video/mpeg2video, and mpeg1video's fps
-check trusting a rate list the encoder itself rejects) plus the frame-rate
-header of sharded AVI products. v7.9.5 stops trusting `ffmpeg -h encoder`
-altogether: the whole legacy set was swept for real containers and real frame
-rates (`docs/capability-matrix.md`), six 2000s video sites join the era presets
-as bitrate profiles, the site pass can run on an existing file with
-`--recompress-only`, and the capability table is cached so a run launches 3
-processes instead of 8–10. v7.9.5.1 makes the presets look like the year they
-describe: 18 sites, each naming the codec it actually served (Sorenson Spark in
-FLV, H.264 in MP4, VP9 in WebM), plus user-written presets in the settings file;
-subtitle fonts are read out of the ASS style table, reported, importable and
-overridable; the second pass can name any of thirteen video and seven audio
-codecs and gets a container that matches; and `docs/requirements.md` documents
-what the machine needs. v7.9.6 adds the other half of "what the picture is":
-`--pix-fmt` writes any of 86 measured pixel formats (pal8, 16-bit colour, 10/12/16-bit
-YUV, grey, alpha variants) and refuses a request it cannot honour instead of
-quietly downgrading it; colour tags can be overridden and are verified in the
-output rather than assumed from the command line; and a full-project review fixed
-seven latent defects — among them a 4:4:0 frame size that had been half wrong
-since the port, per-rung bitrate thresholds dropped by the shard path, and the
-palette/container rule that only applied when sharding. v7.9.6.3 is the
-"first run and network sources" release: a machine with no FFmpeg is now asked
-which distribution to install instead of being told to add one to PATH; era
-presets can be captured in 4:3 or 16:9 as long as the encoder really encodes
-that frame; a network source is measured before it is sharded instead of being
-forced to a single pass; four Windows Media era presets cover 2002-2006; and
-the documented floor drops to what .NET 10 supports — Windows Server 2019 and
-glibc 2.28, i.e. the two machines CI runs on. v7.9.7 rewrites the preset table as
-**site → year**: `--era youku/2007`, `--era bilibili/2012`, `--era generic/1998`,
-one row per site per year it changed shape, with the old ids (`cctv03`, `hd14`, …)
-still resolving through an alias table; every row now carries a Wayback
-citation or is explicitly marked as an encoder-envelope estimate
-(`docs/era-presets.md`); and H.264 becomes a choice — `--h264
-libx264|libopenh264`, with the 2010-and-later presets defaulting to OpenH264
-because that, not x264, is what those years' portals actually ran.
+The version-by-version history lives in **[`docs/CHANGELOG.md`](docs/CHANGELOG.md)**,
+from Python v6.2.2 to the current release, with what changed, why, and whether
+an output changes. Release notes for each published build are in
+`publish/release/notes-*.md`. This file is the guide: what the tool does, how
+to build and test it, and which constraints are deliberate.
 
 ## Layout
 

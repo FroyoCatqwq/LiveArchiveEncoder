@@ -139,6 +139,23 @@ public static class Program
             return 0;
         }
 
+        // v7.9.8.11: a shell that was already open cannot inherit an environment
+        // change made by a child process. Print the exact line to paste (or eval),
+        // e.g. `eval "$(LiveArchiveEncoder --ffmpeg-env bash)"`.
+        if (cli.FfmpegEnv is not null)
+        {
+            string? bin = FFmpeg.ToolchainPath.ActiveBinDir();
+            if (bin is null)
+            {
+                Console.Error.WriteLine("ERROR: no managed FFmpeg is installed; run --ffmpeg-download first");
+                return 1;
+            }
+            string shell = string.Equals(cli.FfmpegEnv, "auto", StringComparison.OrdinalIgnoreCase)
+                ? FFmpeg.ToolchainPath.DefaultShell() : cli.FfmpegEnv;
+            Console.WriteLine(FFmpeg.ToolchainPath.ActivateLine(shell, bin));
+            return 0;
+        }
+
         if (cli.FfmpegDelete is not null)
         {
             (bool deleted, string? deleteError) = FFmpeg.Toolchain.Delete(cli.FfmpegDelete);
@@ -147,7 +164,9 @@ public static class Program
                 Console.Error.WriteLine($"ERROR: {deleteError}");
                 return 1;
             }
+            FFmpeg.ToolchainPath.Unpublish(FFmpeg.Toolchain.BinDir(cli.FfmpegDelete));
             Console.WriteLine($"Removed '{cli.FfmpegDelete}' from {FFmpeg.Toolchain.Home(cli.FfmpegDelete)}");
+            Console.WriteLine("Its directory was taken off the shell PATH; open a new terminal to see the change.");
             return 0;
         }
 
@@ -211,6 +230,13 @@ public static class Program
             if (cli.GhProxy is not null)
                 remembered.GhProxy = front.HasText ? front : FFmpeg.GitHubProxy.Off;
             ConfigStore.Save(remembered);
+
+            // v7.9.8.11: an install has to reach the shell too -- otherwise cmd,
+            // pwsh and bash still have no ffmpeg / ffprobe after this command.
+            (bool pathOk, string? pathError) =
+                FFmpeg.ToolchainPath.Publish(FFmpeg.Toolchain.BinDir(dist.Id), Console.WriteLine);
+            if (!pathOk)
+                Console.Error.WriteLine($"WARNING: installed, but PATH was not updated: {pathError}");
             return 0;
         }
 

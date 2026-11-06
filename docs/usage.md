@@ -7,7 +7,7 @@
 > **一句话说明**：把一个现代视频，以"当年直播录档"的方式，实时节奏地重新编码成
 > RV20 / RoQ / MPEG-1 / MPEG-4 / WMV2 等老式编码器格式，并带自适应码率控制。
 > **画面丢帧、损坏、花屏这类效果不在本工具范围内**——本工具只做编码。这些效果属于
-> 另一个独立项目（v8 计划里以插件形式外挂），不是这里藏着的某个开关。
+> 另一个独立项目，不是这里藏着的某个开关。
 
 ---
 
@@ -270,7 +270,7 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--nnedi-status` | — | **v7.9.8.3**：打印已装权重的版本、大小、sha256、安装时间 |
 | `--nnedi-weights` | 已装的那份 | **v7.9.8.3**：用这个权重文件（或解压目录）代替受管安装 |
 | `--gh-proxy` / `--no-gh-proxy` | 自动探测 | **v7.9.8.3**：GitHub 下载走前沿（默认 `https://gh-proxy.com/`），`--no-gh-proxy` 表示不要并记住（见 §7.10）。**v7.9.8.5** 起程序自身的更新也走它 |
-| `--version` | — | 只打印版本号（如 `7.9.8.10`）然后退出 |
+| `--version` | — | 只打印版本号（如 `7.9.8.11`）然后退出 |
 | `--update-check` | — | **v7.9.8.5**：问一次发布页有没有新版，然后退出（**0**＝已最新，**3**＝有新版，**2**＝读不到） |
 | `--update` | — | **v7.9.8.5**：下载并就地安装最新版本，然后退出（替换正在运行的可执行文件，见 §7.18） |
 | `--update-feed URL` | GitHub | **v7.9.8.5**：改问这个发布源；必须是 GitHub release 形状的 JSON（镜像、内网服务器、测试用本地服务都行） |
@@ -1195,31 +1195,27 @@ Linux   : ~/.local/share/LiveArchiveEncoder/ffmpeg/<来源>/bin/ffmpeg
 
 ### 来源清单
 
+**统一使用两个每日构建源**，Windows 和 Linux 都有最新 daily 资产：
+
 | id | 项目 | Windows | Linux |
 | --- | --- | --- | --- |
-| `btbn`（**默认**） | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) | ✅ 自动，`.zip`（win64 GPL） | ✅ 自动，`.tar.xz`（linux64 GPL） |
-| `gyan` | [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) | ✅ 自动，`.7z`（需要 7-Zip） | ❌ 不提供 Linux 构建 |
-| `avbuild` | [avbuild（SourceForge）](https://sourceforge.net/projects/avbuild/files/) | **手动**（见下） | **手动** |
-| `nonfree` | [BnqDzj/FFmpeg-Builds-nonfree](https://github.com/BnqDzj/FFmpeg-Builds-nonfree) | ✅ 自动，`.zip` | ✅ 自动，`.tar.xz` |
+| `btbn`（**默认**） | [btbn/ffmpeg-builds](https://github.com/btbn/ffmpeg-builds/releases) | ✅ `ffmpeg-master-latest-win64-gpl.zip` | ✅ `ffmpeg-master-latest-linux64-gpl.tar.xz` |
+| `nonfree` | [BnqDzj/FFmpeg-Builds-nonfree](https://github.com/BnqDzj/FFmpeg-Builds-nonfree) | ✅ `ffmpeg-master-latest-win64-nonfree.zip` | ✅ `ffmpeg-master-latest-linux64-nonfree.tar.xz` |
 
-**清单是按平台过滤的。** `--ffmpeg-list`、shell 补全和交互式菜单只会列出当前
-平台能装的来源——在 Linux 上看不到 `gyan`，因为装不了它。
-
-默认来源是 `btbn` 的**每日构建版**（GitHub release 标签 `latest`）：Windows 取
-`ffmpeg-master-latest-win64-gpl.zip`，Linux 取
-`ffmpeg-master-latest-linux64-gpl.tar.xz`。
+两者都取 GitHub release 标签 `latest`（每天从 master 重建），URL 写法两端一致。
+`gyan`（仅 Windows）与 `avbuild`（SourceForge，手动）只是旧配置留下的兼容条目，
+新部署不再使用。**清单按平台过滤**：`--ffmpeg-list`、补全和菜单只列当前平台能装的来源。
 
 ### 命令行
 
 ```powershell
 # Windows
 LiveArchiveEncoder.exe --ffmpeg-list
-LiveArchiveEncoder.exe --ffmpeg-download
+LiveArchiveEncoder.exe --ffmpeg-download                       # 默认 btbn
 LiveArchiveEncoder.exe --ffmpeg-download nonfree --proxy http://127.0.0.1:10808
 LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --ffmpeg-source btbn
 LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --ffmpeg-source path   # 回到系统 FFmpeg
-LiveArchiveEncoder.exe --ffmpeg-delete gyan
-LiveArchiveEncoder.exe --ffmpeg-download avbuild --ffmpeg-archive C:\Downloads\xxx.7z
+LiveArchiveEncoder.exe --ffmpeg-delete btbn
 ```
 
 ```bash
@@ -1227,10 +1223,32 @@ LiveArchiveEncoder.exe --ffmpeg-download avbuild --ffmpeg-archive C:\Downloads\x
 ./LiveArchiveEncoder --ffmpeg-list
 ./LiveArchiveEncoder --ffmpeg-download
 ./LiveArchiveEncoder src.mp4 out.rm --encoder rv20 --ffmpeg-source btbn
-./LiveArchiveEncoder --ffmpeg-download avbuild --ffmpeg-archive ~/Downloads/xxx.tar.xz
 ```
 
 `--proxy` 可以省略；省略时会复用配置文件里记住的代理。
+
+### 装完就能在 shell 里用（v7.9.8.11）
+
+以前安装只落在私有目录，工具自己找得到，但新开的 cmd / PowerShell / bash 里没有
+`ffmpeg`。安装成功时现在会做两件事：
+
+1. **持久化**：Windows 写用户级 `PATH` 并广播设置变更；Linux 幂等写入 `~/.profile`
+   （以及已有的 `~/.bashrc` / `.zshrc`）的标记块，并在 `~/.local/bin` 建
+   `ffmpeg` / `ffprobe` / `ffplay` 符号链接。**新开的终端直接可用。**
+2. **当前终端**：父进程改不了父 shell 的环境，所以会打印一行可直接粘贴的命令。
+   也可以让 shell 自己求值：
+
+```powershell
+LiveArchiveEncoder.exe --ffmpeg-env pwsh | Invoke-Expression
+# cmd：先运行 --ffmpeg-env cmd，把输出的那一行粘回去执行
+```
+
+```bash
+eval "$(./LiveArchiveEncoder --ffmpeg-env bash)"     # zsh / fish 换成对应名字
+```
+
+`--ffmpeg-env` 不带值时自动判断（Windows → PowerShell，Linux → 读 `$SHELL`）。
+`--ffmpeg-delete` 会撤销 PATH 条目与符号链接；重复安装不会堆叠条目。
 
 ### GitHub 下载前沿（`--gh-proxy`，v7.9.8.3）
 

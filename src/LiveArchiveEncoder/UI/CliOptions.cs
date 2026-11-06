@@ -261,6 +261,9 @@ public sealed class CliOptions
 
     public bool FfmpegList { get; init; }
 
+    /// <summary>v7.9.8.11: print a PATH activation line for this shell, then exit.</summary>
+    public string? FfmpegEnv { get; init; }
+
     /// <summary>What to open when the encode finishes.</summary>
     public PlayMode Play { get; init; } = PlayMode.Off;
 
@@ -522,6 +525,7 @@ public static class CliParser
         string? ffmpegArchive = null;
         string? ffmpegDelete = null;
         bool ffmpegList = false;
+        string? ffmpegEnv = null;
         PlayMode play = PlayMode.Off;
         bool playExplicit = false;
         string? playerPath = null;
@@ -875,6 +879,14 @@ public static class CliParser
                     ffmpegDelete = ffmpegDelete.ToLowerInvariant();
                     break;
                 case "--ffmpeg-list": ffmpegList = true; break;
+                case "--ffmpeg-env":
+                    // Bare means "guess this shell". Only a known shell name is
+                    // consumed, so `--ffmpeg-env --quiet` cannot swallow --quiet.
+                    ffmpegEnv = "auto";
+                    if (inlineValue is not null) ffmpegEnv = inlineValue.Trim().ToLowerInvariant();
+                    else if (i + 1 < args.Length && FFmpeg.ToolchainPath.IsShell(args[i + 1]))
+                        ffmpegEnv = args[++i].Trim().ToLowerInvariant();
+                    break;
                 case "--proxy":
                     if (!TryValue(out ffmpegProxy)) return (null, "--proxy requires a value");
                     break;
@@ -1180,6 +1192,7 @@ public static class CliParser
             FfmpegArchive = ffmpegArchive,
             FfmpegDelete = ffmpegDelete,
             FfmpegList = ffmpegList,
+            FfmpegEnv = ffmpegEnv,
             Play = play,
             PlayExplicit = playExplicit,
             PlayerPath = playerPath,
@@ -1306,6 +1319,7 @@ public static class CliParser
             ("--ffmpeg-archive", "PATH", "install from a local archive instead of downloading"),
             ("--ffmpeg-delete", "ID", "delete an installed distribution, then exit"),
             ("--ffmpeg-list", "", "list the installed distributions, then exit"),
+            ("--ffmpeg-env", "SHELL", "print a PATH line for this shell (auto/powershell/cmd/bash/zsh/fish) and exit"),
             ("--proxy", "URL", "proxy for FFmpeg downloads, e.g. http://127.0.0.1:10808"),
             ("--gh-proxy", "[URL]", $"fetch GitHub downloads through a front, e.g. "
                                   + $"{FFmpeg.GitHubProxy.DefaultPrefix} (bare = that default, "

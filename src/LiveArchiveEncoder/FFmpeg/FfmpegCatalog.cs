@@ -146,7 +146,8 @@ public static partial class FfmpegCatalog
             Archive = ArchiveKind.TarXz,
             Daily = true,
             Platform = DistPlatform.Linux,
-            Url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/"
+            // v7.9.8.11: same "latest daily" URL shape as the Windows entry.
+            Url = "https://github.com/btbn/ffmpeg-builds/releases/latest/download/"
                   + "ffmpeg-master-latest-linux64-gpl.tar.xz",
         },
         new()
@@ -167,7 +168,7 @@ public static partial class FfmpegCatalog
             Archive = ArchiveKind.TarXz,
             Daily = true,
             Platform = DistPlatform.Linux,
-            Url = "https://github.com/BnqDzj/FFmpeg-Builds-nonfree/releases/download/latest/"
+            Url = "https://github.com/BnqDzj/FFmpeg-Builds-nonfree/releases/latest/download/"
                   + "ffmpeg-master-latest-linux64-nonfree.tar.xz",
         },
     ];

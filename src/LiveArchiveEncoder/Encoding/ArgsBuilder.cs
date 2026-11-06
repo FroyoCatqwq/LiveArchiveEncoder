@@ -108,10 +108,56 @@ public static class ArgsBuilder
     /// worse than no tag -- which is why the CLI only accepts values from a
     /// known list rather than passing arbitrary text through.
     /// </summary>
-    public static List<string> ColorArgs(StreamInfo info, ColorOverride? over = null)
+    /// <summary>
+    /// v7.9.8.11: FFmpeg's MJPEG encoder refuses a limited-range picture at the
+    /// default strictness. <c>libavcodec/mjpegenc_common.c:569</c>
+    /// (<c>ff_mjpeg_encode_check_pix_fmt</c>) returns EINVAL when
+    /// <c>color_range != AVCOL_RANGE_JPEG</c> and either the pix_fmt is a
+    /// limited-range YUV or <c>color_range == AVCOL_RANGE_MPEG</c> -- unless
+    /// <c>-strict unofficial</c> is used. This tool deliberately never passes
+    /// <c>-strict</c>, so the picture itself has to be full range.
+    ///
+    /// <para><c>mjpegenc.c:666</c> (<c>mjpeg_get_supported_config</c>) confirms
+    /// why: at the default strictness the encoder advertises only
+    /// <c>AVCOL_RANGE_JPEG</c>; <c>AVCOL_RANGE_MPEG</c> is exposed solely when
+    /// strictness is lowered. <c>mjpegenc.c:699</c> lists the six declared
+    /// formats -- three <c>yuvj*</c> full-range ones and three limited-range
+    /// ones -- so declaring support is not the same as accepting them.</para>
+    /// </summary>
+    public static bool NeedsJpegRange(string? encoder) =>
+        string.Equals(encoder, "mjpeg", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The full-range counterpart of a raw transport format.</summary>
+    public static string JpegRangePixFmt(string transportFmt) => transportFmt switch
+    {
+        "yuv422p" or "yuvj422p" => "yuvj422p",
+        "yuv444p" or "yuvj444p" => "yuvj444p",
+        _ => "yuvj420p",
+    };
+
+    /// <summary>
+    /// Pixel-format flags on the encoder side. An ordinary encoder only gets
+    /// one when the user asked for it; MJPEG always does, because the transport
+    /// format follows the source and a limited-range source fails the moment
+    /// FFmpeg opens the encoder. The second pass has always done this
+    /// (<c>RecompressCodecs</c>: <c>-pix_fmt yuvj420p</c>); the live pass did not.
+    /// </summary>
+    public static List<string> EncoderPixFmtArgs(
+        string encoder, string transportFmt, bool explicitRequest)
+    {
+        if (NeedsJpegRange(encoder))
+            return ["-pix_fmt", JpegRangePixFmt(transportFmt)];
+        return explicitRequest ? ["-pix_fmt", transportFmt] : [];
+    }
+
+    public static List<string> ColorArgs(StreamInfo info, ColorOverride? over = null, string? encoder = null)
     {
         var args = new List<string>();
         string? range = over?.Range ?? info.ColorRange;
+        // Even with a full-range pix_fmt, an inherited "tv" tag is enough to
+        // fail ff_mjpeg_encode_check_pix_fmt: color_range == AVCOL_RANGE_MPEG
+        // is a condition of its own, not merely a consequence of the pix_fmt.
+        if (NeedsJpegRange(encoder)) range = "pc";
         string? space = over?.Space ?? info.ColorSpace;
         string? primaries = over?.Primaries ?? info.ColorPrimaries;
         string? transfer = over?.Transfer ?? info.ColorTransfer;

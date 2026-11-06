@@ -18,6 +18,54 @@
 
 ---
 
+## v7.9.8.11（2026-11-06）
+
+修 `--encoder mjpeg` 在预检阶段直接失败，并清理文档。
+
+### 1. MJPEG 必须写 full-range 画面
+
+* **现象**：用 MPEG-2 录像源（`tv` 色彩范围）编码成 `.avi` / mjpeg 时，
+  `Video preflight failed for mjpeg`，FFmpeg 报 `Non full-range YUV is non-standard,
+  set strict_std_compliance to at most unofficial to use it.`，随后
+  `ff_frame_thread_encoder_init failed`。
+* **根因**：已对 FFmpeg 官方源码核实，不依赖某个构建的行为推断。
+  `libavcodec/mjpegenc_common.c:569` 的 `ff_mjpeg_encode_check_pix_fmt()` 在
+  `strict_std_compliance > FF_COMPLIANCE_UNOFFICIAL` 且 `color_range != AVCOL_RANGE_JPEG`，
+  并且（`pix_fmt` 是 `yuv420p` / `yuv422p` / `yuv444p`，**或** `color_range == AVCOL_RANGE_MPEG`）
+  时返回 `EINVAL`；`mjpegenc.c:552` 的 `mjpeg_encode_init` 调用它，失败即连锁报帧线程初始化失败。
+  `mjpegenc.c:666` 的 `mjpeg_get_supported_config` 说明默认严格度只暴露 `AVCOL_RANGE_JPEG`，
+  limited range 要降到 `unofficial` 才可用；`mjpegenc.c:699` 虽声明六种像素格式，后三种属于非标准扩展。
+* **修复**：实时编码和预检都显式写 `-pix_fmt yuvj420p`（按色度族对应 `yuvj422p` / `yuvj444p`），
+  并把该编码器的 `-color_range` 钉为 `pc`。由 swscale 做真正的 tv→pc 转换，不依赖 FFmpeg 的
+  自动协商，也不传 `-strict`（本工具从不降级标准符合度）。二次压缩路径的 mjpeg 一直是这么做的。
+* **⚠ 行为变化**：`--encoder mjpeg` 与 `--color-range tv` / `--pix-fmt yuv420p` 同时给出时，
+  输出仍是 full-range JPEG；这是编码器的硬性要求。
+* **回归**：`MjpegPixelFormatTests`（参数与色彩标签）、`tests/e2e/test_mjpeg_range.py`（真实编码后 ffprobe 校验）。
+
+### 2. 下载 FFmpeg 后 shell 里找不到 ffmpeg / ffprobe
+
+* **现象**：`--ffmpeg-download` 装好的构建只对工具自身的探测可见；新开的 cmd /
+  PowerShell / bash 里没有 `ffmpeg`。根因是安装只落在私有目录
+  （`%LOCALAPPDATA%` / `~/.local/share`）下，从未写进 shell 的 `PATH`。
+* **修复**：安装成功后发布该 `bin` 目录 —— Windows 写用户级 `PATH` 并广播
+  `WM_SETTINGCHANGE`；Linux 幂等写入 `~/.profile`（及已有的 `.bashrc` / `.zshrc`）的
+  标记块，并在 `~/.local/bin` 建符号链接。新开终端直接可用，重复安装不堆叠条目。
+* 子进程改不了父 shell 的环境，因此新增 `--ffmpeg-env [SHELL]`，打印当前终端可粘贴或
+  求值的一行（`powershell` / `cmd` / `bash` / `zsh` / `fish`，裸用自动判断）；安装结束时也会打印。
+  卸载（`--ffmpeg-delete`）撤销这些改动。
+* **回归**：`ToolchainPathTests`（PATH 幂等、标记块替换、五种 shell 的激活行），
+  测试只跑纯文本变换，不碰真实用户环境。
+* 下载源统一指向两个 GitHub 项目 `latest` 标签的每日构建：`btbn/ffmpeg-builds`（GPL）与
+  `BnqDzj/FFmpeg-Builds-nonfree`，两端资产齐全，URL 写法一致；其余来源仅为旧配置兼容保留。
+
+### 3. 文档
+
+* `README.md` 删除开头堆叠的八段版本公告与"Changes since the port"的逐版复述（共 131 行），
+  版本历史只保留 `docs/CHANGELOG.md` 一处。
+* 删除 `usage.md`、`requirements.md` 与本文件中指向另一条开发线的失效描述。
+
+---
+
 ## v7.9.8.10（2026-11-04）
 
 一次全项目审查加清理，**没有新功能**。五路只读审查（正确性、资源与生命周期、
@@ -1962,7 +2010,7 @@ Matroska 暂存流复制进来的码流没有 codec 帧率，只有 1/1000 的�
   相等，统一改 `IsEquivalentTo`）。
 * **"并行分片 + SMB 冻结"修复取消**：根因定位到"解码器提前 EOF 时旧代码静默用上一帧
   填满槽位"，但这是 `option_smoke` 既有断言的依赖项，改了会动长年稳定的输出形态，
-  决定不修，根因留在代码注释里等 v8 评估。
+  决定不修，根因留在代码注释里。
 
 ---
 

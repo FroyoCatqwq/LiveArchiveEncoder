@@ -137,14 +137,18 @@ public static class Preflight
             // v7.9.6: an explicit request is also pinned on the encoder side, so
             // the output really keeps it instead of being quietly retuned to the
             // encoder's own default.
-            if (pixFmt.HasText) cmd.AddRange(["-pix_fmt", pixFmt]);
+            // v7.9.8.11: the trial must carry the SAME flags as the encode --
+            // MJPEG's full-range requirement included -- or it rejects a run
+            // that would have worked (and passes one that would have failed).
+            cmd.AddRange(ArgsBuilder.EncoderPixFmtArgs(
+                encoder.Name, transportFmt ?? stream.PixFmt, pixFmt.HasText));
             cmd.AddRange(["-r", ArgsBuilder.FpsArg(fps)]);
             if (encoder.Name == "libx264")
             {
                 cmd.AddRange(ArgsBuilder.X264Args(x264Preset, x264Tune, x264Profile, x264Level));
                 cmd.AddRange(ArgsBuilder.X264ColorArgs(colors));
             }
-            cmd.AddRange(ArgsBuilder.ColorArgs(stream, colors));
+            cmd.AddRange(ArgsBuilder.ColorArgs(stream, colors, encoder.Name));
             cmd.AddRange(["-f", muxer, "-y", output]);
 
             CaptureResult result = ProcessRunner.Run(cmd, 120);

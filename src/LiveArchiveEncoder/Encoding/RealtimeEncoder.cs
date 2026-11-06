@@ -347,7 +347,7 @@ public static class RealtimeEncoder
                 o.ColorRange, o.ColorSpace, o.ColorPrimaries, o.ColorTransfer);
             if (colors.Any)
             {
-                Console.WriteLine($"{L.T("run.color"),-17}: {string.Join(" ", ArgsBuilder.ColorArgs(stream, colors))}"
+                Console.WriteLine($"{L.T("run.color"),-17}: {string.Join(" ", ArgsBuilder.ColorArgs(stream, colors, o.Encoder.Name))}"
                     + (o.Encoder.Name == "libx264"
                         ? $" {string.Join(" ", ArgsBuilder.X264ColorArgs(colors))}"
                         : ""));
@@ -713,14 +713,16 @@ public static class RealtimeEncoder
         // is free to hand the muxer its own default (measured: libx264 given
         // grey 4:0:0 writes yuvj420p), which is the kind of silent substitution
         // this flag exists to prevent.
-        if (o.PixFmt.HasText) cmd.AddRange(["-pix_fmt", transportFmt]);
+        // v7.9.8.11: MJPEG needs its full-range format even when the user did
+        // not name one; see ArgsBuilder.EncoderPixFmtArgs.
+        cmd.AddRange(ArgsBuilder.EncoderPixFmtArgs(o.Encoder.Name, transportFmt, o.PixFmt.HasText));
         if (o.Encoder.Name == "libx264")
         {
             cmd.AddRange(ArgsBuilder.X264Args(o.X264Preset, o.X264Tune, o.X264Profile, o.X264Level));
             cmd.AddRange(ArgsBuilder.X264ColorArgs(colors));
         }
         cmd.AddRange(["-r", ArgsBuilder.FpsArg(o.Fps), "-fps_mode", "cfr"]);
-        cmd.AddRange(ArgsBuilder.ColorArgs(stream, colors));
+        cmd.AddRange(ArgsBuilder.ColorArgs(stream, colors, o.Encoder.Name));
 
         if (hasAudio)
         {
