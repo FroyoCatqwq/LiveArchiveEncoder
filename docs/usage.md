@@ -1198,8 +1198,9 @@ Linux   : ~/.local/share/LiveArchiveEncoder/ffmpeg/<来源>/bin/ffmpeg
 
 ### 来源清单
 
-**v7.9.8.13.1 起统一为五个源，一律 daily / rolling 优先**。详细差异（release 标签、
-资产、许可、两端实测的编解码器清单）另见 [工具链构建对照](toolchain-builds.md)。
+**v7.9.8.13.1 起统一为六个来源（五个可自动安装 + 一个手动兼容），一律 daily /
+rolling 优先**。详细差异（release 标签、资产、许可、两端实测的编解码器清单）另见
+[工具链构建对照](toolchain-builds.md)。
 
 | id | 项目 | Windows | Linux | daily 形态 |
 | --- | --- | --- | --- | --- |
@@ -1210,8 +1211,10 @@ Linux   : ~/.local/share/LiveArchiveEncoder/ffmpeg/<来源>/bin/ffmpeg
 | `gyan` | [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) | ✅ `ffmpeg-git-full.7z` | ❌ | git master rolling 文件，无 tag |
 | `avbuild` | SourceForge | ✅ 手动 | ✅ 手动 | 旧配置兼容；Cloudflare 拦截，需 `--ffmpeg-archive` |
 
-`autobuild` 实测只发布 win32/win64，所以 Linux 上看不到它。**没有 daily 时才回退稳定版**
-（目录里预留 `StableUrl`；目前五个源都有 rolling，正常不会触发）。
+`autobuild` 实测只发布 win32/win64，所以 Linux 上看不到它。**daily 优先，稳定版只作回退**：
+固定 URL 的四个源本身就是 rolling 文件，没有更稳定的替代品；只有 `autobuild` 走
+`releases/latest` 动态解析，因此给它配了一个已验证的固定 commit 资产作 `StableUrl`，
+feed 读不到或没有匹配资产时才用（v7.9.8.13.2 补齐，之前该字段全空，回退是死代码）。
 `gyan` / `avbuild` 继续保留，旧 `config.json` 无需改动。
 **清单按平台过滤**：`--ffmpeg-list`、补全和菜单只列当前平台能装的来源。
 
@@ -2591,9 +2594,10 @@ MPEG-PS 那两条（mpeg1video）在 Linux 上时长差得比 Windows 大——�
 问题（见 `harness.py` 里 `DURATION_TOL` 的注释），不是丢帧；Windows 上同一用例只
 差 ~0.08 s。容差按 Linux 的最坏值留了 6 帧余量。
 
-`cui_smoke` 会**备份并恢复真实配置文件**（`%LOCALAPPDATA%` / `~/.local/share`
-下的 `config.json`）——持久化检查读的就是它；跑之前不需要特殊准备，跑完之后
-配置原样归还。
+`cui_smoke` 的持久化检查读写的是测试套件**自己的私有配置目录**
+（`harness.config_path()`，由 `LAE_CONFIG_DIR` 隔离，v7.9.8.6 起）；`cui_config`
+fixture 只在套件内部备份/恢复它，好让每个阶段从干净状态开始。**开发者真实的
+`config.json` 不会被任何 e2e 触碰**，跑之前不需要特殊准备。
 
 `option_smoke` 里的 `era_flv` 需要 `fonts` 目录里有字体（见 §7.12）；
 `subtitles` 那 7 条也需要同样的字体目录（libass 没有中文字体会画成方块）。

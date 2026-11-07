@@ -94,7 +94,18 @@ public sealed class CliOptions
     /// because CliOptions is a class, not a record, and every test builds one
     /// with an object initialiser.
     /// </summary>
-    internal void ApplyDiscoveredSubtitles(IReadOnlyList<string> files) => _subtitleFiles = files;
+    /// <summary>
+    /// v7.9.8.13.2: true when <see cref="SubtitleFiles"/> came from per-run
+    /// discovery rather than the command line. A discovered sidecar must not be
+    /// persisted into config.json, or the next unrelated run inherits it.
+    /// </summary>
+    public bool SubtitlesDiscovered { get; private set; }
+
+    internal void ApplyDiscoveredSubtitles(IReadOnlyList<string> files)
+    {
+        _subtitleFiles = files;
+        SubtitlesDiscovered = true;
+    }
 
     /// <summary>Absolute index of an embedded subtitle track to use.</summary>
     public int? SubtitleStream { get; init; }

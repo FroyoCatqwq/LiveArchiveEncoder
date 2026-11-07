@@ -89,6 +89,10 @@ public static class AudioTrack
         cmd.AddRange(["-i", sourcePath, "-map", StreamSelection.AudioMap(0, audioStream), "-vn"]);
         cmd.AddRange(["-t", ArgsBuilder.FloatArg(duration)]);
         cmd.AddRange(["-c:a", audioEncoder]);
+        // v7.9.8.13.2: the inline pass and the preflight both normalise the
+        // audio clock. The separate pass must do the same -- the mux is -c copy
+        // and cannot repair a container offset afterwards.
+        cmd.AddRange(ArgsBuilder.AudioAlignArgs());
         if (!EncoderMath.AudioIgnoresBitrate(audioEncoder))
             cmd.AddRange(["-b:a", $"{audioKbps}k"]);
         cmd.AddRange([
@@ -158,10 +162,13 @@ public static class AudioTrack
 
     public static CaptureResult Mux(
         string ffmpeg, string videoOnlyPath, string audioPath,
-        double duration, string muxer, string outputPath, int timeoutSeconds)
+        double duration, string muxer, string outputPath, int timeoutSeconds,
+        CancellationToken cancellationToken = default)
     {
+        // v7.9.8.13.2: Ctrl+C during a separate/auto run must kill the muxing
+        // FFmpeg too, or the staging directory cannot be removed afterwards.
         return ProcessRunner.Run(
             BuildMuxCommand(ffmpeg, videoOnlyPath, audioPath, duration, muxer, outputPath),
-            timeoutSeconds);
+            timeoutSeconds, cancellationToken: cancellationToken);
     }
 }

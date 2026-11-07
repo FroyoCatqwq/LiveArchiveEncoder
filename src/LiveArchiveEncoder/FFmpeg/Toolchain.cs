@@ -222,7 +222,7 @@ public static class Toolchain
                 return (false, badArchive);
 
             Say("Extracting...");
-            (bool extracted, string? extractError) = Extract(archive, extractDir);
+            (bool extracted, string? extractError) = Extract(archive, extractDir, proxy, ghPrefix);
             if (!extracted) return (false, extractError);
 
             (string? found, string? layoutError) = FindFfmpegDir(extractDir);
@@ -493,7 +493,8 @@ public static class Toolchain
         }
     }
 
-    private static (bool Ok, string? Error) Extract(string archive, string destination)
+    private static (bool Ok, string? Error) Extract(
+        string archive, string destination, string? proxy = null, string? ghPrefix = null)
     {
         // Linux builds ship as .tar.xz; tar is the only tool guaranteed to be
         // there (Bsdtar on Windows never sees this path).
@@ -527,7 +528,9 @@ public static class Toolchain
         // v7.9.8.13.1: both platforms use the official ip7z/7zip build. When
         // neither the system nor our private copy has one, fetch it -- no more
         // "install p7zip by hand" dead end on Linux.
-        (string? sevenZip, string? zipError) = SevenZip.Ensure();
+        // v7.9.8.13.2: the download of 7-Zip itself must honour the same
+        // --proxy / --gh-proxy settings as the FFmpeg archive download.
+        (string? sevenZip, string? zipError) = SevenZip.Ensure(ghPrefix, proxy);
         if (sevenZip is null)
             return (false, $"a .7z archive needs 7-Zip: {zipError}");
 

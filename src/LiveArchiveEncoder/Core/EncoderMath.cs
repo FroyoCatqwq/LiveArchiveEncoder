@@ -398,8 +398,11 @@ public static class EncoderMath
     {
         if (width <= 0 || height <= 0 || width % 16 != 0 || height % 16 != 0)
         {
-            throw new ArgumentException(
-                $"roqvideo requires width and height to be divisible by 16; got {width}x{height}");
+            // v7.9.8.13.2: this is a *query* used by the CUI config page and
+            // the report, both of which only print a warning. Throwing here
+            // crashed those screens; the encoder preflight is what rejects an
+            // impossible size with a proper exit code.
+            return $"roqvideo requires width and height to be divisible by 16; got {width}x{height}.";
         }
         static bool IsPow2(int v) => v > 0 && (v & (v - 1)) == 0;
         if (!IsPow2(width) || !IsPow2(height))

@@ -167,7 +167,13 @@ public static class Smb
     public static CifsMount? MountFor(string? path)
     {
         if (!path.HasText) return null;
-        string full = Path.GetFullPath(path);
+        string full;
+        try { full = Path.GetFullPath(path); }
+        // v7.9.8.13.2: keep the documented "never throws" contract. A path
+        // with NUL / illegal chars / too long must not break argument building.
+        catch (Exception exc) when (exc is ArgumentException or NotSupportedException
+                                        or PathTooLongException)
+        { return null; }
         CifsMount? best = null;
 
         foreach (CifsMount mount in EnumerateMounts())

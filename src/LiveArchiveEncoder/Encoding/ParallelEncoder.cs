@@ -167,7 +167,10 @@ public static class ParallelEncoder
                 // volumes (a share, another disk). A rename is then unavailable
                 // and the whole shard run used to be lost at this last step.
                 try { File.Move(joinedPath, part.FullName, overwrite: true); }
-                catch (IOException) { File.Copy(joinedPath, part.FullName, overwrite: true); }
+                // v7.9.8.13.2: ACL refusal / directory-in-the-way also need the
+                // cross-volume copy fallback, not a discarded set of shards.
+                catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+                { File.Copy(joinedPath, part.FullName, overwrite: true); }
             }
             else
             {
@@ -241,15 +244,17 @@ public static class ParallelEncoder
 
             // Every check passed, so the part file can take the real name.
             finished = true;
-            Core.OutputFile.Promote(part, dst);
+            FileInfo placed = Core.OutputFile.Promote(part, dst);
             double measuredDuration = joined ?? span;
 
-            long totalBytes = dst.Length;
+            // v7.9.8.13.2: count the bytes of the file Promote actually wrote.
+            long totalBytes = placed.Length;
             double avgTotalKbps = totalBytes * 8.0 / Math.Max(0.001, measuredDuration) / 1000.0;
             bool hasAudio = results[0].HasAudio;
 
             return new EncodeResult
             {
+                PlacedPath = placed.FullName,
                 Duration = measuredDuration,
                 StartTimeSeconds = o.StartSeconds,
                 EndTimeSeconds = resolvedEnd,

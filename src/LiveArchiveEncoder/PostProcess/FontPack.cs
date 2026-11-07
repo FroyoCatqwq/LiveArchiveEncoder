@@ -50,10 +50,18 @@ public static class FontPack
         public required IReadOnlyList<string> Fonts { get; init; }
         public string? Error { get; init; }
 
-        public void Dispose()
+        public void Dispose() => TryDelete(Directory);
+    }
+
+    private static void TryDelete(string dir)
+    {
+        try
         {
-            try { System.IO.Directory.Delete(Directory, recursive: true); }
-            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException) { }
+            if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, recursive: true);
+        }
+        catch (Exception)
+        {
+            // Best effort: a cleanup failure must never mask the real error.
         }
     }
 
@@ -65,9 +73,9 @@ public static class FontPack
     public static Unpacked Unpack(string archive, string? ghProxy = null, Action<string>? log = null)
     {
         string temp = Path.Combine(Path.GetTempPath(), "lae-fontpack-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(temp);
         try
         {
+            Directory.CreateDirectory(temp);
             if (!File.Exists(archive)) return Fail($"font pack not found: {archive}");
             if (!IsArchive(archive)) return Fail($"unsupported font pack (use .zip, .7z or .rar): {archive}");
 
@@ -96,9 +104,15 @@ public static class FontPack
                     root + Path.DirectorySeparatorChar, StringComparison.Ordinal))];
             return new Unpacked { Directory = temp, Fonts = fonts };
         }
-        catch (Exception exc) when (exc is IOException or InvalidDataException
-                                        or UnauthorizedAccessException or ArgumentException)
-        { return Fail(exc.Message); }
+        catch (Exception exc)
+        {
+            // v7.9.8.13.2: ProcessRunner may throw TimeoutException /
+            // InvalidOperationException / Win32Exception and SevenZip.Ensure
+            // may fail downloading. When that happens no Unpacked is created,
+            // so the caller's using cannot clean up -- do it here.
+            TryDelete(temp);
+            return Fail(exc.Message);
+        }
 
         Unpacked Fail(string message) =>
             new() { Directory = temp, Fonts = [], Error = message };

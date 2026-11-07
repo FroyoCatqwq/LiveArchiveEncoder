@@ -327,13 +327,26 @@ public static class RealtimeEncoder
                 Math.Max(1.0, o.LimitKbps - (hasAudio ? o.AudioKbps : 0.0)), o.Fps,
                 intraColors, sayIntra);
 
-            double raised = Math.Max(o.LimitKbps, baselineKbps * 1.15);
-            o = o with
+            // v7.9.8.13.2: a failed probe reports 0. Never let it (or a NaN)
+            // into the thresholds -- that used to silently disable the whole
+            // ladder and pin the run at the worst quantiser.
+            if (double.IsFinite(baselineKbps) && baselineKbps > 0)
             {
-                Quality = q,
-                LimitKbps = raised,
-                RecoverKbps = raised * (o.RecoverKbps / o.LimitKbps),
-            };
+                double raised = Math.Max(o.LimitKbps, baselineKbps * 1.15);
+                o = o with
+                {
+                    Quality = q,
+                    LimitKbps = raised,
+                    RecoverKbps = o.LimitKbps > 0
+                        ? raised * (o.RecoverKbps / o.LimitKbps)
+                        : o.RecoverKbps,
+                };
+            }
+            else if (o.Verbose)
+            {
+                Console.WriteLine($"NOTE: {o.Encoder.Name} calibration unavailable; "
+                    + "keeping the requested quality and bitrate limits.");
+            }
         }
 
         // The encoder writes a ".part" sibling; Promote puts it in place only once
@@ -406,7 +419,8 @@ public static class RealtimeEncoder
                 o, part, decCmd, encCmd, frameSize, targetSlots, duration, hasAudio,
                 stream.PixFmt, transportFmt, width, height, scaleAlgo, resolvedEnd, cancellationToken);
             finished = true;
-            Core.OutputFile.Promote(part, dst);
+            FileInfo placed = Core.OutputFile.Promote(part, dst);
+            result.PlacedPath = placed.FullName;
             return result;
         }
         catch (Exception exc)
@@ -576,7 +590,8 @@ public static class RealtimeEncoder
 
             // Stage 3: join. Both streams are copied, so this is a remux, not a re-encode.
             CaptureResult mux = AudioTrack.Mux(
-                o.FFmpeg, videoOnly, audioOnly, span, o.Encoder.FormatName, part.FullName, audioTimeout);
+                o.FFmpeg, videoOnly, audioOnly, span, o.Encoder.FormatName, part.FullName,
+                audioTimeout, cancellationToken);
             if (mux.ExitCode != 0)
             {
                 throw new InvalidOperationException(
@@ -590,17 +605,19 @@ public static class RealtimeEncoder
             // -- on the part file, before it replaces anything.
             VerifyMuxedOutput(o.FFprobe, part, expectedAudio: true, expectedDuration: span);
             finished = true;
-            Core.OutputFile.Promote(part, dst);
+            FileInfo placed = Core.OutputFile.Promote(part, dst);
 
             // The video-only pass measures the video bitrate directly; the final
-            // file supplies the combined bitrate. This is more accurate than the
-            // inline path, which only ever estimates video = total - audio_kbps.
+            // file supplies the combined bitrate. Measure the file that Promote
+            // actually produced (v7.9.8.13.2), not a name that may still be
+            // held by a player.
             long videoBytes = new FileInfo(videoOnly).Length;
             double avgVideoKbps = videoBytes * 8.0 / span / 1000.0;
-            double avgTotalKbps = dst.Length * 8.0 / span / 1000.0;
+            double avgTotalKbps = placed.Length * 8.0 / span / 1000.0;
 
             return new EncodeResult
             {
+                PlacedPath = placed.FullName,
                 Duration = span,
                 StartTimeSeconds = o.StartSeconds,
                 EndTimeSeconds = duration.HasValue ? o.StartSeconds + span : null,

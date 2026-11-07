@@ -475,13 +475,9 @@ public static class Program
             return 2;
         }
 
-        // v7.9.8.13: find the sidecar subtitles named after the source and,
-        // when a font pack was given, unpack the fonts those subtitles ask for.
-        // Both are per-run choices, so nothing is written to the settings file.
-        (CliOptions ready, int? subtitleExit) = SubtitleSetup.Prepare(cli);
-        if (subtitleExit is not null) return subtitleExit.Value;
-        cli = ready;
-
+        // v7.9.8.13.2: SubtitleSetup.Prepare moved into Cli.Run, AFTER the
+        // --save-config / --emit-args exits. A pure conversion must not unpack a
+        // font pack, prompt on stdin, or fold per-run discoveries into a file.
         try
         {
             return Cli.Run(cli, ffmpeg, ffprobe, caps, Interrupt.BeginOperation());

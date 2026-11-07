@@ -43,7 +43,10 @@ public sealed class ToolchainBuildsTests
     [Test]
     public async Task EveryAutomaticSourcePrefersADailyBuild()
     {
-        foreach (FfmpegDist dist in FfmpegCatalog.All.Where(d => d.AutoDownload))
+        var automatic = FfmpegCatalog.All.Where(d => d.AutoDownload).ToArray();
+        // v7.9.8.13.2: an empty collection made every assertion below vacuous.
+        await Assert.That(automatic.Length).IsGreaterThan(0);
+        foreach (FfmpegDist dist in automatic)
         {
             await Assert.That(dist.Daily).IsTrue();
             await Assert.That(dist.Url is { Length: > 0 }

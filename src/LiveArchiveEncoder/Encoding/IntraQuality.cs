@@ -1,6 +1,7 @@
 using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.FFmpeg;
+using LiveArchiveEncoder.Remote;
 
 namespace LiveArchiveEncoder.Encoding;
 
@@ -71,6 +72,9 @@ public static class IntraQuality
         {
             double bytes = Measure(ffmpeg, sourcePath, encoderName, vf, transportFmt, stream,
                 videoStream, startSeconds, pinned, colors);
+            // v7.9.8.13.2: a failed probe must never turn into NaN thresholds.
+            // Kbps == 0 tells the caller to leave quality and limits untouched.
+            if (!double.IsFinite(bytes)) return (pinned, 0, 0);
             return (pinned, bytes, KbpsFor(bytes, fps));
         }
 
@@ -79,6 +83,12 @@ public static class IntraQuality
         int low = 2, high = 31, best = 31;
         double bestBytes = Measure(ffmpeg, sourcePath, encoderName, vf, transportFmt, stream,
             videoStream, startSeconds, high, colors);
+        if (!double.IsFinite(bestBytes))
+        {
+            log?.Invoke($"NOTE: {encoderName} quality calibration could not read a probe frame; "
+                + "keeping the requested quality and bitrate limits unchanged.");
+            return (best, 0, 0);
+        }
         for (int step = 0; step < 5 && low <= high; step++)
         {
             int q = (low + high) / 2;
@@ -116,6 +126,10 @@ public static class IntraQuality
         {
             var cmd = new List<string> { ffmpeg, "-hide_banner", "-loglevel", "error" };
             if (startSeconds > 0) cmd.AddRange(["-ss", ArgsBuilder.FloatArg(startSeconds)]);
+            // v7.9.8.13.2: the probe reads the same source as the encode, so it
+            // needs the same HTTP reconnect / UNC resilience flags.
+            cmd.AddRange(HttpSource.ReadArgs(sourcePath));
+            cmd.AddRange(Smb.RemoteReadArgs(sourcePath));
             cmd.AddRange(["-i", sourcePath]);
             if (!vf.IsGraph) cmd.AddRange(["-map", StreamSelection.VideoMap(videoStream)]);
             cmd.AddRange(vf.Args());
@@ -125,12 +139,15 @@ public static class IntraQuality
             cmd.AddRange(ArgsBuilder.ColorArgs(stream, colors, encoderName));
             cmd.AddRange(["-f", "mjpeg", "-y", temp]);
 
-            CaptureResult result = ProcessRunner.Run(cmd, 30);
+            CaptureResult result = ProcessRunner.Run(cmd, 60);
             if (result.ExitCode != 0 || !File.Exists(temp)) return double.NaN;
             return new FileInfo(temp).Length / (double)FramesPerProbe;
         }
-        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception)
         {
+            // v7.9.8.13.2: ProcessRunner can throw TimeoutException,
+            // OperationCanceledException, InvalidOperationException or
+            // Win32Exception. A probe is optional -- never abort the encode.
             return double.NaN;
         }
         finally

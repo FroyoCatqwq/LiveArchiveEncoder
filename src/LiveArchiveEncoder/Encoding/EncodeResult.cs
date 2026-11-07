@@ -28,4 +28,12 @@ public sealed class EncodeResult
     public int Slots { get; init; }
     /// <summary>Wall-clock seconds spent inside the encode (C#-only diagnostic).</summary>
     public double ElapsedSeconds { get; init; }
+
+    /// <summary>
+    /// v7.9.8.13.2: where the product actually landed. Promote() may save it
+    /// under "name (2).ext" when the requested name is held by a player; the
+    /// report, the byte counts and "play the result" must follow that file,
+    /// not the one that could not be replaced.
+    /// </summary>
+    public string? PlacedPath { get; set; }
 }

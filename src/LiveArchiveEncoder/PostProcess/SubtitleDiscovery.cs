@@ -30,14 +30,24 @@ public static class SubtitleDiscovery
         string stem = Path.GetFileNameWithoutExtension(full);
         string prefix = stem + ".";
         var found = new List<string>();
-        foreach (string file in Directory.EnumerateFiles(dir))
+        try
         {
-            string name = Path.GetFileName(file);
-            string ext = Path.GetExtension(file).ToLowerInvariant();
-            if (!Constants.SubtitleFileExtensions.Contains(ext)) continue;
-            if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(name, stem + ext, StringComparison.OrdinalIgnoreCase)) continue;
-            found.Add(file);
+            // v7.9.8.13.2: an offline UNC share or an unreadable directory must
+            // mean "no sidecars found", not a crash before the manual prompt.
+            foreach (string file in Directory.EnumerateFiles(dir))
+            {
+                string name = Path.GetFileName(file);
+                string ext = Path.GetExtension(file).ToLowerInvariant();
+                if (!Constants.SubtitleFileExtensions.Contains(ext)) continue;
+                if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(name, stem + ext, StringComparison.OrdinalIgnoreCase)) continue;
+                found.Add(file);
+            }
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                        or ArgumentException or NotSupportedException)
+        {
+            return [];
         }
         return Rank(found, stem);
     }

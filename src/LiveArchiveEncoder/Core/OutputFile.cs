@@ -53,6 +53,12 @@ public static class OutputFile
         if (!part.Exists || part.Length == 0)
             throw new InvalidOperationException($"output is empty: {final.FullName}");
 
+        // v7.9.8.13.2: a directory and an ACL refusal are permanent failures;
+        // retrying them only adds ~1.5 s before the same error. Keep the old
+        // "keep the part" behaviour for those, immediately.
+        if (Directory.Exists(final.FullName))
+            throw new IOException($"cannot place {final.FullName}: a directory is in the way");
+
         Exception? last = null;
         for (int attempt = 0; attempt < 4; attempt++)
         {
@@ -61,17 +67,16 @@ public static class OutputFile
                 File.Move(part.FullName, final.FullName, overwrite: true);
                 return final;
             }
-            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+            catch (UnauthorizedAccessException)
+            {
+                throw;                       // permission denied: no retry helps
+            }
+            catch (IOException exc)
             {
                 last = exc;
                 if (attempt < 3) Thread.Sleep(250 * (attempt + 1));
             }
         }
-
-        // FileInfo.Exists is false for a directory, so test the path itself.
-        // A directory is not a transient player lock: keep the old behaviour.
-        if (Directory.Exists(final.FullName))
-            throw last!;
 
         FileInfo alternate = Alternate(final);
         try
@@ -95,7 +100,9 @@ public static class OutputFile
         for (int n = 2; n < 1000; n++)
         {
             var candidate = new FileInfo(Path.Combine(dir, $"{stem} ({n}){final.Extension}"));
-            if (!candidate.Exists) return candidate;
+            // FileInfo.Exists is false for a directory (v7.9.8.12), so a
+            // directory occupying the candidate name must be skipped too.
+            if (!candidate.Exists && !Directory.Exists(candidate.FullName)) return candidate;
         }
         throw new IOException($"no free output name near {final.FullName}");
     }

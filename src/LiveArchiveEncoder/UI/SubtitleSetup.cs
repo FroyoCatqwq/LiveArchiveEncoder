@@ -143,5 +143,8 @@ public static class SubtitleSetup
         return picked.Count > 0 ? picked : [.. suggested];
     }
 
-    private static bool Interactive() => !Console.IsInputRedirected;
+    // v7.9.8.13.2: a redirected stdout means a script is capturing us; asking
+    // on a terminal that is still attached to stdin would block it forever.
+    private static bool Interactive() =>
+        !Console.IsInputRedirected && !Console.IsOutputRedirected;
 }

@@ -79,9 +79,14 @@ public sealed class FontPackTests
         List<string> picked = FontPack.Recommended(fonts, required);
         await Assert.That(picked.Count).IsEqualTo(3);
         await Assert.That(picked.Contains("Unrelated.otf")).IsFalse();
+        // v7.9.8.13.2: an independent expected value, not both sides going
+        // through the same function (that assertion passed for a constant).
         await Assert.That(FontPack.Normalize("FOT-Matisse ProN B"))
-            .IsEqualTo(FontPack.Normalize(
-                Path.GetFileNameWithoutExtension("FOT-MatisseProN-B.otf")));
+            .IsEqualTo("fotmatissepronb");
+        await Assert.That(FontPack.Normalize(
+                Path.GetFileNameWithoutExtension("FOT-MatisseProN-B.otf")))
+            .IsEqualTo("fotmatissepronb");
+        await Assert.That(FontPack.Normalize("  A_B-C / 9 ")).IsEqualTo("abc9");
     }
 
     [Test]

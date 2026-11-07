@@ -1,9 +1,9 @@
 """Interactive-shell (CUI) smoke test.
 
 Drives the CUI through piped stdin and asserts on what it prints and what it
-leaves behind in the settings file. The real settings file is used (that is the
-point of the test) but it is backed up first and restored afterwards -- see the
-cui_config fixture.
+leaves behind in the settings file. The settings file lives in the suite's own
+private LAE_CONFIG_DIR (never the developer's %LOCALAPPDATA%); the cui_config
+fixture backs it up and restores it between phases so every run starts clean.
 
 The eight runs below are a state machine: run 1 writes settings that run 2
 reads back, run 3 overrides them, and so on. They therefore depend on

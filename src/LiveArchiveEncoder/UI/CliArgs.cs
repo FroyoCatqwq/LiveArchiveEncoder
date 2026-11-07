@@ -169,6 +169,21 @@ public static class CliArgs
                 argv.AddRange(["--subtitle-aspect", c.Subtitles.BoxAspect]);
         }
 
+        // v7.9.8.13.2: these are persisted settings too. Without them an
+        // --emit-args line silently lost the OpenH264 mode, the era shape,
+        // "modern" rendering and the chosen H.264 implementation.
+        if (!string.Equals(c.OpenH264Rc,
+                LiveArchiveEncoder.Core.OpenH264RateControl.Bitrate,
+                StringComparison.OrdinalIgnoreCase))
+            argv.AddRange(["--openh264-rc", c.OpenH264Rc]);
+        if (c.OpenH264SkipFrames) argv.Add("--openh264-skip-frames");
+        if (!c.EraNative) argv.Add("--era-modern");
+        if (c.EraAspect is { Length: > 0 } eraShape
+            && !string.Equals(eraShape, "source", StringComparison.OrdinalIgnoreCase))
+            argv.AddRange(["--era-aspect", eraShape]);
+        if (c.H264Impl is { Length: > 0 } h264Impl)
+            argv.AddRange(["--h264", h264Impl]);
+
         return argv;
     }
 

@@ -93,9 +93,11 @@ public sealed class FfmpegDist
 ///   avbuild   -- SourceForge, <b>manual</b> (Cloudflare interstitial). Kept for
 ///                compatibility with older config.json files.
 ///
-/// Daily/rolling builds are always preferred; StableUrl is the fallback when a
-/// daily feed cannot be resolved. All five automatic sources currently publish
-/// one. Linux .tar.xz archives are extracted with tar, .7z with the official
+/// Daily/rolling builds are always preferred. A fixed-URL source has no
+/// fallback (there is nothing more stable to fall back to); a feed-driven
+/// source (autobuild) uses StableUrl -- a pinned, verified commit build --
+/// when releases/latest cannot be read or matched. Linux .tar.xz archives
+/// are extracted with tar, .7z with the official
 /// ip7z/7zip build (see FFmpeg.SevenZip), which is fetched automatically.
 /// </summary>
 public static partial class FfmpegCatalog
@@ -172,6 +174,12 @@ public static partial class FfmpegCatalog
             // time. Verified 2026-11-07: only win32 / win64 assets exist.
             FeedUrl = "https://api.github.com/repos/AnimMouse/ffmpeg-autobuild/releases/latest",
             AssetPattern = "win64.*nonfree.*\\.7z$",
+            // v7.9.8.13.2: without this, a feed outage made the "stable
+            // fallback" dead code. This is a verified, pinned commit build;
+            // it is only used when releases/latest cannot be read or matched.
+            StableUrl = "https://github.com/AnimMouse/ffmpeg-autobuild/releases/download/"
+                      + "2026-11-07-00-17-e196e57-89ebf7b/"
+                      + "ffmpeg-e196e57-89ebf7b-win64-nonfree.7z",
         },
 
         // ---- Linux ----

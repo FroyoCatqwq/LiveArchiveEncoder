@@ -13,6 +13,7 @@ timing numbers.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -25,8 +26,13 @@ def pytest_configure(config: pytest.Config) -> None:
     workers = getattr(config.option, "numprocesses", None)
     if not workers:
         return
-    marks = (config.option.markexpr or "").replace(" ", "")
-    if "timing" in marks and "shared_config" in marks:
+    expr = (config.option.markexpr or "").replace(" ", "").lower()
+    # v7.9.8.13.2: the old substring test let the *exclusive* phase through
+    # ("timing or shared_config" contains both words). Only an expression that
+    # explicitly EXCLUDES both groups -- tools/e2e.py phase 2 -- may use -n.
+    excludes_both = (expr.startswith("not(") or expr.startswith("not"))
+    excludes_both = excludes_both and "timing" in expr and "shared_config" in expr
+    if excludes_both or os.environ.get("LAE_E2E_PHASE") == "parallel":
         return
     raise pytest.UsageError(
         "timing / shared_config modules must run alone: use tools/e2e.py, or "

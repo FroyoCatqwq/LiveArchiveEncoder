@@ -619,6 +619,13 @@ public static class Cli
             return 0;
         }
 
+        // v7.9.8.13.2: per-run sidecar discovery and font-pack import happen
+        // here -- after the pure conversions above, and before the run is
+        // captured into config.json (which must keep only persistent settings).
+        (CliOptions ready, int? subtitleExit) = SubtitleSetup.Prepare(args);
+        if (subtitleExit is not null) return subtitleExit.Value;
+        args = ready;
+
         dst.Directory?.Create();
 
         // Remember the run so the next interactive session starts from it. A CLI
@@ -631,6 +638,9 @@ public static class Cli
         // encode re-encode its own output, which the e2e suite caught at once; on
         // disk, though, the chain the user configured has to survive.
         if (!args.TouchedRecompress) snapshot.Recompress = stored.Recompress;
+        // v7.9.8.13.2: a sidecar found by name is a per-run discovery, not a
+        // setting. Persisting it made the next unrelated run inherit it.
+        if (args.SubtitlesDiscovered) snapshot.Subtitles = stored.Subtitles;
         ConfigStore.Save(snapshot);
 
         // v7.9.8.3: nnedi needs a weights file, and "which file" is a question
@@ -727,19 +737,23 @@ public static class Cli
         if (!args.Quiet) Console.WriteLine(L.T("note.realtime"));
 
         Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
-        if (!args.Quiet) Report.PrintResult(dst.FullName, result);
+        // v7.9.8.13.2: Promote may have saved under "name (2).ext". Everything
+        // downstream -- the report, the pix-fmt check, the recompress chain and
+        // the player -- must follow the file that actually exists.
+        string placedPath = result.PlacedPath ?? dst.FullName;
+        if (!args.Quiet) Report.PrintResult(placedPath, result);
 
         // v7.9.6: a declared pixel format is not a written one -- libx264 lists
         // grey and then encodes 4:2:0. One ffprobe call settles it.
         if (!args.Quiet && config.PixFmt is { Length: > 0 })
-            Report.CheckOutputPixFmt(ffprobe, dst, config.PixFmt);
+            Report.CheckOutputPixFmt(ffprobe, new FileInfo(placedPath), config.PixFmt);
 
         // ---- v7.6: the video-site recompress pass ----
-        string finalPath = dst.FullName;
+        string finalPath = placedPath;
         if (PostProcess.PostPipeline.Needed(config))
         {
             PostProcess.PostProcessOutcome post =
-                PostProcess.PostPipeline.Run(ffmpeg, dst.FullName, config);
+                PostProcess.PostPipeline.Run(ffmpeg, placedPath, config);
             finalPath = post.FinalPath;
 
             if (!args.Quiet)
@@ -757,7 +771,7 @@ public static class Cli
                 // Say the live file survived: losing a long encode and then
                 // discovering the recompress typo is bad enough without also
                 // wondering whether the recording is gone.
-                Console.Error.WriteLine(L.T("post.kept", dst.FullName));
+                Console.Error.WriteLine(L.T("post.kept", placedPath));
                 return 1;
             }
         }

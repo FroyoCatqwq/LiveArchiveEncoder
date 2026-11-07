@@ -2343,19 +2343,21 @@ public static partial class Cui
             Console.WriteLine(L.T("note.realtime"));
             Encoding.EncodeResult result = Encoding.RealtimeEncoder.RunSplit(options, cancellationToken);
             Console.WriteLine();
-            Report.PrintResult(c.OutputPath.FullName, result);
+            // v7.9.8.13.2: follow the file Promote actually produced.
+            string placedPath = result.PlacedPath ?? c.OutputPath.FullName;
+            Report.PrintResult(placedPath, result);
             // v7.9.6: verify a pinned format actually reached the file.
             if (c.PixFmt is { Length: > 0 } pinnedPix)
-                Report.CheckOutputPixFmt(ffprobe, c.OutputPath, pinnedPix);
+                Report.CheckOutputPixFmt(ffprobe, new FileInfo(placedPath), pinnedPix);
 
             // v7.6: the video-site recompress pass, after the live recording --
             // the site transcoded whatever it was given, so this is the only
             // stage left.
-            string finalPath = c.OutputPath.FullName;
+            string finalPath = placedPath;
             if (PostProcess.PostPipeline.Needed(c))
             {
                 PostProcess.PostProcessOutcome post =
-                    PostProcess.PostPipeline.Run(ffmpeg, c.OutputPath.FullName, c);
+                    PostProcess.PostPipeline.Run(ffmpeg, placedPath, c);
                 finalPath = post.FinalPath;
 
                 foreach (string hop in post.Passes) Console.WriteLine(L.T("post.recompress", hop));
@@ -2365,8 +2367,8 @@ public static partial class Cui
                     string stage = post.StageName;
                     string detail = post.RecompressError ?? "";
                     Console.WriteLine($"{L.T("error.prefix")}{L.T("post.failed", stage, detail)}");
-                    Console.WriteLine(L.T("post.kept", c.OutputPath.FullName));
-                    finalPath = c.OutputPath.FullName;   // play what did survive
+                    Console.WriteLine(L.T("post.kept", placedPath));
+                    finalPath = placedPath;   // play what did survive
                 }
             }
 

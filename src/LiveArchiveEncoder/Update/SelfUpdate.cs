@@ -713,6 +713,7 @@ public static class SelfUpdate
         // failure, which is exactly where these copies are useful.
         string backup = Path.GetFullPath(Path.Combine(payloadDir, "..", ".rollback"));
         var replaced = new List<string>();
+        var created = new List<string>();
         try { Directory.CreateDirectory(backup); }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
         {
@@ -733,13 +734,15 @@ public static class SelfUpdate
                 // start and had nothing to restore from.
                 if (File.Exists(target))
                     File.Copy(target, Path.Combine(backup, name), overwrite: true);
+                else
+                    created.Add(name);   // v7.9.8.13.2: rollback removes it
                 File.Copy(source, staged, overwrite: true);
             }
             catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
             {
                 error = $"cannot write {staged}: {exc.Message}";
                 TryDelete(staged);
-                Rollback(backup, installDir, replaced, ref error);
+                Rollback(backup, installDir, replaced, created, ref error);
                 return false;
             }
 
@@ -760,7 +763,7 @@ public static class SelfUpdate
                 {
                     error = $"cannot replace {target}: {exc.Message}";
                     TryDelete(staged);
-                    Rollback(backup, installDir, replaced, ref error);
+                    Rollback(backup, installDir, replaced, created, ref error);
                     return false;
                 }
             }
@@ -779,7 +782,7 @@ public static class SelfUpdate
                                                 or PlatformNotSupportedException)
                 {
                     error = $"cannot make {target} executable: {exc.Message}";
-                    Rollback(backup, installDir, replaced, ref error);
+                    Rollback(backup, installDir, replaced, created, ref error);
                     return false;
                 }
             }
@@ -791,14 +794,39 @@ public static class SelfUpdate
 
     /// <summary>Put the old build back after a swap that failed halfway.</summary>
     private static void Rollback(string backup, string installDir,
-        List<string> replaced, ref string? error)
+        List<string> replaced, List<string> created, ref string? error)
     {
+        // v7.9.8.13.2: a file the old install did not have must disappear on
+        // rollback, otherwise a failed update leaves a mixed, unstartable
+        // directory (new deps next to old binaries).
+        foreach (string name in created)
+        {
+            try { File.Delete(Path.Combine(installDir, name)); }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+            {
+                error += $" [rollback removal of {name} failed: {exc.Message}]";
+            }
+        }
+
         foreach (string name in replaced)
         {
             string saved = Path.Combine(backup, name);
             if (!File.Exists(saved)) continue;
-            try { File.Copy(saved, Path.Combine(installDir, name), overwrite: true); }
-            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+            string target = Path.Combine(installDir, name);
+            try
+            {
+                File.Copy(saved, target, overwrite: true);
+                if (!OperatingSystem.IsWindows()
+                    && !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                {
+                    File.SetUnixFileMode(target,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                        | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+                        | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                }
+            }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                            or PlatformNotSupportedException)
             {
                 error += $" [rollback of {name} failed: {exc.Message}]";
             }

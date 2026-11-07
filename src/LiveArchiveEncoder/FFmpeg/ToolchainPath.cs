@@ -51,6 +51,30 @@ public static class ToolchainPath
             .Split(separator, StringSplitOptions.RemoveEmptyEntries)
             .Where(p => !SamePath(p, dir, separator)));
 
+    /// <summary>
+    /// v7.9.8.13.2: remove PATH entries pointing at a *different* managed
+    /// FFmpeg build. Installing/switching distributions used to stack them, and
+    /// the oldest entry won in new shells -- `ffmpeg` then still ran the build
+    /// the user had switched away from. Entries outside our data root are kept.
+    /// </summary>
+    public static string PruneManagedBins(string? existing, string keepDir, char separator) =>
+        string.Join(separator, (existing ?? "")
+            .Split(separator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(p => !IsOtherManagedBin(p, keepDir, separator)));
+
+    private static bool IsOtherManagedBin(string entry, string keepDir, char separator)
+    {
+        string norm = entry.Trim().Trim('"')
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, separator);
+        if (SamePath(norm, keepDir, separator)) return false;
+        string root = Path.GetFullPath(Toolchain.Root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!norm.StartsWith(root, comparison)) return false;
+        return string.Equals(Path.GetFileName(norm), "bin", comparison);
+    }
+
     private static bool SamePath(string left, string right, char separator)
     {
         string Normalize(string value) => value.Trim().Trim('"')
@@ -127,11 +151,23 @@ public static class ToolchainPath
     {
         try
         {
-            if (OperatingSystem.IsWindows()) PublishWindows(binDir);
+            char separator = Separator;
+            if (OperatingSystem.IsWindows())
+            {
+                // Drop stale managed bin entries before PublishWindows appends
+                // the one we are installing (v7.9.8.13.2).
+                string user = Environment.GetEnvironmentVariable(
+                    PathVariable, EnvironmentVariableTarget.User) ?? "";
+                Environment.SetEnvironmentVariable(PathVariable,
+                    PruneManagedBins(user, binDir, separator), EnvironmentVariableTarget.User);
+                PublishWindows(binDir);
+            }
             else PublishUnix(binDir);
 
+            string processPath = PruneManagedBins(
+                Environment.GetEnvironmentVariable(PathVariable), binDir, separator);
             Environment.SetEnvironmentVariable(PathVariable,
-                AddToPath(Environment.GetEnvironmentVariable(PathVariable), binDir, Separator),
+                AddToPath(processPath, binDir, separator),
                 EnvironmentVariableTarget.Process);
 
             log?.Invoke($"PATH    : {binDir}");

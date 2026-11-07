@@ -61,7 +61,14 @@ public static class SevenZip
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
         { return (null, exc.Message); }
 
-        string url = GitHubProxy.Apply(UrlFor(platform), ghProxy);
+        // v7.9.8.13.2: when the caller has no proxy settings (the font-pack
+        // path), still try the auto-detected GitHub front rather than a direct
+        // connection that is known to hang on some networks.
+        string? front = ghProxy;
+        if (string.IsNullOrEmpty(front) && string.IsNullOrEmpty(proxy))
+            front = GitHubProxy.Detect(UrlFor(platform), null, log);
+
+        string url = GitHubProxy.Apply(UrlFor(platform), front);
         log?.Invoke($"7-Zip not found; downloading the official {ReleaseTag} build: {url}");
         (bool ok, string? dlError) = Toolchain.DownloadFile(url, asset, proxy, log);
         if (!ok) return (null, $"cannot download 7-Zip: {dlError}");
@@ -69,23 +76,40 @@ public static class SevenZip
         CaptureResult run;
         if (platform == DistPlatform.Windows)
         {
-            // 7-Zip FAQ: "/S" = silent, "/D=dir" = destination; case-sensitive.
-            run = ProcessRunner.Run([asset, "/S", $"/D={dir}"], 180);
+            // 7-Zip FAQ: "/S" = silent, /D="dir" = destination; case-sensitive,
+            // and quoted because %LOCALAPPDATA% often contains spaces.
+            run = ProcessRunner.Run([asset, "/S", $"/D=\"{dir}\""], 180);
         }
         else
         {
             run = ProcessRunner.Run(["tar", "-xJf", asset, "-C", dir], 180);
             if (run.ExitCode == 0)
-                ProcessRunner.Run(["chmod", "+x", exe], 30);
+            {
+                CaptureResult chmod = ProcessRunner.Run(["chmod", "+x", exe], 30);
+                if (chmod.ExitCode != 0)
+                    return (null, $"could not make {exe} executable: {chmod.Stderr.Trim()}");
+            }
         }
         if (run.ExitCode != 0)
+        {
+            TryDelete(asset);
             return (null, $"could not unpack 7-Zip (exit {run.ExitCode}): "
                           + $"{(run.Stderr + run.Stdout).Trim()}");
+        }
         if (!File.Exists(exe))
+        {
+            TryDelete(asset);
             return (null, $"7-Zip asset unpacked but {exe} is missing; "
                           + $"install it manually from {ReleasePage}");
+        }
 
         log?.Invoke($"7-Zip ready at {exe}");
         return (exe, null);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch (Exception) { /* best effort: do not mask the real failure */ }
     }
 }

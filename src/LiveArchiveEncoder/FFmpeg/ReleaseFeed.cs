@@ -28,23 +28,39 @@ public static class ReleaseFeed
             return (dist.StableUrl ?? "", error);
         }
 
-        using (doc)
+        // v7.9.8.13.2: an upstream feed can be malformed (assets not an array,
+        // a missing name, a pathological pattern). That must degrade to the
+        // stable fallback, never crash the installer.
+        try
         {
-            if (!doc.RootElement.TryGetProperty("assets", out JsonElement assets))
-                return (dist.StableUrl ?? "", "release feed has no assets");
-
-            foreach (JsonElement asset in assets.EnumerateArray())
+            using (doc)
             {
-                string name = asset.GetProperty("name").GetString() ?? "";
-                if (dist.AssetPattern is { Length: > 0 }
-                    && !Regex.IsMatch(name, dist.AssetPattern, RegexOptions.IgnoreCase)) continue;
-                if (asset.TryGetProperty("browser_download_url", out JsonElement link)
-                    && link.GetString() is { Length: > 0 } href)
+                if (!doc.RootElement.TryGetProperty("assets", out JsonElement assets)
+                    || assets.ValueKind != JsonValueKind.Array)
+                    return (dist.StableUrl ?? "", "release feed has no asset list");
+
+                foreach (JsonElement asset in assets.EnumerateArray())
                 {
-                    say($"Daily asset: {name}");
-                    return (href, null);
+                    if (asset.ValueKind != JsonValueKind.Object) continue;
+                    if (!asset.TryGetProperty("name", out JsonElement nameElement)) continue;
+                    string name = nameElement.GetString() ?? "";
+                    if (dist.AssetPattern is { Length: > 0 }
+                        && !Regex.IsMatch(name, dist.AssetPattern,
+                            RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1))) continue;
+                    if (asset.TryGetProperty("browser_download_url", out JsonElement link)
+                        && link.GetString() is { Length: > 0 } href)
+                    {
+                        say($"Daily asset: {name}");
+                        return (href, null);
+                    }
                 }
             }
+        }
+        catch (Exception exc) when (exc is InvalidOperationException or KeyNotFoundException
+                                        or RegexMatchTimeoutException or ArgumentException)
+        {
+            say($"Daily feed malformed ({exc.Message}); falling back to the stable asset.");
+            return (dist.StableUrl ?? "", exc.Message);
         }
         return (dist.StableUrl ?? "", "no asset in the daily feed matched");
     }

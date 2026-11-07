@@ -32,10 +32,12 @@
 只在 Windows 出现；其 tag 与资产名含提交哈希，不能写成固定 URL，本版改为安装时
 读取 `releases/latest` 的 `assets[]` 并按正则 `win64.*nonfree.*\.7z$` 选取。
 
-**稳定版回退**：`btbn` 的同一个 `latest` release 里同时提供 `n8.1` / `n9.0` 稳定分支
-资产（如 `ffmpeg-n9.0-latest-win64-gpl-9.0.zip`），`gyan` 另有
-`ffmpeg-release-full.7z`。目录模型为此预留 `StableUrl`；**当前五个源都有 daily，
-因此正常路径不会用到稳定版**，只有 daily feed 解析失败才会回退。
+**稳定版回退（v7.9.8.13.2 校正）**：固定 URL 的四个源（`btbn` / `nonfree` / `ytdlp` /
+`gyan`）本身就是 rolling 文件，没有更稳定的替代品，因此不设 `StableUrl`。只有走动态
+feed 的 `autobuild` 需要一个回退：现指向一个已验证的固定 commit 资产（tag
+`2026-11-07-00-17-e196e57-89ebf7b`）。`releases/latest` 读不到、JSON 畸形或无资产匹配时
+才用它。此前该字段全空，"daily 优先、无 daily 用稳定版" 只是一句注释——属于已修的
+死代码，见本版变更记录。
 
 ## 3. 编解码器差异
 

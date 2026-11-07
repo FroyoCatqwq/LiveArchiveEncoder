@@ -29,13 +29,34 @@ public sealed class V79812Tests
         string suffix = SelfUpdate.AssetSuffix();
         await Assert.That(suffix.StartsWith('-')).IsTrue();
         await Assert.That(suffix.EndsWith(".zip") || suffix.EndsWith(".tar.gz")).IsTrue();
-        // A self-contained archive must never match the framework-dependent
-        // suffix, and vice versa -- that was the whole bug.
-        string sc = suffix.Replace(".zip", "-self-contained.zip")
-            .Replace(".tar.gz", "-self-contained.tar.gz");
-        await Assert.That(sc.EndsWith(suffix, StringComparison.Ordinal)).IsFalse();
-        await Assert.That(suffix.EndsWith(sc, StringComparison.Ordinal)).IsFalse();
         await Assert.That(suffix.Contains("self-contained")).IsFalse();
+
+        // v7.9.8.13.2: the old assertions compared two strings with EndsWith
+        // and were true by construction. Drive the real selector instead.
+        string ext = suffix.EndsWith(".zip", StringComparison.Ordinal) ? ".zip" : ".tar.gz";
+        string scSuffix = suffix.Replace(ext, "-self-contained" + ext);
+        var release = new Release
+        {
+            Tag = "v1.0.0",
+            Version = VersionTag.Parse("v1.0.0")!,
+            Assets =
+            [
+                new ReleaseAsset
+                {
+                    Name = "LiveArchiveEncoder-v1.0.0" + suffix,
+                    Url = "https://example.test/framework-dependent", Size = 1,
+                },
+                new ReleaseAsset
+                {
+                    Name = "LiveArchiveEncoder-v1.0.0" + scSuffix,
+                    Url = "https://example.test/self-contained", Size = 1,
+                },
+            ],
+        };
+        await Assert.That(SelfUpdate.Pick(release, suffix)?.Url)
+            .IsEqualTo("https://example.test/framework-dependent");
+        await Assert.That(SelfUpdate.Pick(release, scSuffix)?.Url)
+            .IsEqualTo("https://example.test/self-contained");
     }
 
     [Test]

@@ -39,7 +39,7 @@ while [ $# -gt 0 ]; do
     --debug)   CONFIGURATION="Debug" ;;
     --rid)     RID="${2:?--rid needs a value}"; shift ;;
     --tfm)     TFM="${2:?--tfm needs a value}"; shift ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
