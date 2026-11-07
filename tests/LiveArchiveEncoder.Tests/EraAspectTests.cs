@@ -39,12 +39,13 @@ public sealed class EraAspectTests
     [Test]
     public async Task KeepsTheCaptureWidthAndChangesTheHeight()
     {
-        // youku07 is 352x264 (4:3). Widescreen keeps the width the preset was
-        // tuned for, so 352x198 -- same horizontal detail, fewer rows.
+        // v7.9.8.13.1: youku07 is back to 320x240 (4:3) after cross-checking
+        // contemporary blogs/forum posts with the archive.org clips. Widescreen
+        // keeps that width, so 320x180.
         EraPreset youku = EraPresets.Find("youku07")!;
         (int W, int H)? wide = EraAspects.Resolve(youku, EraAspect.SixteenNine, "flv", out string? reason);
         await Assert.That(reason).IsNull();
-        await Assert.That(wide).IsEqualTo((352, 198));
+        await Assert.That(wide).IsEqualTo((320, 180));
 
         // The other direction: hd14 is 1280x720, and 4:3 at that width is 960
         // rows. libx264 has no size limits that matter here.
@@ -57,12 +58,12 @@ public sealed class EraAspectTests
     [Test]
     public async Task SourceShapeIsThePresetItself()
     {
-        EraPreset cctv = EraPresets.Find("cctv06")!;               // 384x288
+        EraPreset cctv = EraPresets.Find("cctv06")!;               // 320x240 (v7.9.8.13.1)
         foreach (EraAspect aspect in new[] { EraAspect.Source, EraAspect.FourThree })
         {
             (int W, int H)? size = EraAspects.Resolve(cctv, aspect, "flv", out string? reason);
             await Assert.That(reason).IsNull().Because(aspect.ToString());
-            await Assert.That(size).IsEqualTo((384, 288)).Because(aspect.ToString());
+            await Assert.That(size).IsEqualTo((320, 240)).Because(aspect.ToString());
         }
     }
 

@@ -27,8 +27,8 @@ LiveArchiveEncoder in.mp4 out.mp4 --era generic/2014 --era-aspect 16:9
 | `generic/2007` | [2007](http://web.archive.org/web/20070601120905/http://youtube.com/) | 352x264@15 / 300k | 352x264@15 300k 32k/22.05kHz mono | flv → libx264/aac .mp4 | 包络 | FLV 时代的通用档位；具体站点见 youku/tudou 等行 |
 | `generic/2010` | [2010](http://web.archive.org/web/20100602002509/http://www.youtube.com/) | 640x480@25 / 900k | 640x480@25 900k 64k/44.1kHz mono | libx264 → libx264/aac .mp4 | 包络 | 480p H.264 成为网页默认尺寸的年份 |
 | `generic/2014` | [2014](http://web.archive.org/web/20140602000310/http://www.youtube.com/) | 1280x720@30 / 2500k | 1280x720@30 2500k 96k/44.1kHz stereo | libx264 → libx264/aac .mp4 | 包络 | 720p 普及、立体声得以保留 |
-| `cctv/2003` | [2003](http://web.archive.org/web/20030528121336/http://www.cctv.com:80/) | 320x240@15 / 250k | 320x240@15 250k 32k/22.05kHz mono | wmv2 → wmav2 .asf | 包络 | MMS 流未被爬取保存，只有站点页面可引 |
-| `cctv/2006` | [2006](http://web.archive.org/web/20060528214736/http://cctv.com:80/) | 384x288@25 / 350k | 384x288@25 350k 48k/22.05kHz mono | flv → libmp3lame .flv | 包络 | PAL 4:3 素材，25 fps |
+| `cctv/2003` | [2003](http://web.archive.org/web/20030528121336/http://www.cctv.com:80/) | 320x240@15 / 290k | 320x240@15 290k 32k/11.025kHz mono | wmv2 → wmav2 .asf | **页面+实测** | 依据 `title/copyright=cctv.com`、2004-09-20 的原始 WMV；见下节 |
+| `cctv/2006` | [2006](http://web.archive.org/web/20060528214736/http://cctv.com:80/) | 320x240@15 / 300k | 320x240@15 300k 32k/11.025kHz stereo | flv → libmp3lame .flv | **实测+史料** | 依据 2007–09 cctv.com 原始 FLV（LAME3.97/3.98）；见下节 |
 | `cctv/2011` | [2011](http://web.archive.org/web/20110602005532/http://www.cntv.cn:80/) | 640x360@25 / 700k | 640x360@25 700k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 | CNTV 独立域名之后 |
 | `sina/2003` | [2003](http://web.archive.org/web/20030527035526/http://video.sina.com.cn:80/) | 320x240@12 / 200k | 320x240@12 200k 24k/22.05kHz mono | wmv2 → wmav2 .asf | 包络 |  |
 | `sina/2006` | [2006](http://web.archive.org/web/20051208020436/http://video.sina.com.cn:80/) | 320x240@12 / 200k | 320x240@12 200k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 | 新浪播客；12 fps 是它的特征 |
@@ -42,7 +42,7 @@ LiveArchiveEncoder in.mp4 out.mp4 --era generic/2014 --era-aspect 16:9
 | `qq/2010` | [2010](http://web.archive.org/web/20110301075944/http://v.qq.com/) | 640x360@25 / 700k | 640x360@25 700k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 |  |
 | `tudou/2006` | [2006](http://web.archive.org/web/20060612223905/http://www.tudou.com:80/) | 352x264@12 / 295k | 352x264@12 295k 32k/22.05kHz mono | flv → libmp3lame .flv | 实测 | 对真实下载的 FLV 文件 ffprobe 得出（v7.9.5 记录） |
 | `tudou/2009` | [2009](http://web.archive.org/web/20090616230533/http://www.tudou.com:80/) | 352x264@15 / 320k | 352x264@15 320k 32k/22.05kHz mono | flv → libmp3lame .flv | 实测 | 同上，帧率与码率都略升 |
-| `youku/2007` | [2007](http://web.archive.org/web/20070602010215/http://www.youku.com/v_show/id_1001059.html) | 352x264@15 / 320k | 352x264@15 320k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 |  |
+| `youku/2007` | [2007](http://web.archive.org/web/20070602010215/http://www.youku.com/v_show/id_1001059.html) | 320x240@15 / 280k | 320x240@15 280k 32k/22.05kHz mono | flv → libmp3lame .flv | **史料** | 352x264 原是包络估值；优酷素材经元数据证实为 x264 后期重编码，不作编码依据 |
 | `youku/2011` | [2011](http://web.archive.org/web/20110601214528/http://www.youku.com:80/) | 640x360@25 / 800k | 640x360@25 800k 96k/44.1kHz stereo | libx264 → aac .mp4 | 包络 |  |
 | `ku6/2007` | [2007](http://web.archive.org/web/20070529140512/http://ku6.com:80/) | 320x240@15 / 240k | 320x240@15 240k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 |  |
 | `56/2007` | [2007](http://web.archive.org/web/20070707111454/http://www.56.com/) | 320x240@15 / 220k | 320x240@15 220k 32k/22.05kHz mono | flv → libmp3lame .flv | 包络 |  |
@@ -67,6 +67,67 @@ LiveArchiveEncoder in.mp4 out.mp4 --era generic/2014 --era-aspect 16:9
 `swf` 里拼出来，存档下来的 HTML 里只剩一个 `<embed>`。结果是"站点存在、年份可证、
 具体码率不可证"。这种情况下本表给的是**当年编码器在这个尺寸下的典型值**，不是伪造的
 实测数字。
+
+## 原始素材取证与 2026-11-07 更正
+
+用户从 archive.org 取回 20 份 2003–2013 的 cctv / 优酷系素材。**文件名的年份不等于
+编码年份**：先看 ffprobe / MediaInfo 的元数据，再决定它能不能当证据。
+
+### 取证方法
+
+| 手段 | 用途 |
+| --- | --- |
+| `ffprobe -show_format -show_streams -of json` | 编码格式、尺寸、帧率、码率，**以及容器/流的 tags** |
+| `MediaInfo --Output=JSON` | `Encoded_Date`、`Encoded_Library`、ASF 的 `WM/*`、RealMedia 的 `ASMRuleBook` |
+| opencv 抽帧 | 画面里的台标、网站水印、播放器/浏览器界面 |
+| 当年网页 / 博客 / 论坛 | 站方说明与技术社区对转码参数的记录 |
+
+### 元数据里的站点线索
+
+| 文件 | 关键字段 | 结论 |
+| --- | --- | --- |
+| `cctv-2004/2004年9月20日新闻.wmv` | `title = cctv.com`、`copyright = cctv.com`、`creation_time = 2004-09-20T11:42:05Z` | **A 级**：当年站端原始，wmv1 320x240@25 / 290 kbps / wmav2 11.025 kHz mono |
+| `cctv-2004/[岩松看霓虹国02]....rmvb` | `ASMRuleBook = #($Bandwidth >= 0), Stream0Bandwidth = 64082, Stream1Bandwidth = 385918` | RealMedia 多码率规则书；rv40 + cook，320x240 / 388 kbps / 44.1 kHz stereo |
+| `cctv-2007~2009/*.flv` | `Encoded_Library = LAME3.97 / LAME3.98 (alpha\|beta)`；画面有 `CCTV.com` 水印与栏目台标（opencv 抽帧确认） | **A 级**：flv1(Sorenson) 320x240@15 + MP3 11.025 kHz stereo，LAME 版本与年份相符 |
+| `cctv-2003/《新闻调查》...wmv` ×2 | `creation_time = 2006-04-20`（两份同一天） | **B 级**：2006 年批量转制，不能代表 2003 |
+| `cctv-2007/101575_...wmv` | `creation_time = 1970-01-01` | 时间戳被清零，B 级 |
+| `cctv-ixiyou-2010later/...20130505.mp4` | `encoder = Lavf60.10.100` | FFmpeg 6.x（2023+）重封装，B 级 |
+| `youku-2008/手把手教你...mp4` | `creation_time = 2010-05-24`、`GPAC ISO ... Handler`、`x264 core 54`；抽帧为 XP + IE 录屏 | 2010 年再分发，B 级 |
+| `youku-early/*.flv`、`youku-ku6-2005-flv/*.flv` | `x264 core 54 / core 56 svn-680`，容器里是 H.264 + AAC | **B 级**：Flash 9 之后的重编码，文件名写 2005–2007 不成立 |
+
+### 史料（不能只看视频的原因）
+
+1. **央视网 2003《视频点播说明》**（`cctv.com/advertisement/20030521/`）：站点音、视频
+   "目前包括 Real 和 Windows Media 两种格式"——**2003 年没有 FLV**。
+2. **央视网 2006《走过 CCTV.com 的第一个十年》**：2004-03-01《视听在线》改版，直播码流
+   由单一 56K 改为 **28K–56K–128K 自适应**（直播自适应，不是点播分辨率）。
+3. **Cash Chou 博客《FLV 小檔案》**：第一代 FLV 是 Sorenson H.263（FLV1），Flash 8 起是
+   On2 VP6（"中國土豆網在用"），Flash 9 才支持 H.264 + AAC。→ 直接证明那些 H.264/AAC
+   的"优酷早期 FLV"不是当年站端产物。
+4. **博客园《视频参数介绍》/ ChinaUnix 博客 / CSDN**：视频共享站 FLV 普遍 320×240、
+   12–15 fps、H.263、码率不足 300 Kbps，播放界面常为 400×300。
+5. **论坛实测帖**：土豆/优酷上传后"系统会自动转换成标准的 320×240"，一份 FLV 实测
+   295 Kbps / 320×240 / 4:3 / 11.99 fps。
+6. **百度知道 2009**：上传的视频"会被它自动变为 FLV 格式"。
+
+### 更正清单（本版实际改了什么）
+
+| 预设 | 原值 | 新值 | 主要依据 | 置信度 |
+| --- | --- | --- | --- | --- |
+| `cctv/2003` | 320x240@15 / 250k / 32k 22.05kHz | 320x240@15 / **290k** / 32k **11.025kHz** | A 级 2004 `cctv.com` 原始 WMV + 站方 2003 说明 | 高（码率/音频），帧率仍为包络 |
+| `cctv/2006` | 384x288@25 / 350k / 48k 22.05kHz mono | **320x240@15 / 300k / 32k 11.025kHz stereo** | A 级 2007–09 cctv.com FLV + 博客/论坛 | 高 |
+| `youku/2007` | 352x264@15 / 320k | **320x240@15 / 280k** | 当年博客/论坛的 320x240、<300 Kbps | 中（史料为主，素材仅弱旁证） |
+
+**没有改的**：
+
+- 交付编码器仍是 `flv`（Sorenson H.263）+ `libmp3lame`。史料 1、3、4 一致指向这一代；
+  archive.org 里那些 H.264+AAC 的 FLV 是后期重编码，**不采信**。
+- `tudou/2006` 的 352x264 / 295 Kbps 保持：它本就标注"实测"，且与论坛实测帖的 295 Kbps
+  吻合，属于站点高清档，不与其他站点的 320x240 默认档混为一谈。
+- `cctv/2003` 直播层 fps 保持 15：A 级素材是 PAL 25 fps，但直播层描述的是采集侧节流档位，
+  不是站端交付帧率；无站方采集参数可证，保留包络值而不用文件帧率硬套。
+- `ku6/2007` 等年份未动：`ku6-2005-flv` 那份的编码库是 x264 core 56（约 2008 后），
+  不足以把预设年份前移。
 
 ## 直播画质与机器参数（v7.9.8.2）
 

@@ -18,6 +18,56 @@
 
 ---
 
+## v7.9.8.13.1（2026-11-07）
+
+统一工具链、专门文档，以及用原始素材元数据 + 史料交叉校正时代预设。
+
+### 1. 7-Zip 双平台统一
+
+* 新增 `FFmpeg/SevenZip.cs`：两端都从 `ip7z/7zip` release `26.05` 取构建。
+  Windows 用 `7z2605-x64.exe`（官方 FAQ 的 `/S` + `/D=` 静默安装到用户目录），
+  Linux 用 `7z2605-linux-x64.tar.xz`（实测包内含 `7zz` / `7zzs`），解包后 `chmod +x`。
+  查找顺序：系统 PATH → Windows `Program Files\7-Zip` → 我们装的那份；都没有才下载。
+* `Toolchain.FindSevenZip()` 现在两端都会认出自动安装的副本，`Toolchain.Extract` 的
+  `.7z` 分支也改为 `SevenZip.Ensure()`，Linux 不再出现 "install p7zip by hand" 死路。
+  `FontPack.EnsureSevenZip` 收敛为同一个实现，字体包（含 Rar5）与 FFmpeg 归档共用。
+
+### 2. FFmpeg 工具链：5 个源，daily 优先
+
+* 新增 `ytdlp`（yt-dlp/FFmpeg-Builds，Win+Linux，`latest` daily）与
+  `autobuild`（AnimMouse，每次 commit 一个带哈希的 tag）。`btbn` / `nonfree` / `gyan`
+  / `avbuild` 全部保留，旧配置不受影响。
+* **AnimMouse 实测只有 win32/win64**（翻查最近 30 个 release 均无 Linux 资产），因此只在
+  Windows 提供；其资产名含提交哈希，新增 `FfmpegDist.FeedUrl` + `AssetPattern` 与
+  `FFmpeg/ReleaseFeed.cs`，安装时读 `releases/latest` 的 `assets[]` 正则选取。
+* 「daily 优先、无 daily 才用稳定版」：`FfmpegDist.StableUrl` 作为回退字段；当前五个源
+  都有 rolling 构建（实测 `latest` 标签的发布时间与资产名），正常路径不触发回退。
+* 新增 `docs/toolchain-builds.md`：五个源的 release 标签/资产/平台/归档格式对照、
+  **两端 `ffmpeg -encoders` 实测编解码器表**（Windows nonfree N-128412 vs Linux btbn
+  GPL N-128532，例如 `libfdk_aac` 仅前者有）、构建定位差异、自行核对命令、7-Zip 统一方案。
+
+### 3. 时代预设更正（不看视频偏信，先做元数据取证）
+
+* 用 `ffprobe -show_format/-show_streams`、`MediaInfo --Output=JSON`、opencv 抽帧扫描
+  `D:\VideoHaners\EraPresents-Original-Source` 的 20 份素材，并结合当年网页/博客/论坛。
+* **元数据决定了谁能当证据**：`2004年9月20日新闻.wmv` 的 `title/copyright = cctv.com`、
+  `creation_time = 2004-09-20`，是 A 级原始；而 `cctv-2003` 那两份 `《新闻调查》` 的
+  `creation_time` 都是 **2006-04-20**（后期批量转制），`youku-2008` 是 2010 + GPAC，
+  2013 的 MP4 用 `Lavf60.10.100`，`youku-early` / `ku6-2005` 的 FLV 编码库是
+  `x264 core 54/56`（H.264+AAC，Flash 9 之后）——**全部降为 B 级，不采信其编码格式**。
+  cctv 的 FLV 则用 `LAME3.97/3.98`，与 2007–2009 年份相符，抽帧可见 CCTV.com 水印。
+* 史料交叉：央视网 2003《视频点播说明》（只有 Real + Windows Media，无 FLV）、2006
+  《走过 CCTV.com 的第一个十年》（2004 直播改 28K/56K/128K 自适应）、Cash Chou 博客
+  （FLV1=Sorenson H.263，Flash 8=VP6，Flash 9 才 H.264+AAC）、博客园/ChinaUnix/CSDN
+  （站点 FLV 320×240、12–15fps、<300 Kbps）、论坛实测帖（自动转 320×240、295 Kbps）。
+* 更正 3 行：`cctv/2003` → 290k / 11.025kHz；`cctv/2006` → 320x240@15 / 300k /
+  11.025kHz stereo；`youku/2007` → 320x240@15 / 280k。交付编码器仍是 `flv`+`libmp3lame`。
+  完整可信度分级、更正清单与「哪些没改、为什么」见 `docs/era-presets.md`。
+* 同步更新 5 个硬编码数值的单测断言（`EraAspectTests`、`BuildProfileTests`、
+  `EncoderRateAndContainerTests`）。
+
+---
+
 ## v7.9.8.13（2026-11-07）
 
 字幕工作流：字体包与按素材名自动找字幕。

@@ -185,8 +185,15 @@ public static class Toolchain
             }
             else
             {
-                string url = GitHubProxy.Apply(dist.Url!, ghPrefix);
-                if (url.Length != dist.Url!.Length)
+                // v7.9.8.13.1: a fixed "latest" URL, or a per-commit asset
+                // resolved from the release feed (with a stable fallback).
+                (string resolved, string? resolveError) =
+                    ReleaseFeed.Resolve(dist, ghPrefix, proxy, Say);
+                if (string.IsNullOrEmpty(resolved))
+                    return (false, resolveError ?? $"no download URL for '{dist.Id}'");
+
+                string url = GitHubProxy.Apply(resolved, ghPrefix);
+                if (url.Length != resolved.Length)
                     Say($"Front  : {ghPrefix} (the request is fetched through it)");
                 Say($"URL    : {url}");
                 Say($"Target : {bin}");
@@ -517,13 +524,12 @@ public static class Toolchain
             }
         }
 
-        string? sevenZip = FindSevenZip();
+        // v7.9.8.13.1: both platforms use the official ip7z/7zip build. When
+        // neither the system nor our private copy has one, fetch it -- no more
+        // "install p7zip by hand" dead end on Linux.
+        (string? sevenZip, string? zipError) = SevenZip.Ensure();
         if (sevenZip is null)
-            return (false, OperatingSystem.IsWindows()
-                ? "a .7z archive needs an extractor; install 7-Zip (7z.exe) or put 7z on PATH, "
-                  + "or pick the BtbN / nonfree source which ships a .zip"
-                : "a .7z archive needs an extractor; install p7zip (7z / 7za / 7zz on PATH), "
-                  + "or pick the BtbN / nonfree source");
+            return (false, $"a .7z archive needs 7-Zip: {zipError}");
 
         (int code, string output) = RunLong(sevenZip,
             ["x", "-y", "-bso0", "-bsp0", $"-o{destination}", archive], null);
@@ -543,20 +549,27 @@ public static class Toolchain
             if (found is not null) return found;
         }
 
-        if (!OperatingSystem.IsWindows()) return null;
-
         // Only meaningful on Windows; GetFolderPath gives "" elsewhere and the
         // join would produce a path that never exists anyway.
-        string[] candidates =
-        [
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "7-Zip", "7z.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "7-Zip", "7z.exe"),
-        ];
-        foreach (string candidate in candidates)
+        if (OperatingSystem.IsWindows())
         {
-            if (File.Exists(candidate)) return candidate;
+            string[] candidates =
+            [
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "7-Zip", "7z.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "7-Zip", "7z.exe"),
+            ];
+            foreach (string candidate in candidates)
+            {
+                if (File.Exists(candidate)) return candidate;
+            }
         }
-        return null;
+
+        // v7.9.8.13.1: the official ip7z build we installed ourselves lives
+        // here on BOTH platforms (7z.exe on Windows, 7zz on Linux). Without
+        // this, a second run would not see the copy the first one downloaded.
+        string own = Path.Combine(SevenZip.DirectoryPath,
+            SevenZip.ExeNameFor(FfmpegCatalog.Current));
+        return File.Exists(own) ? own : null;
     }
 
     /// <summary>

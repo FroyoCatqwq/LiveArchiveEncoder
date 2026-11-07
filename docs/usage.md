@@ -1198,16 +1198,26 @@ Linux   : ~/.local/share/LiveArchiveEncoder/ffmpeg/<来源>/bin/ffmpeg
 
 ### 来源清单
 
-**统一使用两个每日构建源**，Windows 和 Linux 都有最新 daily 资产：
+**v7.9.8.13.1 起统一为五个源，一律 daily / rolling 优先**。详细差异（release 标签、
+资产、许可、两端实测的编解码器清单）另见 [工具链构建对照](toolchain-builds.md)。
 
-| id | 项目 | Windows | Linux |
-| --- | --- | --- | --- |
-| `btbn`（**默认**） | [btbn/ffmpeg-builds](https://github.com/btbn/ffmpeg-builds/releases) | ✅ `ffmpeg-master-latest-win64-gpl.zip` | ✅ `ffmpeg-master-latest-linux64-gpl.tar.xz` |
-| `nonfree` | [BnqDzj/FFmpeg-Builds-nonfree](https://github.com/BnqDzj/FFmpeg-Builds-nonfree) | ✅ `ffmpeg-master-latest-win64-nonfree.zip` | ✅ `ffmpeg-master-latest-linux64-nonfree.tar.xz` |
+| id | 项目 | Windows | Linux | daily 形态 |
+| --- | --- | --- | --- | --- |
+| `btbn`（**默认**） | [btbn/ffmpeg-builds](https://github.com/btbn/ffmpeg-builds/releases) | ✅ `win64-gpl.zip` | ✅ `linux64-gpl.tar.xz` | GitHub 标签 `latest`，每日从 master 重建 |
+| `nonfree` | [BnqDzj/FFmpeg-Builds-nonfree](https://github.com/BnqDzj/FFmpeg-Builds-nonfree/releases) | ✅ `win64-nonfree.zip` | ✅ `linux64-nonfree.tar.xz` | 同上，额外带 `libfdk_aac` |
+| `ytdlp` | [yt-dlp/FFmpeg-Builds](https://github.com/yt-dlp/FFmpeg-Builds/releases) | ✅ `win64-gpl.zip` | ✅ `linux64-gpl.tar.xz` | 同上，面向 yt-dlp 生态 |
+| `autobuild` | [AnimMouse/ffmpeg-autobuild](https://github.com/AnimMouse/ffmpeg-autobuild/releases) | ✅ `win64-nonfree.7z` | ❌ | **每次 commit 一个 tag**，资产名含哈希，安装时读 `releases/latest` 动态选取 |
+| `gyan` | [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) | ✅ `ffmpeg-git-full.7z` | ❌ | git master rolling 文件，无 tag |
+| `avbuild` | SourceForge | ✅ 手动 | ✅ 手动 | 旧配置兼容；Cloudflare 拦截，需 `--ffmpeg-archive` |
 
-两者都取 GitHub release 标签 `latest`（每天从 master 重建），URL 写法两端一致。
-`gyan`（仅 Windows）与 `avbuild`（SourceForge，手动）只是旧配置留下的兼容条目，
-新部署不再使用。**清单按平台过滤**：`--ffmpeg-list`、补全和菜单只列当前平台能装的来源。
+`autobuild` 实测只发布 win32/win64，所以 Linux 上看不到它。**没有 daily 时才回退稳定版**
+（目录里预留 `StableUrl`；目前五个源都有 rolling，正常不会触发）。
+`gyan` / `avbuild` 继续保留，旧 `config.json` 无需改动。
+**清单按平台过滤**：`--ffmpeg-list`、补全和菜单只列当前平台能装的来源。
+
+**解压统一用 [ip7z/7zip](https://github.com/ip7z/7zip/releases) 官方构建**：Windows 静默
+安装 `7z2605-x64.exe`，Linux 解包 `7z2605-linux-x64.tar.xz` 里的 `7zz`；系统已装 7-Zip
+则直接用。两端都不再要求手动装 p7zip，见 [工具链构建对照](toolchain-builds.md) §4。
 
 ### 命令行
 
@@ -1736,9 +1746,10 @@ LiveArchiveEncoder.exe X.mkv out.rm --auto-subtitle --font-pack "Fonts\Fonts.rar
   （脚本/非交互取排名第一），**一个都没有就提示手动输入路径**，输错会报错退出。
   只认同名前缀加一个点，`X[06].ass` 不会被挂到 `X[05].mkv` 上。
 * `--font-pack` 隐含开启上一条，因为没有字幕就不知道该挑哪些字体。支持 `.zip`、`.7z`、
-  `.rar`，用 **7-Zip** 解开；系统里没有 7-Zip 时会自动下载官方 26.05 x64 安装器，
-  按官方 FAQ 的 `/S` + `/D=dir` 静默装到用户可写目录（不需要管理员权限），以后复用。
-  Linux 没装 p7zip 时，`.zip` 会回退到内置读取器，`.7z`/`.rar` 仍会明确提示。
+  `.rar`，**两端统一用 [ip7z/7zip](https://github.com/ip7z/7zip/releases) 官方构建**解开：
+  Windows 静默安装 `7z2605-x64.exe`（FAQ 的 `/S` + `/D=dir`，不需管理员权限），
+  Linux 解包 `7z2605-linux-x64.tar.xz` 里的 `7zz`。系统已装 7-Zip 就直接用，都没有才下载。
+  `.zip` 另有 .NET 内置读取器作最后兜底，见 [工具链构建对照](toolchain-builds.md) §4。
 * 解压后按 ASS 的 `Fontname` 建议筛字体，比较时忽略空格、连字符和大小写
   （`FOT-Matisse ProN B` 能对上 `FOT-MatisseProN-B.otf`）。交互式会列出包内编号：
   留空按 ASS 建议、`*` 全选、`1,3` 自选——这就是「按个人喜好」的入口。

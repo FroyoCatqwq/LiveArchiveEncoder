@@ -319,9 +319,9 @@ public sealed class SitePresetTests
         await Assert.That(native).Contains("-c:v flv");
         await Assert.That(modern).Contains("-c:v libx264");
         // The same ladder: same scaler expression, same target bitrate.
-        await Assert.That(native).Contains("scale=352:264");
-        await Assert.That(modern).Contains("scale=352:264");
-        await Assert.That(native).Contains("-b:v 320k");
+        await Assert.That(native).Contains("scale=320:240");
+        await Assert.That(modern).Contains("scale=320:240");
+        await Assert.That(native).Contains("-b:v 280k");
         // ... and the containers each rendering has to land in.
         await Assert.That(youku.ContainerFor(native: true)).IsEqualTo("flv");
         await Assert.That(youku.ContainerFor(native: false)).IsEqualTo("mp4");
@@ -346,10 +346,10 @@ public sealed class SitePresetTests
         bool applied = EraPresets.Find("youku07")!.ApplyLive(config);
 
         await Assert.That(applied).IsTrue();
-        await Assert.That(config.Width).IsEqualTo(352);
-        await Assert.That(config.Height).IsEqualTo(264);
+        await Assert.That(config.Width).IsEqualTo(320);
+        await Assert.That(config.Height).IsEqualTo(240);
         await Assert.That(config.Fps).IsEqualTo(15.0);
-        await Assert.That(config.Limit).IsEqualTo(320.0);
+        await Assert.That(config.Limit).IsEqualTo(280.0);
         await Assert.That(config.FpsLevels).IsEquivalentTo(new[] { 15.0, 12.0, 10.0, 8.0, 5.0 });
         await Assert.That(config.AudioRate).IsEqualTo(22050);
         await Assert.That(config.Encoder!.Name).IsEqualTo("mpeg4");

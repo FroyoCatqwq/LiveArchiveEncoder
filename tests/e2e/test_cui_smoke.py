@@ -134,15 +134,16 @@ def test_run6_toolchain_menu(exe, cui_config):
     c = Checks()
     c.check("exit code 0", p6.returncode == 0, f"rc={p6.returncode}")
     c.check("toolchain menu offered", "12." in p6.stdout and "FFmpeg toolchain" in p6.stdout)
-    # gyan.dev publishes no Linux build, so the Linux catalogue is
-    # deliberately shorter. Asking for "gyan" there would fail for a correct
-    # reason -- the menu must not offer a source it cannot install.
-    expected = (("btbn", "gyan", "avbuild", "nonfree") if os.name == "nt"
-                else ("btbn", "avbuild", "nonfree"))
+    # v7.9.8.13.1: five sources. gyan.dev publishes no Linux build, and
+    # AnimMouse only ships win32/win64, so Linux shows neither of them.
+    expected = (("btbn", "gyan", "avbuild", "nonfree", "ytdlp", "autobuild")
+                if os.name == "nt"
+                else ("btbn", "avbuild", "nonfree", "ytdlp"))
     missing = [s for s in expected if s not in p6.stdout]
     c.check("lists every source", not missing, f"missing={missing}")
     if os.name != "nt":
-        c.check("hides windows-only sources", "gyan" not in p6.stdout)
+        c.check("hides windows-only sources",
+                "gyan" not in p6.stdout and "autobuild" not in p6.stdout)
     c.check("marks manual sources", "manual download" in p6.stdout)
     c6 = harness.read_config()
     c.check("ffmpeg source persisted", c6 and c6.get("FfmpegSource") == "btbn",

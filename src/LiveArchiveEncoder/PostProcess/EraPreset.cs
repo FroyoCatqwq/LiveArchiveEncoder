@@ -470,9 +470,16 @@ public static class EraPresets
             "era.generic.2014", ladder: [30, 25, 20, 15], crf: 23, profile: "high"),
 
         // ---- CCTV: Windows Media, then FLV, then its own CDN ----
-        Site("cctv", 2003, 320, 240, 15, 250, 32, 22050, 1, "wmv2", "wmav2", "asf",
+        // v7.9.8.13.1: metadata decides what counts as evidence. The two files
+        // in "cctv-2003" carry creation_time 2006-04-20 -- a later batch
+        // re-encode -- so they cannot speak for 2003. The trustworthy original
+        // is 2004年9月20日新闻.wmv: title/copyright = cctv.com, creation_time
+        // 2004-09-20, wmv1 320x240@25 at 290 kbps with 11.025 kHz mono wmav2.
+        // cctv.com's own 2003 视频点播说明 lists only Real + Windows Media.
+        // The live-layer fps stays an envelope value; see docs/era-presets.md.
+        Site("cctv", 2003, 320, 240, 15, 290, 32, 11025, 1, "wmv2", "wmav2", "asf",
             11, 22, "era.cctv.2003", liveEncoder: "wmv2"),
-        Site("cctv", 2006, 384, 288, 25, 350, 48, 22050, 1, "flv", "libmp3lame", "flv",
+        Site("cctv", 2006, 320, 240, 15, 300, 32, 11025, 2, "flv", "libmp3lame", "flv",
             11, 24, "era.cctv.2006"),
         Site("cctv", 2011, 640, 360, 25, 700, 96, 44100, 2, "libx264", "aac", "mp4",
             10, 21, "era.cctv.2011", h264: "libopenh264"),
@@ -510,7 +517,13 @@ public static class EraPresets
             11, 22, "era.tudou.2006"),
         Site("tudou", 2009, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
             11, 22, "era.tudou.2009"),
-        Site("youku", 2007, 352, 264, 15, 320, 32, 22050, 1, "flv", "libmp3lame", "flv",
+        // v7.9.8.13.1: contemporary blogs/forum posts describe the common
+        // 320x240 / 12-15 fps / H.263 / <300 kbps FLV that sites transcoded
+        // uploads into. The archive.org youku clips are NOT evidence for the
+        // codec: MediaInfo reads "x264 core 54/56" in them, i.e. a later
+        // re-encode (Flash 9-era H.264+AAC). Only their size/frame rate is a
+        // weak corroboration; 352x264 was an envelope guess with no source.
+        Site("youku", 2007, 320, 240, 15, 280, 32, 22050, 1, "flv", "libmp3lame", "flv",
             11, 22, "era.youku.2007"),
         Site("youku", 2011, 640, 360, 25, 800, 96, 44100, 2, "libx264", "aac", "mp4",
             10, 20, "era.youku.2011", h264: "libopenh264"),

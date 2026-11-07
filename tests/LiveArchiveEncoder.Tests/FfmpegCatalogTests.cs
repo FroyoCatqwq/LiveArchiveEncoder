@@ -58,8 +58,12 @@ public sealed class FfmpegCatalogTests
     [Test]
     public async Task SourcesAreUniquePerPlatform()
     {
-        await Assert.That(FfmpegCatalog.All.Where(d => d.Platform == Win).Select(d => d.Id)).IsEquivalentTo(new[] { "btbn", "gyan", "avbuild", "nonfree" });
-        await Assert.That(FfmpegCatalog.All.Where(d => d.Platform == Lin).Select(d => d.Id)).IsEquivalentTo(new[] { "btbn", "avbuild", "nonfree" });
+        // v7.9.8.13.1: ytdlp mirrors on both platforms; AnimMouse only ships
+        // win32/win64 assets (verified against every release on 2026-11-07).
+        await Assert.That(FfmpegCatalog.All.Where(d => d.Platform == Win).Select(d => d.Id))
+            .IsEquivalentTo(new[] { "btbn", "gyan", "avbuild", "nonfree", "ytdlp", "autobuild" });
+        await Assert.That(FfmpegCatalog.All.Where(d => d.Platform == Lin).Select(d => d.Id))
+            .IsEquivalentTo(new[] { "btbn", "avbuild", "nonfree", "ytdlp" });
 
         // Available is exactly this platform's slice, with no duplicate ids --
         // a duplicate would make Installed() list the same build twice.

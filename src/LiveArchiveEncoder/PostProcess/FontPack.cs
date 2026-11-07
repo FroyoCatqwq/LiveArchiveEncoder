@@ -18,60 +18,30 @@ public static class FontPack
 {
     public static readonly string[] ArchiveExtensions = [".zip", ".7z", ".rar"];
 
-    /// <summary>Official 26.05 x64 installer, used only when nothing is installed.</summary>
-    public const string InstallerUrl =
-        "https://github.com/ip7z/7zip/releases/download/26.05/7z2605-x64.exe";
+    /// <summary>
+    /// v7.9.8.13.1: kept as a property so callers/tests still have a Windows
+    /// install URL. The authoritative per-platform asset list is
+    /// <see cref="SevenZip"/>; both platforms now use ip7z/7zip releases.
+    /// </summary>
+    public static string InstallerUrl => SevenZip.UrlFor(DistPlatform.Windows);
 
     public static bool IsArchive(string path) =>
         ArchiveExtensions.Contains(Path.GetExtension(path).ToLowerInvariant());
 
     /// <summary>Where a 7-Zip we installed ourselves lives (user-writable).</summary>
-    public static string Portable7ZipDir => Path.Combine(Toolchain.Root, "7zip");
+    public static string Portable7ZipDir => SevenZip.DirectoryPath;
 
     /// <summary>A 7-Zip already present, including one installed by an earlier run.</summary>
-    public static string? ExistingSevenZip()
-    {
-        string? found = Toolchain.FindSevenZip();
-        if (found is not null) return found;
-        string own = Path.Combine(Portable7ZipDir, OperatingSystem.IsWindows() ? "7z.exe" : "7z");
-        return File.Exists(own) ? own : null;
-    }
+    public static string? ExistingSevenZip() => SevenZip.Find();
 
     /// <summary>
-    /// Find 7-Zip, or install the official build silently. The 7-Zip FAQ gives
-    /// <c>/S</c> for silent and <c>/D=dir</c> for the destination; both switches
-    /// are case-sensitive. Installing under the user's own data directory avoids
-    /// needing elevation.
+    /// Find 7-Zip, or fetch the official build for this platform. The lookup,
+    /// download and unpack now live in <see cref="SevenZip"/>, so the FFmpeg
+    /// installer and the font pack share one implementation on Windows AND Linux.
     /// </summary>
     public static (string? Exe, string? Error) EnsureSevenZip(
-        string? ghProxy = null, Action<string>? log = null)
-    {
-        string? found = ExistingSevenZip();
-        if (found is not null) return (found, null);
-
-        if (!OperatingSystem.IsWindows())
-            return (null, "7-Zip is required for .7z/.rar font packs; install p7zip (7z / 7za / 7zz) first.");
-
-        string dir = Portable7ZipDir;
-        string exe = Path.Combine(dir, "7z.exe");
-        string installer = Path.Combine(dir, "7z2605-x64.exe");
-        try { Directory.CreateDirectory(dir); }
-        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
-        { return (null, exc.Message); }
-
-        log?.Invoke($"7-Zip not found; downloading {InstallerUrl}");
-        (bool ok, string? dlError) = Toolchain.DownloadFile(
-            GitHubProxy.Apply(InstallerUrl, ghProxy), installer, null, log);
-        if (!ok) return (null, $"cannot download 7-Zip: {dlError}");
-
-        CaptureResult run = ProcessRunner.Run([installer, "/S", $"/D={dir}"], 180);
-        if (run.ExitCode != 0)
-            return (null, $"7-Zip installer exited with {run.ExitCode}: {run.Stderr.Trim()}");
-        if (!File.Exists(exe))
-            return (null, $"7-Zip installed but {exe} is missing; install it manually from {InstallerUrl}");
-        log?.Invoke($"7-Zip installed at {exe}");
-        return (exe, null);
-    }
+        string? ghProxy = null, Action<string>? log = null) =>
+        SevenZip.Ensure(ghProxy, null, log);
 
     /// <summary>Staging directory plus the fonts found in it. Dispose removes it.</summary>
     public sealed class Unpacked : IDisposable

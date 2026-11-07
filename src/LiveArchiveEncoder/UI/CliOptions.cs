@@ -216,7 +216,10 @@ public sealed class CliOptions
     /// <summary>When set, print a shell completion script and exit.</summary>
     public string? Completion { get; init; }
 
-    /// <summary>FFmpeg distribution to use: btbn / gyan / avbuild / nonfree.</summary>
+    /// <summary>
+    /// FFmpeg distribution id. The live list is FfmpegCatalog.Available; see
+    /// docs/toolchain-builds.md for what each of the five sources ships.
+    /// </summary>
     public string FfmpegSource { get; init; } = LiveArchiveEncoder.FFmpeg.FfmpegCatalog.DefaultId;
 
     /// <summary>

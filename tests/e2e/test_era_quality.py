@@ -2,7 +2,7 @@
 
 The defect these tests exist for: a preset never touched the live quality, so
 whatever the previous encoder had left in the settings went straight to FFmpeg.
-Applying ``--era youku/2007`` (352x264@15, 320 kbps) and naming libx264 handed
+Applying ``--era youku/2007`` (320x240@15, 280 kbps) and naming libx264 handed
 ``-crf 9`` to x264 -- measured 935 kbps for a 320 kbps stream, 2.9x the ceiling
 the frame-rate ladder reads. The ladder went to its last rung inside the first
 second and the run reported a 15 fps capture that never ran at 15 fps.

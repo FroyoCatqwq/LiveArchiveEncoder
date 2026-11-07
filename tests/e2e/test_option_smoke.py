@@ -447,7 +447,7 @@ def test_a_site_preset_reshapes_both_passes(exe, src, workdir):
     2005-2009 China was not one transcode ladder but a dozen -- every portal ran
     its own FLV settings. Until v7.9.6.2 --era youku07 only rewrote the
     recompress fragment, so the live pass recorded the user's 640x480@25 master
-    while the second pass claimed 352x264@15, and the menu's parameter page
+    while the second pass claimed 320x240@15, and the menu's parameter page
     (option 4) showed numbers from neither. The capture side of a portal is as
     period-specific as its delivery side, so both come from the same row now.
 
@@ -466,13 +466,13 @@ def test_a_site_preset_reshapes_both_passes(exe, src, workdir):
     assert dst.exists(), "the live product is missing"
     live = harness.video_summary(dst) or {}
     assert live.get("codec") == "mpeg4", f"live pass changed codec: {live.get('codec')}"
-    assert (live.get("width"), live.get("height")) == (352, 264), live
+    assert (live.get("width"), live.get("height")) == (320, 240), live
 
     # ... and the site product carries the site's numbers.
     web = out / "site_preset_web.mp4"
     assert web.exists() and web.stat().st_size > 0, "no site product"
     info = harness.video_summary(web) or {}
-    assert (info.get("width"), info.get("height")) == (352, 264), info
+    assert (info.get("width"), info.get("height")) == (320, 240), info
 
 
 def test_an_explicit_flag_still_beats_a_site_preset(exe, src, workdir):
@@ -496,7 +496,7 @@ def test_an_explicit_flag_still_beats_a_site_preset(exe, src, workdir):
 def test_a_site_preset_writes_the_codec_its_era_had(exe, src, workdir):
     """v7.9.5.1: the codec is half of what "looks like 2007" means.
 
-    320 kbps of H.264 is a clean picture; 320 kbps of Sorenson Spark is the
+    280 kbps of H.264 is a clean picture; 280 kbps of Sorenson Spark is the
     blocky thing people actually remember. --era youku07 now renders with the
     site's own codec in the site's own container, and --era-modern is the
     viewing copy.
@@ -513,7 +513,7 @@ def test_a_site_preset_writes_the_codec_its_era_had(exe, src, workdir):
     assert web.exists() and web.stat().st_size > 0, "no .flv product"
     info = harness.video_summary(web) or {}
     assert info.get("codec") == "flv1", info
-    assert (info.get("width"), info.get("height")) == (352, 264), info
+    assert (info.get("width"), info.get("height")) == (320, 240), info
 
 
 def test_a_site_preset_sets_the_live_encoder_only_when_not_overridden(exe, src, workdir):
@@ -560,7 +560,7 @@ def test_recompress_only_needs_no_live_pass(exe, src, workdir):
     web = out / "already_made_web.mp4"
     assert web.exists() and web.stat().st_size > 0, "no recompressed product"
     info = harness.video_summary(web) or {}
-    assert (info.get("width"), info.get("height")) == (352, 264), info
+    assert (info.get("width"), info.get("height")) == (320, 240), info
 
     # The whole point: nothing was recorded, so no _live product may appear.
     assert not list(out.glob("already_made_live.*")), "a live pass ran anyway"

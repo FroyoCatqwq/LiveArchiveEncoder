@@ -12,6 +12,8 @@ Full user guide: [`docs/usage.md`](docs/usage.md); system and hardware requireme
 [`docs/requirements.md`](docs/requirements.md). Version history, from Python
 v6.2.2 to the current release: [`docs/CHANGELOG.md`](docs/CHANGELOG.md). Where
 the era-preset numbers come from: [`docs/era-presets.md`](docs/era-presets.md).
+Which FFmpeg / 7-Zip builds are supported and how their codecs differ:
+[`docs/toolchain-builds.md`](docs/toolchain-builds.md).
 
 **The port keeps the realtime simulation semantics of v6.3.3.** The capture
 thread feeds frames at the source cadence and the main loop emits one output

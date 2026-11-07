@@ -132,6 +132,6 @@ public sealed class RecompressOnlyTests
 
         await Assert.That(error).IsNull();
         await Assert.That(tokens.Count).IsGreaterThan(4);
-        await Assert.That(string.Join(' ', tokens)).Contains("352:264");
+        await Assert.That(string.Join(' ', tokens)).Contains("320:240");
     }
 }

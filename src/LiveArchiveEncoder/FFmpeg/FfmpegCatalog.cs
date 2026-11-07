@@ -46,8 +46,25 @@ public sealed class FfmpegDist
     /// </summary>
     public string? Url { get; init; }
 
-    /// <summary>True when <see cref="Url"/> can be downloaded without a browser.</summary>
-    public bool AutoDownload => Url is { Length: > 0 };
+    /// <summary>
+    /// v7.9.8.13.1: a GitHub <c>releases/latest</c> API URL for sources whose
+    /// asset name changes with every build (AnimMouse tags every commit with a
+    /// hash). Resolved at install time; <see cref="AssetPattern"/> picks the asset.
+    /// </summary>
+    public string? FeedUrl { get; init; }
+
+    /// <summary>Case-insensitive regex an asset name from the feed must match.</summary>
+    public string? AssetPattern { get; init; }
+
+    /// <summary>
+    /// Stable release used only when the daily feed cannot be resolved. Every
+    /// supported source publishes a daily/rolling build, so this is a fallback,
+    /// not the normal path.
+    /// </summary>
+    public string? StableUrl { get; init; }
+
+    /// <summary>True when this source can be fetched without a browser.</summary>
+    public bool AutoDownload => !string.IsNullOrEmpty(Url) || !string.IsNullOrEmpty(FeedUrl);
 
     public string ArchiveExtension => Archive switch
     {
@@ -60,31 +77,26 @@ public sealed class FfmpegDist
 /// <summary>
 /// The supported distributions, per platform.
 ///
-/// Verified against the live projects on 2026-10-18:
+/// v7.9.8.13.1: every asset was verified against the live projects on
+/// 2026-11-07. The full comparison (release tags, assets, platforms, licence
+/// and measured encoder lists) lives in <c>docs/toolchain-builds.md</c>.
 ///
-///   btbn    -- BtbN/FFmpeg-Builds (GitHub), release tagged "latest", an
-///              auto-build refreshed from master every day. Windows ships
-///              ffmpeg-master-latest-win64-gpl.zip, Linux ships
-///              ffmpeg-master-latest-linux64-gpl.tar.xz. Automatic, and it is
-///              the default on both platforms.
-///   gyan    -- gyan.dev, ffmpeg-git-full.7z; the "-git" file is the rolling
-///              master build. <b>Windows only</b> -- gyan.dev publishes no
-///              Linux build, so the source is not offered there. Needs 7-Zip
-///              (or any 7z on PATH).
-///   avbuild -- SourceForge windows-desktop / linux-desktop folders.
-///              <b>Manual.</b> SourceForge puts the mirror redirect behind a
-///              Cloudflare "Just a moment..." interstitial: both aria2c and
-///              HttpClient save the HTML page instead of the archive, and
-///              spoofing a browser User-Agent gets a flat 403. Rather than ship
-///              a downloader that silently writes a 131 KB HTML file and calls
-///              it a build, this source asks you to download the archive and
-///              then install it from disk.
-///   nonfree -- BnqDzj/FFmpeg-Builds-nonfree (GitHub), release tagged "latest",
-///              win64-nonfree.zip / linux64-nonfree.tar.xz. Adds fdk-aac and
-///              friends; redistribution of those binaries is the user's problem.
+///   btbn      -- BtbN/FFmpeg-Builds, release tag "latest" (daily master).
+///                win64-gpl.zip / linux64-gpl.tar.xz. Default on both.
+///   nonfree   -- BnqDzj/FFmpeg-Builds-nonfree, tag "latest"; adds fdk-aac.
+///   ytdlp     -- yt-dlp/FFmpeg-Builds, tag "latest"; Win + Linux GPL.
+///   autobuild -- AnimMouse/ffmpeg-autobuild, one tag per commit with a hash in
+///                the asset name, resolved through releases/latest at install
+///                time. <b>Windows only</b>: all 30 checked releases ship just
+///                win32/win64 nonfree .7z files.
+///   gyan      -- gyan.dev ffmpeg-git-full.7z (rolling git master, Win only).
+///   avbuild   -- SourceForge, <b>manual</b> (Cloudflare interstitial). Kept for
+///                compatibility with older config.json files.
 ///
-/// Linux note: the .tar.xz sources are extracted with <c>tar</c>, so xz-utils /
-/// xz must be present. The install says so when it is missing.
+/// Daily/rolling builds are always preferred; StableUrl is the fallback when a
+/// daily feed cannot be resolved. All five automatic sources currently publish
+/// one. Linux .tar.xz archives are extracted with tar, .7z with the official
+/// ip7z/7zip build (see FFmpeg.SevenZip), which is fetched automatically.
 /// </summary>
 public static partial class FfmpegCatalog
 {
@@ -136,6 +148,31 @@ public static partial class FfmpegCatalog
             Url = "https://github.com/BnqDzj/FFmpeg-Builds-nonfree/releases/latest/download/"
                   + "ffmpeg-master-latest-win64-nonfree.zip",
         },
+        new()
+        {
+            Id = "ytdlp",
+            Label = "yt-dlp / FFmpeg-Builds (win64 GPL, daily auto-build)",
+            Homepage = "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/latest",
+            Archive = ArchiveKind.Zip,
+            Daily = true,
+            Platform = DistPlatform.Windows,
+            Url = "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/"
+                  + "ffmpeg-master-latest-win64-gpl.zip",
+        },
+        new()
+        {
+            Id = "autobuild",
+            Label = "AnimMouse / ffmpeg-autobuild (win64 nonfree, per-commit build)",
+            Homepage = "https://github.com/AnimMouse/ffmpeg-autobuild/releases",
+            Archive = ArchiveKind.SevenZip,
+            Daily = true,
+            Platform = DistPlatform.Windows,
+            // This project tags every commit with a date+hash, so the asset
+            // name cannot be a constant. Resolve releases/latest at install
+            // time. Verified 2026-11-07: only win32 / win64 assets exist.
+            FeedUrl = "https://api.github.com/repos/AnimMouse/ffmpeg-autobuild/releases/latest",
+            AssetPattern = "win64.*nonfree.*\\.7z$",
+        },
 
         // ---- Linux ----
         new()
@@ -170,6 +207,17 @@ public static partial class FfmpegCatalog
             Platform = DistPlatform.Linux,
             Url = "https://github.com/BnqDzj/FFmpeg-Builds-nonfree/releases/latest/download/"
                   + "ffmpeg-master-latest-linux64-nonfree.tar.xz",
+        },
+        new()
+        {
+            Id = "ytdlp",
+            Label = "yt-dlp / FFmpeg-Builds (linux64 GPL, daily auto-build)",
+            Homepage = "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/latest",
+            Archive = ArchiveKind.TarXz,
+            Daily = true,
+            Platform = DistPlatform.Linux,
+            Url = "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/"
+                  + "ffmpeg-master-latest-linux64-gpl.tar.xz",
         },
     ];
 

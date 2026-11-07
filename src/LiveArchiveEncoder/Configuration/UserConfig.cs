@@ -139,7 +139,10 @@ public sealed class UserConfig
     public int Parallel { get; set; } = 1;
     public string Language { get; set; } = "en";
 
-    /// <summary>Selected FFmpeg distribution id (btbn / gyan / avbuild / nonfree / path).</summary>
+    /// <summary>
+    /// Selected FFmpeg distribution id (btbn / nonfree / ytdlp / autobuild /
+    /// gyan / avbuild / path). Old ids stay valid; see docs/toolchain-builds.md.
+    /// </summary>
     public string FfmpegSource { get; set; } = FFmpeg.FfmpegCatalog.DefaultId;
 
     /// <summary>Proxy for FFmpeg downloads; null means "ask every time".</summary>
