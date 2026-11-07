@@ -248,6 +248,8 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--subtitle-aspect` | `source` | **v7.9.8.3**：字幕按哪个画面比例排版 `source` / `4:3` / `16:9`（见 §7.16） |
 | `--font-import` | — | **v7.9.5.1**：把一个字体文件（或整个目录里的字体）拷进程序 `fonts` 目录后退出（见 §7.12） |
 | `--list-subtitle-fonts` | — | **v7.9.5.1**：列出字幕文件要哪些字体、本机有没有、在哪，然后退出 |
+| `--font-pack` | FILE | **v7.9.8.13**：用 7-Zip 解开 `.zip/.7z/.rar` 字体包，按字幕建议（或自己挑编号）导入字体（见 §7.12） |
+| `--auto-subtitle` | — | **v7.9.8.13**：按素材名在同目录找 `X.sc.ass` / `X.tc.ass` 这类字幕，找不到就提示手动指定 |
 | `--width` `--height` | `256` `192` | 输出分辨率（16:9 预设见 §7.15） |
 | `--container` | 编码器默认 | 容器切换（见 §7.14） |
 | `--fit` | `crop` | 画面适配：`crop` 裁切填满 / `fit` 完整画面＋补边 / `stretch` 拉伸变形（见 §7.15） |
@@ -1720,6 +1722,29 @@ LiveArchiveEncoder.exe --font-import D:\fonts\cjk
 | 只在系统字体里 | 仍能渲染，但换台机器可能变成方块——`--list-subtitle-fonts` 会标出来 |
 | 谁都没有 | 烧录**照常进行**，libass 用回退字体；同时打一行 `NOTE` 说明缺哪个 |
 | SRT / VTT（不指定字体） | 用 `--subtitle-font 家族名` 自己选，或不动（libass 默认） |
+
+#### 字体包与自动找字幕（v7.9.8.13）
+
+一次只导一个字体的做法对「随片附带的 `Fonts.rar`」很不友好。现在可以直接把压缩包交给程序：
+
+```bash
+# 视频 X.mkv 旁边有 X.sc.ass / X.tc.ass，同目录的 Fonts\ 里有 Fonts.rar
+LiveArchiveEncoder.exe X.mkv out.rm --auto-subtitle --font-pack "Fonts\Fonts.rar" --encoder rv20
+```
+
+* `--auto-subtitle` 在同目录找 `<视频名>.<语言>.ass/.ssa/.srt/.vtt`；多个会列编号让你选
+  （脚本/非交互取排名第一），**一个都没有就提示手动输入路径**，输错会报错退出。
+  只认同名前缀加一个点，`X[06].ass` 不会被挂到 `X[05].mkv` 上。
+* `--font-pack` 隐含开启上一条，因为没有字幕就不知道该挑哪些字体。支持 `.zip`、`.7z`、
+  `.rar`，用 **7-Zip** 解开；系统里没有 7-Zip 时会自动下载官方 26.05 x64 安装器，
+  按官方 FAQ 的 `/S` + `/D=dir` 静默装到用户可写目录（不需要管理员权限），以后复用。
+  Linux 没装 p7zip 时，`.zip` 会回退到内置读取器，`.7z`/`.rar` 仍会明确提示。
+* 解压后按 ASS 的 `Fontname` 建议筛字体，比较时忽略空格、连字符和大小写
+  （`FOT-Matisse ProN B` 能对上 `FOT-MatisseProN-B.otf`）。交互式会列出包内编号：
+  留空按 ASS 建议、`*` 全选、`1,3` 自选——这就是「按个人喜好」的入口。
+* 两者都是**一次性选择**，不会写进 `config.json`；字体仍落在程序自己的 `fonts/`
+  （`LAE_FONT_DIR` 可改）。CUI 里对应「字幕 → 7. 按素材名自动查找字幕」和
+  「字幕 → 字体 → 4. 导入字体包」。
 
 `--subtitle-font` 会被写成 `subtitles=...:force_style='FontName=…'`，覆盖整个文件里
 所有样式的字体——这是"字体缺失时先让它能看"的应急开关，不是逐样式编辑器。

@@ -148,6 +148,8 @@ public static class OptionCatalog
         new Spec("--subtitle-aspect", Kind.Value, [.. Constants.SubtitleAspects]),
         new Spec("--font-import", Kind.File, []),
         new Spec("--list-subtitle-fonts", Kind.Flag, []),
+        new Spec("--font-pack", Kind.File, []),
+        new Spec("--auto-subtitle", Kind.Flag, []),
 
         // ---- settings files (v7.9.1) ----
         new Spec("--save-config", Kind.File, []),

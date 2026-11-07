@@ -530,7 +530,11 @@ public static class Toolchain
         return code == 0 ? (true, null) : (false, $"7z exited with {code}: {Tail(output)}");
     }
 
-    private static string? FindSevenZip()
+    /// <summary>
+    /// v7.9.8.13: public so <see cref="PostProcess.FontPack"/> can reuse the same
+    /// lookup instead of growing a second, drifting copy of it.
+    /// </summary>
+    public static string? FindSevenZip()
     {
         string[] names = ["7z", "7za", "7zz"];
         foreach (string name in names)

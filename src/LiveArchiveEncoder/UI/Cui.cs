@@ -935,6 +935,7 @@ public static partial class Cui
             Console.WriteLine($" 4. {L.Pad(L.T("sub.menu.codec"), 30)} = {(s.Codec is { Length: > 0 } code ? code : L.T("value.auto"))}");
             Console.WriteLine($" 5. {L.Pad(L.T("sub.menu.fonts"), 30)} = {(s.FallbackFont is { Length: > 0 } f ? f : L.T("value.auto"))}");
             Console.WriteLine($" 6. {L.Pad(L.T("sub.menu.aspect"), 30)} = {s.BoxAspect}");
+            Console.WriteLine($" 7. {L.Pad(L.T("sub.menu.autofind"), 30)}");
             Console.WriteLine($" 0. {L.T("sub.menu.back")}");
             Console.Write(L.T("menu.select"));
 
@@ -1064,6 +1065,27 @@ public static partial class Cui
                     };
                     Console.WriteLine(L.T("sub.aspect.set", s.BoxAspect));
                     break;
+                case "7":
+                    // v7.9.8.13: sidecars named after the video. No match falls
+                    // through to the manual path prompt in ChooseSubtitles.
+                    if (c.InputPath is null || !c.InputPath.Exists)
+                    {
+                        Console.WriteLine(L.T("stream.selectfirst"));
+                        break;
+                    }
+                    IReadOnlyList<string> sidecars = SubtitleDiscovery.Find(c.InputPath.FullName);
+                    IReadOnlyList<string> picked =
+                        SubtitleSetup.ChooseSubtitles(c.InputPath.FullName, sidecars, true);
+                    if (picked.Count == 0) break;
+                    if (!File.Exists(picked[0]))
+                    {
+                        Console.WriteLine(L.T("fontpack.badsub", picked[0]));
+                        break;
+                    }
+                    s.Files = [Path.GetFullPath(picked[0])];
+                    s.Stream = null;
+                    Console.WriteLine(L.T("sub.files.set", Path.GetFileName(picked[0])));
+                    break;
             }
         }
     }
@@ -1083,6 +1105,7 @@ public static partial class Cui
             Console.WriteLine($" 1. {L.T("sub.fonts.heading")}");
             Console.WriteLine($" 2. {L.Pad(L.T("sub.fonts.import"), 22)}");
             Console.WriteLine($" 3. {L.Pad(L.T("sub.fonts.fallback"), 22)} = {(s.FallbackFont is { Length: > 0 } f ? f : L.T("value.auto"))}");
+            Console.WriteLine($" 4. {L.Pad(L.T("sub.fonts.pack"), 22)}");
             Console.WriteLine($" 0. {L.T("sub.menu.back")}");
             Console.Write(L.T("menu.select"));
 
@@ -1125,6 +1148,20 @@ public static partial class Cui
                         s.FallbackFont = family;
                         Console.WriteLine(L.T("sub.fonts.fallback.set", family));
                     }
+                    break;
+                case "4":
+                    // v7.9.8.13: a whole .zip/.7z/.rar release font pack.
+                    Console.Write(L.T("sub.fonts.importprompt", FontResolver.FontDirectory));
+                    string pack = Ask().Trim().Trim('"');
+                    if (pack.Length == 0) break;
+                    if (!FontPack.IsArchive(pack))
+                    {
+                        Console.WriteLine(L.T("fontpack.badpack", pack));
+                        break;
+                    }
+                    (bool packOk, string? packError) = SubtitleSetup.ImportPack(
+                        pack, s.Files, null, true);
+                    if (!packOk) Console.WriteLine($"{L.T("error.prefix")}{packError}");
                     break;
             }
         }

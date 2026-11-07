@@ -81,7 +81,20 @@ public sealed class CliOptions
     // ---- v7.9 #2: subtitles ----
 
     /// <summary>External subtitle file(s), e.g. clip.sc.ass. Repeatable.</summary>
-    public IReadOnlyList<string> SubtitleFiles { get; init; } = [];
+    private IReadOnlyList<string> _subtitleFiles = [];
+    public IReadOnlyList<string> SubtitleFiles
+    {
+        get => _subtitleFiles;
+        init => _subtitleFiles = value;
+    }
+
+    /// <summary>
+    /// v7.9.8.13: sidecar subtitles discovered after parsing (the parser has
+    /// no filesystem access). Kept as a setter rather than a <c>with</c> copy
+    /// because CliOptions is a class, not a record, and every test builds one
+    /// with an object initialiser.
+    /// </summary>
+    internal void ApplyDiscoveredSubtitles(IReadOnlyList<string> files) => _subtitleFiles = files;
 
     /// <summary>Absolute index of an embedded subtitle track to use.</summary>
     public int? SubtitleStream { get; init; }
@@ -117,6 +130,12 @@ public sealed class CliOptions
 
     /// <summary>v7.9.5.1: print the fonts a subtitle file needs, then exit.</summary>
     public bool ListSubtitleFonts { get; init; }
+
+    /// <summary>v7.9.8.13: a .zip/.7z/.rar font pack to unpack with 7-Zip.</summary>
+    public string? FontPack { get; init; }
+
+    /// <summary>v7.9.8.13: discover sidecar subtitles named after the input.</summary>
+    public bool AutoSubtitle { get; init; }
     public int Width { get; init; } = 256;
     public int Height { get; init; } = 192;
 
@@ -473,6 +492,8 @@ public static class CliParser
         string? subtitleAspect = null;
         string? fontImport = null;
         bool listSubtitleFonts = false;
+        string? fontPack = null;
+        bool autoSubtitle = false;
         int width = 256;
         int height = 192;
         string? container = null;
@@ -729,6 +750,13 @@ public static class CliParser
                     break;
                 case "--list-subtitle-fonts":
                     listSubtitleFonts = true;
+                    break;
+                case "--font-pack":
+                    if (!TryValue(out string packRaw)) return (null, "--font-pack requires a .zip/.7z/.rar path");
+                    fontPack = packRaw.Trim().Trim('"');
+                    break;
+                case "--auto-subtitle":
+                    autoSubtitle = true;
                     break;
                 case "--width":
                     if (!TryValue(out string wRaw) || !int.TryParse(wRaw, out width))
@@ -1138,6 +1166,8 @@ public static class CliParser
             SubtitleAspect = subtitleAspect,
             FontImport = fontImport,
             ListSubtitleFonts = listSubtitleFonts,
+            FontPack = fontPack,
+            AutoSubtitle = autoSubtitle,
             Width = width,
             Height = height,
             Container = container,
@@ -1269,6 +1299,10 @@ public static class CliParser
                                     + "program's fonts directory, then exit"),
             ("--list-subtitle-fonts", "", "print the fonts a subtitle file needs, whether they are "
                                         + "installed, and where, then exit"),
+            ("--font-pack", "FILE", "unpack a .zip/.7z/.rar font pack with 7-Zip and import the "
+                                  + "fonts the subtitles ask for (downloads 7-Zip if missing)"),
+            ("--auto-subtitle", "", "find subtitles named after the input in its directory; "
+                                  + "ask for a path when none match"),
             ("--width", "N", "output width (default: 256)"),
             ("--height", "N", "output height (default: 192)"),
             ("--container", "NAME", "container override where the encoder allows one, e.g. avi for "
