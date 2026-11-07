@@ -247,7 +247,8 @@ public static class AudioCatalog
         // v7.9.8.1: real_144 leads. Until this version the entry was just the
         // muxer's own default (ac3), which is a codec no RealMedia player ever
         // had -- a 2003 .rm that only VLC can open is not an archive of 2003.
-        ["rm"] = ["real_144", "ac3", "aac"],
+        // v7.9.8.12: ac3 leads again -- real_144's RM packets all carry PTS 0.
+        ["rm"] = ["ac3", "real_144", "aac"],
         ["flv"] = ["aac", "libmp3lame", "mp3_mf"],
         ["mov"] = ["aac", "libmp3lame", "ac3", "pcm_s16le"],
         ["amv"] = ["adpcm_ima_amv", "adpcm_ima_wav"],

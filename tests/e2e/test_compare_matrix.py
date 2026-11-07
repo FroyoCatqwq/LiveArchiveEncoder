@@ -46,14 +46,9 @@ CASES = [
 # Where the C# build deliberately differs from the frozen v6.3.3 reference,
 # field by field, with the reason. Anything not listed must match exactly: the
 # matrix exists to make a silent difference visible, not to be relaxed.
-DIVERGENCES = {
-    # v7.9.8.1: the reference never named an audio codec for RealMedia, so the
-    # rm muxer's own default (ac3) ended up in a .rm that no player of 2003
-    # could decode. The C# side writes real_144 -- which is the entire point of
-    # reproducing the era. Container, codec and geometry still match.
-    "rv20_default": {"audio": ("ac3", "ra_144")},
-    "rv20_timerange": {"audio": ("ac3", "ra_144")},
-}
+# v7.9.8.12: rm is back on ac3, exactly as the v6.3.3 baseline. The old
+# rv20_* audio exceptions are no longer needed (real_144 wrote PTS 0 packets).
+DIVERGENCES = {}
 
 
 def _excused(case: str, diff: str) -> bool:

@@ -25,7 +25,7 @@ public static class Constants
     /// compares <c>tag_name</c> from the feed with this value, so a forgotten
     /// bump makes the program offer its own version as an upgrade forever.</para>
     /// </summary>
-    public const string Version = "7.9.8.11.1";
+    public const string Version = "7.9.8.12";
 
     public const int DefaultWidth = 256;
     public const int DefaultHeight = 192;
@@ -299,10 +299,11 @@ public static class Constants
             // FFmpeg and need -strict, which this tool never passes, so the
             // lib-prefixed pair is what the preference list offers.
             ["ogg"] = ["libvorbis", "libopus"],
-            // v7.9.8.1: RealMedia gets its own audio codec first. ac3 muxes, but
-            // no player of the period ever decoded it, so a .rm carrying it is a
-            // file from nowhere.
-            ["rm"] = ["real_144", "ac3", "aac"],
+            // v7.9.8.12: ac3 leads again. real_144 writes every audio packet
+            // with PTS 0 into RM (measured: audio stream duration 0.000000),
+            // which breaks A/V sync and leaves a second pass with 0.355 s of
+            // audio against 282 s of video. It stays available explicitly.
+            ["rm"] = ["ac3", "real_144", "aac"],
             ["mp4"] = ["aac", "libopus", "libmp3lame"],
             ["flv"] = ["aac", "libmp3lame", "mp3_mf"],
             ["mov"] = ["aac", "libmp3lame"],

@@ -410,7 +410,7 @@ v7.8 起一部分编码器还能写别的容器（`--container` 指定，或者�
 
 | 编码器 | 默认容器 | 允许的扩展名 | 还能写（v7.9.5） | 默认音频 |
 | --- | --- | --- | --- | --- |
-| `rv10` `rv20` | rm | `.rm` `.rmvb` | — | `real_144`（v7.9.8.1 起；之前是 `ac3`） |
+| `rv10` `rv20` | rm | `.rm` `.rmvb` | 16 的倍数 | `ac3`（v7.9.8.12 起） |
 | `mpeg1video` `mpeg2video` | mpeg | `.mpg` `.mpeg` `.mpe` `.vob` | avi, mp4, mov, mkv | `mp2` |
 | `mpeg4` `libxvid` | avi | `.avi` | mp4, mov, mkv | `libmp3lame` |
 | `mjpeg` `h263p` | avi | `.avi` | mov, mkv, mp4（仅 mjpeg） | `libmp3lame` |
@@ -447,12 +447,13 @@ v7.8 起一部分编码器还能写别的容器（`--container` 指定，或者�
   文件头里 fps 是整数，`--fps 23.976` 会被写成 23.000，roq 更是直接拒编。
   现在三者都会四舍五入到最近的整数（23.976→24、29.97→30、59.94→60），报告的
   "FPS 支持"一栏对它们显示"只接受整数"。
-* **`.rm` 的音频是 `real_144`**（v7.9.8.1）：RealAudio 1.0，8 kHz 单声道，码率固定。
-  给它 `--audio-rate 44100` 会被吸附到 8000、`--audio-channels 2` 会被降到 1，
-  并各打一行提示——这个编码器只有这一种形态。`-b:a` 它不认（FFmpeg 收下但不理会），
-  文件永远是 14.4 kbps 那一档。
-  之前默认落在 `ac3` 上：那确实能装进 `.rm`，但当年的播放器一个都解不了。
-  真要 ac3 就显式给 `--audio-encoder ac3`。
+* **`.rm` 的音频默认回到 `ac3`**（v7.9.8.12）：`real_144` 写进 RM 的音频包时间戳恒为 0，
+  音频流时长会成为 0，播放时音画不同步；二次压缩更只剩约 0.35 s 声音、进度条也拖不动
+  （实测 282 s 素材）。它仍可用 `--audio-encoder real_144` 显式选择，但**不建议**：
+  8 kHz 单声道、固定 14.4 kbps，`-b:a` 被忽略；给 44100 Hz / 2 声道会被吸附到
+  8000 Hz / 单声道并各打一行提示。
+* **`rv10`/`rv20` 的宽高必须是 16 的倍数**（v7.9.8.12）：FFmpeg 的 `rv10enc.c` 会直接拒绝
+  其他尺寸。请求 320×180 会自动吸附成 320×176 并打印一行尺寸调整提示。
 * **`.rm` 只能单遍编码**（v7.9.8.1）：RealVideo 在 AVI 里没有 fourcc（读回来是
   `rawvideo`），Matroska 直接拒绝（`does not yet support muxing rv10`），而
   `--parallel` 的分片正是用这两种容器暂存的。所以 `--parallel` 对 `.rm` 会明确
@@ -1584,7 +1585,9 @@ LiveArchiveEncoder.exe clip.mkv --recompress-only --recompress-codec libx265 --r
 `real_144` / `copy`。
 `libopus` 与 `libvorbis` 只接受 webm / mkv / ogg；`copy` 原样搬运音轨。
 `rv10`/`rv20` 自动配 `real_144`（RealAudio 1.0，8 kHz 单声道）——不点名也是它，
-因为 `.rm` 里放 AAC 只是"能装"，不是当年那个文件。
+因为 `.rm` 里放 AAC 只是"能装"，不是当年那个文件。注意 `real_144` 写进 RM 时音频包
+时间戳恒为 0（v7.9.8.12 实测），要可拖动、可同步的产物请显式
+`--recompress-audio-codec ac3`。
 
 四条硬规则：
 

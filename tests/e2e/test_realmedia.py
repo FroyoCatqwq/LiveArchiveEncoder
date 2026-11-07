@@ -27,8 +27,10 @@ def _details(path):
     return {s.get("codec_type"): s for s in info.get("streams", [])}
 
 
-def test_rm_carries_real_audio(exe, workdir):
-    """rv10 + real_144, in a file ffmpeg can read back and decode."""
+def test_rm_defaults_to_ac3_with_a_real_timeline(exe, workdir):
+    """v7.9.8.12: real_144 leaves every RM audio packet at PTS 0, so the audio
+    stream reports duration 0 and the file cannot stay in sync. ac3 must be the
+    default and must produce an audio timeline as long as the video."""
     out = workdir("realmedia")
     dst = out / "rv10.rm"
     proc = run([str(exe), str(harness.SRC), str(dst), "--encoder", "rv10",
@@ -38,16 +40,31 @@ def test_rm_carries_real_audio(exe, workdir):
         f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
     streams = _streams(dst)
     assert ("video", "rv10") in streams, f"expected rv10 video, got {streams}"
-    assert ("audio", "ra_144") in streams, f"expected ra_144 audio, got {streams}"
+    assert ("audio", "ac3") in streams, f"expected ac3 audio, got {streams}"
 
-    # The codec has exactly one mode; a 44.1 kHz stereo request must land on it.
-    audio = _details(dst)["audio"]
-    assert audio.get("sample_rate") == "8000", audio
-    assert audio.get("channels") == 1, audio
+    details = _details(dst)
+    video_duration = float(details["video"].get("duration") or 0)
+    audio_duration = float(details["audio"].get("duration") or 0)
+    assert audio_duration > video_duration * 0.8, (video_duration, audio_duration)
 
     decode = run(["ffmpeg", "-v", "error", "-i", str(dst), "-f", "null", "-"])
     assert decode.returncode == 0 and not decode.stderr.strip(), \
         f"the .rm does not decode cleanly: {decode.stderr[:300]}"
+
+
+def test_rv10_snaps_a_non_multiple_of_16(exe, workdir):
+    """v7.9.8.12: rv10enc.c:69 rejects (width | height) & 15. A 320x180
+    request must be snapped to 320x176 instead of failing the preflight."""
+    out = workdir("realmedia")
+    dst = out / "rv10_320x180.rm"
+    proc = run([str(exe), str(harness.SRC), str(dst), "--encoder", "rv10",
+                "--width", "320", "--height", "180",
+                "--end", "00:00:02", "--ffmpeg-source", "path"])
+
+    assert proc.returncode == 0, (
+        f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
+    video = _details(dst)["video"]
+    assert (video.get("width"), video.get("height")) == (320, 176), video
 
 
 def test_recompress_to_realmedia(exe, workdir):

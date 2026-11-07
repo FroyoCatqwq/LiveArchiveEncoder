@@ -18,6 +18,58 @@
 
 ---
 
+## v7.9.8.12（2026-11-07）
+
+修 5 个使用中暴露的问题。
+
+### 1. rm 容器默认音频改回 ac3
+
+* 用户产物实测（rv20 + ra_144，282 s）：**所有音频包 PTS/DTS 恒为 0**，音频流
+  `duration=0.000000`；二次压缩后两个 MP4 的音频都只有 0.355 s，ffplay 以音频为主时钟
+  因而无法拖动进度条，"没有声音"也由此而来。
+* A/B 实测确认与 `-af asetpts` 无关：无 filter / `PTS-STARTPTS` / `N/SR/TB` 三种写法下
+  real_144 的 RM 包时间戳全是 0。FFmpeg Doxygen `ra144enc.c:529` 只从
+  `ff_af_queue_remove` 取 pts，`rmenc.c:94-116` 的 duration 取各流最大时间戳。
+* 修复：`Constants.DefaultAudioByContainer["rm"]` 与 `AudioCatalog.ContainerCodecs["rm"]`
+  回到 `ac3 → real_144 → aac`；`real_144` 仍可显式选择。同步更新 `RealMediaTests`、
+  e2e（新增音频时长断言），并删除 `test_compare_matrix` 里 rv20 的基线例外。
+
+### 2. 自更新按 flavour 选资产
+
+* 现象：self-contained 安装检测到新版后下载了 framework-dependent 包，覆盖后报
+  `You must install or update .NET to run this application`。
+* 根因：`AssetSuffix()` 只用 `RuntimeFeature.IsDynamicCodeSupported` 分 AOT/JIT；
+  self-contained JIT 仍支持动态代码，于是选中 `-win-x64.zip`。
+* 修复：新增 `IsSelfContained()` —— 应用目录含 `coreclr.dll` / `libcoreclr.so` /
+  `System.Private.CoreLib.dll` 即自包含（实测 FDD 目录只有 4 个文件、SCD 目录带运行时）。
+  `AssetSuffix()` 现在输出 `-aot` / `-self-contained` / 无后缀三档；裸 `EndsWith` 在
+  新命名下仍互斥。`Flavour()` 同步显示。
+
+### 3. rv10/rv20 尺寸
+
+* FFmpeg Doxygen `rv10enc.c:69`：`(width | height) & 15` 直接报
+  "width and height must be a multiple of 16"，rv20 共用该 init。
+* 修复：`EncoderMath.NormalizeDimensions` 对 rv10/rv20 复用 AMV 的 16 像素网格吸附
+  （320×180 → 320×176，沿用已有的尺寸调整提示）。新增单测与 e2e。
+
+### 4. 输出被播放器占用
+
+* 现象：ffplay 打开目标后编码完成，`File.Move(overwrite)` 抛
+  `IO_SharingViolation_NoFileName`，长时间实时录制只能留在 `.part`。
+* 修复：`OutputFile.Promote` 先做 4 次短重试；仍冲突则自动另存为首个空闲的
+  `name (2).ext` 并打印实际路径。目录占位用 `Directory.Exists` 排除，保持 v7.9.8.10
+  "改名失败保留 part" 语义不变。
+
+### 5. 两点实测澄清
+
+* "first frame is no keyframe" / "Changing video frame properties on the fly"：二次压缩
+  产物实测有 56 个关键帧、帧属性唯一（320×180 yuv420p left），并非缺关键帧或属性变化；
+  进度条异常的根因是第 1 条的音频时间轴损坏。
+* 二压到 RM 时 `RecommendedAudio("rv20")` 仍为 `real_144`（用户显式走该 codec），
+  本次只改实时通路的默认值；修改了默认音频后，其输入 RM 已带正常音频时间轴。
+
+---
+
 ## v7.9.8.11.1（2026-11-07）
 
 修 mjpeg 使用中暴露的两个问题。

@@ -146,14 +146,28 @@ public static class SelfUpdate
         !string.Equals(FeedOr(over), PublicFeed, StringComparison.Ordinal);
 
     /// <summary>
-    /// Which asset this build needs: <c>-win-x64-aot.zip</c> and friends.
+    /// True when this process carries its own .NET runtime in its own directory.
+    /// A framework-dependent publish contains only the app dll, deps.json and
+    /// runtimeconfig.json; a self-contained one also has coreclr.dll
+    /// (libcoreclr.so on Linux) and System.Private.CoreLib.dll. NativeAOT is a
+    /// separate case and is decided before this is consulted.
+    /// </summary>
+    public static bool IsSelfContained(string? directory = null)
+    {
+        string dir = directory ?? AppContext.BaseDirectory;
+        return File.Exists(Path.Combine(dir, "System.Private.CoreLib.dll"))
+            || File.Exists(Path.Combine(dir, "coreclr.dll"))
+            || File.Exists(Path.Combine(dir, "libcoreclr.so"));
+    }
+
+    /// <summary>
+    /// Which asset this build needs: <c>-win-x64.zip</c>,
+    /// <c>-win-x64-self-contained.zip</c>, <c>-win-x64-aot.zip</c> and friends.
     ///
-    /// <para>The flavour matters as much as the platform. An AOT build that
-    /// "updates" itself into the framework-dependent one would stop starting on
-    /// a machine with no .NET runtime installed, and nothing in the program would
-    /// say why -- so the suffix is derived from what this process actually is
-    /// (<see cref="RuntimeFeature.IsDynamicCodeSupported"/> is false only under
-    /// NativeAOT) rather than from a build-time constant.</para>
+    /// <para>v7.9.8.12: a self-contained JIT build still supports dynamic code,
+    /// so <c>IsDynamicCodeSupported</c> alone used to select the
+    /// framework-dependent archive and leave the install without a runtime.
+    /// The suffix now names all three flavours explicitly.</para>
     /// </summary>
     public static string AssetSuffix()
     {
@@ -172,13 +186,15 @@ public static class SelfUpdate
         };
 
         bool aot = !RuntimeFeature.IsDynamicCodeSupported;
+        string flavour = aot ? "-aot" : IsSelfContained() ? "-self-contained" : "";
         string extension = OperatingSystem.IsWindows() ? "zip" : "tar.gz";
-        return $"-{os}-{arch}{(aot ? "-aot" : "")}.{extension}";
+        return $"-{os}-{arch}{flavour}.{extension}";
     }
 
     /// <summary>A human name for the flavour, for messages.</summary>
     public static string Flavour() =>
-        (RuntimeFeature.IsDynamicCodeSupported ? "JIT" : "AOT")
+        (!RuntimeFeature.IsDynamicCodeSupported ? "AOT"
+            : IsSelfContained() ? "JIT / self-contained" : "JIT / framework-dependent")
         + " / " + (OperatingSystem.IsWindows() ? "Windows"
             : OperatingSystem.IsLinux() ? "Linux"
             : OperatingSystem.IsMacOS() ? "macOS" : "unknown")

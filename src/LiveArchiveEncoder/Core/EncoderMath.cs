@@ -359,7 +359,10 @@ public static class EncoderMath
 
     public static (int W, int H, bool Exact) NormalizeDimensions(string name, int width, int height)
     {
-        if (name == "amv") return AmvDimensions(width, height);
+        // v7.9.8.12: libavcodec/rv10enc.c:69 rejects (width | height) & 15
+        // with "width and height must be a multiple of 16"; rv20 shares that
+        // init. Snap both down to the 16-pixel grid the way AMV already does.
+        if (name is "amv" or "rv10" or "rv20") return MultipleOf16Dimensions(width, height);
 
         if (!Constants.SpecialSizes.TryGetValue(name, out (int W, int H)[]? allowed) || allowed.Length == 0)
             return (width, height, true);
@@ -380,11 +383,10 @@ public static class EncoderMath
     }
 
     /// <summary>
-    /// Snap a requested size down to the 16-pixel grid AMV decoders expect.
-    /// FFmpeg happily writes other sizes while only warning, and the result is
-    /// unplayable on the hardware this format exists for.
+    /// Snap a requested size down to a 16-pixel grid. AMV decoders expect it,
+    /// and FFmpeg's rv10/rv20 encoder refuses anything else outright.
     /// </summary>
-    private static (int W, int H, bool Exact) AmvDimensions(int width, int height)
+    private static (int W, int H, bool Exact) MultipleOf16Dimensions(int width, int height)
     {
         int m = Constants.AmvDimensionMultiple;
         int w = Math.Max(m, width - width % m);

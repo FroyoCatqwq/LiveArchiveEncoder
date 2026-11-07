@@ -20,11 +20,13 @@ public sealed class RealMediaTests
     // ---- the live pass: a .rm gets a RealAudio track --------------------
 
     [Test]
-    public async Task RealMediaPrefersItsOwnAudioCodec()
+    public async Task RealMediaPrefersAc3Again()
     {
-        await Assert.That(Constants.DefaultAudioByContainer["rm"][0]).IsEqualTo("real_144");
+        // v7.9.8.12: real_144 writes every RM audio packet with PTS 0, leaving
+        // the audio stream at duration 0 and desynchronising the whole file.
+        await Assert.That(Constants.DefaultAudioByContainer["rm"][0]).IsEqualTo("ac3");
         await Assert.That(AudioCatalog.Compatible("rm", ["aac", "ac3", "real_144"])[0])
-            .IsEqualTo("real_144");
+            .IsEqualTo("ac3");
     }
 
     [Test]

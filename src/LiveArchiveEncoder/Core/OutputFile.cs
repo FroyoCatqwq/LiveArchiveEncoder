@@ -38,13 +38,66 @@ public static class OutputFile
     /// <summary>
     /// Move a finished part file onto its real name, replacing an older copy.
     /// Both names are in the same directory, so this is a rename, not a copy.
+    ///
+    /// <para>v7.9.8.12: a player holding the destination (ffplay left open from
+    /// an earlier run) makes <c>File.Move(overwrite)</c> fail with a sharing
+    /// violation and throw away a perfectly good long encode. Retry briefly,
+    /// then save under the first free <c>name (2).ext</c>. A directory standing
+    /// in for the output is not a sharing conflict, so that case still reaches
+    /// <see cref="Keep"/> unchanged.</para>
     /// </summary>
-    public static void Promote(FileInfo part, FileInfo final)
+    /// <returns>The name the finished file actually landed under.</returns>
+    public static FileInfo Promote(FileInfo part, FileInfo final)
     {
         part.Refresh();
         if (!part.Exists || part.Length == 0)
             throw new InvalidOperationException($"output is empty: {final.FullName}");
-        File.Move(part.FullName, final.FullName, overwrite: true);
+
+        Exception? last = null;
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            try
+            {
+                File.Move(part.FullName, final.FullName, overwrite: true);
+                return final;
+            }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+            {
+                last = exc;
+                if (attempt < 3) Thread.Sleep(250 * (attempt + 1));
+            }
+        }
+
+        // FileInfo.Exists is false for a directory, so test the path itself.
+        // A directory is not a transient player lock: keep the old behaviour.
+        if (Directory.Exists(final.FullName))
+            throw last!;
+
+        FileInfo alternate = Alternate(final);
+        try
+        {
+            File.Move(part.FullName, alternate.FullName, overwrite: false);
+            Console.Error.WriteLine(
+                $"WARNING: {final.FullName} is in use; the finished file was saved as {alternate.FullName}");
+            return alternate;
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            throw last!;
+        }
+    }
+
+    /// <summary>First free <c>name (2).ext</c> in the same directory.</summary>
+    internal static FileInfo Alternate(FileInfo final)
+    {
+        string dir = Path.GetDirectoryName(final.FullName) ?? "";
+        string stem = Path.GetFileNameWithoutExtension(final.Name);
+        for (int n = 2; n < 1000; n++)
+        {
+            var candidate = new FileInfo(Path.Combine(dir, $"{stem} ({n}){final.Extension}"));
+            if (!candidate.Exists) return candidate;
+        }
+        throw new IOException($"no free output name near {final.FullName}");
     }
 
     /// <summary>
