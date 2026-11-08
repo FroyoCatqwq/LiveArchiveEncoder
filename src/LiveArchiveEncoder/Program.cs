@@ -1,5 +1,6 @@
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
+using LiveArchiveEncoder.Diagnostics;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
 using LiveArchiveEncoder.UI;
@@ -9,6 +10,28 @@ namespace LiveArchiveEncoder;
 public static class Program
 {
     public static int Main(string[] args)
+    {
+        // v7.9.9: one correlated log per run. The self-update applier is its
+        // own process and must not touch the console before the old build
+        // exits, so it gets the log file but not the Console mirror.
+        bool applying = args.Length > 0 && string.Equals(
+            args[0], "--self-update-apply", StringComparison.Ordinal);
+        AppLog.Init(mirrorConsole: !applying);
+        try
+        {
+            int exitCode = Run(args);
+            AppLog.Info("process.exit code={ExitCode}", exitCode);
+            return exitCode;
+        }
+        catch (Exception exc)
+        {
+            AppLog.Error(exc, "process.unhandled type={ExceptionType}", exc.GetType().Name);
+            throw;
+        }
+        finally { AppLog.Close(); }
+    }
+
+    private static int Run(string[] args)
     {
         if (Environment.Version.Major < 10)
         {
@@ -325,7 +348,12 @@ public static class Program
             string found = FFmpegDiscovery.FindFFmpeg(cli.FFmpeg, source);
             bool isBtbn = FFmpegDiscovery.IsBtbn;
             string probe = FFmpegDiscovery.FindFFprobe(cli.FFprobe, found);
-            return (found, probe, isBtbn, FFmpeg.BuildProfileStore.For(found));
+            FFmpeg.Capabilities buildCaps = FFmpeg.BuildProfileStore.For(found);
+            // v7.9.9: which FFmpeg actually ran is the first question when a
+            // report cannot be reproduced.
+            AppLog.Info("ffmpeg.discovered ffmpeg={FFmpeg} ffprobe={FFprobe} source={Source} btbn={IsBtbn}",
+                found, probe, source ?? "default", isBtbn);
+            return (found, probe, isBtbn, buildCaps);
         }
 
         try

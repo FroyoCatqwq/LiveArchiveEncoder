@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using LiveArchiveEncoder.Diagnostics;
 
 namespace LiveArchiveEncoder.Core;
 
@@ -53,6 +54,7 @@ public static class Interrupt
         // Outside the gate: Cancel runs the registered callbacks synchronously, and
         // one of them reaching back in here would deadlock on a non-reentrant Lock.
         Console.Error.WriteLine("\nInterrupted.");
+        AppLog.Warn("interrupt.requested operation={Operation}", AppLog.CurrentOperation);
         target.Cancel();
     }
 
@@ -73,6 +75,9 @@ public static class Interrupt
                 _source = new CancellationTokenSource();
                 _reported = false;
             }
+            // v7.9.9: Interrupt.BeginOperation is exactly the boundary of one
+            // encode, so it also advances the log's operation correlation id.
+            AppLog.BeginOperation();
             return _source.Token;
         }
     }

@@ -1,3 +1,5 @@
+using LiveArchiveEncoder.Diagnostics;
+
 namespace LiveArchiveEncoder.Core;
 
 /// <summary>
@@ -65,6 +67,8 @@ public static class OutputFile
             try
             {
                 File.Move(part.FullName, final.FullName, overwrite: true);
+                AppLog.Info("output.promoted part={Part} placed={Placed} alternate={Alternate}",
+                    part.Name, final.FullName, false);
                 return final;
             }
             catch (UnauthorizedAccessException)
@@ -84,6 +88,8 @@ public static class OutputFile
             File.Move(part.FullName, alternate.FullName, overwrite: false);
             Console.Error.WriteLine(
                 $"WARNING: {final.FullName} is in use; the finished file was saved as {alternate.FullName}");
+            AppLog.Warn("output.promoted part={Part} placed={Placed} alternate={Alternate}",
+                part.Name, alternate.FullName, true);
             return alternate;
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)

@@ -41,7 +41,7 @@ public static class HttpSource
         int scheme = body.IndexOf("://", StringComparison.Ordinal);
         if (scheme >= 0) body = body[(scheme + 3)..];
 
-        int cut = body.IndexOfAny(['?', '#']);
+        int cut = body.AsSpan().IndexOfAny(LiveArchiveEncoder.Core.CharSets.UrlQuery);
         if (cut >= 0) body = body[..cut];
 
         int slash = body.LastIndexOf('/');

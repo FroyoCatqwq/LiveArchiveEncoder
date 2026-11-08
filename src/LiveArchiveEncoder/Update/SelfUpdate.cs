@@ -1144,7 +1144,7 @@ public static class SelfUpdate
     private static string FirstLine(string text)
     {
         string flat = text.Trim();
-        int cut = flat.IndexOfAny(['\r', '\n']);
+        int cut = flat.AsSpan().IndexOfAny(LiveArchiveEncoder.Core.CharSets.NewLine);
         if (cut >= 0) flat = flat[..cut].Trim();
         return flat.Length <= 200 ? flat : flat[..200];
     }

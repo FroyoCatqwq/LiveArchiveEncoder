@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net;
+using System.Threading.Channels;
 using LiveArchiveEncoder.Core;
+using LiveArchiveEncoder.Diagnostics;
 
 namespace LiveArchiveEncoder.FFmpeg;
 
@@ -720,28 +722,41 @@ public static class Toolchain
         using Process? proc = Process.Start(info);
         if (proc is null) return (-1, $"could not start {exe}");
 
-        var tail = new System.Text.StringBuilder();
-        var tailGate = new Lock();
+        // v7.9.9: the two pipe readers are producers, one Channel consumer
+        // owns the tail buffer and the log callback. This removes the lock and
+        // keeps stdout/stderr in arrival order without blocking either pipe.
+        Channel<string> lines = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
         void Pipe(StreamReader reader)
         {
             string? line;
-            while ((line = reader.ReadLine()) is not null)
+            while ((line = reader.ReadLine()) is not null) lines.Writer.TryWrite(line);
+        }
+
+        var tail = new System.Text.StringBuilder();
+        Task consumer = Task.Run(async () =>
+        {
+            await foreach (string line in lines.Reader.ReadAllAsync().ConfigureAwait(false))
             {
                 log?.Invoke(line);
-                lock (tailGate)
+                AppLog.Sampled("toolchain.output {Line}", line);
+                if (tail.Length < 4000)
                 {
-                    if (tail.Length < 4000)
-                    {
-                        tail.Append(line).Append('\n');
-                        if (tail.Length > 4000) tail.Remove(0, tail.Length - 4000);
-                    }
+                    tail.Append(line).Append('\n');
+                    if (tail.Length > 4000) tail.Remove(0, tail.Length - 4000);
                 }
             }
-        }
+        });
 
         Task outTask = Task.Run(() => Pipe(proc.StandardOutput));
         Task errTask = Task.Run(() => Pipe(proc.StandardError));
         Task.WaitAll(outTask, errTask);
+        lines.Writer.TryComplete();
+        consumer.GetAwaiter().GetResult();
 
         proc.WaitForExit();
         return (proc.ExitCode, tail.ToString());

@@ -56,7 +56,7 @@ public static class Cli
         // bitrate ceiling) and pre-fills the recompress arguments. It never
         // arms the recompress stage on its own -- that stays opt-in.
         PostProcess.EraPreset? era = null;
-        if (args.Era is { Length: > 0 } eraId)
+        if (!args.NoEra && args.Era is { Length: > 0 } eraId)
         {
             // v7.9.7: ids are site/year now. The pre-rewrite spellings still
             // resolve (cctv03 -> cctv/2003); say so once, because a script that
@@ -521,7 +521,10 @@ public static class Cli
                 // MergeStoredPreferences below, which is the only place that knows
                 // whether the run named them or whether the file did.
                 Recompress = recompress,
-                EraPreset = era?.Id ?? (args.Era is null ? stored.EraPreset : null),
+                // v7.9.9: --no-era explicitly deletes the stored preset too.
+                EraPreset = args.NoEra
+                    ? null
+                    : era?.Id ?? (args.Era is null ? stored.EraPreset : null),
                 EraNative = eraNative,
                 H264Impl = h264Impl,
                 // v7.9.5.1: the user's own presets travel with the run, so

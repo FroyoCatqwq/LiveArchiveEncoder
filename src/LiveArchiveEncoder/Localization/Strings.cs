@@ -735,6 +735,11 @@ public static class L
         ["era.menu.new"] = "New custom preset",
         ["era.menu.edit"] = "Edit a custom preset",
         ["era.menu.delete"] = "Delete a custom preset",
+        // v7.9.9: explicit "do not use / delete" entries
+        ["era.menu.none"] = "Do not use an era preset (clear the saved one)",
+        ["era.none.set"] = "Era preset cleared; the live pass uses your explicit settings.",
+        ["rc.menu.clear"] = "Do not recompress (delete the whole chain)",
+        ["rc.cleared"] = "Recompress chain deleted; the stage is off.",
         ["era.menu.toggle"] = "Toggle native / modern second pass",
         ["era.menu.aspect"] = "Frame shape (source/4:3/16:9)",
         ["era.menu.h264"] = "H.264 encoder (auto/libopenh264/libx264)",
@@ -1458,6 +1463,11 @@ public static class L
         ["era.menu.new"] = "新建自定义预设",
         ["era.menu.edit"] = "编辑自定义预设",
         ["era.menu.delete"] = "删除自定义预设",
+        // v7.9.9：显式的「不使用 / 删除」入口
+        ["era.menu.none"] = "不使用时代预设（清除已保存的）",
+        ["era.none.set"] = "已清除时代预设；实时编码改用你显式给的参数。",
+        ["rc.menu.clear"] = "不使用二次压缩（删除整条链）",
+        ["rc.cleared"] = "二次压缩链已删除，该阶段关闭。",
         ["era.menu.toggle"] = "切换 原生 / 现代 第二遍",
         ["era.menu.aspect"] = "画幅（source/4:3/16:9）",
         ["era.menu.h264"] = "H.264 编码器（auto/libopenh264/libx264）",

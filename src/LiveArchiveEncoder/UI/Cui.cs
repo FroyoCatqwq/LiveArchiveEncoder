@@ -2456,6 +2456,7 @@ public static partial class Cui
         Console.WriteLine($"  n. {L.T("era.menu.new")}");
         Console.WriteLine($"  e. {L.T("era.menu.edit")}");
         Console.WriteLine($"  d. {L.T("era.menu.delete")}");
+        Console.WriteLine($"  x. {L.T("era.menu.none")}");
         Console.WriteLine($"  m. {L.T("era.menu.toggle")} = "
             + (c.EraNative ? L.T("era.native.on") : L.T("era.native.off")));
         Console.WriteLine($"  a. {L.Pad(L.T("era.menu.aspect"), 26)} = {c.EraAspect ?? "source"}");
@@ -2471,6 +2472,12 @@ public static partial class Cui
             case "n": EditCustomEra(c, encoders, null); return;
             case "e": EditCustomEra(c, encoders, AskPresetId()); return;
             case "d": DeleteCustomEra(c); return;
+            case "x":
+                // v7.9.9: explicit "do not use". Clear the id only; the user's
+                // own recompress chain stays theirs to delete separately.
+                c.EraPreset = null;
+                Console.WriteLine(L.T("era.none.set"));
+                return;
             case "m":
                 c.EraNative = !c.EraNative;
                 Console.WriteLine(c.EraNative ? L.T("era.native.on") : L.T("era.native.off"));
@@ -2960,12 +2967,23 @@ public static partial class Cui
                 + (c.Recompress.Extra.Count == 0
                     ? L.T("value.none")
                     : L.T("rc.menu.extra.value", c.Recompress.Extra.Count)));
+            Console.WriteLine($" 9. {L.Pad(L.T("rc.menu.clear"), 30)}");
             Console.WriteLine($" 0. {L.T("rc.menu.back")}");
             Console.Write(L.T("menu.select"));
 
             switch (Ask().Trim())
             {
                 case "0": return;
+                case "9":
+                    // v7.9.9: "do not use" really deletes the saved chain,
+                    // not just disables the stage. The first pass Args and
+                    // Container are cleared too (menu 8 only cleared Extra).
+                    c.Recompress.Enabled = false;
+                    c.Recompress.Args = "";
+                    c.Recompress.Container = "mp4";
+                    c.Recompress.Extra.Clear();
+                    Console.WriteLine(L.T("rc.cleared"));
+                    break;
                 case "1":
                     c.Recompress.Enabled = !c.Recompress.Enabled;
                     Console.WriteLine(c.Recompress.Enabled ? L.T("rc.on") : L.T("rc.off"));

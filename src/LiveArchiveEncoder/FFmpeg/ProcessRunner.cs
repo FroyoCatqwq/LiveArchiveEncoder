@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using LiveArchiveEncoder.Diagnostics;
 
 namespace LiveArchiveEncoder.FFmpeg;
 
@@ -32,6 +33,11 @@ public static class ProcessRunner
                                     CancellationToken cancellationToken = default)
     {
         if (args.Count == 0) throw new ArgumentException("no executable to run", nameof(args));
+
+        // v7.9.9: the exact child argv is the single most useful thing to have
+        // when a run cannot be reproduced. AppLog redacts credentials.
+        AppLog.Info("child.spawn exe={Exe} argc={Argc} argv={Argv}",
+            args[0], args.Count - 1, string.Join(' ', args.Skip(1)));
 
         var startInfo = new ProcessStartInfo
         {
@@ -85,11 +91,16 @@ public static class ProcessRunner
             }
         }
 
+        string stdout = stdoutTask.GetAwaiter().GetResult();
+        string stderr = stderrTask.GetAwaiter().GetResult();
+        AppLog.Info("child.exit exe={Exe} code={ExitCode} elapsedMs={ElapsedMs} stderr={Stderr}",
+            args[0], proc.ExitCode, clock.ElapsedMilliseconds,
+            stderr.Length > 400 ? stderr[..400] : stderr);
         return new CaptureResult
         {
             ExitCode = proc.ExitCode,
-            Stdout = stdoutTask.GetAwaiter().GetResult(),
-            Stderr = stderrTask.GetAwaiter().GetResult(),
+            Stdout = stdout,
+            Stderr = stderr,
         };
     }
 

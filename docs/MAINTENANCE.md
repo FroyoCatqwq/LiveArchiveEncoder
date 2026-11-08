@@ -101,3 +101,44 @@ python tools/e2e.py        # 全量 e2e（分两阶段，见 §4）
 
 CI（`.github/workflows/ci.yml`）只做双平台 build + unit tests + 清单校验 +
 net11 目标验证；e2e 因需要实时时钟与 legacy 编码器，不进 CI。
+
+## 7. 运行日志与诊断（v7.9.9）
+
+默认每次运行写一份滚动日志：`<数据根>/logs/lae-yyyyMMdd.log`（留 7 天）。
+**它不在 `LAE_CONFIG_DIR` 里**——那是用户配置目录，日志另设 `LAE_LOG_DIR`。
+
+| 环境变量 | 作用 |
+| --- | --- |
+| `LAE_LOG_DIR` | 自定义日志目录；e2e 的 `harness.py` 会指到套件私有根 |
+| `LAE_LOG_LEVEL` | `verbose` / `warning` / `error`，默认 `information` |
+| `LAE_LOG_MIRROR=0` | 不把控制台输出镜像进日志 |
+| `LAE_LOG=0` | 完全关闭日志 |
+
+每行格式：`<ISO 时间> [级别] <RunId>/<OperationId> <消息>`。`RunId` 每次进程唯一，
+`OperationId` 每个 `Interrupt.BeginOperation()`（即一次编码）推进一次。
+
+读日志时按这几个事件串链路：`run.start` → `ffmpeg.discovered` → `child.spawn` /
+`child.exit`（完整 argv、退出码、耗时、最后 400 字符 stderr）→ `output.promoted` →
+`process.exit`。用户看到的每一行也以 `ui.stdout` / `ui.stderr` 记录。`AppLog.Sampled`
+对高频 FFmpeg stderr 做 40 令牌/秒采样，被抑制的条数会单独记一条；关键事件不限流。
+
+**实现约束**（改日志代码前务必知道）：
+
+* 663 处 `Console.*` 调用是用户可见输出，e2e 断言其精确文本。日志通过 `TextWriter`
+  装饰器原样转发，**不许新增行、不许改 Encoding**；Serilog 不加 Console sink。
+* 实时编码按高分辨率时钟节流。调用线程只做 `Channel.Writer.TryWrite`，单一后台消费者
+  写盘；任何同步文件 I/O 或锁都会改变 pacing。
+* 日志初始化/写盘失败会降级到临时目录、再失败则静默关闭，绝不能中断编码。
+* `LAE_UPDATE_TOKEN` 与 `user:pass@host` 形式的凭据必须保持脱敏。
+* 新增 `--log-*` 之类的 CLI 选项需同步 `CliOptions`（局部变量 / switch / 构造 /
+  `Usage()`）与 `OptionCatalog.All`；当前只通过环境变量控制，没有新选项。
+
+## 8. 依赖与 AOT
+
+主项目从 v7.9.9 起不再零依赖：`Serilog` / `Serilog.Extensions.Logging` /
+`Serilog.Sinks.*` / `Microsoft.Extensions.Logging` / `System.Threading.RateLimiting`
+均为显式 `PackageReference`。`System.Threading.Channels` 与 `System.IO.Pipelines`
+属于 net10.0 共享框架，显式引用会触发 NU1510 警告，**不要加**。
+
+`nuget.config` 只清出一个源（nuget.org），代理不写进仓库；需要代理的机器用
+`HTTP_PROXY` / 用户级 NuGet.Config。`dotnet restore` 必须能联网，离线构建需预置包缓存。

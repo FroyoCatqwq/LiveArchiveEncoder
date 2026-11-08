@@ -34,7 +34,7 @@ public sealed class VersionTag : IComparable<VersionTag>, IEquatable<VersionTag>
         string work = text.Trim();
         if (work.Length > 0 && (work[0] == 'v' || work[0] == 'V')) work = work[1..];
 
-        int cut = work.IndexOfAny(['-', '+', ' ']);
+        int cut = work.AsSpan().IndexOfAny(LiveArchiveEncoder.Core.CharSets.VersionSuffix);
         if (cut >= 0) work = work[..cut];
         if (work.Length == 0) return null;
 

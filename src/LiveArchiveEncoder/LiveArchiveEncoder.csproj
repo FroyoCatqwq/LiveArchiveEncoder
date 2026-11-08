@@ -85,4 +85,23 @@
   <ItemGroup>    <RuntimeHostConfigurationOption Include="System.GC.Conserve" Value="7" Trim="false" />
   </ItemGroup>
 
+  <!-- v7.9.9: structured, correlated run logs for reproducing and tracing bugs.
+       Serilog is configured in code (no XML/JSON config) so it survives the
+       Release trimming switches above and stays AOT-friendly. The console sink
+       is deliberately absent: the 663 Console.* calls remain the only thing a
+       user sees, and the e2e suite asserts on their exact text. Logs go to a
+       rolling file under LAE_LOG_DIR (see Diagnostics/AppLog.cs).
+
+       System.Threading.Channels and System.IO.Pipelines are part of the
+       net10.0 shared framework; an explicit PackageReference would produce
+       NU1510, so they are simply used from source. -->
+  <ItemGroup>
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.14" />
+    <PackageReference Include="System.Threading.RateLimiting" Version="10.0.14" />
+  </ItemGroup>
+
 </Project>

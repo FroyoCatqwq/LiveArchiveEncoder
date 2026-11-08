@@ -48,11 +48,14 @@ MARKER = "LiveArchiveEncoder.e2e-marker"
 
 
 def _files_of(exe: Path) -> list[str]:
-    """The files that make up this build: one exe for AOT, four for JIT."""
-    names = [exe.name]
-    if (exe.parent / _JIT_FILES[0]).is_file():
-        names += _JIT_FILES
-    return [name for name in names if (exe.parent / name).is_file()]
+    """Every file the published build ships.
+
+    v7.9.9: the app is no longer dependency-free. A hard-coded four-file list
+    produced a fake release whose exe could not load Serilog.dll, so mirror the
+    real publish directory instead of guessing its contents.
+    """
+    return sorted(p.name for p in exe.parent.iterdir()
+                  if p.is_file() and p.name != MARKER)
 
 
 def _suffix(files: list[str]) -> str:

@@ -20,6 +20,72 @@
 
 ---
 
+## v7.9.9（2026-11-08）
+
+改善 bug 复现与追溯链路：结构化日志、三个并发/IO 库、显式的「不使用（删除）」入口，
+以及补齐 .NET 6-10 的现代语法落点。
+
+### 1. Serilog + Microsoft.Extensions.Logging，全量可追溯日志
+
+* 主项目此前**零 NuGet 依赖**、全仓 663 处 `Console.*` 直写、没有任何日志抽象。
+  本版引入 `Serilog` 4.4 / `Serilog.Extensions.Logging` 10 / `Serilog.Sinks.File` 7 /
+  `Serilog.Sinks.Console` 6 / `Microsoft.Extensions.Logging` 10 / `System.Threading.RateLimiting` 10。
+  Serilog 用**代码式配置**（不依赖 XML/JSON 绑定），与 Release 的裁剪开关兼容。
+* `Diagnostics/LaePaths.cs`：`LAE_LOG_DIR` 独立日志根，默认
+  `<数据根>/logs/lae-yyyyMMdd.log`（按天滚动、留 7 天）。**刻意不放进
+  `ConfigStore.RootDirectory`**，避免污染用户配置目录与 e2e 隔离语义。
+* `Diagnostics/AppLog.cs` 两层设计，用户可见输出一字不改：
+  * **镜像层**：`TextWriter` 装饰器原样转发 `Console.Out/Error`，同时把每一行记成
+    `ui.stdout` / `ui.stderr` 事件。CR/LF 分段，避免 `\r` 进度重绘刷屏。
+  * **结构化层**：子进程 argv、退出码/耗时/最后 400 字符 stderr、FFmpeg 路径与来源、
+    输出文件实际落地路径、中断、操作边界、运行开始/退出码等 20 余处插桩。
+* 每次运行一个 `RunId`（pid+guid8），`Interrupt.BeginOperation()` 推进 `OperationId`，
+  每条日志都带 `<RunId>/<OperationId>`，CUI 里连续多次编码也能拆开。
+* **绝不阻塞实时编码**：调用方只做 `Channel.Writer.TryWrite`，单一后台消费者写盘；
+  Main 用 `try/finally` 保证所有 early return 与异常路径都 `Close()` 落盘。
+  日志初始化/写盘失败自动降级到临时目录，再失败则静默关闭，**不会中断编码**。
+* 脱敏：`LAE_UPDATE_TOKEN` 与 `user:pass@host` 凭据不会进入日志。
+* 开关：`LAE_LOG=0` 关闭，`LAE_LOG_LEVEL=verbose|warning|error` 调级别，
+  `LAE_LOG_MIRROR=0` 关闭 UI 镜像；e2e 的 `harness.py` 已把日志目录重定向到私有根。
+
+### 2. Channels / RateLimiting / Pipelines
+
+* **Channels**：`AppLog` 的无界单读者队列；`FFmpeg.Toolchain.RunLong` 的两个管道读线程
+  改为生产者 + 单消费者 `Channel<string>`，去掉 `tailGate` 锁，保持到达顺序与末 4000 字符。
+* **RateLimiting**：`TokenBucketRateLimiter`（40 令牌/秒）用于高频重复的 FFmpeg stderr /
+  安装器输出采样；关键事件与 UI 输出**不限流**，被抑制的条数会另行记录。
+* **Pipelines**：`FFmpeg/PipeReaders.ForEachLineAsync` 的手写 `byte[]` + `BlockCopy` 行切分
+  改为 `PipeReader.Create(stream)` + `SequenceReader<byte>`。公开 API、trim 规则、CRLF、
+  无换行尾行、取消与错误回调逐项保持；新增单测钉住这些边界。
+* `System.Threading.Channels` 与 `System.IO.Pipelines` 在 net10.0 已是 BCL 自带
+  （显式引用会触发 NU1510），因此只从源码使用；`System.Threading.RateLimiting` 需包引用。
+
+### 3. 时代预设与二次压缩的「不使用（删除）」
+
+* CUI 时代预设菜单新增 `x.`：清除当前预设（`c.EraPreset = null`），实时编码回到用户显式参数；
+  原有的 `d.` 删除自定义预设保持。
+* CUI 二次压缩菜单新增 `9.`：一次性删除整条链 —— `Enabled=false`、`Args=""`、
+  `Container="mp4"`、`Extra.Clear()`。此前只有菜单 8 能清 `Extra`，第一遍参数清不掉。
+* CLI 新增 `--no-era`：不使用时代预设，并**从写回的 `config.json` 快照里移除**已保存的预设
+  （`Cli.cs` 的 `EraPreset` 组装与 `era` 解析都让该 flag 优先）。`--no-recompress` 沿用。
+* en/zh 各补 4 个本地化键，双语键集合与补全表的双向校验单测全过。
+
+### 4. .NET 6-10 语法与新 API
+
+项目此前已用 `System.Threading.Lock`（11 处）、`FrozenDictionary`（52 处）、
+`TextExtensions` 的 C# 14 extension members、`u8` 字面量与 collection expressions；
+本版补齐剩余低风险落点，不改任何行为：
+
+* `Core/CharSets.cs`：缓存 `SearchValues<char>`（.NET 8+）替换 4 处
+  `IndexOfAny(char[])`（URL 查询、版本后缀、CR/LF），省掉每次调用的 char[] 分配。
+* `AppLog.LogPath` 使用 C# 14 **`field` 关键字**；`MirrorWriter` 用 C# 12 **primary constructor**、
+  `AppLog.Entry` 用 `readonly record struct`；`PipeReaders` 用 .NET 6 的
+  `ArgumentNullException.ThrowIfNull`。
+* 新增测试 `V799Tests`（`--no-era`、双语键、Pipelines 行解析边界、SearchValues、关联 id）
+  与 `tests/e2e/test_logging.py`（日志落盘 + stdout 字节不变 + `--no-era` 实跑）。
+
+---
+
 ## v7.9.8.13.2（2026-11-07）
 
 全项目审计、文档拆分与可维护性整理。四个只读子代理分别审查了核心编码链路、

@@ -53,6 +53,7 @@
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Core/">
     <File Path="src/LiveArchiveEncoder/Core/AudioCatalog.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/CharSets.cs" />
     <File Path="src/LiveArchiveEncoder/Core/EncoderMath.cs" />
     <File Path="src/LiveArchiveEncoder/Core/EnvCheck.cs" />
     <File Path="src/LiveArchiveEncoder/Core/FileExtensions.cs" />
@@ -66,6 +67,10 @@
     <File Path="src/LiveArchiveEncoder/Core/TextExtensions.cs" />
     <File Path="src/LiveArchiveEncoder/Core/Timecode.cs" />
     <File Path="src/LiveArchiveEncoder/Core/Validation.cs" />
+  </Folder>
+  <Folder Name="/src/LiveArchiveEncoder/Diagnostics/">
+    <File Path="src/LiveArchiveEncoder/Diagnostics/AppLog.cs" />
+    <File Path="src/LiveArchiveEncoder/Diagnostics/LaePaths.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Encoding/">
     <File Path="src/LiveArchiveEncoder/Encoding/ArgsBuilder.cs" />
@@ -194,6 +199,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/UpdateTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V79812Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V798132Tests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/V799Tests.cs" />
   </Folder>
   <Folder Name="/tests/e2e/">
     <File Path="tests/e2e/conftest.py" />
@@ -208,6 +214,7 @@
     <File Path="tests/e2e/test_feature_sweep.py" />
     <File Path="tests/e2e/test_font_pack.py" />
     <File Path="tests/e2e/test_http_source.py" />
+    <File Path="tests/e2e/test_logging.py" />
     <File Path="tests/e2e/test_mjpeg_av.py" />
     <File Path="tests/e2e/test_mjpeg_range.py" />
     <File Path="tests/e2e/test_multi_pass.py" />

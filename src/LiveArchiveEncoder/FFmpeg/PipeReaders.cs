@@ -1,4 +1,7 @@
+using System.Buffers;
+using System.IO.Pipelines;
 using System.Text;
+using LiveArchiveEncoder.Diagnostics;
 using LiveArchiveEncoder.RateControl;
 
 namespace LiveArchiveEncoder.FFmpeg;
@@ -9,6 +12,12 @@ namespace LiveArchiveEncoder.FFmpeg;
 /// Both the decoder and the encoder write diagnostics continuously; if nobody
 /// drains those pipes the child process blocks on a full pipe buffer and the
 /// whole encode stalls. These readers never touch the frame path.
+///
+/// <para>v7.9.9: the hand-rolled byte[]/BlockCopy line splitter is now a
+/// <see cref="PipeReader"/> over the stream plus a
+/// <see cref="SequenceReader{T}"/>. Same API, same trimming rules, same
+/// cancellation and error callbacks; the difference is that buffering across
+/// reads is handled by System.IO.Pipelines instead of two growable arrays.</para>
 /// </summary>
 public static class PipeReaders
 {
@@ -25,7 +34,9 @@ public static class PipeReaders
             int eq = line.IndexOf((byte)'=');
             if (eq < 0)
             {
-                monitor.AddDiagnostic(Decode(line));
+                string diagnostic = Decode(line);
+                AppLog.Sampled("ffmpeg.stderr {Line}", diagnostic);
+                monitor.AddDiagnostic(diagnostic);
                 return true;
             }
 
@@ -60,8 +71,13 @@ public static class PipeReaders
     public static Task DiagnosticsReaderAsync(
         Stream stderr, Action<string> onLine, CancellationToken token)
     {
-        return ForEachLineAsync(stderr, line => { onLine(Decode(line)); return true; }, token,
-            ex => onLine($"decoder stderr reader: {ex.Message}"));
+        return ForEachLineAsync(stderr, line =>
+        {
+            string text = Decode(line);
+            AppLog.Sampled("ffmpeg.stderr {Line}", text);
+            onLine(text);
+            return true;
+        }, token, ex => onLine($"decoder stderr reader: {ex.Message}"));
     }
 
     private static async Task ForEachLineAsync(
@@ -70,63 +86,40 @@ public static class PipeReaders
         CancellationToken token,
         Action<Exception>? onError = null)
     {
-        byte[] block = new byte[BlockSize];
+        ArgumentNullException.ThrowIfNull(stream);   // .NET 6+ guard
+        ArgumentNullException.ThrowIfNull(onLine);
+        PipeReader reader = PipeReader.Create(stream, new StreamPipeReaderOptions(
+            bufferSize: BlockSize, minimumReadSize: BlockSize, leaveOpen: true));
         byte[] line = new byte[512];
-        int lineLength = 0;
-
-        static void TrimRange(byte[] buffer, ref int start, ref int length)
-        {
-            while (length > 0 && buffer[start] is (byte)' ' or (byte)'\t') { start++; length--; }
-            while (length > 0 && buffer[start + length - 1] is (byte)' ' or (byte)'\t') length--;
-        }
 
         try
         {
-            int read;
-            while (!token.IsCancellationRequested
-                   && (read = await stream.ReadAsync(block, token).ConfigureAwait(false)) > 0)
+            while (!token.IsCancellationRequested)
             {
-                int segmentStart = 0;
-                for (int i = 0; i < read; i++)
+                ReadResult result = await reader.ReadAsync(token).ConfigureAwait(false);
+                if (result.IsCanceled) break;
+
+                ReadOnlySequence<byte> buffer = result.Buffer;
+                var sequence = new SequenceReader<byte>(buffer);
+
+                while (sequence.TryReadTo(out ReadOnlySequence<byte> raw, (byte)'\n'))
                 {
-                    if (block[i] != (byte)'\n') continue;
-
-                    int segmentLength = i - segmentStart;
-                    if (segmentLength > 0 && block[segmentStart + segmentLength - 1] == (byte)'\r')
-                        segmentLength--;
-
-                    if (lineLength + segmentLength > line.Length)
+                    if (!Emit(raw, ref line, onLine))
                     {
-                        Array.Resize(ref line, Math.Max(line.Length * 2, lineLength + segmentLength));
+                        reader.AdvanceTo(buffer.End);
+                        return;
                     }
-                    Buffer.BlockCopy(block, segmentStart, line, lineLength, segmentLength);
-                    lineLength += segmentLength;
-
-                    int start = 0;
-                    TrimRange(line, ref start, ref lineLength);
-                    if (lineLength > 0 && !onLine(line.AsSpan(start, lineLength))) return;
-
-                    lineLength = 0;
-                    segmentStart = i + 1;
                 }
 
-                if (segmentStart < read)
+                if (result.IsCompleted)
                 {
-                    int tail = read - segmentStart;
-                    if (lineLength + tail > line.Length)
-                    {
-                        Array.Resize(ref line, Math.Max(line.Length * 2, lineLength + tail));
-                    }
-                    Buffer.BlockCopy(block, segmentStart, line, lineLength, tail);
-                    lineLength += tail;
+                    // A final line without a trailing newline is still a line.
+                    Emit(buffer.Slice(sequence.Position), ref line, onLine);
+                    reader.AdvanceTo(buffer.End);
+                    break;
                 }
-            }
 
-            if (lineLength > 0)
-            {
-                int start = 0;
-                TrimRange(line, ref start, ref lineLength);
-                if (lineLength > 0) onLine(line.AsSpan(start, lineLength));
+                reader.AdvanceTo(sequence.Position, buffer.End);
             }
         }
         catch (OperationCanceledException)
@@ -137,10 +130,35 @@ public static class PipeReaders
         {
             onError?.Invoke(ex);
         }
+        finally
+        {
+            await reader.CompleteAsync().ConfigureAwait(false);
+        }
     }
 
-    private static string Decode(ReadOnlySpan<byte> line) =>
-        System.Text.Encoding.UTF8.GetString(line);
+    /// <summary>
+    /// Copy one (possibly multi-segment) sequence into the reusable buffer,
+    /// strip CR and leading/trailing whitespace, then hand a contiguous span
+    /// to the caller. Returning false stops the reader.
+    /// </summary>
+    private static bool Emit(ReadOnlySequence<byte> raw, ref byte[] line,
+        Func<ReadOnlySpan<byte>, bool> onLine)
+    {
+        int length = (int)raw.Length;
+        if (length == 0) return true;
+        if (length > line.Length)
+            Array.Resize(ref line, Math.Max(line.Length * 2, length));
+        raw.CopyTo(line.AsSpan(0, length));
+
+        if (line[length - 1] == (byte)'\r') length--;
+        int start = 0;
+        while (start < length && line[start] is (byte)' ' or (byte)'\t') start++;
+        while (length > start && line[length - 1] is (byte)' ' or (byte)'\t') length--;
+
+        return length <= start || onLine(line.AsSpan(start, length - start));
+    }
+
+    private static string Decode(ReadOnlySpan<byte> line) => System.Text.Encoding.UTF8.GetString(line);
 
     private static long? ParseInt64(ReadOnlySpan<byte> text) =>
         long.TryParse(text, System.Globalization.NumberStyles.Integer,

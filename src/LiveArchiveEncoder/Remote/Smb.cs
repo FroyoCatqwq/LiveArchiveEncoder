@@ -122,7 +122,7 @@ public static class Smb
     {
         // smb://server/share/rest -- and stop at '?' or '#' like any other URL.
         string body = path["smb://".Length..];
-        int cut = body.IndexOfAny(['?', '#']);
+        int cut = body.AsSpan().IndexOfAny(LiveArchiveEncoder.Core.CharSets.UrlQuery);
         if (cut >= 0) body = body[..cut];
         string[] parts = body.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 1 || parts[0].Length == 0) return null;

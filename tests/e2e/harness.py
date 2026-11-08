@@ -122,7 +122,12 @@ def run(cmd: list[str], *, timeout: int = 300, **kw) -> subprocess.CompletedProc
         payload = payload.encode("utf-8")
     # Every child gets the private settings directory; a caller that supplies its
     # own env (a few tests do) keeps it, and only inherits ours when it does not.
-    kw.setdefault("env", {**os.environ, "LAE_CONFIG_DIR": str(CONFIG_ROOT)})
+    # v7.9.9: the run log is a separate root, so it needs its own redirection --
+    # otherwise the suite would write rolling logs into the developer's real
+    # %LOCALAPPDATA% / ~/.local/share.
+    kw.setdefault("env", {**os.environ,
+                          "LAE_CONFIG_DIR": str(CONFIG_ROOT),
+                          "LAE_LOG_DIR": str(CONFIG_ROOT / "logs")})
     p = subprocess.run(cmd, capture_output=True, timeout=timeout,
                        input=payload, **kw)
     p.stdout = decode_output(p.stdout)

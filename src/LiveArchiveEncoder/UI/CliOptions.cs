@@ -328,6 +328,12 @@ public sealed class CliOptions
     public bool NoRecompress { get; init; }
 
     /// <summary>
+    /// v7.9.9: do not use an era preset for this run AND remove the one saved
+    /// in config.json. Without this flag a stored preset silently survives.
+    /// </summary>
+    public bool NoEra { get; init; }
+
+    /// <summary>
     /// v7.9.5.1: pick a pass's video codec by name instead of writing a
     /// fragment. The container follows the codec when none was named.
     /// Repeatable, paired by position with the quality and audio flags.
@@ -568,6 +574,7 @@ public static class CliParser
         var recompressArgs = new List<string>();
         var recompressContainers = new List<string>();
         bool noRecompress = false;
+        bool noEra = false;
         bool recompressOnly = false;
         var recompressCodecs = new List<string>();
         var recompressQualities = new List<int>();
@@ -1028,6 +1035,7 @@ public static class CliParser
                     recompressContainers.Add(recompressContainerValue.TrimStart('.').ToLowerInvariant());
                     break;
                 case "--no-recompress": noRecompress = true; break;
+                case "--no-era": noEra = true; break;
                 case "--recompress-only": recompressOnly = true; break;
                 case "--recompress-codec":
                     if (!TryValue(out string recompressCodecValue))
@@ -1247,6 +1255,7 @@ public static class CliParser
             RecompressArgs = recompressArgs,
             RecompressContainers = recompressContainers,
             NoRecompress = noRecompress,
+            NoEra = noEra,
             RecompressOnly = recompressOnly,
             RecompressCodecs = recompressCodecs,
             RecompressQualities = recompressQualities,
@@ -1416,6 +1425,7 @@ public static class CliParser
             ("--recompress-only", "", "skip the live encode and apply the recompress pass to an "
                                     + "existing file, then exit"),
             ("--no-recompress", "", "disable the recompress stage"),
+            ("--no-era", "", "do not use an era preset and remove the one saved in config.json"),
             ("--era", "ID", $"apply an era/site preset: {PostProcess.EraPresets.Ids} "
                           + "(custom ids from the settings file also work)"),
             ("--era-modern", "", "render a preset's second pass with libx264 + AAC in MP4 "
