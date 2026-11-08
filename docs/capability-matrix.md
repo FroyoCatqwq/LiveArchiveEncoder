@@ -1,5 +1,11 @@
 # 实测能力矩阵（v7.9.6 快照，历史资料）
 
+[English](capability-matrix.en.md) · **中文**
+
+> **已归档**：这些是 v7.9.6 的实测读数，保留下来是为了说明能力清单是**怎么**得出的。
+> 现行数字在 `Core/PixelFormatCatalog.cs` 与 `Constants.ContainerChoicesByEncoder`，
+> 由单测逐行钉住；移植验收结果见 [`test-report-v7.md`](test-report-v7.md)。
+
 `ffmpeg -h encoder=NAME` 声明的东西不一定是真的。这个项目已经因此栽过三次
 （v7.9.4 的 mpeg1video 帧率、pal8 帧长，v7.9.5 的 RealMedia 整数帧率）。所以
 v7.9.5 不再相信声明表，改用 `tools/capability_sweep.py` 把每个编码器的**容器**
@@ -8,7 +14,7 @@ v7.9.5 不再相信声明表，改用 `tools/capability_sweep.py` 把每个编�
 ## 怎么测的
 
 ```bash
-python tools/capability_sweep.py --json /tmp/capsweep.json
+python tools/capability_sweep.py > /tmp/capsweep.json
 ```
 
 对每个 legacy 编码器：
@@ -102,7 +108,7 @@ note，并建议改用 AVI。
 字节数`（调色板格式再加 1024），错一个字节画面就一帧一帧滑走。
 
 ```bash
-python tools/pixfmt_sweep.py --json /tmp/pixfmt.json
+python tools/pixfmt_sweep.py > /tmp/pixfmt.json
 ```
 
 每种格式写 3 帧 64×48 裸视频，除以帧数。86 种全部实测，结果表在

@@ -1,5 +1,7 @@
 # 项目维护指南
 
+[English](MAINTENANCE.en.md) · **中文**
+
 写给继续维护 v7 的人：目录怎么分、命令怎么跑、改动后必须做哪些检查、发布怎么发。
 面向使用者的说明在 [`usage.md`](usage.md)，版本历史在
 [`CHANGELOG.md`](CHANGELOG.md) / [`CHANGELOG-archive.md`](CHANGELOG-archive.md)。
@@ -62,16 +64,29 @@ python tools/e2e.py        # 全量 e2e（分两阶段，见 §4）
 * 需要真实 FFmpeg 的用例，Linux CI 靠 `apt install ffmpeg xz-utils`；完整 legacy
   编码器扫描仍在本机 / 双平台手动跑，因为发行版 FFmpeg 不带这些编码器。
 
-## 5. 文档拆分约定
+## 5. 文档命名与链接契约
 
 | 文件 | 范围 |
 | --- | --- |
+| `docs/README.md` | 全量文档索引（中英两版并列） |
 | `docs/CHANGELOG.md` | **v7.9.8 起**的现行版本历史。新条目加在标题块之后、第一个 `## v…` 之前 |
 | `docs/CHANGELOG-archive.md` | **v7.9.7 及更早**（含 v6.2.2 → v6.3.3 移植基线）。只归档，不改写 |
 | `docs/usage.md` | 现行功能说明；带版本前缀的段落是当时的说明，改行为时要同步 |
 | `docs/era-presets.md` | 时代预设的史料依据、素材可信度分级与更正清单 |
 | `docs/toolchain-builds.md` | FFmpeg / 7-Zip 构建来源对照与两端实测编解码器 |
 | `docs/requirements.md` | 系统与硬件要求 |
+| `docs/capability-matrix.md` | 容器 × 帧率 × 像素格式实测矩阵（已归档快照） |
+| `docs/test-report-v7.md` | 移植验收测量报告（已归档） |
+| `archive/README.md` | 退役代码的归档规则与当前清单 |
+
+**命名与链接（v7.9.9.4）：**
+
+* `X.md` 是中文，`X.en.md` 是英文。两者必须同批提交，每个文件第一行是语言切换。
+* 英文页里的相对链接一律指向 `*.en.md`，中文页指向 `*.md`；混用会让读者点一次就
+  掉回另一种语言。
+* `tools/check-slnx.py` 会校验 `docs/*.md` 与 `docs/*.en.md` 成对存在，只翻一半会
+  让 CI 失败。
+* 历史型文档以中文为唯一权威全文，英文版是逐版摘要并链回中文原文。
 
 拆分的判据是**版本号**，不是日期或行数。历史条目里的数字、链接与结论按原样保留，
 阅读时注意其时代背景；需要纠正的是现行文档和代码注释。
@@ -104,8 +119,11 @@ net11 目标验证；e2e 因需要实时时钟与 legacy 编码器，不进 CI�
 
 ## 7. 运行日志与诊断（v7.9.9）
 
-默认每次运行写一份滚动日志：`<数据根>/logs/lae-yyyyMMdd.log`（留 7 天）。
+默认每次运行写一份滚动日志：`<数据根>/logs/lae.log`，按体积滚动（16 MB × 7 份）。
 **它不在 `LAE_CONFIG_DIR` 里**——那是用户配置目录，日志另设 `LAE_LOG_DIR`。
+
+> v7.9.9.1 之前是按天滚动（`lae-yyyyMMdd.log`），而且启动日志打印的是
+> `lae-.log` —— 一个不存在的名字。现在启动日志里的路径就是真实文件。
 
 | 环境变量 | 作用 |
 | --- | --- |

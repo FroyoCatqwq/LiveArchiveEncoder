@@ -1,5 +1,7 @@
 # 变更记录（CHANGELOG）
 
+[English summary](CHANGELOG.en.md) · **中文全文**
+
 本项目从 Python 单文件脚本（`reference/live_archive_encoder.py`）迁到 C#（.NET 10 /
 .NET 11）的完整变更记录。**新的在上，旧的在下面。**
 
@@ -17,6 +19,71 @@
   不影响产物的条目不标。
 
 > **v7.9.8 以前的变更记录已拆到 [`CHANGELOG-archive.md`](CHANGELOG-archive.md)**；本文件只保留 v7.9.8 及以后。
+
+---
+
+## v7.9.9.4（2026-11-08）
+
+一次纯清理与文档工程版本：删掉没人用的代码与脚本，把文档理顺、补齐、并做成中英双语。
+
+### 1. 清理：删除无引用项
+
+| 删除 | 理由 |
+| --- | --- |
+| `tools/benchmark.ps1` | 只在 README 与验收报告里被"提到"，没有任何地方调用；性能数据早已并入 `docs/test-report-v7` |
+| `tools/probe_audio_limits.py` | 一次性测音频边界的脚本，结论已固化进 `Core/AudioCatalog.cs` 与单测 |
+| `publish/release/notes-v7.9.8.{7,8,9,10}.md` | 历史发布说明；GitHub / Codeberg Release 页面是权威副本，仓库里再存一份只会与 `publish/` 的 gitignore 规则自相矛盾 |
+| `PostProcessOutcome.RecompressRan` / `RecompressPath` | 只写不读的属性（`Passes` / `FinalPath` 已完整表达） |
+| `Recompress.Apply(settings)` / `Apply(pass)` / `BuildArgv(settings)` | 单遍兼容壳，唯一调用方是测试；生产路径一律走 `ApplyWithPath` |
+| `EncoderMath` 里指向自身命名空间的 `using` | 编译器本来就会忽略 |
+
+同时把 `.pytest_cache/` 加进 `.gitignore`（此前每次跑测试都会在仓库根留下未跟踪目录）。
+
+### 2. 文档：中英双语
+
+* 新增英文版：`docs/usage.en.md`、`requirements.en.md`、`era-presets.en.md`、
+  `toolchain-builds.en.md`、`MAINTENANCE.en.md`、`capability-matrix.en.md`、
+  `CHANGELOG.en.md`、`CHANGELOG-archive.en.md`、`archive/README.en.md`，以及中文版
+  `docs/test-report-v7.md`（英文原文改名为 `.en.md` 保留）。
+* 根入口：`README.md` 以英文为主（仓库首页），新增 `README.zh.md`；两份互相链接。
+* 新增 `docs/README.md` / `README.en.md` 作为全量索引，并写明语言约定。
+* 每个文件第一行是语言切换；英文页的相对链接一律指向 `*.en.md`，中文页指向 `*.md`
+  —— 混用会让读者点一次就掉回另一种语言。
+* 历史型文档（`CHANGELOG*`）以中文为唯一权威全文，英文版给逐版摘要 + `⚠` 行为变化
+  标记，并链回中文原文：历史条目按原样保留，重写会毁掉它作为记录的价值。
+
+### 3. 文档：理顺、补齐、修错
+
+* **章节顺序**：`usage.md` 的 `7.17`/`7.18` 原本排在 `9` 之后，现在按编号重排；
+  删掉「编码器修复记录」整节（内容早已并入本文件与 CHANGELOG）。
+* **文件截断**：`usage.md` 的排错表曾被 v7.9.9.1 插入的日志小节拦腰截断，现已接回；
+  `archive/README.en.md` 的退役清单同样被空行断开，已修。
+* **数量口径统一**：FFmpeg 来源统一说「六个（五个可自动下载 + `avbuild` 手动）」，
+  之前 `toolchain-builds.md` 标题写五个、表里列六个，`usage.md` 又写六个。
+* **修正过期事实**：`MAINTENANCE.md` 的日志文件名写的是 `lae-yyyyMMdd.log`（v7.9.9.1
+  已改为按体积滚动的 `lae.log`）；发布流程补上「先建 Release，再分批传资产」
+  （四个资产一次性传会卡住，v7.9.9.2 实测）。
+* **修正错误命令**：`capability-matrix.md` 的 `python tools/capability_sweep.py --json`
+  与 `pixfmt_sweep.py --json` —— 两个脚本都不接受 `--json`，改为 shell 重定向。
+* **断链与入口**：`README.md` 的版本历史链接指向已拆分出的 `CHANGELOG-archive.md`；
+  `usage.md` 顶部补 `../README.md` 与文档索引；`docs/*` 全部纳入索引表。
+* **精简**：删掉 `README.md` 与 `usage.md` 里重复的 AVX2 说明、`README.md` 的旧
+  工具/文档清单（`benchmark.ps1` 等已不存在）、`usage.md` 的旧测试读数（155 条 /
+  706 项等易过时数字改为「以实际收集结果为准」）；性能预期只保留在
+  `requirements.md`，其余链接过去。
+* **归档标注**：`capability-matrix`、`test-report-v7` 开头显式标 `已归档`，避免读者
+  把 v7.9.6 的读数当成现行规范。
+
+### 4. 校验
+
+* `tools/check-slnx.py` 新增**双语成对**检查：`docs/*.md` 必须有 `*.en.md`
+  （以及 `archive/README.md`、根 `README.md`），只翻一半直接让 CI 失败。
+* 新增一次性链接校验（24 份文档、全部相对链接可解析，含代码段内的命名示例不误报）。
+* 清单：208 文件 / 2 项目，双向无漂移。
+
+### 5. 验证
+
+Windows：构建 0 警告 0 错误、单测 **718 全过**、e2e 全过、清单与语言成对校验通过。
 
 ---
 

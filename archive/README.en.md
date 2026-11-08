@@ -1,0 +1,35 @@
+# Archive
+
+[English](README.en.md) · [中文](README.md)
+
+Retired code lives here instead of being deleted.
+
+Everything under this directory is **not** part of any project: no `.csproj`
+globs it, so nothing here is compiled, trimmed or shipped. It exists so a
+decision can be re-read later with its original context intact.
+
+## What goes here
+
+* Members that no call site reaches any more, but whose intent is worth keeping
+  (a table, a rule, a formula somebody verified against FFmpeg).
+* Implementations superseded by a better one, kept next to the reason why the
+  replacement is equivalent.
+
+## What does not go here
+
+* Dead branches inside live code — those are removed in place.
+* Anything still referenced from `src/`, `tests/` or `docs/`.
+* Build output, test media or log files.
+
+## Current contents
+
+| File | Retired in | Why |
+| --- | --- | --- |
+| `retired/RetiredConstants.cs` | v7.8.1 | Unreferenced lookup tables and helpers: `Constants.DefaultFpsLevels`, `Constants.BtbnGplReleaseUrl`, `Constants.LegacyEncoderPatterns` (superseded by one source-generated regex), `EncoderMath.FallbackTransportFormat()`, `AudioCatalog.Names` / `IsKnown` / `KnownFor`, `CliOptions.EffectiveRecover`. |
+| `retired/RetiredTurbo.cs` | v7.9 | The Turbo mode: `RealtimeOptions.Turbo`, the three slot-loop branches plus `FrameBufferPool.WaitForFrame`/`Close`, the `--turbo` CLI plumbing and its seven localisation keys per language. Removed outright after two releases of deprecation — it fought the live-recording simulation the tool exists to produce. |
+| `retired/RetiredHelpers.cs` | v7.9.3.1 | Unreferenced duplicate helpers found by a full declaration/reference sweep: `Probe.HasAudio` and `Probe.Stream` (both superseded by the single-run `Probe.Source`), `SubtitleTrack.FormatMode`, the last copy of the transport-format preference list, and the boolean "crop 4:3" filter chain from v7.7. |
+| `retired/RetiredWatermark.cs` | v7.9.1 | The static text watermark stage (its `WatermarkSettings`, argument builder and menu strings). Removed at the user's request; the recompress pass is now the only post-processing stage. |
+| `retired/RetiredFontPicking.cs` | v7.9.1 | The drawtext-era font picker (`Find` / `PickFrom` / `SeedFromSystemFonts`, `ToFilterPath`, `InstallHint`). The watermark was its only consumer; subtitle fonts now come from `SubtitleFonts`. |
+
+Every entry carries the version it was retired in and what replaced it, so
+restoring one is a copy-paste rather than an archaeology exercise.

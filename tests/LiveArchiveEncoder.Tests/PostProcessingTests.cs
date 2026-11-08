@@ -139,11 +139,14 @@ public sealed class RecompressTests
         Container = container,
     };
 
+    private static RecompressPass Pass(string args, string container = "mp4") =>
+        new() { Args = args, Container = container };
+
     [Test]
     public async Task ArgvWrapsTheFragmentBetweenInputAndOutput()
     {
         (List<string> argv, string? error) = Recompress.BuildArgv(
-            "ffmpeg", "in.rm", "out.mp4", Settings("-c:v libx264 -crf 28"));
+            "ffmpeg", "in.rm", "out.mp4", Pass("-c:v libx264 -crf 28"));
 
         await Assert.That(error).IsNull();
         await Assert.That(argv[0]).IsEqualTo("ffmpeg");
@@ -157,21 +160,30 @@ public sealed class RecompressTests
     public async Task BadFragmentStopsTheBuild()
     {
         (List<string> argv, string? error) = Recompress.BuildArgv(
-            "ffmpeg", "in.rm", "out.mp4", Settings("-i other.mp4"));
+            "ffmpeg", "in.rm", "out.mp4", Pass("-i other.mp4"));
 
         await Assert.That(error).IsNotNull();
         await Assert.That(argv).IsEmpty();
     }
 
     [Test]
-    public async Task DisabledStageIsANoOp()
+    public async Task DisabledStageIsNotNeeded()
     {
-        (bool ok, string? error) = Recompress.Apply(
-            "ffmpeg-does-not-exist", "in.rm", "out.mp4",
-            new RecompressSettings { Enabled = false, Args = "-c:v libx264" });
+        // v7.9.9.4: the single-pass Apply(settings) shim is gone. The contract
+        // every caller relies on is PostPipeline.Needed.
+        var config = new Config
+        {
+            Recompress = new RecompressSettings
+            {
+                Enabled = false,
+                Args = "-c:v libx264",
+                Container = "mp4",
+            },
+        };
+        await Assert.That(PostPipeline.Needed(config)).IsFalse();
 
-        await Assert.That(ok).IsTrue();
-        await Assert.That(error).IsNull();
+        config.Recompress.Enabled = true;
+        await Assert.That(PostPipeline.Needed(config)).IsTrue();
     }
 
     [Test]
@@ -179,9 +191,9 @@ public sealed class RecompressTests
     {
         // A stage that throws would take the live product's reporting down with
         // it; it has to come back as an error message instead.
-        (bool ok, string? error) = Recompress.Apply(
+        (bool ok, string? error, _) = Recompress.ApplyWithPath(
             "ffmpeg-does-not-exist", "no-such-file.rm", "out.mp4",
-            Settings("-c:v libx264"));
+            Pass("-c:v libx264"));
 
         await Assert.That(ok).IsFalse();
         await Assert.That(error).IsNotEmpty();

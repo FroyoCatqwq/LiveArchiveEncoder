@@ -1,5 +1,7 @@
 # FFmpeg 工具链与 7-Zip 构建对照
 
+[English](toolchain-builds.en.md) · **中文**
+
 > v7.9.8.13.1。所有资产信息于 **2026-11-07** 用 `gh api repos/<repo>/releases/latest`
 > 与 HTTP HEAD 实测核对；编解码器清单用两端 `ffmpeg -hide_banner -encoders` 实测。
 > 本文件只讲「装什么、彼此差在哪」，命令用法见 `docs/usage.md` §7.10。
@@ -8,7 +10,7 @@
 
 | 项 | 规则 |
 | --- | --- |
-| FFmpeg 来源 | 5 个自动/手动源，按平台过滤；`btbn` 仍是默认 |
+| FFmpeg 来源 | **6 个来源**（5 个可自动下载 + `avbuild` 手动），按平台过滤；`btbn` 仍是默认 |
 | 版本策略 | **一律 daily / rolling**；只有当日构建无法解析时才回退稳定版（`FfmpegDist.StableUrl`） |
 | 解压器 | Windows 与 Linux **统一使用 `ip7z/7zip` 官方构建**，不再依赖系统预装 p7zip |
 | 旧配置 | `avbuild`（SourceForge 手动）与 `gyan` 全部保留，旧 `config.json` 无需改动 |

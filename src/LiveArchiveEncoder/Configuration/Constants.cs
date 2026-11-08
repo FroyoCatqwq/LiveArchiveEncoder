@@ -25,7 +25,7 @@ public static class Constants
     /// compares <c>tag_name</c> from the feed with this value, so a forgotten
     /// bump makes the program offer its own version as an upgrade forever.</para>
     /// </summary>
-    public const string Version = "7.9.9.3";
+    public const string Version = "7.9.9.4";
 
     public const int DefaultWidth = 256;
     public const int DefaultHeight = 192;

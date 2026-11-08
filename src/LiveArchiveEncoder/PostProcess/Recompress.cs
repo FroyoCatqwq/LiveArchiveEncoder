@@ -41,41 +41,6 @@ public static class Recompress
         return (argv, null);
     }
 
-    /// <summary>The first pass of a whole chain -- the pre-v7.9.8.3 shape.</summary>
-    public static (List<string> Argv, string? Error) BuildArgv(
-        string ffmpeg, string input, string output, RecompressSettings settings) =>
-        BuildArgv(ffmpeg, input, output,
-            new RecompressPass { Args = settings.Args, Container = settings.Container });
-
-    /// <summary>
-    /// Run a whole chain's first pass. Kept because the single-pass call sites
-    /// and tests read better this way; <see cref="Apply(string, string, string, RecompressPass)"/>
-    /// is what the pipeline actually loops over.
-    /// </summary>
-    public static (bool Ok, string? Error) Apply(
-        string ffmpeg, string input, string output, RecompressSettings settings,
-        CancellationToken cancellationToken = default)
-    {
-        if (!settings.Enabled) return (true, null);
-        if (settings.Stages().FirstOrDefault() is not { } first) return (true, null);
-        (bool ok, string? error, _) = ApplyWithPath(
-            ffmpeg, input, output, first, cancellationToken);
-        return (ok, error);
-    }
-
-    /// <summary>
-    /// Compatibility shim for the single-pass callers that do not need the
-    /// placed path. The pipeline uses <see cref="ApplyWithPath"/>.
-    /// </summary>
-    public static (bool Ok, string? Error) Apply(
-        string ffmpeg, string input, string output, RecompressPass pass,
-        CancellationToken cancellationToken = default)
-    {
-        (bool ok, string? error, _) = ApplyWithPath(
-            ffmpeg, input, output, pass, cancellationToken);
-        return (ok, error);
-    }
-
     /// <summary>
     /// Run one pass, writing to <c>output.part.ext</c> until it succeeds.
     /// v7.9.9.2: returns where the file REALLY landed, because Promote may save

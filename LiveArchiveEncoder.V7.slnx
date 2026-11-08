@@ -7,6 +7,7 @@
     <File Path="LICENSE" />
     <File Path="LiveArchiveEncoder.V7.slnx" />
     <File Path="README.md" />
+    <File Path="README.zh.md" />
     <File Path="global.json" />
     <File Path="nuget.config" />
     <File Path="pytest.ini" />
@@ -18,6 +19,7 @@
     <File Path=".github/workflows/ci.yml" />
   </Folder>
   <Folder Name="/archive/">
+    <File Path="archive/README.en.md" />
     <File Path="archive/README.md" />
   </Folder>
   <Folder Name="/archive/retired/">
@@ -28,14 +30,25 @@
     <File Path="archive/retired/RetiredWatermark.cs" />
   </Folder>
   <Folder Name="/docs/">
+    <File Path="docs/CHANGELOG-archive.en.md" />
     <File Path="docs/CHANGELOG-archive.md" />
+    <File Path="docs/CHANGELOG.en.md" />
     <File Path="docs/CHANGELOG.md" />
+    <File Path="docs/MAINTENANCE.en.md" />
     <File Path="docs/MAINTENANCE.md" />
+    <File Path="docs/README.en.md" />
+    <File Path="docs/README.md" />
+    <File Path="docs/capability-matrix.en.md" />
     <File Path="docs/capability-matrix.md" />
+    <File Path="docs/era-presets.en.md" />
     <File Path="docs/era-presets.md" />
+    <File Path="docs/requirements.en.md" />
     <File Path="docs/requirements.md" />
+    <File Path="docs/test-report-v7.en.md" />
     <File Path="docs/test-report-v7.md" />
+    <File Path="docs/toolchain-builds.en.md" />
     <File Path="docs/toolchain-builds.md" />
+    <File Path="docs/usage.en.md" />
     <File Path="docs/usage.md" />
   </Folder>
   <Folder Name="/reference/">
@@ -233,7 +246,6 @@
     <File Path="tests/e2e/test_update.py" />
   </Folder>
   <Folder Name="/tools/">
-    <File Path="tools/benchmark.ps1" />
     <File Path="tools/build.ps1" />
     <File Path="tools/build.sh" />
     <File Path="tools/capability_sweep.py" />
@@ -242,6 +254,5 @@
     <File Path="tools/forgejo-runner-config.yml" />
     <File Path="tools/forgejo-runner.service" />
     <File Path="tools/pixfmt_sweep.py" />
-    <File Path="tools/probe_audio_limits.py" />
   </Folder>
 </Solution>

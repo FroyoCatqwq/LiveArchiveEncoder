@@ -19,6 +19,7 @@ TestResults/
 __pycache__/
 *.py[cod]
 .venv/
+.pytest_cache/
 
 # Local data (installed ffmpeg toolchains, config)
 .local/

@@ -1,8 +1,11 @@
 # Live Archive Encoder v7 (.NET 10 / .NET 11 / C#) — 使用教程
 
-面向使用者的操作手册。想了解迁移细节与验证数据，看 `README.md` 和
-`docs/test-report-v7.md`；想了解**每个版本改了什么**，看
-[`CHANGELOG.md`](CHANGELOG.md)。
+[English](usage.en.md) · **中文**
+
+面向使用者的操作手册。迁移细节与验证数据看 [`../README.md`](../README.md) 与
+[`test-report-v7.md`](test-report-v7.md)；**每版改了什么**看
+[`CHANGELOG.md`](CHANGELOG.md)；全部文档的索引（中英两版并列）看
+[`README.md`](README.md)。
 
 > **一句话说明**：把一个现代视频，以"当年直播录档"的方式，实时节奏地重新编码成
 > RV20 / RoQ / MPEG-1 / MPEG-4 / WMV2 等老式编码器格式，并带自适应码率控制。
@@ -1093,7 +1096,7 @@ archive.org、各种 CDN 都是）。FFmpeg 原生会说这两个协议，本工
 
 **扩展名写错自动更正**：`out.rm` 配 `libx264` 这种"这个容器装不了这个编码器"的组合，
 以前在开跑前报错（退出码 2）。现在按编码器真正能写的扩展名更正，并打印
-`注意：“.rm”是 libx264 写不出的容器，文件按 .mp4 输出。`。更正后的名字**不会覆盖**：
+`注意：".rm"是 libx264 写不出的容器，文件按 .mp4 输出。`。更正后的名字**不会覆盖**：
 
 - 已有 `out.mp4` → 写 `out (2).mp4`；
 - 更正后正好是源文件（`src.rm`，源是 `src.mp4`）→ 写 `src (2).mp4`。
@@ -1147,49 +1150,6 @@ sudo mount -t cifs //<server>/lae /mnt/lae -o guest,vers=3.1.1,uid=$UID,gid=$UID
 共享还没连接（协议版本暂时查不到）时也不会沉默，会说明"已启用读取重试参数，
 协议版本待连接后可知"——至少让你知道韧性参数已经生效了。查询失败（无权限、
 PowerShell 不可用）同样不影响编码。
-
----
-
-## 7.9 编码器修复记录
-
-### AMV（v7.3 修复）
-
-v6.3.3 的 AMV 是**完全不能用的**——无论怎么调都只产出 0 字节。原因和修复：
-
-| 约束（实测） | v6.3.3 行为 | v7.3 行为 |
-| --- | --- | --- |
-| 容器必须有且仅有 2 条流 | 纯视频也能进，写完才报 `AMV files only support 2 streams` | 源无音轨时**提前报错**，不再白跑一遍 |
-| 音频采样率必须是视频帧率的整数倍，合法帧率 `10/14/15/18/21/25/30` | 用默认 13fps，muxer 直接拒收 | 自动对齐到最近的合法帧率（默认 13 → 14） |
-| ADPCM 块大小 = 22050 / fps | 不加 `-block_size`，默认 1024 会被拒 | 自动算并加 `-block_size:a` |
-| 宽高应为 16 的倍数 | 原样输出，FFmpeg 只警告，产物播放器打不开 | 自动向下取整到 16 的倍数 |
-| 音频必须是 adpcm_ima_amv @ 22050Hz 单声道 | 已正确 | 保持 |
-| 码率：ADPCM 无码率控制，`-b:a` 被静默忽略 | 仍写 `-b:a 32k`，误导 | 对 adpcm 不再输出 `-b:a` |
-
-修复后默认参数实测：`amv 256x192 @14fps` + `adpcm_ima_amv 22050Hz mono`，产物正常。
-
-> 这是对 Python 基线（v6.3.3）的**有意偏离**：原实现在这里是坏的，不是"行为差异"。
-
-### 全编码器扫描
-
-```powershell
-pytest tests\e2e\test_feature_sweep.py                             # 默认 JIT
-CS_EXE=publish\aot\LiveArchiveEncoder.exe pytest tests\e2e\test_feature_sweep.py
-```
-
-对当前 FFmpeg 探测到的**全部 35 个** legacy 编码器各跑 2 秒片段，检查退出码、
-产物非空、包含视频流、时长合理，并留一份产物在 `tests\out\sweep\`。
-
-三种结局：`PASSED` 正常；`SKIPPED` 指 FFmpeg 只有 muxer、没有 demuxer（例如
-a64），产物写出来了但 ffprobe 读不回来——这是 FFmpeg 的属性，不是本程序的问题；
-容器不写时长（amv / h263 / roq / h261）算通过，只打印一条 note（同样是容器
-本身的行为，用纯 ffmpeg 生成的对照文件也没有时长）。只有 `FAILED` 才是真问题。
-
-v7.3 实测 35/35 无非预期失败。少数编码器会自动修正参数并给出提示，属正常行为：
-
-```
-NOTE: h261 requires a special frame size; using 176x144.
-NOTE: mpeg1video does not support 13 fps; using 23.976 fps.
-```
 
 ---
 
@@ -2083,101 +2043,6 @@ v7.9.0 的字幕只有命令行能用，菜单里看不见——v7.9.1 补上了
 
 ---
 
-## 8. 实用命令示例
-
-```powershell
-# RealVideo 20 录档味，默认 256x192 / 13fps / 200kbps 上限
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20
-
-# 只取 2 分 30 秒到 5 分整
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --start-time 00:02:30 --end-time 00:05:00
-
-# 低带宽感：把码率压到 80kbps，阶梯拉宽
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --limit 80 --fps-levels 13,6,3,1
-
-# MPEG-4 / AVI，320x240，bicubic 缩放，不裁 4:3
-LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --width 320 --height 240 ^
-    --no-crop --scale-algo bicubic
-# H.264 对照用：CRF 23、 faster 预设（注意 --qv 对 libx264 是 CRF）
-LiveArchiveEncoder.exe src.mp4 out.mp4 --encoder libx264 --qv 23 --x264-preset faster
-
-# RoQ：尺寸必须 16 的倍数，音频会强制 22050Hz
-LiveArchiveEncoder.exe src.mp4 out.roq --encoder roqvideo --width 256 --height 192
-
-# 隔行扫描素材：先 yadif 反交错
-LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --deinterlace yadif --deint-mode send_field
-
-# 隔行扫描素材，只处理标记为 interlaced 的帧
-LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --deinterlace bwdif --deint-marked-only
-
-# 有 NVIDIA 显卡且驱动正常，想让解码走 GPU
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --hwaccel cuda
-
-# 不确定机器有什么，让工具自己试（按平台偏好顺序，第一个真能解出帧的就用它）
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --hwaccel auto
-
-# 没有显卡 / 不想看 CUDA 报错：默认就是关的，什么都不用加
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20
-
-# 脚本里跑，别进菜单也别刷屏
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --no-cui --quiet
-
-# 指定 FFmpeg（比如系统里有多个版本）
-LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 ^
-    --ffmpeg D:\tools\ffmpeg\bin\ffmpeg.exe --ffprobe D:\tools\ffmpeg\bin\ffprobe.exe
-```
-
-Windows PowerShell 里用反引号 `` ` `` 换行，`cmd` 里用 `^`。
-
----
-
-## 9. 输出怎么读
-
-编码结束后会打印：
-
-```
-Done: D:\...\out.rm
-Time range         : 00:00:00 - 00:00:05
-Duration           : 5.00s
-Source pix fmt     : yuv420p
-Transport pix fmt  : yuv420p
-Output resolution  : 256x192
-Video average      : 216.5 kbps
-Total average      : 248.5 kbps
-Fresh frames       : 18
-Repeated slots     : 21
-```
-
-* **Fresh frames** — 真正编码了新帧的槽数。
-* **Repeated slots** — 缓冲里没新帧、复用了上一帧的槽数。
-  两者之和 = 总输出槽数 ≈ `duration × fps`。
-* **Video average / Total average** — 滚动窗口统计的平均码率（kbps）。
-* **Transport pix fmt** — 管道里实际搬运的像素格式（可能和源不同，是为了适配
-  编码器能力自动选的）。
-
-`Fresh` / `Repeated` 每次跑都会有小幅差异，这是自适应控制器对实时抖动的正常响应，
-不是 bug。想验证帧管线本身是否稳定，用 `--limit 99999` 关掉节流再跑，计数就会
-变得完全确定。
-
-### 写盘顺序：先 `.part`，成功才改名（v7.9.8）
-
-编码期间真实文件名上**不会**出现半成品。FFmpeg 只写同目录的 `名字.part.扩展名`，
-全部校验通过后用改名把它放到你要求的名字上：
-
-```
-out.flv        <- 成功时才出现
-out.part.flv   <- 编码中；失败或被取消后可能残留
-```
-
-两条推论，都值得知道：
-
-* 重编码一个已有的成片、中途失败时，**旧文件一字节不动**。以前 `-y` 会在开跑那一
-  刻就把它截断。
-* 进程被强杀（`kill -9`、断电）来不及清理时，会留下一个 `.part` 文件。看到它就说明
-  那次没跑完——删掉重跑即可。工具本身不会把 `.part` 当成产物，也不会去动它。
-
----
-
 ## 7.17 输出像素格式与色彩（v7.9.6）
 
 v7.9.5 以前，管道里的像素格式是**推导**出来的：源是什么就用什么，源不行就取同
@@ -2383,6 +2248,101 @@ LiveArchiveEncoder --update-check      # 会自动直连 GitHub，不走前沿
 
 ---
 
+## 8. 实用命令示例
+
+```powershell
+# RealVideo 20 录档味，默认 256x192 / 13fps / 200kbps 上限
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20
+
+# 只取 2 分 30 秒到 5 分整
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --start-time 00:02:30 --end-time 00:05:00
+
+# 低带宽感：把码率压到 80kbps，阶梯拉宽
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --limit 80 --fps-levels 13,6,3,1
+
+# MPEG-4 / AVI，320x240，bicubic 缩放，不裁 4:3
+LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --width 320 --height 240 ^
+    --no-crop --scale-algo bicubic
+# H.264 对照用：CRF 23、 faster 预设（注意 --qv 对 libx264 是 CRF）
+LiveArchiveEncoder.exe src.mp4 out.mp4 --encoder libx264 --qv 23 --x264-preset faster
+
+# RoQ：尺寸必须 16 的倍数，音频会强制 22050Hz
+LiveArchiveEncoder.exe src.mp4 out.roq --encoder roqvideo --width 256 --height 192
+
+# 隔行扫描素材：先 yadif 反交错
+LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --deinterlace yadif --deint-mode send_field
+
+# 隔行扫描素材，只处理标记为 interlaced 的帧
+LiveArchiveEncoder.exe src.mp4 out.avi --encoder mpeg4 --deinterlace bwdif --deint-marked-only
+
+# 有 NVIDIA 显卡且驱动正常，想让解码走 GPU
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --hwaccel cuda
+
+# 不确定机器有什么，让工具自己试（按平台偏好顺序，第一个真能解出帧的就用它）
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --hwaccel auto
+
+# 没有显卡 / 不想看 CUDA 报错：默认就是关的，什么都不用加
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20
+
+# 脚本里跑，别进菜单也别刷屏
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --no-cui --quiet
+
+# 指定 FFmpeg（比如系统里有多个版本）
+LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 ^
+    --ffmpeg D:\tools\ffmpeg\bin\ffmpeg.exe --ffprobe D:\tools\ffmpeg\bin\ffprobe.exe
+```
+
+Windows PowerShell 里用反引号 `` ` `` 换行，`cmd` 里用 `^`。
+
+---
+
+## 9. 输出怎么读
+
+编码结束后会打印：
+
+```
+Done: D:\...\out.rm
+Time range         : 00:00:00 - 00:00:05
+Duration           : 5.00s
+Source pix fmt     : yuv420p
+Transport pix fmt  : yuv420p
+Output resolution  : 256x192
+Video average      : 216.5 kbps
+Total average      : 248.5 kbps
+Fresh frames       : 18
+Repeated slots     : 21
+```
+
+* **Fresh frames** — 真正编码了新帧的槽数。
+* **Repeated slots** — 缓冲里没新帧、复用了上一帧的槽数。
+  两者之和 = 总输出槽数 ≈ `duration × fps`。
+* **Video average / Total average** — 滚动窗口统计的平均码率（kbps）。
+* **Transport pix fmt** — 管道里实际搬运的像素格式（可能和源不同，是为了适配
+  编码器能力自动选的）。
+
+`Fresh` / `Repeated` 每次跑都会有小幅差异，这是自适应控制器对实时抖动的正常响应，
+不是 bug。想验证帧管线本身是否稳定，用 `--limit 99999` 关掉节流再跑，计数就会
+变得完全确定。
+
+### 写盘顺序：先 `.part`，成功才改名（v7.9.8）
+
+编码期间真实文件名上**不会**出现半成品。FFmpeg 只写同目录的 `名字.part.扩展名`，
+全部校验通过后用改名把它放到你要求的名字上：
+
+```
+out.flv        <- 成功时才出现
+out.part.flv   <- 编码中；失败或被取消后可能残留
+```
+
+两条推论，都值得知道：
+
+* 重编码一个已有的成片、中途失败时，**旧文件一字节不动**。以前 `-y` 会在开跑那一
+  刻就把它截断。
+* 进程被强杀（`kill -9`、断电）来不及清理时，会留下一个 `.part` 文件。看到它就说明
+  那次没跑完——删掉重跑即可。工具本身不会把 `.part` 当成产物，也不会去动它。
+
+---
+
 ## 10. 排错
 
 | 报错 | 原因 | 怎么办 |
@@ -2458,10 +2418,10 @@ C# v7 是 v6.3.3 的**行为等价**移植：FFmpeg 命令行（包括 `-threads
 
 所以**同一条命令在 Python 版和 C# 版上应产出等价的结果**，可以直接对照着用。
 
-C# 版在 v7.3 之外多出来的东西：`--parallel`（分片提速，见 §7.5）、配置
-持久化（§7.6）、中英文（§7.6）、Shell 自动补全（§7.7）、SMB 读取优化（§7.8）、
-`--help` / `--cpu-info` 两个辅助标志。这些都不改变默认行为：不加任何开关时，
-命令行语义与 v6.3.3 一致。
+C# 版在 v7.3 之外多出来的东西（全部**默认关闭或纯增量**）：`--parallel`（§7.5）、
+配置持久化与中英文（§7.6）、Shell 补全（§7.7）、远程源（§7.8）、工具链管理（§7.10）、
+编码后播放（§7.11）、二次压缩与时代预设（§7.12）、音频/容器/画面比例/字幕/像素格式
+（§7.13–§7.17）、自更新（§7.18）。不加任何开关时，命令行语义与 v6.3.3 一致。
 
 ### 逐版变更记录去哪了
 
@@ -2554,7 +2514,7 @@ Microsoft.Testing.Platform` 段负责把 `dotnet test` 切到 MTP 模式。
 ```powershell
 # Windows
 pip install -r tests\e2e\requirements.txt          # pytest==9.1.1 + pytest-xdist
-python tools\e2e.py                                 # 全部 155 个用例，分两阶段跑
+python tools\e2e.py                                 # 全部用例（Windows 实测 148），分两阶段跑
 pytest                                               # 单进程串行，同上但慢一倍
 pytest tests\e2e\test_feature_sweep.py              # 只跑一个模块
 pytest tests\e2e\test_compare_matrix.py -k wmv2     # 只跑一条（替代旧 CM_ONLY）
@@ -2563,7 +2523,7 @@ CS_EXE=publish\aot\LiveArchiveEncoder.exe pytest     # 切换被测 exe（验 AO
 
 ### 两阶段跑法（v7.9.1）
 
-整套 155 条里，绝大部分只是"这个选项能不能产出一个结构正确的文件"，彼此独立；
+整套用例里，绝大部分只是"这个选项能不能产出一个结构正确的文件"，彼此独立；
 但有 25 条不行，分两类，靠 marker 标出来：
 
 | marker | 谁 | 为什么不能并行 |
@@ -2572,7 +2532,7 @@ CS_EXE=publish\aot\LiveArchiveEncoder.exe pytest     # 切换被测 exe（验 AO
 | `shared_config` | `cui_smoke`（11） | 读写的是用户目录下真实的 `config.json`，而**每一次 CLI 运行都会在退出时写这个文件**，并行的 CLI 会插进它的两条断言中间 |
 
 `tools/e2e.py` 就按这个分组跑两阶段：先把排他模块单独跑完（这段时间机器上不跑
-别的），再把其余 130 条交给 xdist，一条用例一个 worker。
+别的），再把其余用例交给 xdist，一条用例一个 worker。
 
 ```powershell
 python tools\e2e.py                 # 两阶段

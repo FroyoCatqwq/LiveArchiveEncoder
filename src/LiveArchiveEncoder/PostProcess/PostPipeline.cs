@@ -11,14 +11,9 @@ public sealed class PostProcessOutcome
     /// <summary>The file to play or hand on; equals <see cref="LivePath"/> when the stage did not run.</summary>
     public string FinalPath { get; set; } = "";
 
-    public bool RecompressRan { get; set; }
-
-    /// <summary>The last hop that was written, i.e. the delivered file.</summary>
-    public string? RecompressPath { get; set; }
-
     /// <summary>
-    /// v7.9.8.3: every hop that was written, in order. A single-pass run has one
-    /// entry, which is also <see cref="RecompressPath"/>.
+    /// v7.9.8.3: every hop that was written, in order. The last entry is the
+    /// delivered file (also <see cref="FinalPath"/>).
     /// </summary>
     public List<string> Passes { get; } = [];
 
@@ -104,9 +99,7 @@ public static class PostPipeline
             }
 
             string hop = placed ?? output;
-            outcome.RecompressRan = true;
             outcome.Passes.Add(hop);
-            outcome.RecompressPath = hop;
             outcome.FinalPath = hop;
             input = hop;
         }

@@ -1,5 +1,7 @@
 # 时代预设：站点 -> 年份
 
+[English](era-presets.en.md) · **中文**
+
 > v7.9.7 起，预设不再是一份"时代"清单加一份"站点"清单，而是**一个站在一个年份**。
 > id 就是 `site/year`，例如 `youku/2007`、`bilibili/2012`、`generic/1998`。
 

@@ -1,5 +1,7 @@
 # Live Archive Encoder v7 (.NET 10 / .NET 11)
 
+**English** · [中文](README.zh.md)
+
 CUI/CLI frontend for classic/legacy FFmpeg video encoders. Started as a
 behaviour-preserving port of `live_archive_encoder.py` v6.3.3 (kept verbatim
 under `reference/`) to C#, with the internals rewritten for lower
@@ -8,14 +10,25 @@ a "video site" recompress pass and per-era presets sit on top of the realtime
 encoder, all of them off by default — with no flags given, the output is still
 exactly what v6.3.3 would have produced.
 
-Full user guide: [`docs/usage.md`](docs/usage.md); system and hardware requirements:
-[`docs/requirements.md`](docs/requirements.md). Current version history
-(v7.9.8 onwards): [`docs/CHANGELOG.md`](docs/CHANGELOG.md); the v6.2.2 → v7.9.7
-archive: [`docs/CHANGELOG-archive.md`](docs/CHANGELOG-archive.md). Where the
-era-preset numbers come from: [`docs/era-presets.md`](docs/era-presets.md).
-Which FFmpeg / 7-Zip builds are supported and how their codecs differ:
-[`docs/toolchain-builds.md`](docs/toolchain-builds.md). How to build, test and
-release this project: [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md).
+## Documentation
+
+Every document has a Chinese and an English edition; the index lists both:
+
+**[`docs/README.en.md`](docs/README.en.md)** — full index, with the Chinese
+edition of every document.
+
+| What | English | 中文 |
+| --- | --- | --- |
+| User guide (CLI, CUI, toolchain, playback) | [`docs/usage.en.md`](docs/usage.en.md) | [`docs/usage.md`](docs/usage.md) |
+| System / hardware requirements | [`docs/requirements.en.md`](docs/requirements.en.md) | [`docs/requirements.md`](docs/requirements.md) |
+| Era presets and where their numbers come from | [`docs/era-presets.en.md`](docs/era-presets.en.md) | [`docs/era-presets.md`](docs/era-presets.md) |
+| FFmpeg / 7-Zip builds and codec differences | [`docs/toolchain-builds.en.md`](docs/toolchain-builds.en.md) | [`docs/toolchain-builds.md`](docs/toolchain-builds.md) |
+| Build, test, release (maintainers) | [`docs/MAINTENANCE.en.md`](docs/MAINTENANCE.en.md) | [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) |
+| Version history (v7.9.8 →) | [`docs/CHANGELOG.en.md`](docs/CHANGELOG.en.md) | [`docs/CHANGELOG.md`](docs/CHANGELOG.md) |
+| Version history (v6.2.2 → v7.9.7) | [`docs/CHANGELOG-archive.en.md`](docs/CHANGELOG-archive.en.md) | [`docs/CHANGELOG-archive.md`](docs/CHANGELOG-archive.md) |
+| Container × frame-rate × pixel-format matrix | [`docs/capability-matrix.en.md`](docs/capability-matrix.en.md) | [`docs/capability-matrix.md`](docs/capability-matrix.md) |
+| Measured port acceptance report | [`docs/test-report-v7.en.md`](docs/test-report-v7.en.md) | [`docs/test-report-v7.md`](docs/test-report-v7.md) |
+| Archived / retired code | [`archive/README.en.md`](archive/README.en.md) | [`archive/README.md`](archive/README.md) |
 
 **The port keeps the realtime simulation semantics of v6.3.3.** The capture
 thread feeds frames at the source cadence and the main loop emits one output
@@ -67,12 +80,6 @@ tools/build.sh --tfm net11.0      # or: dotnet build -p:LaeTfm=net11.0
 `LaeTfm` is the one switch (see `Directory.Build.props`); CI runs the suite under
 both frameworks, so "works on 10 and 11" is verified rather than assumed.
 NativeAOT output is self-contained and unaffected by either choice.
-
-v7.8.1 also stopped shipping a third flavour: an AOT build with
-`-p:IlcInstructionSet=avx2`. Raising the instruction-set baseline only affects
-the C# side of this tool, while the encoding happens in FFmpeg, which
-runtime-dispatches its own SIMD — measured difference nil, and the result was an
-exe that only runs on AVX2 CPUs.
 
 Linux / macOS:
 
@@ -328,11 +335,13 @@ pipeline when the muxer rejects the split. Measured numbers are in
 
 ## Changes since the port
 
-The version-by-version history lives in **[`docs/CHANGELOG.md`](docs/CHANGELOG.md)**,
-from Python v6.2.2 to the current release, with what changed, why, and whether
-an output changes. Release notes for each published build are in
-`publish/release/notes-*.md`. This file is the guide: what the tool does, how
-to build and test it, and which constraints are deliberate.
+The version-by-version history lives in **[`docs/CHANGELOG.md`](docs/CHANGELOG.md)**
+(v7.9.8 onwards) and **[`docs/CHANGELOG-archive.md`](docs/CHANGELOG-archive.md)**
+(Python v6.2.2 → v7.9.7), with what changed, why, and whether an output changes.
+Release notes for each published build live in `publish/release/notes-*.md`
+(GitHub/Codeberg releases carry the published copies). This file is the guide:
+what the tool does, how to build and test it, and which constraints are
+deliberate.
 
 ## Layout
 
@@ -382,17 +391,25 @@ tests/
   media/test_src.mp4          generated 20 s 320x240 h264+aac fixture
   out/                        scratch products, gitignored
 tools/
-  build.ps1                   JIT and/or NativeAOT build helper (Windows)
-  build.sh                    the same for Linux/macOS
-  benchmark.ps1               controller CPU / memory measurement
+  build.ps1 / build.sh        JIT and/or NativeAOT build helper
+  e2e.py                      pytest phased runner (timing group alone, then -n)
+  check-slnx.py               .slnx manifest drift check (CI gate)
+  capability_sweep.py         encoder capability probe (feeds the unit tests)
+  pixfmt_sweep.py             pixel-format probe (feeds the unit tests)
   forgejo-runner.service      systemd unit for the self-hosted Codeberg runner
   forgejo-runner-config.yml   its config (host mode, mise SDK on PATH)
 reference/
   live_archive_encoder.py     v6.3.3 — the Python baseline the port is measured against
-docs/
-  CHANGELOG.md                version history, Python v6.2.2 -> now
-  usage.md                    full user guide (CLI, CUI, FFmpeg toolchain, playback)
-  test-report-v7.md           measured porting results
+docs/                         every file has a .en.md English edition; see docs/README.md
+  usage.md / usage.en.md      full user guide (CLI, CUI, FFmpeg toolchain, playback)
+  requirements.md             system / hardware requirements
+  era-presets.md              era presets and where their numbers come from
+  toolchain-builds.md         FFmpeg / 7-Zip builds and codec differences
+  capability-matrix.md        container × fps × pixel-format measurements
+  CHANGELOG.md                version history, v7.9.8 onwards
+  CHANGELOG-archive.md        version history, v6.2.2 -> v7.9.7
+  test-report-v7.md           measured porting results (archived)
+  MAINTENANCE.md              build / test / release guide
 ```
 
 ## How this differs from v6.3.3
@@ -407,7 +424,8 @@ timer instead of a 15.6 ms `sleep`, and typed results instead of dicts.
 The full table, plus the six baseline defects this rewrite deliberately fixes
 (AMV produced 0 bytes, CUDA on by default, two wrong SMB options, audio limits
 checked only for sample rate, fonts never resolved), is in
-[`docs/CHANGELOG.md`](docs/CHANGELOG.md) under "v7.0 → v7.2" and "v6.3.3".
+[`docs/CHANGELOG-archive.md`](docs/CHANGELOG-archive.md) under "v7.0 → v7.2" and
+"v6.3.3".
 
 ## Known constraints
 

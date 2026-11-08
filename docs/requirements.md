@@ -1,5 +1,7 @@
 # 系统与硬件需求
 
+[English](requirements.en.md) · **中文**
+
 一句话版本：**程序本身很轻，门槛在 FFmpeg。**
 
 LiveArchiveEncoder 自己不碰像素：解码与编码全部由 FFmpeg 子进程完成，程序负责帧槽节流、码率控制、

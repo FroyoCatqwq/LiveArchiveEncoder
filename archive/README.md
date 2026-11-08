@@ -1,34 +1,33 @@
-# Archive
+# 归档（archive）
 
-Retired code lives here instead of being deleted.
+[English](README.en.md) · **中文**
 
-Everything under this directory is **not** part of any project: no `.csproj`
-globs it, so nothing here is compiled, trimmed or shipped. It exists so a
-decision can be re-read later with its original context intact.
+退役的代码放在这里，而不是删掉。
 
-## What goes here
+这个目录下的任何东西都**不属于**任何项目：没有 `.csproj` 会 glob 它，所以这里的东西
+不参与编译、裁剪或发布。它的存在是为了让某个决定在以后还能带着当时的上下文被重新
+读到。
 
-* Members that no call site reaches any more, but whose intent is worth keeping
-  (a table, a rule, a formula somebody verified against FFmpeg).
-* Implementations superseded by a better one, kept next to the reason why the
-  replacement is equivalent.
+## 什么该放进来
 
-## What does not go here
+* 已经没有调用点、但意图值得保留的成员（一张表、一条规则、一个对着 FFmpeg 验证过的
+  公式）。
+* 被更好的实现取代、但「为什么替代者等价」值得留档的旧实现。
 
-* Dead branches inside live code — those are removed in place.
-* Anything still referenced from `src/`, `tests/` or `docs/`.
-* Build output, test media or log files.
+## 什么不该放进来
 
-## Current contents
+* 活代码里的死分支 —— 那些就地删除。
+* 仍被 `src/`、`tests/` 或 `docs/` 引用的东西。
+* 构建产物、测试素材或日志文件。
 
-| File | Retired in | Why |
+## 当前内容
+
+| 文件 | 退役版本 | 原因 |
 | --- | --- | --- |
-| `retired/RetiredConstants.cs` | v7.8.1 | Unreferenced lookup tables and helpers: `Constants.DefaultFpsLevels`, `Constants.BtbnGplReleaseUrl`, `Constants.LegacyEncoderPatterns` (superseded by one source-generated regex), `EncoderMath.FallbackTransportFormat()`, `AudioCatalog.Names` / `IsKnown` / `KnownFor`, `CliOptions.EffectiveRecover`. |
-| `retired/RetiredTurbo.cs` | v7.9 | The Turbo mode: `RealtimeOptions.Turbo`, the three slot-loop branches plus `FrameBufferPool.WaitForFrame`/`Close`, the `--turbo` CLI plumbing and its seven localisation keys per language. Removed outright after two releases of deprecation — it fought the live-recording simulation the tool exists to produce. |
-| `retired/RetiredHelpers.cs` | v7.9.3.1 | Unreferenced duplicate helpers found by a full declaration/reference sweep: `Probe.HasAudio` and `Probe.Stream` (both superseded by the single-run `Probe.Source`), `SubtitleTrack.FormatMode`, the last copy of the transport-format preference list, and the boolean "crop 4:3" filter chain from v7.7. |
+| `retired/RetiredConstants.cs` | v7.8.1 | 无引用的查表与辅助：`Constants.DefaultFpsLevels`、`Constants.BtbnGplReleaseUrl`、`Constants.LegacyEncoderPatterns`（已由一个 source-generated 正则取代）、`EncoderMath.FallbackTransportFormat()`、`AudioCatalog.Names` / `IsKnown` / `KnownFor`、`CliOptions.EffectiveRecover`。 |
+| `retired/RetiredTurbo.cs` | v7.9 | Turbo 模式：`RealtimeOptions.Turbo`、三个槽循环分支加 `FrameBufferPool.WaitForFrame`/`Close`、`--turbo` 的 CLI 接线与两种语言各七个本地化键。弃用两个版本后直接移除 —— 它和本工具存在的意义（模拟当年的直播录制）相冲突。 |
+| `retired/RetiredHelpers.cs` | v7.9.3.1 | 全量声明/引用扫描找到的无引用重复辅助：`Probe.HasAudio` 与 `Probe.Stream`（都被单次运行的 `Probe.Source` 取代）、`SubtitleTrack.FormatMode`、传输格式偏好表的最后一份副本，以及 v7.7 的布尔「裁 4:3」滤镜链。 |
+| `retired/RetiredWatermark.cs` | v7.9.1 | 静态文字水印阶段（`WatermarkSettings`、参数构建与菜单文案）。按用户要求移除；二次压缩成为唯一后处理阶段。 |
+| `retired/RetiredFontPicking.cs` | v7.9.1 | drawtext 时代的字体选择器（`Find` / `PickFrom` / `SeedFromSystemFonts`、`ToFilterPath`、`InstallHint`）。水印是它唯一的调用方；字幕字体现在来自 `SubtitleFonts`。 |
 
-| `retired/RetiredWatermark.cs` | v7.9.1 | The static text watermark stage (its `WatermarkSettings`, argument builder and menu strings). Removed at the user's request; the recompress pass is now the only post-processing stage. |
-| `retired/RetiredFontPicking.cs` | v7.9.1 | The drawtext-era font picker (`Find` / `PickFrom` / `SeedFromSystemFonts`, `ToFilterPath`, `InstallHint`). The watermark was its only consumer; subtitle fonts now come from `SubtitleFonts`. |
-
-Every entry carries the version it was retired in and what replaced it, so
-restoring one is a copy-paste rather than an archaeology exercise.
+每一条都带着「在哪个版本退役」与「被什么取代」，所以恢复它是复制粘贴，而不是考古。

@@ -64,4 +64,36 @@ if missing or unlisted:
     print(f"\nmanifest drift: {len(missing)} stale, {len(unlisted)} unlisted. "
           "Regenerate the Solution Items from the tree.", file=sys.stderr)
     sys.exit(1)
-print("manifest OK")
+
+# v7.9.9.4: every document ships in both languages. A half-translated pair is a
+# documentation bug that nothing else catches, so check it here.
+#
+#   docs/*.md  <->  docs/*.en.md      (X.md is Chinese, X.en.md is English)
+#   archive/README.md <-> archive/README.en.md
+#   README.md <-> README.zh.md        the one exception: the root README keeps
+#                                     English as its main text and links to a
+#                                     Chinese edition, because it is the repo's
+#                                     landing page.
+unpaired: list[str] = []
+for path in sorted((ROOT / "docs").glob("*.md")):
+    if path.stem.endswith(".en"):
+        twin = path.with_name(path.stem[:-3] + ".md")
+    else:
+        twin = path.with_name(path.stem + ".en.md")
+    if not twin.is_file():
+        unpaired.append(f"{path.relative_to(ROOT)} <-> {twin.relative_to(ROOT)}")
+
+for name, twin_name in (("archive/README.md", "archive/README.en.md"),
+                        ("archive/README.en.md", "archive/README.md"),
+                        ("README.md", "README.zh.md"),
+                        ("README.zh.md", "README.md")):
+    if not (ROOT / twin_name).is_file():
+        unpaired.append(f"{name} <-> {twin_name}")
+
+if unpaired:
+    for pair in unpaired:
+        print(f"  UNPAIRED {pair}")
+    print(f"\nlanguage drift: {len(unpaired)} document(s) without a both-language "
+          "twin. Add the missing edition.", file=sys.stderr)
+    sys.exit(1)
+print("manifest OK, language pairs OK")
