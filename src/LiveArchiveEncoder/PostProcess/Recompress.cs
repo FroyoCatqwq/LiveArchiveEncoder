@@ -53,11 +53,13 @@ public static class Recompress
     /// is what the pipeline actually loops over.
     /// </summary>
     public static (bool Ok, string? Error) Apply(
-        string ffmpeg, string input, string output, RecompressSettings settings)
+        string ffmpeg, string input, string output, RecompressSettings settings,
+        CancellationToken cancellationToken = default)
     {
         if (!settings.Enabled) return (true, null);
         if (settings.Stages().FirstOrDefault() is not { } first) return (true, null);
-        (bool ok, string? error, _) = ApplyWithPath(ffmpeg, input, output, first);
+        (bool ok, string? error, _) = ApplyWithPath(
+            ffmpeg, input, output, first, cancellationToken);
         return (ok, error);
     }
 
@@ -66,9 +68,11 @@ public static class Recompress
     /// placed path. The pipeline uses <see cref="ApplyWithPath"/>.
     /// </summary>
     public static (bool Ok, string? Error) Apply(
-        string ffmpeg, string input, string output, RecompressPass pass)
+        string ffmpeg, string input, string output, RecompressPass pass,
+        CancellationToken cancellationToken = default)
     {
-        (bool ok, string? error, _) = ApplyWithPath(ffmpeg, input, output, pass);
+        (bool ok, string? error, _) = ApplyWithPath(
+            ffmpeg, input, output, pass, cancellationToken);
         return (ok, error);
     }
 
@@ -79,7 +83,8 @@ public static class Recompress
     /// two-tuple made PostPipeline derive a `_web` name that did not exist.
     /// </summary>
     public static (bool Ok, string? Error, string? PlacedPath) ApplyWithPath(
-        string ffmpeg, string input, string output, RecompressPass pass)
+        string ffmpeg, string input, string output, RecompressPass pass,
+        CancellationToken cancellationToken = default)
     {
         // v7.9.8.1: the same ".part" rule the live pass follows. This stage was
         // the one write path v7.9.8 missed -- `ffmpeg -y` truncates the
@@ -102,15 +107,19 @@ public static class Recompress
         CaptureResult result;
         try
         {
-            result = ProcessRunner.Run(argv, TimeoutSeconds);
+            result = ProcessRunner.Run(argv, TimeoutSeconds,
+                cancellationToken: cancellationToken);
         }
         // A bad --ffmpeg path or an unreadable input surfaces here as an OS
         // exception, not as an exit code. Report it the same way as any other
         // failure: the live product must survive this stage going wrong.
+        // v7.9.9.3: cancellation must also land here -- otherwise the exception
+        // escaped PostPipeline and the finished .part was never discarded.
         catch (Exception exc) when (exc is InvalidOperationException
                                        or System.ComponentModel.Win32Exception
                                        or TimeoutException
-                                       or IOException)
+                                       or IOException
+                                       or OperationCanceledException)
         {
             OutputFile.Discard(part);
             return (false, exc.Message, null);

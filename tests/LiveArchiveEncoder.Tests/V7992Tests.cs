@@ -123,7 +123,8 @@ public sealed class V7992Tests
         await Assert.That(error!).Contains("need a target bitrate");
 
         (CliOptions? inverted, _) = CliParser.Parse(
-            ["clip.mkv", "--recompress-video-kbps", "250",
+            ["clip.mkv", "--recompress-codec", "libx264",
+             "--recompress-video-kbps", "250",
              "--recompress-maxrate", "100", "--recompress-minrate", "300"]);
         (_, error) = Cli.ResolveRecompress(inverted!, null, true);
         await Assert.That(error).IsNotNull();
@@ -172,7 +173,11 @@ public sealed class V7992Tests
     [Test]
     public async Task KillingAnEmptyPlayerListIsHarmless()
     {
-        await Assert.That(ChildProcesses.KillAll()).IsGreaterThanOrEqualTo(0);
+        // v7.9.9.3: `>= 0` was true by construction. With no matching holder
+        // the contract is exactly zero, both for a null and an unknown path.
+        await Assert.That(ChildProcesses.KillAll(null)).IsEqualTo(0);
+        await Assert.That(ChildProcesses.KillAll(
+            Path.Combine(Path.GetTempPath(), "lae-not-tracked.avi"))).IsEqualTo(0);
     }
 
     private static string NewDir()

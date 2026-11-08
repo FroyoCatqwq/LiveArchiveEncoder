@@ -19,9 +19,21 @@ public static class Interrupt
     // BeginOperation's check and its reassignment was swallowed: Request saw the
     // already-cancelled old source and returned, so the new operation ran on
     // thinking nobody had asked it to stop.
-    private static readonly Lock Gate = new();
+    // v7.9.9.3: Monitor (a plain object) is RE-ENTRANT, System.Threading.Lock
+    // is not. Request() must call Cancel() inside the gate -- see below -- and
+    // a cancellation callback can come back in here without deadlocking.
+    private static readonly object Gate = new();
     private static CancellationTokenSource _source = new();
     private static bool _reported;
+
+    /// <summary>
+    /// Token of the current operation, for helpers that start their own child
+    /// process (the FFmpeg installer in particular). Read under the gate.
+    /// </summary>
+    public static CancellationToken CurrentToken
+    {
+        get { lock (Gate) return _source.Token; }
+    }
 
     /// <summary>
     /// Installs the Ctrl+C handler. The default kill is swallowed on purpose:
@@ -40,22 +52,21 @@ public static class Interrupt
     /// <summary>Raises a cancellation and reports it once per operation.</summary>
     public static void Request()
     {
-        CancellationTokenSource? target = null;
         lock (Gate)
         {
-            if (!_reported)
-            {
-                _reported = true;
-                target = _source;
-            }
-        }
-        if (target is null) return;
+            if (_reported) return;
+            _reported = true;
 
-        // Outside the gate: Cancel runs the registered callbacks synchronously, and
-        // one of them reaching back in here would deadlock on a non-reentrant Lock.
-        Console.Error.WriteLine("\nInterrupted.");
-        AppLog.Warn("interrupt.requested operation={Operation}", AppLog.CurrentOperation);
-        target.Cancel();
+            Console.Error.WriteLine("\nInterrupted.");
+            AppLog.Warn("interrupt.requested operation={Operation}", AppLog.CurrentOperation);
+            // v7.9.9.3: cancel INSIDE the gate. Doing it outside left a window
+            // where BeginOperation could swap in a fresh CTS; this Cancel then
+            // hit the old source and the new encode never saw the Ctrl+C.
+            // Gate is a re-entrant Monitor, so a callback reaching back in here
+            // is safe.
+            try { _source.Cancel(); }
+            catch (ObjectDisposedException) { /* a late reader disposed it */ }
+        }
     }
 
     /// <summary>

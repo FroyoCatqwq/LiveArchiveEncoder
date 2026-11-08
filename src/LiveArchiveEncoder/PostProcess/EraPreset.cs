@@ -354,7 +354,11 @@ public sealed class EraPreset
         // A site targeted a bitrate, so the native rendering caps it. The modern
         // rendering is CRF-based and needs no cap -- unless the H.264 encoder is
         // OpenH264, which has no constant-quality mode and is already pinned.
-        if (native && Kind == EraKind.Site && video.Contains("-b:v", StringComparison.Ordinal) is false)
+        // v7.9.9.3: NativeVideoArgs ALWAYS emits -b:v, so the old
+        // `Contains("-b:v") is false` guard was dead code and site presets
+        // never got the cap this comment advertises. VBV must accompany -b:v,
+        // which is exactly what the native path produces.
+        if (native && Kind == EraKind.Site)
             parts.Add($"-maxrate {RcVideoKbps * 12 / 10}k -bufsize {RcVideoKbps * 2}k");
 
         parts.Add(native

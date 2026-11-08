@@ -20,6 +20,88 @@
 
 ---
 
+## v7.9.9.3（2026-11-08）
+
+全项目审计修复，并把上一版只存在于 CLI 的通用编码参数补进 CUI。
+
+### 1. CUI 里看得见 bufsize / minrate / maxrate
+
+* 用户反馈：v7.9.9.2 的 `--recompress-maxrate/-minrate/-bufsize/-recompress-extra` 在 CUI
+  **没有任何入口**，直播侧只能借参数菜单 `35.` 手写字符串。更混淆的是二次压缩菜单 `8.`
+  的标签叫 `rc.menu.extra`（第 2+ 遍链），与 CLI 的 `--recompress-extra`（第一遍自由参数）
+  同名不同义 —— 现改名为 `rc.menu.chain`（「后续遍数（链）」）。
+* **二次压缩菜单**新增 `b.` `-maxrate`、`c.` `-minrate`、`d.` `-bufsize`、`e.` `-preset`、
+  `f.` `-profile:v`、`g.` `-ac`；**参数菜单**新增 `36.` `-maxrate`、`37.` `-minrate`、
+  `38.` `-bufsize`（直播编码侧）。输入 `none` 删除该 flag，留空不改。
+* 新增 `PostProcess/FragmentEditor.cs`：`SetFlag` / `Merge` / `ValidateVbv` /
+  `ValidateBounds` / `FirstWins`。CUI 与 CLI 都把选择写进 fragment 本身（二次压缩写
+  `Recompress.Args`、直播写 `ExtraEncoderArgs`），**不新增持久化字段**，于是
+  `--emit-args`、`CloneRecompress`、`ComposeSecondPass` 自动跟着走。
+* VBV 校验抽成共享规则，CLI 与 CUI 都调；校验放在**最终 fragment 生成之后**，覆盖手写
+  `--recompress-args`、era 预设、CUI 编辑。二次压缩要求有 `-b:v`，直播侧只校验
+  `minrate <= maxrate`（编码器自己生成 `-b:v`）。
+* 修 `--extra-encoder-args` 按文档「会被记住」却没写回 `Config` 的问题。
+
+### 2. 全量审计：严重问题
+
+* **非实时捕获线程无限自旋**：v7.9.9.2 的一帧一槽握手里，捕获线程的等待条件只看
+  `ReadyCount` 与取消，主循环达到 `targetSlots` 停止消费后没人再清 `ReadyCount`，
+  线程永久自旋并占住帧缓冲，`Join(5000)` 每次白等 5 秒。现检查 `captureState.Stop`、
+  收到停止即释放缓冲退出，两处 `Thread.Sleep(0)` 改为带退避的 `SpinWait`。
+  修复后 `Fresh 65 / Repeated 0`、A/V 时长与实时模式一致，耗时仍约 0.8 s。
+* **后处理整条链不响应 Ctrl+C**：`PostPipeline.Run` / `Recompress.ApplyWithPath` 此前没有
+  `CancellationToken`，FFmpeg 超时 3600 s，取消异常还会穿透并留下 `.part`。现从 CLI/CUI
+  主链路与 `--recompress-only` 两条路径透传 token，catch 纳入 `OperationCanceledException`
+  并清理 `.part`。
+* **`PostArgs.Validate` 只查最后一个 token**：中间的裸路径（`-c:v libx264 evil.mp4 -crf 20`）
+  会被 FFmpeg 当成额外输出文件，可覆盖无关路径。现逐 token 跟踪「选项的值」，任何游离的
+  非选项 token 一律拒绝；`ValueLessFlags` 表处理 `-y`/`-an` 等无值开关。
+* **`FlushContext` 上下文平方级放大**：`ctx[...]` 事件经同一个 Logger 又回写进 200 条
+  ring，第二次错误把它们再输出一遍，真正的上下文被挤出。`ContextSink.Emit` 现过滤该模板。
+* **自更新只复制 payload 顶层文件**：`runtimes/`、`cs/`、`de/` 子目录里的 native 库与
+  卫星资源被整批丢弃，更新后的程序可能起不来。现递归枚举并按相对路径重建安装/回滚目录。
+* **占用检查会删掉并发运行正在写的 `.part`**：现用 glob 过滤 + 「创建时间早于本进程」+
+  可独占打开三重判定，只清崩溃残留；`ChildProcesses` 记录播放器打开的是**哪个文件**，
+  只结束该文件对应的进程，不再误杀正在播放 B/C 的窗口；`WaitForExit` 移出锁。
+* **`Toolchain.RunLong` 无取消、异常不 kill 子进程**：现接 `Interrupt.CurrentToken`、
+  轮询等待、取消/读异常时 `Kill(entireProcessTree)`，consumer 整体免疫
+  `AppLog.Sampled` 在 `Close()` 后抛的 `ObjectDisposedException`。
+* **`AppLog.Redact` 漏脱敏**：`SelfUpdate` 会 Trim token，日志按原值替换；现同时替换
+  Trim 后与 URL 编码后的变体。
+* **`CliParser.TryValue` 吞掉后续选项**：`--recompress-extra --quiet` 会把 `--quiet`
+  当值。现只在下一个 token **确实是本程序选项**时拒绝，因此以 `-` 开头的 FFmpeg 片段
+  （`--recompress-args "-c:v libx264"`）仍然合法。
+* **`ComposeSecondPass` 重复 `-preset`**：用户手写的 `-preset slow` 被 catalog 追加的
+  `veryfast` 覆盖（FFmpeg last-wins）。现对单值 flag 保留首次出现；`WithExtras` 的纯
+  字符串拼接换成 `FragmentEditor.Merge`，不再产生两个 `-maxrate` / `-b:v`。
+
+### 3. 全量审计：中等问题
+
+`Interrupt.Request` 把 `Cancel()` 放锁外导致边界丢 Ctrl+C（改用可重入 Monitor 并在锁内取消）；
+`NetworkProbe` 把失败的 `null` 永久缓存（只缓存成功结果 + 256 上限）；`EraPreset.Fragment`
+的 `-maxrate/-bufsize` 分支是死代码（native 参数恒含 `-b:v`）；`RunSplit` 的 Auto 回退漏
+`UnauthorizedAccessException`；`AppLog.Init` 降级路径重复注册同一个 `ContextSink` 且泄漏
+旧 logger（先 Dispose 再重建）；`PipeReaders` 在 `Emit=false` 时直接返回、停止排空管道会
+让子进程写满 stderr 死锁，取消时未 `AdvanceTo`，`CompleteAsync` 异常会覆盖真实错误。
+
+### 4. 测试有效性
+
+修掉 4 处恒真/条件断言（`AppLog.RunId` 自比、`KillAll() >= 0`、三处 `if report:`/`if levels:`
+让核心回归可静默跳过），并把一个「声称验证回调停止」实则只数行的测试改成真实契约。
+顺带发现 `_frame_report` 的正则按逗号匹配、而报告是两行格式 —— 它**从未匹配过**，A/V
+回归一直被跳过；修正后重新钉住 `Fresh/Repeated`。新增 `V7993Tests`（9 项：路径注入、
+fragment 编辑/合并/去重、共享 VBV 校验、CLI 解析、CUI 双语键、era VBV、`--emit-args` 往返）。
+e2e `conftest.py` 加了一个 Windows/CPython 3.15.2 兼容处理：pytest 在 sessionfinish 对
+陈旧 symlink 调 `resolve()` 抛 WinError 448，会把全绿的运行误报 exit=1。
+
+### 5. 验证
+
+Windows：单测 **718 全过** / e2e **148 全过** / 构建 0 警告 0 错误；清单无漂移。
+CUI 端到端实测：参数菜单 36/37/38 写入 `-maxrate 300k -minrate 100k -bufsize 600k`，
+二次压缩菜单 b–g 写入完整的 `-preset slow -profile:v high -ac 1` fragment。
+
+---
+
 ## v7.9.9.2（2026-11-08）
 
 直接压缩音画同步修复、时代标准默认档位、路径记忆、文件占用治理、通用编码参数，外加一轮全项目审查。

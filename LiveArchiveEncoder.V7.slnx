@@ -115,6 +115,7 @@
     <File Path="src/LiveArchiveEncoder/PostProcess/EraPreset.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/FontPack.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/FontResolver.cs" />
+    <File Path="src/LiveArchiveEncoder/PostProcess/FragmentEditor.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/PostArgs.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/PostPipeline.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/Recompress.cs" />
@@ -202,6 +203,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/V79812Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V798132Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V7992Tests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/V7993Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V799Tests.cs" />
   </Folder>
   <Folder Name="/tests/e2e/">

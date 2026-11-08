@@ -69,8 +69,15 @@ def _encode(exe, src, out, *extra):
 
 
 def _frame_report(stdout):
-    match = re.search(r"Fresh frames:\s*(\d+),\s*Repeated slots:\s*(\d+)", stdout)
-    return (int(match.group(1)), int(match.group(2))) if match else None
+    """The report prints the two counters on separate lines (with blank lines
+    from the console mirror), not as one comma-separated line. The old regex
+    never matched, and `if report:` silently skipped the core A/V regression.
+    """
+    fresh = re.search(r"Fresh frames\s*:\s*(\d+)", stdout)
+    repeated = re.search(r"Repeated slots\s*:\s*(\d+)", stdout)
+    if fresh is None or repeated is None:
+        return None
+    return int(fresh.group(1)), int(repeated.group(1))
 
 
 def _exclusive_open(path):
@@ -102,11 +109,13 @@ def test_direct_mode_keeps_every_slot_a_real_frame(exe, src, tmp_path):
     assert vdur > 1.5 and adur > 1.5, (vdur, adur)
     assert abs(vdur - adur) < 0.25, f"A/V desync: video={vdur} audio={adur}"
 
+    # v7.9.9.3: this was `if report:`, so the whole regression could be
+    # skipped silently whenever the report format changed. Require it.
     report = _frame_report(proc.stdout)
-    if report:
-        fresh, repeated = report
-        assert repeated == 0, f"{repeated} repeated slots: {proc.stdout[-500:]}"
-        assert fresh >= 20
+    assert report is not None, f"frame report missing: {proc.stdout[-800:]}"
+    fresh, repeated = report
+    assert repeated == 0, f"{repeated} repeated slots: {proc.stdout[-500:]}"
+    assert fresh >= 20
 
 
 def test_fps_levels_none_never_drops_the_frame_rate(exe, src, tmp_path):
@@ -116,8 +125,8 @@ def test_fps_levels_none_never_drops_the_frame_rate(exe, src, tmp_path):
     proc = _run(exe, cfg, *_encode(exe, src, out, "--fps-levels", "none"))
     assert proc.returncode == 0, (proc.stdout[-600:], proc.stderr[-600:])
     report = _frame_report(proc.stdout)
-    if report:
-        assert report[0] >= 20, report
+    assert report is not None, f"frame report missing: {proc.stdout[-800:]}"
+    assert report[0] >= 20, report
     assert "DOWN" not in proc.stdout, proc.stdout[-600:]
 
     bad = _run(exe, cfg, *_encode(exe, src, tmp_path / "bad.avi",
@@ -135,8 +144,8 @@ def test_default_ladder_is_the_era_standard(exe, src, tmp_path):
     # The run writes its snapshot; it must not pin the retired Python baseline.
     settings = json.loads((cfg / "config.json").read_text(encoding="utf-8"))
     levels = settings.get("FpsLevels") or []
-    if levels:
-        assert [float(x) for x in levels][:5] == [13.0, 12.0, 10.0, 8.0, 5.0], levels
+    assert levels, "config.json has no FpsLevels -- default ladder was not saved"
+    assert [float(x) for x in levels][:5] == [13.0, 12.0, 10.0, 8.0, 5.0], levels
 
 
 def test_output_directory_is_completed_and_directories_are_remembered(exe, src, tmp_path):

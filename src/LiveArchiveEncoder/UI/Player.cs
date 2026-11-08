@@ -57,7 +57,7 @@ public static class Player
                 if (ffplay is null)
                     return (false, "ffplay was not found next to FFmpeg or on PATH; "
                         + "choose an external player instead");
-                Start(ffplay, ["-autoexit", "-window_title", Path.GetFileName(file), file]);
+                Start(ffplay, ["-autoexit", "-window_title", Path.GetFileName(file), file], file);
                 return (true, null);
             }
 
@@ -68,7 +68,7 @@ public static class Player
                 // is also the only handler for these legacy containers.
                 if (!OperatingSystem.IsWindows() && Which("xdg-open") is { Length: > 0 } xdg)
                 {
-                    Start(xdg, [file]);
+                    Start(xdg, [file], file);
                     return (true, null);
                 }
                 Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
@@ -77,7 +77,7 @@ public static class Player
 
             if (!File.Exists(externalPlayer))
                 return (false, $"external player not found: {externalPlayer}");
-            Start(externalPlayer, [file]);
+            Start(externalPlayer, [file], file);
             return (true, null);
         }
         catch (Exception exc) when (exc is System.ComponentModel.Win32Exception
@@ -87,13 +87,14 @@ public static class Player
         }
     }
 
-    private static void Start(string exe, IReadOnlyList<string> args)
+    private static void Start(string exe, IReadOnlyList<string> args, string openedFile)
     {
         var info = new ProcessStartInfo { FileName = exe, UseShellExecute = false };
         foreach (string a in args) info.ArgumentList.Add(a);
         // v7.9.9.2: remember it so the next encode can close a player that is
-        // holding the output open (see OutputFile.EnsureTargetAvailable).
-        Core.ChildProcesses.Track(Process.Start(info));
+        // holding the output open. v7.9.9.3: record WHICH file, so a lock on A
+        // does not close the user's playback of B.
+        Core.ChildProcesses.Track(Process.Start(info), openedFile);
     }
 
     /// <summary>Local PATH lookup; FFmpegDiscovery.Which is private.</summary>

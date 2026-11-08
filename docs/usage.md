@@ -308,6 +308,7 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--recompress-maxrate` / `--recompress-minrate` / `--recompress-bufsize` | — | **v7.9.9.2**：二次压缩的 VBV 三件套，单位 kbps。**必须与 `-b:v` 一起给**（`--recompress-video-kbps` 或手写 fragment 里的 `-b:v`），否则 FFmpeg 会静默忽略；也拒绝 `minrate > maxrate` |
 | `--recompress-extra` | — | **v7.9.9.2**：追加到二次压缩第一遍的自由 FFmpeg 参数，如 `"-preset slow -profile:v high -ac 1 -b:a 64k"`。改编码器时这些参数不再被抹掉 |
 | `--extra-encoder-args` | — | **v7.9.9.2**：追加到**直播编码**命令输出参数段的自由 FFmpeg 参数，如 `"-maxrate 300k -bufsize 600k"`；用与 `--recompress-args` 相同的引号解析。该设置会被记住并出现在 `--emit-args` 里 |
+
 | `--net-test PATH\|URL` | — | **v7.9.6.3**：测量该源的链路并打印并行判定，不编码（见 §7.8.4） |
 | `--iperf3 HOST[:PORT]` | — | **v7.9.6.3**：用 iperf3 量链路本身作为参考；需对端有 iperf3 服务器 |
 | `--emit-args` / `--emit-args=FILE` | — | **v7.9.1**：把设置打印成等价命令行后退出；带 `=FILE` 时从一个配置文件读设置（见 §7.6） |
@@ -320,6 +321,12 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 
 `--start-time` / `--end-time` 都支持 `HH:MM:SS` 和 `HH:MM:SS.mmm`。`--end-time`
 必须晚于 `--start-time`，且不能超出源时长。
+
+**v7.9.9.3**：`--recompress-maxrate/-minrate/-bufsize/-recompress-extra` 和
+`--extra-encoder-args` 在 CUI 里也有专门菜单行，不用再手写整段参数 ——
+二次压缩菜单 `b.`–`g.`（`-maxrate/-minrate/-bufsize/-preset/-profile:v/-ac`），
+参数菜单 `36.`–`38.`（直播侧 VBV 三件套）与 `35.`（任意附加参数）。详见
+§7.12「二次压缩（菜单 15）」。
 
 ### 退出码
 
@@ -1525,7 +1532,7 @@ libx264 → auto）。
 
 ### 二次压缩（菜单 15）
 
-菜单 15 是这一层，八行（v7.9.8.4 加了第 8 行）：
+菜单 15 是这一层（v7.9.9.3 起 16 行）：
 
 ```
  1. 启用二次压缩                 on / off
@@ -1535,9 +1542,26 @@ libx264 → auto）。
  5. 视频编码器                   改第 2 项里的 -c:v
  6. 质量                         改第 2 项里的 -crf / -q:v
  7. 音频编码器                   改第 2 项里的 -c:a
- 8. 追加压缩遍数（链式）         第 2 遍起的链
+ a. 音频码率                     -b:a（v7.9.9.1）
+ b. VBV 最大码率                 -maxrate
+ c. VBV 最小码率                 -minrate
+ d. VBV 缓冲区                   -bufsize
+ e. 编码预设                     -preset
+ f. Profile:v                    -profile:v
+ g. 音频声道                     -ac
+ 8. 后续遍数（链）               第 2 遍起的链（**不是** CLI 的 --recompress-extra）
+ 9. 不使用二次压缩               删除整条链
  0. 返回
 ```
+
+`b`–`g` 是 v7.9.9.3 新增的通用参数行；参数菜单里另有 `36.`–`38.`
+（直播编码侧的 `-maxrate/-minrate/-bufsize`）和 `35.`（任意附加参数）。输入数值或名称即
+设置、`none` 删除、留空不改。它们和 CLI 选项写的是**同一份 fragment**（二次压缩写第 2 项
+的参数段、直播写 `ExtraEncoderArgs`），所以 `--emit-args`、改编码器、改质量都不会弄丢。
+
+**VBV 三件套必须与 `-b:v` 一起给**（`--recompress-video-kbps`，或第 2 项里手写的 `-b:v`），
+否则 FFmpeg 静默忽略；CUI 在写回前检查这一点与 `minrate <= maxrate`。直播编码命令自带
+`-b:v`，所以参数菜单只校验大小关系。
 
 第 8 项进去列出现有的第 2..N 遍，一个提示框管三件事：**输入一段参数=追一遍**、
 **输入编号=删掉那一遍**、**输入 `-`=全部清空**。新增那遍的容器按它的编码器推导

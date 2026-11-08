@@ -642,9 +642,23 @@ public static class CliParser
             bool TryValue(out string value)
             {
                 if (inlineValue is not null) { value = inlineValue; return true; }
-                if (i + 1 < args.Length) { value = args[++i]; return true; }
-                value = "";
-                return false;
+                if (i + 1 >= args.Length) { value = ""; return false; }
+
+                // v7.9.9.3: refuse only when the next token is an actual option
+                // of THIS program. FFmpeg fragments legitimately begin with '-'
+                // (--recompress-args "-c:v libx264"), so a blanket
+                // StartsWith('-') check would reject valid input. But an absent
+                // value followed by --quiet must not swallow the switch.
+                string nextName = args[i + 1].Split('=', 2)[0];
+                if (nextName.StartsWith("--", StringComparison.Ordinal)
+                    && OptionCatalog.All.Any(s =>
+                        string.Equals(s.Name, nextName, StringComparison.Ordinal)))
+                {
+                    value = "";
+                    return false;
+                }
+                value = args[++i];
+                return true;
             }
 
             // --ffmpeg-download is usable bare ("install the default"), so its

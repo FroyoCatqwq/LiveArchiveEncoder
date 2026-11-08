@@ -465,6 +465,7 @@ public static class RealtimeEncoder
             return RunSplitCore(o, cancellationToken);
         }
         catch (Exception exc) when (exc is InvalidOperationException or IOException
+                                        or UnauthorizedAccessException
                                         or TimeoutException or ArgumentException)
         {
             if (o.AudioMode == AudioMode.Separate) throw;
@@ -959,8 +960,22 @@ public static class RealtimeEncoder
                     // capture thread silently loses programme-time frames.
                     if (!o.RealTime)
                     {
-                        while (pool.ReadyCount > 0 && !cancellationToken.IsCancellationRequested)
-                            Thread.Sleep(0);
+                        // v7.9.9.3: check captureState.Stop on EVERY pass. The
+                        // slot loop can hit targetSlots and stop consuming while
+                        // we wait here; without that check this thread spins
+                        // forever holding a frame buffer (and Join(5000) below
+                        // burns five seconds on every direct encode). SpinWait
+                        // backs off instead of burning a core at Sleep(0).
+                        var backoff = new SpinWait();
+                        while (pool.ReadyCount > 0
+                               && !captureState.Stop
+                               && !cancellationToken.IsCancellationRequested)
+                            backoff.SpinOnce();
+                        if (captureState.Stop || cancellationToken.IsCancellationRequested)
+                        {
+                            pool.Release(index);
+                            break;
+                        }
                     }
                     pool.Publish(index, capturedSequence);
 
@@ -1070,9 +1085,12 @@ public static class RealtimeEncoder
                 // full-length audio track, i.e. the A/V desync of --no-realtime.
                 if (!o.RealTime && previousIndex >= 0)
                 {
+                    // v7.9.9.3: SpinWait backs off; the old Sleep(0) loop ran a
+                    // whole core at 100% while waiting for a slow decoder.
+                    var backoff = new SpinWait();
                     while (pool.ReadyCount == 0 && !captureState.Done
                            && !cancellationToken.IsCancellationRequested)
-                        Thread.Sleep(0);
+                        backoff.SpinOnce();
                     if (pool.ReadyCount == 0 && captureState.Done) break;
                 }
 

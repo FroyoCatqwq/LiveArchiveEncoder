@@ -47,6 +47,9 @@ public static class OutputFile
     /// v7.9.8.10's "keep the finished part" path owns that case and the e2e
     /// suite pins its output.</para>
     /// </summary>
+    /// <summary>Type-init timestamp: a .part created after this belongs to a live run.</summary>
+    private static readonly DateTime StartedUtc = DateTime.UtcNow;
+
     public static (bool Ok, string? Error) EnsureTargetAvailable(FileInfo final)
     {
         string dir = Path.GetDirectoryName(final.FullName) ?? ".";
@@ -66,11 +69,10 @@ public static class OutputFile
             }
             catch (IOException)
             {
-                // v7.9.9.2: "either delete it or end the holding process". The
-                // usual holder is the ffplay WE launched after the last encode.
-                // Close exactly those, then probe again. Never touch a player
-                // the user opened from elsewhere.
-                ChildProcesses.KillAll();
+                // v7.9.9.3: close only the players WE started FOR THIS FILE.
+                // The old KillAll() also closed unrelated playback of B and C,
+                // and a stale .part could trigger it for no reason at all.
+                ChildProcesses.KillAll(final.FullName);
                 try
                 {
                     using var probe = new FileStream(final.FullName, FileMode.Open,
@@ -84,28 +86,35 @@ public static class OutputFile
             }
         }
 
-        // Remove stale .part siblings from earlier crashed runs, best effort.
-        // A locked one is a hard error: the new run would collide with it.
+        // v7.9.9.3: glob-filtered scan (no full-directory walk), and ONLY
+        // leftovers from an EARLIER process that are not locked. A part from a
+        // concurrent encode is created after we started; deleting it on POSIX /
+        // UNC succeeds and the other FFmpeg silently loses its output.
         string prefix = Path.GetFileNameWithoutExtension(final.Name) + ".";
         string marker = ".part" + final.Extension;
         try
         {
-            foreach (string path in Directory.EnumerateFiles(dir))
+            foreach (string path in Directory.EnumerateFiles(dir, "*" + marker))
             {
                 string name = Path.GetFileName(path);
-                if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                    || !name.EndsWith(marker, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (File.GetCreationTimeUtc(path) >= StartedUtc) continue;
+                try
+                {
+                    // Windows: a live FFmpeg holds the part open. POSIX has no
+                    // mandatory locks, but the creation-time guard covers it.
+                    using var probe = new FileStream(path, FileMode.Open,
+                        FileAccess.ReadWrite, FileShare.None);
+                }
+                catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+                { continue; }
+
                 try { File.Delete(path); }
                 catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
                 {
-                    // Same reasoning: a leftover player may be holding the part.
-                    ChildProcesses.KillAll();
-                    try { File.Delete(path); }
-                    catch (Exception)
-                    {
-                        return (false, $"stale part file is in use: {path}; "
-                            + "close the player holding it before encoding");
-                    }
+                    return (false, $"stale part file is in use: {path}; "
+                        + "close the program holding it before encoding");
                 }
             }
         }

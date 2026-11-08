@@ -45,15 +45,17 @@ public sealed class V799Tests
     }
 
     [Test]
-    public async Task PipelinesLineReaderStopsWhenTheCallbackSaysSo()
+    public async Task DiagnosticsReaderKeepsAllThreeLines()
     {
         byte[] bytes = System.Text.Encoding.UTF8.GetBytes("one\ntwo\nthree\n");
         using var stream = new MemoryStream(bytes);
         var lines = new List<string>();
-        // DiagnosticsReaderAsync always returns true; exercise the reader's own
-        // contract through ProgressReaderAsync-style data instead.
+        // DiagnosticsReaderAsync's callback returns void; it cannot stop early.
+        // The test used to claim to exercise "false stops the reader" while
+        // only counting lines, so the name is now what it actually asserts.
         await PipeReaders.DiagnosticsReaderAsync(stream, lines.Add, CancellationToken.None);
         await Assert.That(lines.Count).IsEqualTo(3);
+        await Assert.That(string.Join("|", lines)).IsEqualTo("one|two|three");
     }
 
     [Test]
@@ -67,8 +69,14 @@ public sealed class V799Tests
     [Test]
     public async Task TheRunLogHasAStableCorrelationId()
     {
-        await Assert.That(AppLog.RunId.Length).IsGreaterThan(4);
-        await Assert.That(AppLog.RunId).IsEqualTo(AppLog.RunId);
-        await Assert.That(AppLog.CurrentOperation.Length).IsGreaterThan(0);
+        string first = AppLog.RunId;
+        await Assert.That(first.Length).IsGreaterThan(4);
+        // v7.9.9.3: the old assertion compared the property with itself and
+        // passed for ANY implementation, including one that generated a new id
+        // on every read. Capture once, then verify stability.
+        await Assert.That(AppLog.RunId).IsEqualTo(first);
+        string operation = AppLog.CurrentOperation;
+        await Assert.That(operation.Length).IsGreaterThan(0);
+        await Assert.That(AppLog.CurrentOperation).IsEqualTo(operation);
     }
 }

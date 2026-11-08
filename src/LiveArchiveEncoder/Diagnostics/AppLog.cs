@@ -125,6 +125,17 @@ public static class AppLog
         }
         catch (Exception)
         {
+            // v7.9.9.3: tear down the half-built logger first. Build() reads
+            // the static _context, so reusing it would register the SAME sink
+            // on both loggers (double-counted events, a leaked file handle and
+            // a sampler that never sees a clean state).
+            try { _serilog?.Dispose(); } catch (Exception) { /* best effort */ }
+            try { _sampler?.Dispose(); } catch (Exception) { /* best effort */ }
+            _serilog = null;
+            _sampler = null;
+            _logger = null;
+            _context = null;
+
             // Fall back to a temp directory; if that fails too, logging is
             // simply unavailable and the program carries on unchanged.
             try
@@ -386,6 +397,13 @@ public static class AppLog
 
         public void Emit(LogEvent logEvent)
         {
+            // v7.9.9.3: FlushContext writes the ring back through this SAME
+            // logger. Without this guard every ctx[...] becomes a fresh ring
+            // item, the next error re-emits those copies, and the 200-slot
+            // ring fills with echoes of itself instead of real context.
+            if (logEvent.MessageTemplate.Text.StartsWith("ctx[", StringComparison.Ordinal))
+                return;
+
             _items.Enqueue((logEvent.Level, logEvent.RenderMessage()));
             while (_items.Count > Capacity) _items.TryDequeue(out _);
         }
@@ -452,8 +470,21 @@ public static class AppLog
     {
         // Never let the update token or a URL's userinfo reach the log.
         string? token = Environment.GetEnvironmentVariable("LAE_UPDATE_TOKEN");
-        if (!string.IsNullOrEmpty(token))
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            // v7.9.9.3: SelfUpdate trims the token before use. A value with
+            // surrounding spaces used to leave the actually-sent credential
+            // ("abc") unredacted in URLs and exception text.
+            string trimmed = token.Trim();
             value = value.Replace(token, "***", StringComparison.Ordinal);
+            if (trimmed.Length > 0)
+            {
+                if (!string.Equals(trimmed, token, StringComparison.Ordinal))
+                    value = value.Replace(trimmed, "***", StringComparison.Ordinal);
+                value = value.Replace(Uri.EscapeDataString(trimmed), "***",
+                    StringComparison.Ordinal);
+            }
+        }
 
         // v7.9.9.2: userinfo may have no scheme at all ("--proxy
         // user:pass@host:8080"), and a URL may contain several '@'. Use the

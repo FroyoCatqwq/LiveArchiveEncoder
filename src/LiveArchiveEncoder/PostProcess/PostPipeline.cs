@@ -68,7 +68,8 @@ public sealed class PostProcessOutcome
 public static class PostPipeline
 {
     public static PostProcessOutcome Run(
-        string ffmpeg, string livePath, Config config)
+        string ffmpeg, string livePath, Config config,
+        CancellationToken cancellationToken = default)
     {
         var outcome = new PostProcessOutcome { LivePath = livePath, FinalPath = livePath };
 
@@ -91,7 +92,8 @@ public static class PostPipeline
             // using `output` here reported success for a nonexistent file and
             // broke every later hop of the chain.
             (bool ok, string? error, string? placed) =
-                Recompress.ApplyWithPath(ffmpeg, input, output, stages[i]);
+                Recompress.ApplyWithPath(ffmpeg, input, output, stages[i],
+                    cancellationToken);
 
             if (!ok)
             {

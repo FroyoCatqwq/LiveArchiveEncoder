@@ -741,21 +741,26 @@ public static class Toolchain
             while ((line = reader.ReadLine()) is not null) lines.Writer.TryWrite(line);
         }
 
+        CancellationToken token = Core.Interrupt.CurrentToken;
         var tail = new System.Text.StringBuilder();
         Task consumer = Task.Run(async () =>
         {
             await foreach (string line in lines.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                // v7.9.9.1: a logging callback that throws must not kill the
-                // drain -- otherwise the pipes keep writing to a channel nobody
-                // reads (a multi-GB download used to grow there without bound).
-                try { log?.Invoke(line); } catch (Exception) { /* best effort */ }
-                AppLog.Sampled("toolchain.output {Line}", line);
-                // v7.9.9.2: always append, then trim. The old outer guard froze
-                // the buffer at the FIRST 4000 chars, so a download/7z failure
-                // that printed its reason later was never in the diagnostic.
-                tail.Append(line).Append('\n');
-                if (tail.Length > 4000) tail.Remove(0, tail.Length - 4000);
+                // v7.9.9.3: protect the WHOLE body. AppLog.Close() disposes
+                // the sampler, so a concurrent AppLog.Sampled can throw
+                // ObjectDisposedException; a faulted consumer used to surface
+                // as an unhandled exception from Install().
+                try
+                {
+                    try { log?.Invoke(line); } catch (Exception) { /* best effort */ }
+                    AppLog.Sampled("toolchain.output {Line}", line);
+                    // v7.9.9.2: always append, then trim. The old outer guard
+                    // froze the buffer at the FIRST 4000 chars.
+                    tail.Append(line).Append('\n');
+                    if (tail.Length > 4000) tail.Remove(0, tail.Length - 4000);
+                }
+                catch (Exception) { /* keep draining the channel */ }
             }
         });
 
@@ -763,14 +768,27 @@ public static class Toolchain
         Task errTask = Task.Run(() => Pipe(proc.StandardError));
         try
         {
-            Task.WaitAll(outTask, errTask);
+            // v7.9.9.3: honour Ctrl+C. A grandchild that inherited the pipes
+            // can keep ReadLine() from ever seeing EOF, so poll instead of an
+            // unbounded WaitAll, and kill the whole tree on the way out.
+            while (!Task.WaitAll(new[] { outTask, errTask }, 250))
+            {
+                token.ThrowIfCancellationRequested();
+            }
+        }
+        catch (Exception)
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
+            catch (Exception) { /* already gone */ }
+            throw;
         }
         finally
         {
             // Complete even when a reader threw, or the consumer waits forever.
             lines.Writer.TryComplete();
         }
-        consumer.GetAwaiter().GetResult();
+        try { consumer.GetAwaiter().GetResult(); }
+        catch (Exception) { /* diagnostics only */ }
 
         proc.WaitForExit();
         return (proc.ExitCode, tail.ToString());

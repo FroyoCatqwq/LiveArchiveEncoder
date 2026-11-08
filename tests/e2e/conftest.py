@@ -21,6 +21,24 @@ import pytest
 
 import harness
 
+# v7.9.9.3: CPython 3.15.2 on Windows raises WinError 448 ("untrusted mount
+# point") from Path.resolve() for pytest's own stale `*current` symlinks.
+# pytest calls that inside pytest_sessionfinish, turning a fully green run into
+# exit code 1 with no failed tests. That cleanup is best-effort by design and
+# none of our tests depend on it, so make it tolerant on Windows only.
+if os.name == "nt":
+    import _pytest.tmpdir as _pytest_tmpdir
+
+    _original_cleanup = getattr(_pytest_tmpdir, "cleanup_dead_symlinks", None)
+    if _original_cleanup is not None:
+        def _tolerant_cleanup_dead_symlinks(root):
+            try:
+                _original_cleanup(root)
+            except OSError:
+                pass
+
+        _pytest_tmpdir.cleanup_dead_symlinks = _tolerant_cleanup_dead_symlinks
+
 
 def pytest_configure(config: pytest.Config) -> None:
     workers = getattr(config.option, "numprocesses", None)

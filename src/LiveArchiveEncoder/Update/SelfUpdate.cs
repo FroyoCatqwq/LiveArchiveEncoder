@@ -687,12 +687,14 @@ public static class SelfUpdate
         try
         {
             // v7.9.8.10: copy every file in the payload, not just those whose
-            // names start with the product. A new dependency or a renamed
-            // runtimeconfig used to be silently dropped.
-            names = Directory.GetFiles(payloadDir)
-                .Select(Path.GetFileName)
-                .Where(n => n.HasText)
-                .Select(n => n!)
+            // names start with the product. v7.9.9.3: recurse -- self-contained
+            // / AOT payloads contain runtimes/, cs/, de/ ... subdirectories and
+            // the old top-level-only walk silently dropped native libraries and
+            // satellite resources, leaving an install that could not start.
+            names = Directory
+                .EnumerateFiles(payloadDir, "*", SearchOption.AllDirectories)
+                .Select(p => Path.GetRelativePath(payloadDir, p))
+                .Where(n => n.HasText && !n.StartsWith("..", StringComparison.Ordinal))
                 .ToArray();
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
@@ -729,11 +731,20 @@ public static class SelfUpdate
 
             try
             {
+                // Relative paths may contain subdirectories now: build both
+                // the install and the rollback tree before copying.
+                string backupTarget = Path.Combine(backup, name);
+                foreach (string? directory in new[]
+                         { Path.GetDirectoryName(target), Path.GetDirectoryName(backupTarget) })
+                {
+                    if (directory is { Length: > 0 }) Directory.CreateDirectory(directory);
+                }
+
                 // Save the old file before the first overwrite. Without this a
                 // failure on a later file left a mixed install that could not
                 // start and had nothing to restore from.
                 if (File.Exists(target))
-                    File.Copy(target, Path.Combine(backup, name), overwrite: true);
+                    File.Copy(target, backupTarget, overwrite: true);
                 else
                     created.Add(name);   // v7.9.8.13.2: rollback removes it
                 File.Copy(source, staged, overwrite: true);

@@ -1610,6 +1610,13 @@ public static partial class Cui
                 c.RealTime ? L.T("param.realtime.on") : L.T("param.realtime.off"));
             Row(35, L.T("param.extraargs"),
                 c.ExtraEncoderArgs.Length == 0 ? L.T("value.none") : c.ExtraEncoderArgs);
+            // v7.9.9.3: the live encoder's VBV dials are visible too, not just
+            // reachable by typing a raw string into 35. They share the same
+            // ExtraEncoderArgs fragment (single source of truth).
+            List<string> liveTokens = PostProcess.PostArgs.Tokenize(c.ExtraEncoderArgs);
+            Row(36, L.T("param.maxrate"), FlagLabel(liveTokens, "-maxrate"));
+            Row(37, L.T("param.minrate"), FlagLabel(liveTokens, "-minrate"));
+            Row(38, L.T("param.bufsize"), FlagLabel(liveTokens, "-bufsize"));
             // v7.9.8.8: OpenH264's two dials. Shown only for that encoder,
             // because for every other one the row would be a setting that never
             // reaches FFmpeg -- the "q:v 9 under libopenh264" mistake again.
@@ -1697,6 +1704,9 @@ public static partial class Cui
                         }
                         c.ExtraEncoderArgs = extraInput;
                         break;
+                    case "36": EditLiveVbvFlag(c, "-maxrate"); break;
+                    case "37": EditLiveVbvFlag(c, "-minrate"); break;
+                    case "38": EditLiveVbvFlag(c, "-bufsize"); break;
                     case "7":
                         c.Threads = ReadInt(L.T("param.prompt.threads", c.Threads), c.Threads);
                         break;
@@ -2412,7 +2422,8 @@ public static partial class Cui
             if (PostProcess.PostPipeline.Needed(c))
             {
                 PostProcess.PostProcessOutcome post =
-                    PostProcess.PostPipeline.Run(ffmpeg, placedPath, c);
+                    PostProcess.PostPipeline.Run(ffmpeg, placedPath, c,
+                        cancellationToken);
                 finalPath = post.FinalPath;
 
                 foreach (string hop in post.Passes) Console.WriteLine(L.T("post.recompress", hop));
@@ -3021,10 +3032,19 @@ public static partial class Cui
                 ? $"{audioKbpsNow.ToString(CultureInfo.InvariantCulture)} kbps"
                 : L.T("value.auto");
             Console.WriteLine($" a. {L.Pad(L.T("rc.menu.audiokbps"), 30)} = {audioKbpsLabel}");
-            // v7.9.8.4: the chain beyond the first pass. This is the menu row
-            // whose strings shipped in v7.9.8.3 with nothing wired to them, so a
-            // CUI user could not build a two-hop chain at all.
-            Console.WriteLine($" 8. {L.Pad(L.T("rc.menu.extra"), 30)} = "
+            // v7.9.9.3: the generic encoder options used to be CLI-only. They
+            // live in the same fragment as everything else, so they survive
+            // codec/quality edits and show up in --emit-args.
+            Console.WriteLine($" b. {L.Pad(L.T("rc.menu.maxrate"), 30)} = {FlagLabel(tokens, "-maxrate")}");
+            Console.WriteLine($" c. {L.Pad(L.T("rc.menu.minrate"), 30)} = {FlagLabel(tokens, "-minrate")}");
+            Console.WriteLine($" d. {L.Pad(L.T("rc.menu.bufsize"), 30)} = {FlagLabel(tokens, "-bufsize")}");
+            Console.WriteLine($" e. {L.Pad(L.T("rc.menu.preset"), 30)} = {FlagLabel(tokens, "-preset")}");
+            Console.WriteLine($" f. {L.Pad(L.T("rc.menu.profile"), 30)} = {FlagLabel(tokens, "-profile:v")}");
+            Console.WriteLine($" g. {L.Pad(L.T("rc.menu.channels"), 30)} = {FlagLabel(tokens, "-ac")}");
+            // v7.9.8.4: the chain beyond the first pass. v7.9.9.3: this is the
+            // pass-2+ CHAIN, not the CLI's --recompress-extra free-form args --
+            // renamed so the two are no longer confused.
+            Console.WriteLine($" 8. {L.Pad(L.T("rc.menu.chain"), 30)} = "
                 + (c.Recompress.Extra.Count == 0
                     ? L.T("value.none")
                     : L.T("rc.menu.extra.value", c.Recompress.Extra.Count)));
@@ -3038,6 +3058,12 @@ public static partial class Cui
                 case "a":
                     EditRecompressAudioKbps(c);
                     break;
+                case "b": EditSecondPassFlag(c, "-maxrate", true); break;
+                case "c": EditSecondPassFlag(c, "-minrate", true); break;
+                case "d": EditSecondPassFlag(c, "-bufsize", true); break;
+                case "e": EditSecondPassFlag(c, "-preset", false); break;
+                case "f": EditSecondPassFlag(c, "-profile:v", false); break;
+                case "g": EditSecondPassFlag(c, "-ac", false); break;
                 case "9":
                     // v7.9.9: "do not use" really deletes the saved chain,
                     // not just disables the stage. The first pass Args and
@@ -3194,6 +3220,80 @@ public static partial class Cui
         c.Recompress.Args = ComposeSecondPass(tokens, codec, quality, audio, kbps);
         Console.WriteLine(L.T("rc.audiokbps.set", kbps));
     }
+
+    /// <summary>Current value of a fragment flag, for a menu row.</summary>
+    private static string FlagLabel(IReadOnlyList<string> tokens, string flag)
+    {
+        for (int i = 0; i < tokens.Count - 1; i++)
+        {
+            if (string.Equals(tokens[i], flag, StringComparison.Ordinal))
+                return tokens[i + 1];
+        }
+        return L.T("value.auto");
+    }
+
+    /// <summary>
+    /// v7.9.9.3: edit one generic encoder flag in the fragment. "none" (or
+    /// "-") removes it. The FINAL fragment is checked for the -b:v dependency
+    /// and for minrate &lt;= maxrate before anything is written back, so the CUI
+    /// can no longer bypass the CLI's VBV rule.
+    /// </summary>
+    private static void EditFragmentFlag(
+        string current, string flag, bool kbps,
+        Func<string, string?>? validate, Action<string> save)
+    {
+        List<string> tokens = PostProcess.PostArgs.Tokenize(current);
+        Console.Write(L.T("rc.prompt.flag", flag, FlagLabel(tokens, flag)));
+        string raw = Ask().Trim();
+        if (raw.Length == 0) return;
+
+        bool clear = raw.Equals("none", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("-", StringComparison.OrdinalIgnoreCase);
+        string? value = null;
+        if (!clear)
+        {
+            if (kbps)
+            {
+                string number = raw;
+                if (number.EndsWith('k') || number.EndsWith('K')) number = number[..^1];
+                if (!int.TryParse(number, NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out int n) || n <= 0 || n > 1_000_000)
+                {
+                    Console.WriteLine(L.T("param.badvalue", raw));
+                    return;
+                }
+                value = n.ToString(CultureInfo.InvariantCulture) + "k";
+            }
+            else value = raw;
+        }
+
+        string candidate = PostProcess.FragmentEditor.SetFlag(current, flag, value);
+        string? error = validate?.Invoke(candidate);
+        if (error is null && candidate.Trim().Length > 0)
+        {
+            (List<string> _, string? parseError) = PostProcess.PostArgs.Parse(candidate);
+            error = parseError;
+        }
+        if (error is not null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.vbv.bad", error)}");
+            return;
+        }
+        save(PostProcess.FragmentEditor.FirstWins(candidate));
+        Console.WriteLine(L.T("rc.flag.set", flag, value ?? L.T("value.none")));
+    }
+
+    /// <summary>Second pass: the fragment must carry -b:v when VBV is used.</summary>
+    private static void EditSecondPassFlag(Config c, string flag, bool kbps) =>
+        EditFragmentFlag(c.Recompress.Args, flag, kbps,
+            PostProcess.FragmentEditor.ValidateVbv,
+            value => c.Recompress.Args = value);
+
+    /// <summary>Live pass: the encoder generates its own -b:v, so only bounds apply.</summary>
+    private static void EditLiveVbvFlag(Config c, string flag) =>
+        EditFragmentFlag(c.ExtraEncoderArgs, flag, true,
+            PostProcess.FragmentEditor.ValidateBounds,
+            value => c.ExtraEncoderArgs = value);
 
     /// <summary>
     /// The passes after the first one (v7.9.8.4).
@@ -3397,7 +3497,11 @@ public static partial class Cui
             audioKbps ?? KbpsOf(tokens, "-b:a"),
             IntOf(tokens, "-ar"),
             IntOf(tokens, "-ac")));
-        return string.Join(' ', parts);
+        // v7.9.9.3: the catalog also emits -preset / -pix_fmt. Keep the FIRST
+        // occurrence of single-value flags, so a value the user typed here is
+        // not silently overridden by a later generated duplicate (FFmpeg is
+        // last-wins).
+        return PostProcess.FragmentEditor.FirstWins(string.Join(' ', parts));
     }
 
     /// <summary>Whatever follows <c>-crf</c> or <c>-q:v</c>, or "" when neither is there.</summary>
@@ -3505,13 +3609,16 @@ public static partial class Cui
         string confirm = Ask().Trim().ToLowerInvariant();
         if (confirm is not ("" or "y" or "yes")) return;
 
+        // v7.9.9.3: the CUI's direct-recompress path must honour Ctrl+C too.
+        CancellationToken directToken = Core.Interrupt.BeginOperation();
         string input = src.FullName;
         for (int i = 0; i < stages.Count; i++)
         {
             try
             {
                 (bool ok, string? failure, string? placed) =
-                    PostProcess.Recompress.ApplyWithPath(ffmpeg, input, outputs[i], stages[i]);
+                    PostProcess.Recompress.ApplyWithPath(
+                        ffmpeg, input, outputs[i], stages[i], directToken);
                 if (!ok)
                 {
                     string stage = stages.Count > 1 ? $"recompress {i + 1}/{stages.Count}" : "recompress";

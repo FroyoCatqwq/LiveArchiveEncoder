@@ -466,6 +466,11 @@ public static class Cli
                 // the user typed is theirs to keep.
                 OutputIsAuto = !args.Output.HasText,
                 RecentDirectories = [.. stored.RecentDirectories],
+                // v7.9.9.3: a CLI-supplied --extra-encoder-args must be
+                // remembered in the snapshot, so --save-config / --emit-args
+                // (and the next CUI session) see it. Previously it reached the
+                // encoder but was never written back.
+                ExtraEncoderArgs = args.ExtraEncoderArgs ?? stored.ExtraEncoderArgs ?? "",
                 StartTimeSeconds = args.StartTime,
                 EndTimeSeconds = args.EndTime,
                 Encoder = encoder,
@@ -782,7 +787,8 @@ public static class Cli
         if (PostProcess.PostPipeline.Needed(config))
         {
             PostProcess.PostProcessOutcome post =
-                PostProcess.PostPipeline.Run(ffmpeg, placedPath, config);
+                PostProcess.PostPipeline.Run(ffmpeg, placedPath, config,
+                    cancellationToken);
             finalPath = post.FinalPath;
 
             if (!args.Quiet)
@@ -957,13 +963,15 @@ public static class Cli
             }
         }
 
+        // v7.9.9.3: --recompress-only must honour Ctrl+C too.
+        CancellationToken recompressToken = Core.Interrupt.BeginOperation();
         string hopInput = src.FullName;
         for (int i = 0; i < stages.Count; i++)
         {
             // v7.9.9.2: a held target is saved as "name (2).ext"; the next hop
             // must read that file, not the name it could not use.
             (bool ok, string? error, string? placed) = PostProcess.Recompress.ApplyWithPath(
-                ffmpeg, hopInput, outputs[i].FullName, stages[i]);
+                ffmpeg, hopInput, outputs[i].FullName, stages[i], recompressToken);
             if (!ok)
             {
                 string stage = stages.Count > 1 ? $"recompress {i + 1}/{stages.Count}" : "recompress";
@@ -1072,19 +1080,6 @@ public static class Cli
     {
         var rc = new RecompressSettings { Enabled = false };
 
-        // v7.9.9.2: FFmpeg silently ignores -maxrate/-bufsize/-minrate unless
-        // a target bitrate is present. Whether -b:v actually lands in the
-        // fragment is checked AFTER the pass is built (below) -- a kbps flag
-        // with no codec / era / hand-written args produces an empty pass.
-        bool vbvAsked = args.RecompressMaxrate is not null
-            || args.RecompressMinrate is not null || args.RecompressBufsize is not null;
-        if (args.RecompressMaxrate is { } maxRate && args.RecompressMinrate is { } minRate
-            && minRate > maxRate)
-        {
-            return (rc, $"--recompress-minrate ({minRate}) must not exceed "
-                + $"--recompress-maxrate ({maxRate})");
-        }
-
         // One entry per transcode, in the order written. Without any flags the
         // chain is the single era pass (or a single blank mp4 pass that the
         // Enabled flag keeps from running).
@@ -1184,14 +1179,13 @@ public static class Cli
             if (i == 0)
             {
                 // v7.9.9.2: VBV triple and free-form extras apply to the first
-                // pass. ComposeSecondPass now preserves them across CUI edits.
-                rc.Args = WithExtras(pass.Args, ExtraSecondPassArgs(args));
-                if (vbvAsked && !rc.Args.Contains("-b:v", StringComparison.Ordinal))
-                {
-                    return (rc, "--recompress-maxrate/-minrate/-bufsize need a target bitrate: "
-                        + "give --recompress-video-kbps together with --recompress-codec, "
-                        + "or -b:v inside --recompress-args");
-                }
+                // pass. v7.9.9.3: merge instead of concatenating (no duplicate
+                // -maxrate/-b:v), and validate the FINAL fragment through the
+                // same rule the CUI menus use.
+                rc.Args = PostProcess.FragmentEditor.Merge(
+                    pass.Args, ExtraSecondPassArgs(args));
+                string? vbvError = PostProcess.FragmentEditor.ValidateVbv(rc.Args);
+                if (vbvError is not null) return (rc, vbvError);
                 rc.Container = pass.Container;
             }
             else
@@ -1240,9 +1234,6 @@ public static class Cli
         if (args.RecompressExtra is { Length: > 0 } extra) parts.Add(extra);
         return string.Join(' ', parts);
     }
-
-    private static string WithExtras(string fragment, string extras) =>
-        extras.Length == 0 ? fragment : (fragment + " " + extras).Trim();
 
     private static (RecompressPass Pass, string? Error) BuildPass(
         string fragment, string? container, CliOptions args,

@@ -115,7 +115,15 @@ public static class NetworkProbe
             ? FromIperf3(iperf3Host!, requiredKbps)
             : FromReads(source, requiredKbps);
 
-        Cache[key] = measured;
+        // v7.9.9.3: a transient failure must NOT be cached for the whole
+        // session -- one bad read used to disable sharding until restart, even
+        // after the network recovered. Cap the cache so long CUI sessions do
+        // not accumulate an entry per (source, kbps) pair forever.
+        if (measured is not null)
+        {
+            if (Cache.Count >= 256) Cache.Clear();
+            Cache[key] = measured;
+        }
         return measured;
     }
 

@@ -94,45 +94,45 @@ public static class PipeReaders
         PipeReader reader = PipeReader.Create(stream, new StreamPipeReaderOptions(
             bufferSize: BlockSize, minimumReadSize: BlockSize, leaveOpen: true));
         byte[] line = new byte[512];
+        // v7.9.9.3: a false from onLine means "stop delivering lines", NOT
+        // "stop draining". Returning immediately left the child's stderr pipe
+        // unread, which fills up and deadlocks the process. Keep reading to EOF
+        // and simply stop emitting.
+        bool stopped = false;
 
         try
         {
             while (!token.IsCancellationRequested)
             {
                 ReadResult result = await reader.ReadAsync(token).ConfigureAwait(false);
-                if (result.IsCanceled) break;
+                if (result.IsCanceled)
+                {
+                    reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+                    break;
+                }
 
                 ReadOnlySequence<byte> buffer = result.Buffer;
                 var sequence = new SequenceReader<byte>(buffer);
 
                 while (sequence.TryReadTo(out ReadOnlySequence<byte> raw, (byte)'\n'))
                 {
-                    if (!Emit(raw, ref line, onLine))
-                    {
-                        reader.AdvanceTo(buffer.End);
-                        return;
-                    }
+                    if (!stopped && !Emit(raw, ref line, onLine)) stopped = true;
                 }
 
                 // v7.9.9.2: output with no \n at all never reaches Emit, so
                 // PipeReader would keep the whole prefix buffered until exit
                 // and grow without bound (a \r-only progress stream does this).
-                // Flush MaxLine-sized chunks; the remaining partial line stays.
                 while (buffer.Length - sequence.Consumed > MaxLine)
                 {
                     ReadOnlySequence<byte> chunk = buffer.Slice(sequence.Position, MaxLine);
-                    if (!Emit(chunk, ref line, onLine))
-                    {
-                        reader.AdvanceTo(buffer.End);
-                        return;
-                    }
+                    if (!stopped && !Emit(chunk, ref line, onLine)) stopped = true;
                     sequence.Advance(MaxLine);
                 }
 
                 if (result.IsCompleted)
                 {
                     // A final line without a trailing newline is still a line.
-                    Emit(buffer.Slice(sequence.Position), ref line, onLine);
+                    if (!stopped) Emit(buffer.Slice(sequence.Position), ref line, onLine);
                     reader.AdvanceTo(buffer.End);
                     break;
                 }
@@ -150,7 +150,10 @@ public static class PipeReaders
         }
         finally
         {
-            await reader.CompleteAsync().ConfigureAwait(false);
+            // CompleteAsync can itself throw after a cancelled read; that must
+            // not replace an error the caller already reported.
+            try { await reader.CompleteAsync().ConfigureAwait(false); }
+            catch (Exception ex) { onError?.Invoke(ex); }
         }
     }
 
