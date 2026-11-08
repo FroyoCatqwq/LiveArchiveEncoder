@@ -49,11 +49,13 @@
     <File Path="src/LiveArchiveEncoder/Configuration/ConfigProfiles.cs" />
     <File Path="src/LiveArchiveEncoder/Configuration/Constants.cs" />
     <File Path="src/LiveArchiveEncoder/Configuration/Models.cs" />
+    <File Path="src/LiveArchiveEncoder/Configuration/PathMemory.cs" />
     <File Path="src/LiveArchiveEncoder/Configuration/UserConfig.cs" />
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/Core/">
     <File Path="src/LiveArchiveEncoder/Core/AudioCatalog.cs" />
     <File Path="src/LiveArchiveEncoder/Core/CharSets.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/ChildProcesses.cs" />
     <File Path="src/LiveArchiveEncoder/Core/EncoderMath.cs" />
     <File Path="src/LiveArchiveEncoder/Core/EnvCheck.cs" />
     <File Path="src/LiveArchiveEncoder/Core/FileExtensions.cs" />
@@ -199,6 +201,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/UpdateTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V79812Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V798132Tests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/V7992Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V799Tests.cs" />
   </Folder>
   <Folder Name="/tests/e2e/">
@@ -209,6 +212,7 @@
     <File Path="tests/e2e/test_compare_matrix.py" />
     <File Path="tests/e2e/test_config_conversion.py" />
     <File Path="tests/e2e/test_cui_smoke.py" />
+    <File Path="tests/e2e/test_direct_and_paths.py" />
     <File Path="tests/e2e/test_era_quality.py" />
     <File Path="tests/e2e/test_error_paths.py" />
     <File Path="tests/e2e/test_feature_sweep.py" />

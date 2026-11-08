@@ -170,11 +170,33 @@ public static partial class Cui
                     }
                     break;
                 case "2":
+                    // v7.9.9.2: remembered directories, newest first. "rN"
+                    // picks one; naming a directory directly also works.
+                    if (c.RecentDirectories.Count > 0)
+                    {
+                        Console.WriteLine(L.T("output.recent"));
+                        for (int i = 0; i < c.RecentDirectories.Count; i++)
+                            Console.WriteLine($"  r{i + 1}. {c.RecentDirectories[i]}");
+                    }
                     Console.Write(L.T("output.prompt"));
                     string rawOut = Ask().Trim().Trim('"');
                     if (rawOut.Length > 0)
                     {
-                        c.OutputPath = new FileInfo(rawOut);
+                        string chosen = rawOut;
+                        if (rawOut.StartsWith('r')
+                            && int.TryParse(rawOut[1..], NumberStyles.Integer,
+                                CultureInfo.InvariantCulture, out int recentIndex)
+                            && recentIndex >= 1 && recentIndex <= c.RecentDirectories.Count)
+                        {
+                            chosen = c.RecentDirectories[recentIndex - 1];
+                        }
+
+                        string? completed = PathMemory.CompleteDirectory(
+                            chosen,
+                            c.InputPath is { } inp
+                                ? Path.GetFileNameWithoutExtension(inp.Name) : "capture",
+                            c.Encoder?.Extension ?? "mp4");
+                        c.OutputPath = new FileInfo(completed ?? chosen);
                         c.OutputIsAuto = false;
                     }
                     else if (c.InputPath is not null && c.Encoder is not null)
@@ -298,6 +320,9 @@ public static partial class Cui
 
     private static void Persist(Config c)
     {
+        // v7.9.9.2: every save refreshes the recently-used directory list.
+        PathMemory.Remember(c.RecentDirectories,
+            c.InputPath?.DirectoryName, c.OutputPath?.DirectoryName);
         if (ConfigStore.Save(ConfigStore.Capture(c))) return;
         Console.WriteLine(L.T("config.savefailed", ConfigStore.DefaultPath));
     }
@@ -1583,6 +1608,8 @@ public static partial class Cui
             // v7.9.9.1: live simulation vs direct compression.
             Row(34, L.T("param.realtime"),
                 c.RealTime ? L.T("param.realtime.on") : L.T("param.realtime.off"));
+            Row(35, L.T("param.extraargs"),
+                c.ExtraEncoderArgs.Length == 0 ? L.T("value.none") : c.ExtraEncoderArgs);
             // v7.9.8.8: OpenH264's two dials. Shown only for that encoder,
             // because for every other one the row would be a setting that never
             // reaches FFmpeg -- the "q:v 9 under libopenh264" mistake again.
@@ -1655,6 +1682,20 @@ public static partial class Cui
                         c.RealTime = !c.RealTime;
                         Console.WriteLine(c.RealTime
                             ? L.T("param.realtime.on") : L.T("param.realtime.off"));
+                        break;
+                    case "35":
+                        // v7.9.9.2: free-form output-side FFmpeg args. Validate
+                        // with the same tokenizer the encoder uses, so a typo is
+                        // rejected here instead of halfway through a live pass.
+                        string extraInput = ReadRaw(L.T("param.prompt.extraargs",
+                            c.ExtraEncoderArgs.Length == 0 ? L.T("value.none") : c.ExtraEncoderArgs));
+                        if (extraInput.Length > 0)
+                        {
+                            (List<string> _, string? extraError) =
+                                PostProcess.PostArgs.Parse(extraInput);
+                            if (extraError is not null) throw new FormatException(extraError);
+                        }
+                        c.ExtraEncoderArgs = extraInput;
                         break;
                     case "7":
                         c.Threads = ReadInt(L.T("param.prompt.threads", c.Threads), c.Threads);
@@ -2288,6 +2329,7 @@ public static partial class Cui
                 // bitrate window, so it runs a single rung.
                 FpsLevels = c.RealTime ? c.FpsLevels : [c.Fps],
                 RealTime = c.RealTime,
+                ExtraEncoderArgs = c.ExtraEncoderArgs,
                 FpsLevelKbps = c.FpsLevelKbps,
                 Quality = c.Qv,
                 Threads = c.Threads,
@@ -3298,6 +3340,21 @@ public static partial class Cui
     /// Rewrite a fragment around a codec choice: the filter chain the user wrote
     /// is kept, the codec/quality/audio arguments are replaced.
     /// </summary>
+    /// <summary>
+    /// Flags that VideoArgs/AudioArgs regenerate. Everything else the user
+    /// hand-wrote -- -preset, -profile:v, -maxrate, -bufsize, -minrate,
+    /// -x264-params, -map, -t, -ss, -metadata ... -- is kept verbatim.
+    /// v7.9.9.2: the old loop kept ONLY -vf, so changing the codec silently
+    /// deleted every other user option.
+    /// </summary>
+    private static readonly HashSet<string> ReplacedSecondPassFlags =
+        new(StringComparer.Ordinal)
+        {
+            "-c:v", "-vcodec", "-crf", "-q:v", "-qscale:v", "-b:v",
+            "-rc_mode", "-allow_skip_frames", "-c:a", "-acodec",
+            "-b:a", "-ar", "-ac", "-pix_fmt",
+        };
+
     internal static string ComposeSecondPass(
         IReadOnlyList<string> tokens, SecondPassVideoCodec codec, int? quality,
         string audioCodec, int? audioKbps, int? videoKbps = null)
@@ -3306,12 +3363,22 @@ public static partial class Cui
 
         for (int i = 0; i < tokens.Count; i++)
         {
-            if (tokens[i] is "-vf" or "-filter:v" or "-filter" && i + 1 < tokens.Count)
+            string token = tokens[i];
+            bool isFilter = token is "-vf" or "-filter:v" or "-filter";
+            if (isFilter && i + 1 < tokens.Count)
             {
-                parts.Add(tokens[i]);
+                parts.Add(token);
                 parts.Add(tokens[i + 1]);
                 i++;
+                continue;
             }
+            if (ReplacedSecondPassFlags.Contains(token))
+            {
+                // Skip the flag AND its value (unless the next token is a flag).
+                if (i + 1 < tokens.Count && !tokens[i + 1].StartsWith('-')) i++;
+                continue;
+            }
+            parts.Add(token);
         }
 
         // v7.9.8.8: a bitrate-only codec keeps whatever -b:v the fragment
@@ -3443,8 +3510,8 @@ public static partial class Cui
         {
             try
             {
-                (bool ok, string? failure) =
-                    PostProcess.Recompress.Apply(ffmpeg, input, outputs[i], stages[i]);
+                (bool ok, string? failure, string? placed) =
+                    PostProcess.Recompress.ApplyWithPath(ffmpeg, input, outputs[i], stages[i]);
                 if (!ok)
                 {
                     string stage = stages.Count > 1 ? $"recompress {i + 1}/{stages.Count}" : "recompress";
@@ -3452,14 +3519,16 @@ public static partial class Cui
                     Console.WriteLine(L.T("post.kept", src.FullName));
                     return;
                 }
+                // v7.9.9.2: follow "name (2).ext" on later hops.
+                input = placed ?? outputs[i];
             }
             catch (Exception exc)
             {
                 Console.WriteLine($"{L.T("error.prefix")}{exc.Message}");
                 return;
             }
-            input = outputs[i];
         }
-        Console.WriteLine(L.T("rc.only.done", outputs[^1]));
+        // v7.9.9.2: `input` now tracks the real placed path through every hop.
+        Console.WriteLine(L.T("rc.only.done", input));
     }
 }

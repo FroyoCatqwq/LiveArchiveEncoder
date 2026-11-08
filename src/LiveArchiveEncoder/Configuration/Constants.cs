@@ -25,7 +25,7 @@ public static class Constants
     /// compares <c>tag_name</c> from the feed with this value, so a forgotten
     /// bump makes the program offer its own version as an upgrade forever.</para>
     /// </summary>
-    public const string Version = "7.9.9.1";
+    public const string Version = "7.9.9.2";
 
     public const int DefaultWidth = 256;
     public const int DefaultHeight = 192;
@@ -39,7 +39,22 @@ public static class Constants
     /// (v7.9.6.1). The old menu path derived <c>[base, 8, 5, 3]</c> and silently
     /// lost the 13 rung on any base above 13.
     /// </summary>
-    public static readonly double[] DefaultFpsLevels = [DefaultFps, 8.0, 5.0, 3.0];
+    /// <summary>
+    /// v7.9.9.2: the default ladder now follows the era-standard rungs that
+    /// <c>EraPreset.SiteLadder()</c> already uses for a 13-15 fps site -- one
+    /// small step at a time (13 → 12 → 10 → 8 → 5). The old 13/8/5/3 came
+    /// verbatim from the Python v6.3.3 port and had no contemporary source;
+    /// its first step threw away 38% of the frame rate, which no portal of the
+    /// period did. Base FPS stays 13 so the v6.3.3 comparison matrix is intact.
+    /// Kept as the single source of truth for every default ladder in the app.
+    /// </summary>
+    public static readonly double[] DefaultFpsLevels = [DefaultFps, 12.0, 10.0, 8.0, 5.0];
+
+    /// <summary>The same ladder in the string form <c>--fps-levels</c> accepts.</summary>
+    public const string DefaultFpsLevelsSpec = "13,12,10,8,5";
+
+    /// <summary>The Python-baseline ladder; used only to migrate old config.json files.</summary>
+    internal static readonly double[] LegacyFpsLevels = [DefaultFps, 8.0, 5.0, 3.0];
 
     public static readonly FrozenSet<string> VideoExtensions =
         new HashSet<string>

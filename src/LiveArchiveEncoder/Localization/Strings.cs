@@ -738,6 +738,9 @@ public static class L
         // v7.9.9: explicit "do not use / delete" entries
         ["era.menu.none"] = "Do not use an era preset (clear the saved one)",
         ["era.none.set"] = "Era preset cleared; the live pass uses your explicit settings.",
+        ["output.recent"] = "Recent directories (type rN to put the product in one):",
+        ["param.extraargs"] = "Extra encoder args",
+        ["param.prompt.extraargs"] = "Extra FFmpeg args [{0}] (blank = clear): ",
         ["param.realtime"] = "Live simulation",
         ["param.realtime.on"] = "on (replay the source's cadence)",
         ["param.realtime.off"] = "off (encode as fast as possible)",
@@ -1472,6 +1475,9 @@ public static class L
         // v7.9.9：显式的「不使用 / 删除」入口
         ["era.menu.none"] = "不使用时代预设（清除已保存的）",
         ["era.none.set"] = "已清除时代预设；实时编码改用你显式给的参数。",
+        ["output.recent"] = "最近目录（输入 rN 把产物放进去）：",
+        ["param.extraargs"] = "附加编码参数",
+        ["param.prompt.extraargs"] = "附加 FFmpeg 参数 [{0}]（留空清除）：",
         ["param.realtime"] = "实时模拟",
         ["param.realtime.on"] = "开（按素材节奏跑）",
         ["param.realtime.off"] = "关（尽快编码）",

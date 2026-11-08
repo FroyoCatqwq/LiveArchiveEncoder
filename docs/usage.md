@@ -229,7 +229,7 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--recover` | `limit × 0.75` | 码率下限，低于它才允许升回帧率 |
 | `--window` | `2.0` | 滚动统计窗口（秒） |
 | `--fps` | `13` | 目标帧率 |
-| `--fps-levels` | `13,8,5,3` | 自适应帧率阶梯，逗号分隔、从高到低；`none`（或 `off`）删除阶梯，全程保持基础帧率。用 `--era` 且没写这一项时，阶梯来自预设 |
+| `--fps-levels` | `13,12,10,8,5` | **v7.9.9.2**：默认阶梯改为当年 13–15 fps 站点的档位（与 `EraPreset.SiteLadder()` 一致），不再是 Python 基线的 13/8/5/3；旧 `config.json` 里恰好还是旧值的会自动迁移。逗号分隔、从高到低；`none`（或 `off`）删除阶梯，全程保持基础帧率。用 `--era` 且没写这一项时，阶梯来自预设 |
 | `--qv` | 按编码器 | 画质，**越小越好**，但**每个编码器读自己的刻度**：libx264/libx265/VP9/AV1 是 CRF（0–51），mpeg4/flv/wmv2/rv10/rv20 等是 `q:v`（2–31），libopenh264 两样都不认、只吃码率。同一个 9 在两种刻度里差 2.9 倍码率，换编码器时数字会按等码率换算（v7.9.8.2） |
 | `--threads` | `16` | 传给 FFmpeg 的线程数 |
 | `--buffer-frames` | `6` | 采集缓冲深度（帧） |
@@ -304,7 +304,10 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--era-aspect` | `source` | **v7.9.6.3**：预设的画幅 `source` / `4:3` / `16:9`，只给编码器真支持的尺寸（见 §7.12） |
 | `--h264` | 跟随预设 | **v7.9.7**：`libx264` 或 `libopenh264`；2010 年及以后的预设默认 OpenH264，直播层与第二遍一起换（见 §7.12） |
 | `--no-era` | — | **v7.9.9**：不使用时代预设，并从写回的 `config.json` 里删除已保存的预设；实时编码只用显式参数。CUI 里对应「时代预设 → `x.` 不使用」；二次压缩菜单 `9.` 则删除整条压缩链 |
-| `--no-realtime` | — | **v7.9.9.1**：不模拟直播节奏，按机器速度尽快编码（直接压缩）。输出与实时模式完全相同，只是不等时间；本次运行强制单级挡位。CUI 里对应「参数 → `34.` 实时模拟」 |
+| `--no-realtime` | — | **v7.9.9.1**：不模拟直播节奏，按机器速度尽快编码（直接压缩）。输出与实时模式完全相同，只是不等时间；本次运行强制单级挡位。CUI 里对应「参数 → `34.` 实时模拟」。**v7.9.9.2 修好了音画不同步**（原来 65 个槽只有 3 个真实帧），现在一帧一槽握手，A/V 时长与实时模式逐项一致 |
+| `--recompress-maxrate` / `--recompress-minrate` / `--recompress-bufsize` | — | **v7.9.9.2**：二次压缩的 VBV 三件套，单位 kbps。**必须与 `-b:v` 一起给**（`--recompress-video-kbps` 或手写 fragment 里的 `-b:v`），否则 FFmpeg 会静默忽略；也拒绝 `minrate > maxrate` |
+| `--recompress-extra` | — | **v7.9.9.2**：追加到二次压缩第一遍的自由 FFmpeg 参数，如 `"-preset slow -profile:v high -ac 1 -b:a 64k"`。改编码器时这些参数不再被抹掉 |
+| `--extra-encoder-args` | — | **v7.9.9.2**：追加到**直播编码**命令输出参数段的自由 FFmpeg 参数，如 `"-maxrate 300k -bufsize 600k"`；用与 `--recompress-args` 相同的引号解析。该设置会被记住并出现在 `--emit-args` 里 |
 | `--net-test PATH\|URL` | — | **v7.9.6.3**：测量该源的链路并打印并行判定，不编码（见 §7.8.4） |
 | `--iperf3 HOST[:PORT]` | — | **v7.9.6.3**：用 iperf3 量链路本身作为参考；需对端有 iperf3 服务器 |
 | `--emit-args` / `--emit-args=FILE` | — | **v7.9.1**：把设置打印成等价命令行后退出；带 `=FILE` 时从一个配置文件读设置（见 §7.6） |
@@ -2372,6 +2375,14 @@ LiveArchiveEncoder --update-check      # 会自动直连 GitHub，不走前沿
 | `ERROR: input not found` | 路径不对 | 注意路径含空格要加引号 |
 | 一堆 CUDA/cuvid 警告 | 机器没 NVIDIA 或驱动不匹配 | 默认已关闭硬件解码；若手动开了 `--hwaccel cuda`，改回 `--hwaccel off` |
 | 输出文件只有音轨 / 时长不对 | 老式 muxer 的坑（RoQ、RealMedia 都出现过） | 默认 `inline` 模式不会遇到；如果用 `--audio-mode separate`，工具内置了 3 帧预演 + 输出解码校验，会拦下并自动回退到单进程 |
+| 字幕烧录后**中文是方块** | ASS 点名的字体不在 `fonts` 目录里，libass 挑了拉丁字体顶上 | 往 `%LOCALAPPDATA%\LiveArchiveEncoder\fonts\`（Linux `~/.local/share/LiveArchiveEncoder/fonts/`）放一个中文字体（msyh.ttc / simhei.ttf / Noto*CJK）；目录可用 `LAE_FONT_DIR` 改。见 §7.12 |
+| `recompress` 报 `'-i' is not allowed here` / `looks like an output file name` | 参数段里写了输入或输出 | 参数段只写中间部分，`-i` 和输出路径由程序生成；见 §7.12 |
+| `--parallel 4` 给了却"没生效" | 输入在网络驱动器上（UNC / `smb://` / 映射盘 / CIFS 挂载） | 这是故意回退成单遍：分片读同一个网络文件会让画质在中间塌一段。把源拷到本地再分片，或接受单遍；见 §7.8 |
+| `pal8 frames cannot be stored in 'matroska'` | 调色板格式只能进 AVI / MOV：Matroska/ASF 存未知 VfW 编码器时不带调色板，画面会是纯黑 | 改用 `.avi` / `.mov`，或换一个不需要调色板的像素格式（`--pix-fmt yuv420p`）；见 §7.17 |
+| `encoder 'xxx' cannot take yuv420p10le` | 该编码器不声明这个像素格式 | `--list-pix-fmts --encoder xxx` 看它到底吃哪些；老编码器多数只吃 8 位 |
+| 请求了 `gray` 但文件报 `yuvj420p` | 编码器把 gray 当输入接受、编码时按 4:2:0 写（libx264 实测如此） | 这是 note 不是错误；要真的灰度就改用 `cinepak`/`qtrle` 这类原生 gray 编码器 |
+| 远程源录到一半**画质突然变糊** | 网络抖动，实时节拍落后 → 自适应控制器误判码率太高而连续降档 | 同上，这是实时工具对线路的诚实反应；换稳定链路或降到本地源 |
+| `ERROR: output is in use by another program` | 目标文件被播放器/杀毒软件独占 | 关掉占用者，或换个输出名；本程序自己启动的播放器会被自动关掉。见下节 |
 
 ### 运行日志（v7.9.9 / v7.9.9.1）
 
@@ -2391,13 +2402,22 @@ LiveArchiveEncoder --update-check      # 会自动直连 GitHub，不走前沿
 `ffmpeg.discovered` → `child.spawn` / `child.exit`（完整 argv、退出码、耗时、最后 400
 字符 stderr）→ `output.promoted` → `process.exit`。启动日志里会打印**实际的日志文件
 路径**，不用去猜。
-| 字幕烧录后**中文是方块** | ASS 点名的字体不在 `fonts` 目录里，libass 挑了拉丁字体顶上 | 往 `%LOCALAPPDATA%\LiveArchiveEncoder\fonts\`（Linux `~/.local/share/LiveArchiveEncoder/fonts/`）放一个中文字体（msyh.ttc / simhei.ttf / Noto*CJK）；目录可用 `LAE_FONT_DIR` 改。见 §7.12 |
-| `recompress` 报 `'-i' is not allowed here` / `looks like an output file name` | 参数段里写了输入或输出 | 参数段只写中间部分，`-i` 和输出路径由程序生成；见 §7.12 |
-| `--parallel 4` 给了却"没生效" | 输入在网络驱动器上（UNC / `smb://` / 映射盘 / CIFS 挂载） | 这是故意回退成单遍：分片读同一个网络文件会让画质在中间塌一段。把源拷到本地再分片，或接受单遍；见 §7.8 |
-| `pal8 frames cannot be stored in 'matroska'` | 调色板格式只能进 AVI / MOV：Matroska/ASF 存未知 VfW 编码器时不带调色板，画面会是纯黑 | 改用 `.avi` / `.mov`，或换一个不需要调色板的像素格式（`--pix-fmt yuv420p`）；见 §7.17 |
-| `encoder 'xxx' cannot take yuv420p10le` | 该编码器不声明这个像素格式 | `--list-pix-fmts --encoder xxx` 看它到底吃哪些；老编码器多数只吃 8 位 |
-| 请求了 `gray` 但文件报 `yuvj420p` | 编码器把 gray 当输入接受、编码时按 4:2:0 写（libx264 实测如此） | 这是 note 不是错误；要真的灰度就改用 `cinepak`/`qtrle` 这类原生 gray 编码器 |
-| 远程源录到一半**画质突然变糊** | 网络抖动，实时节拍落后 → 自适应控制器误判码率太高而连续降档 | 同上，这是实时工具对线路的诚实反应；换稳定链路或降到本地源 |
+
+### 路径记忆与文件占用（v7.9.9.2）
+
+* **最近目录**：每次运行把输入文件所在目录与输出目录记进 `config.json` 的
+  `RecentDirectories`（最多 8 个，最新在前；不存在 / 相对 / 重复的路径在读取时清掉）。
+  CUI 的「输出文件」菜单会列出 `r1.`、`r2.`…，输入 `rN` 即可把产物放进那个目录。
+* **目录自动补全**：`--output`（或 CUI 的输出路径）给一个**已存在的目录**时，产物自动命名为
+  `<源文件名>_live.<容器扩展名>` 放进去。给普通文件路径时行为不变，仍当作文件名。
+* **编码前占用检查**：目标文件以 `FileShare.None` 独占探测；同目录上次崩溃残留的
+  `<名字>.<pid+guid>.part<扩展名>` 会被删除。inline / split / 并行 / 二次压缩四条路径都做，
+  避免跑完一遍才发现存不下去。
+* **占用时的处理**：先结束**本程序自己启动的**播放器（ffplay / 外部播放器），再复查；仍被
+  占用则明确报错并提示关掉播放器或换名字。**不会去杀用户从外部打开的程序**。
+* **编码途中才被占用**：`Promote` 重试 4 次后另存为 `名字 (2).ext`，报告与后续二次压缩链
+  都跟随这个真实路径。Windows 上共享冲突与权限拒绝抛的是同一类异常，v7.9.9.2 起统一按
+  「可重试」处理，另存兜底不会再被绕过。
 
 ---
 

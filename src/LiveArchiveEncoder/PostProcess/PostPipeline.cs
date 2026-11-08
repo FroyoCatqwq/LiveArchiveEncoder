@@ -86,7 +86,12 @@ public static class PostPipeline
             // Named from the live product, not from the previous hop: see
             // Recompress.DeriveOutputPath.
             string output = Recompress.DeriveOutputPath(livePath, stages[i].Container, pass);
-            (bool ok, string? error) = Recompress.Apply(ffmpeg, input, output, stages[i]);
+            // v7.9.9.2: follow the file that really landed. When the derived
+            // name was held by a player, Promote saved it as "name (2).ext";
+            // using `output` here reported success for a nonexistent file and
+            // broke every later hop of the chain.
+            (bool ok, string? error, string? placed) =
+                Recompress.ApplyWithPath(ffmpeg, input, output, stages[i]);
 
             if (!ok)
             {
@@ -96,11 +101,12 @@ public static class PostPipeline
                 return outcome;
             }
 
+            string hop = placed ?? output;
             outcome.RecompressRan = true;
-            outcome.Passes.Add(output);
-            outcome.RecompressPath = output;
-            outcome.FinalPath = output;
-            input = output;
+            outcome.Passes.Add(hop);
+            outcome.RecompressPath = hop;
+            outcome.FinalPath = hop;
+            input = hop;
         }
 
         return outcome;

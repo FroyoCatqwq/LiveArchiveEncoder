@@ -114,6 +114,21 @@ public static class PipeReaders
                     }
                 }
 
+                // v7.9.9.2: output with no \n at all never reaches Emit, so
+                // PipeReader would keep the whole prefix buffered until exit
+                // and grow without bound (a \r-only progress stream does this).
+                // Flush MaxLine-sized chunks; the remaining partial line stays.
+                while (buffer.Length - sequence.Consumed > MaxLine)
+                {
+                    ReadOnlySequence<byte> chunk = buffer.Slice(sequence.Position, MaxLine);
+                    if (!Emit(chunk, ref line, onLine))
+                    {
+                        reader.AdvanceTo(buffer.End);
+                        return;
+                    }
+                    sequence.Advance(MaxLine);
+                }
+
                 if (result.IsCompleted)
                 {
                     // A final line without a trailing newline is still a line.

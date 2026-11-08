@@ -49,7 +49,7 @@ public sealed class ResilienceTests
             await Assert.That(loaded).IsNotNull();
 
             // The ladder is never empty: the controller needs a current rung.
-            await Assert.That(loaded!.FpsLevels.Count).IsEqualTo(4);
+            await Assert.That(loaded!.FpsLevels.Count).IsEqualTo(5);
             await Assert.That(loaded.FpsLevelKbps).IsNotNull();
             await Assert.That(loaded.Recompress).IsNotNull();
             await Assert.That(loaded.Subtitles).IsNotNull();

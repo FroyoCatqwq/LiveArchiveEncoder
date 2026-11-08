@@ -177,7 +177,7 @@ public static class EncoderMath
     public static List<double> SelectLevels(double baseFps, IEnumerable<double>? raw)
     {
         IEnumerable<double> rawValues = raw is null
-            ? [baseFps, 8.0, 5.0, 3.0]
+            ? Configuration.Constants.DefaultFpsLevels.Append(baseFps)
             : raw.Append(baseFps);
 
         var values = new List<double>();

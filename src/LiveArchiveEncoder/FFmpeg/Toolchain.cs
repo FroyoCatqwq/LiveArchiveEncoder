@@ -751,11 +751,11 @@ public static class Toolchain
                 // reads (a multi-GB download used to grow there without bound).
                 try { log?.Invoke(line); } catch (Exception) { /* best effort */ }
                 AppLog.Sampled("toolchain.output {Line}", line);
-                if (tail.Length < 4000)
-                {
-                    tail.Append(line).Append('\n');
-                    if (tail.Length > 4000) tail.Remove(0, tail.Length - 4000);
-                }
+                // v7.9.9.2: always append, then trim. The old outer guard froze
+                // the buffer at the FIRST 4000 chars, so a download/7z failure
+                // that printed its reason later was never in the diagnostic.
+                tail.Append(line).Append('\n');
+                if (tail.Length > 4000) tail.Remove(0, tail.Length - 4000);
             }
         });
 

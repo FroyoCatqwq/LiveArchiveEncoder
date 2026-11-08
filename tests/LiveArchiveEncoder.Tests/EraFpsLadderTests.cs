@@ -127,7 +127,8 @@ public sealed class EraFpsLadderTests
 
         await Assert.That(config.Fps).IsEqualTo(20.0);
         // Base first, then the default rungs that still fit under it.
-        await Assert.That(config.FpsLevels).IsEquivalentTo(new[] { 20.0, 13.0, 8.0, 5.0, 3.0 });
+        await Assert.That(config.FpsLevels)
+            .IsEquivalentTo(new[] { 20.0, 13.0, 12.0, 10.0, 8.0, 5.0 });
     }
 
     /// <summary>

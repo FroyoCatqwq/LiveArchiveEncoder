@@ -359,6 +359,10 @@ public static class RealtimeEncoder
 
         // The encoder writes a ".part" sibling; Promote puts it in place only once
         // the run has actually succeeded.
+        // v7.9.9.2: fail fast instead of discovering a player lock after a
+        // whole realtime pass. Also removes stale .part siblings.
+        (bool canWrite, string? lockError) = Core.OutputFile.EnsureTargetAvailable(dst);
+        if (!canWrite) throw new InvalidOperationException(lockError);
         FileInfo part = Core.OutputFile.PartPath(dst);
 
         List<string> decCmd;
@@ -537,6 +541,10 @@ public static class RealtimeEncoder
         Directory.CreateDirectory(stageDir);
         string videoOnly = Path.Combine(stageDir, $"video.{o.Encoder.Extension}");
         string audioOnly = Path.Combine(stageDir, $"audio.{AudioTrack.ContainerFor(o.AudioEncoder!)}");
+        // v7.9.9.2: fail fast instead of discovering a player lock after a
+        // whole realtime pass. Also removes stale .part siblings.
+        (bool canWrite, string? lockError) = Core.OutputFile.EnsureTargetAvailable(dst);
+        if (!canWrite) throw new InvalidOperationException(lockError);
         FileInfo part = Core.OutputFile.PartPath(dst);
 
         // The audio pass has to die with the run. If the video stage fails or the
@@ -811,6 +819,17 @@ public static class RealtimeEncoder
         // encoder shutdown.
         if (duration is not null) cmd.AddRange(["-t", ArgsBuilder.FloatArg(duration.Value)]);
 
+        // v7.9.9.2: free-form output-side encoder args. Placed after the
+        // generated video/audio options but before the muxer/output so they can
+        // override a generated knob (e.g. -preset / -maxrate) as FFmpeg expects.
+        if (o.ExtraEncoderArgs is { Length: > 0 } extra)
+        {
+            (List<string> tokens, string? parseError) = PostProcess.PostArgs.Parse(extra);
+            if (parseError is not null)
+                throw new InvalidOperationException($"--extra-encoder-args: {parseError}");
+            cmd.AddRange(tokens);
+        }
+
         // -rw_timeout is the only write-side resilience option FFmpeg has; the
         // reconnect family is decode-only and would be rejected here.
         cmd.AddRange(Remote.Smb.RemoteWriteArgs(dst.FullName));
@@ -934,6 +953,15 @@ public static class RealtimeEncoder
                     }
 
                     capturedSequence++;
+                    // v7.9.9.2: in direct mode keep at most one frame in flight.
+                    // Publish evicts the oldest when the pool is full and
+                    // TryTakeLatest drops all but the newest, so an unthrottled
+                    // capture thread silently loses programme-time frames.
+                    if (!o.RealTime)
+                    {
+                        while (pool.ReadyCount > 0 && !cancellationToken.IsCancellationRequested)
+                            Thread.Sleep(0);
+                    }
                     pool.Publish(index, capturedSequence);
 
                     // Python resets the deadline when the slot is already overdue
@@ -1033,6 +1061,19 @@ public static class RealtimeEncoder
                     if (captureState.Done) break;
                     Thread.Sleep(Math.Max(1, (int)(Math.Min(0.01, slotInterval) * 1000)));
                     continue;
+                }
+
+                // v7.9.9.2: one decoded frame per output slot in direct mode.
+                // Without this handshake the slot loop outruns the decoder:
+                // TryTakeLatest keeps returning the same sequence and a 5 s clip
+                // became 3 fresh frames + 62 repeats -- a still picture over a
+                // full-length audio track, i.e. the A/V desync of --no-realtime.
+                if (!o.RealTime && previousIndex >= 0)
+                {
+                    while (pool.ReadyCount == 0 && !captureState.Done
+                           && !cancellationToken.IsCancellationRequested)
+                        Thread.Sleep(0);
+                    if (pool.ReadyCount == 0 && captureState.Done) break;
                 }
 
                 // v7.9.9.1: --no-realtime emits slots back to back.

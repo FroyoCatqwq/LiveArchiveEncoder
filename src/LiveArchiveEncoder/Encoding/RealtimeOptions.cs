@@ -21,7 +21,7 @@ public sealed record RealtimeOptions
     public required string DestinationPath { get; init; }
     public required EncoderInfo Encoder { get; init; }
     public double Fps { get; init; } = Constants.DefaultFps;
-    public List<double> FpsLevels { get; init; } = [13.0, 8.0, 5.0, 3.0];
+    public List<double> FpsLevels { get; init; } = [.. Constants.DefaultFpsLevels];
 
     /// <summary>
     /// v7.9.9.1: <c>--no-realtime</c> — encode as fast as the machine allows
@@ -31,6 +31,13 @@ public sealed record RealtimeOptions
     /// programme seconds.
     /// </summary>
     public bool RealTime { get; init; } = true;
+
+    /// <summary>
+    /// v7.9.9.2: free-form extra output-side FFmpeg args (-bufsize/-maxrate/
+    /// -minrate/-profile:v/-preset/-x264-params ...). Parsed with the same
+    /// tokenizer as --recompress-args.
+    /// </summary>
+    public string ExtraEncoderArgs { get; init; } = "";
 
     /// <summary>
     /// Per-rung bitrate thresholds, keyed by FPS. Empty derives them from

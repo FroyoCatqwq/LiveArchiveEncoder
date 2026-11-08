@@ -91,7 +91,9 @@ public static class Player
     {
         var info = new ProcessStartInfo { FileName = exe, UseShellExecute = false };
         foreach (string a in args) info.ArgumentList.Add(a);
-        Process.Start(info);
+        // v7.9.9.2: remember it so the next encode can close a player that is
+        // holding the output open (see OutputFile.EnsureTargetAvailable).
+        Core.ChildProcesses.Track(Process.Start(info));
     }
 
     /// <summary>Local PATH lookup; FFmpegDiscovery.Which is private.</summary>

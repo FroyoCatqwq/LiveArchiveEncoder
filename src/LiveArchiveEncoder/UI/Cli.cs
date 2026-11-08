@@ -177,8 +177,18 @@ public static class Cli
         if (networkSource) Console.WriteLine(Remote.Smb.StabilityHint(sourceForPolicy));
         int parallel = args.Parallel;
 
-        FileInfo dst = !string.IsNullOrEmpty(args.Output)
-            ? new FileInfo(args.Output)
+        // v7.9.9.2: a directory given as --output means "put the product in
+        // there". Derive the filename from the source stem + the encoder's
+        // container; a path that is not a directory keeps the old behaviour.
+        string outputArg = args.Output ?? "";
+        string outputStem = urlInput
+            ? Path.GetFileNameWithoutExtension(Remote.HttpSource.FileNameFromUrl(args.Input!))
+            : Path.GetFileNameWithoutExtension(src!.Name);
+        string? completed = PathMemory.CompleteDirectory(outputArg, outputStem, encoder.Extension);
+        if (completed is not null) outputArg = completed;
+
+        FileInfo dst = outputArg.Length > 0
+            ? new FileInfo(outputArg)
             : DefaultOutput(src, encoder, urlInput ? args.Input! : null);
         if (!urlInput && string.Equals(Path.GetFullPath(dst.FullName), Path.GetFullPath(src!.FullName),
                 StringComparison.OrdinalIgnoreCase))
@@ -438,6 +448,11 @@ public static class Cli
             if (!availableScaleAlgorithms.Contains(scaleAlgo))
                 throw new ArgumentException($"scale algorithm '{scaleAlgo}' is not exposed by this FFmpeg build");
 
+            // v7.9.9.2: remember where this run read from / wrote to. The CUI
+            // offers these next session, and the settings file keeps them.
+            PathMemory.Remember(stored.RecentDirectories,
+                src?.DirectoryName, dst.DirectoryName);
+
             config = new Config
             {
                 // A URL is not a FileInfo and the interactive shell cannot
@@ -450,6 +465,7 @@ public static class Cli
                 // source moved, or the network rule now applies), while a path
                 // the user typed is theirs to keep.
                 OutputIsAuto = !args.Output.HasText,
+                RecentDirectories = [.. stored.RecentDirectories],
                 StartTimeSeconds = args.StartTime,
                 EndTimeSeconds = args.EndTime,
                 Encoder = encoder,
@@ -677,10 +693,13 @@ public static class Cli
             // bitrate window no longer maps to programme seconds, so a ladder
             // would misfire on its first estimate; pin one rung for the run
             // only -- config.FpsLevels (and the settings file) keep the real one.
-            FpsLevels = args.NoRealtime ? [config.Fps] : levels,
+            // v7.9.9.2: the persisted CUI toggle must pin a single rung too,
+            // not just the --no-realtime flag. Both paths have to agree.
+            FpsLevels = (!args.NoRealtime && config.RealTime) ? levels : [config.Fps],
             // The CLI flag is per-run; the persisted choice comes from the CUI
             // toggle. Either one can turn pacing off.
             RealTime = !args.NoRealtime && config.RealTime,
+            ExtraEncoderArgs = args.ExtraEncoderArgs ?? config.ExtraEncoderArgs ?? "",
             FpsLevelKbps = levelKbps,
             Quality = config.Qv,
             QualityExplicit = args.Qv.HasValue,
@@ -941,7 +960,9 @@ public static class Cli
         string hopInput = src.FullName;
         for (int i = 0; i < stages.Count; i++)
         {
-            (bool ok, string? error) = PostProcess.Recompress.Apply(
+            // v7.9.9.2: a held target is saved as "name (2).ext"; the next hop
+            // must read that file, not the name it could not use.
+            (bool ok, string? error, string? placed) = PostProcess.Recompress.ApplyWithPath(
                 ffmpeg, hopInput, outputs[i].FullName, stages[i]);
             if (!ok)
             {
@@ -949,10 +970,12 @@ public static class Cli
                 Console.Error.WriteLine($"ERROR: {L.T("post.failed", stage, error ?? "")}");
                 return 1;
             }
-            hopInput = outputs[i].FullName;
+            hopInput = placed ?? outputs[i].FullName;
         }
 
-        if (!args.Quiet) Console.WriteLine(L.T("rc.only.done", dst.FullName));
+        // v7.9.9.2: report the file that really exists. After an alternate
+        // "(2)" save, `dst` is the name the player was holding, not our output.
+        if (!args.Quiet) Console.WriteLine(L.T("rc.only.done", hopInput));
         return 0;
     }
 
@@ -1048,6 +1071,19 @@ public static class Cli
         string? h264Impl = null)
     {
         var rc = new RecompressSettings { Enabled = false };
+
+        // v7.9.9.2: FFmpeg silently ignores -maxrate/-bufsize/-minrate unless
+        // a target bitrate is present. Whether -b:v actually lands in the
+        // fragment is checked AFTER the pass is built (below) -- a kbps flag
+        // with no codec / era / hand-written args produces an empty pass.
+        bool vbvAsked = args.RecompressMaxrate is not null
+            || args.RecompressMinrate is not null || args.RecompressBufsize is not null;
+        if (args.RecompressMaxrate is { } maxRate && args.RecompressMinrate is { } minRate
+            && minRate > maxRate)
+        {
+            return (rc, $"--recompress-minrate ({minRate}) must not exceed "
+                + $"--recompress-maxrate ({maxRate})");
+        }
 
         // One entry per transcode, in the order written. Without any flags the
         // chain is the single era pass (or a single blank mp4 pass that the
@@ -1147,7 +1183,15 @@ public static class Cli
 
             if (i == 0)
             {
-                rc.Args = pass.Args;
+                // v7.9.9.2: VBV triple and free-form extras apply to the first
+                // pass. ComposeSecondPass now preserves them across CUI edits.
+                rc.Args = WithExtras(pass.Args, ExtraSecondPassArgs(args));
+                if (vbvAsked && !rc.Args.Contains("-b:v", StringComparison.Ordinal))
+                {
+                    return (rc, "--recompress-maxrate/-minrate/-bufsize need a target bitrate: "
+                        + "give --recompress-video-kbps together with --recompress-codec, "
+                        + "or -b:v inside --recompress-args");
+                }
                 rc.Container = pass.Container;
             }
             else
@@ -1183,6 +1227,23 @@ public static class Cli
     /// <c>clip_web.mp4</c>. Only codecs this tool knows by name are checked;
     /// <c>copy</c> and anything newer are left to FFmpeg.</para>
     /// </summary>
+    /// <summary>
+    /// v7.9.9.2: VBV triple and free-form extras, in the same string form the
+    /// rest of the fragment uses. Values are always InvariantCulture numbers.
+    /// </summary>
+    private static string ExtraSecondPassArgs(CliOptions args)
+    {
+        var parts = new List<string>();
+        if (args.RecompressMaxrate is { } max) parts.Add($"-maxrate {max}k");
+        if (args.RecompressMinrate is { } min) parts.Add($"-minrate {min}k");
+        if (args.RecompressBufsize is { } buf) parts.Add($"-bufsize {buf}k");
+        if (args.RecompressExtra is { Length: > 0 } extra) parts.Add(extra);
+        return string.Join(' ', parts);
+    }
+
+    private static string WithExtras(string fragment, string extras) =>
+        extras.Length == 0 ? fragment : (fragment + " " + extras).Trim();
+
     private static (RecompressPass Pass, string? Error) BuildPass(
         string fragment, string? container, CliOptions args,
         PostProcess.EraPreset? era, bool firstPass, bool codecNamed, bool containerPinned)

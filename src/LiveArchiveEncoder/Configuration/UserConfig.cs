@@ -50,7 +50,7 @@ public sealed class UserConfig
     public double StartTimeSeconds { get; set; }
     public double? EndTimeSeconds { get; set; }
     public double Fps { get; set; } = Constants.DefaultFps;
-    public List<double> FpsLevels { get; set; } = [13.0, 8.0, 5.0, 3.0];
+    public List<double> FpsLevels { get; set; } = [.. Constants.DefaultFpsLevels];
 
     /// <summary>
     /// v7.7: bitrate thresholds per ladder rung. Absent from v2 files, which is
@@ -195,6 +195,12 @@ public sealed class UserConfig
 
     /// <summary>v7.9.9.1: false = encode as fast as possible (no live pacing).</summary>
     public bool RealTime { get; set; } = true;
+
+    /// <summary>v7.9.9.2: free-form output-side FFmpeg args for the live encoder.</summary>
+    public string ExtraEncoderArgs { get; set; } = "";
+
+    /// <summary>v7.9.9.2: most-recently-used input/output directories (newest first).</summary>
+    public List<string> RecentDirectories { get; set; } = [];
 
     /// <summary>
     /// v7.9.6.3: frame shape for the applied preset -- "source", "4:3" or
@@ -393,8 +399,19 @@ public static class ConfigStore
     {
         // An empty ladder is not a ladder: the encoder always needs a current
         // rung, so both "absent" and "blank" mean the built-in four.
-        c.FpsLevels = c.FpsLevels is { Count: > 0 } levels ? levels : [13.0, 8.0, 5.0, 3.0];
+        // v7.9.9.2: an old config.json carrying the Python-baseline ladder would
+        // otherwise pin 13/8/5/3 forever. Migrate only that exact unchanged value;
+        // a ladder the user actually chose is left alone.
+        c.FpsLevels = c.FpsLevels is { Count: > 0 } levels
+            ? (levels.SequenceEqual(Constants.LegacyFpsLevels)
+                ? [.. Constants.DefaultFpsLevels]
+                : levels)
+            : [.. Constants.DefaultFpsLevels];
         c.FpsLevelKbps = c.FpsLevelKbps is { } rungs ? [.. rungs.Where(r => r is not null)] : [];
+        // v7.9.9.2: stale/relative/duplicate recent directories must not leak
+        // into the CUI menu or grow the settings file forever.
+        c.RecentDirectories = PathMemory.Normalise(c.RecentDirectories);
+        c.ExtraEncoderArgs ??= "";
 
         // null and [] differ here on purpose: null means "the file predates the
         // field, leave the presets already loaded alone", [] means "none".
@@ -508,6 +525,8 @@ public static class ConfigStore
         EraPreset = c.EraPreset,
         EraNative = c.EraNative,
         RealTime = c.RealTime,
+        ExtraEncoderArgs = c.ExtraEncoderArgs,
+        RecentDirectories = [.. c.RecentDirectories],
         EraAspect = c.EraAspect,
         H264Impl = c.H264Impl,
         CustomEras = [.. c.CustomEras.Select(EraConfigMap.ToConfig)],
@@ -676,6 +695,8 @@ public static class ConfigStore
         c.EraPreset = stored.EraPreset;
         c.EraNative = stored.EraNative;
         c.RealTime = stored.RealTime;
+        c.ExtraEncoderArgs = stored.ExtraEncoderArgs ?? "";
+        c.RecentDirectories = [.. stored.RecentDirectories ?? []];
         c.EraAspect = stored.EraAspect;
         c.H264Impl = stored.H264Impl;
 

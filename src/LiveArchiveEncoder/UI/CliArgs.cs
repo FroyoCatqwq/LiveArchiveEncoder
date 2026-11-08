@@ -180,6 +180,10 @@ public static class CliArgs
         if (!c.EraNative) argv.Add("--era-modern");
         // v7.9.9.1: a direct (non-realtime) encode is a remembered decision.
         if (!c.RealTime) argv.Add("--no-realtime");
+        // v7.9.9.2: extra encoder args are a remembered setting, so the
+        // equivalent command line has to carry them too.
+        if (c.ExtraEncoderArgs is { Length: > 0 } extraArgs)
+            argv.AddRange(["--extra-encoder-args", extraArgs]);
         if (c.EraAspect is { Length: > 0 } eraShape
             && !string.Equals(eraShape, "source", StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--era-aspect", eraShape]);
@@ -251,9 +255,11 @@ public static class CliArgs
         if (chosen.Count == 0)
             chosen.AddRange(c.FpsLevels.Select(f => (f, (FpsRungSetting?)null)));
 
-        bool isDefault = chosen.Count == 4
-            && Same(chosen[0].Fps, 13.0) && Same(chosen[1].Fps, 8.0)
-            && Same(chosen[2].Fps, 5.0) && Same(chosen[3].Fps, 3.0)
+        // v7.9.9.2: compare against the single source of truth instead of a
+        // hard-coded 13/8/5/3, so changing the era-standard ladder cannot make
+        // --emit-args silently start emitting a stale --fps-levels line.
+        bool isDefault = chosen.Count == Constants.DefaultFpsLevels.Length
+            && chosen.Select((e, i) => Same(e.Fps, Constants.DefaultFpsLevels[i])).All(x => x)
             && chosen.All(e => e.Rung?.DropAboveKbps is null && e.Rung?.RiseBelowKbps is null);
         if (isDefault) return null;
 

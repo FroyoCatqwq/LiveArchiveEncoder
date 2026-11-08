@@ -23,7 +23,7 @@ public sealed class CliOptions
     public double? Recover { get; init; }
     public double Window { get; init; } = 2.0;
     public double Fps { get; init; } = 13.0;
-    public string FpsLevels { get; init; } = "13,8,5,3";
+    public string FpsLevels { get; init; } = Configuration.Constants.DefaultFpsLevelsSpec;
 
     /// <summary>
     /// True when <c>--fps-levels</c> appeared on the command line. The default
@@ -341,6 +341,21 @@ public sealed class CliOptions
     public bool NoRealtime { get; init; }
 
     /// <summary>
+    /// v7.9.9.2: VBV trio for the second pass, in kbps. FFmpeg requires
+    /// maxrate/bufsize/minrate to accompany a target bitrate (-b:v); giving them
+    /// alone is silently ignored, so ResolveRecompress refuses that.
+    /// </summary>
+    public int? RecompressMaxrate { get; init; }
+    public int? RecompressMinrate { get; init; }
+    public int? RecompressBufsize { get; init; }
+
+    /// <summary>Free-form extra FFmpeg args appended to the second pass.</summary>
+    public string? RecompressExtra { get; init; }
+
+    /// <summary>Free-form extra FFmpeg args appended to the live encoder command.</summary>
+    public string? ExtraEncoderArgs { get; init; }
+
+    /// <summary>
     /// v7.9.5.1: pick a pass's video codec by name instead of writing a
     /// fragment. The container follows the codec when none was named.
     /// Repeatable, paired by position with the quality and audio flags.
@@ -489,7 +504,7 @@ public static class CliParser
         double? recover = null;
         double window = 2.0;
         double fps = 13.0;
-        string fpsLevels = "13,8,5,3";
+        string fpsLevels = Configuration.Constants.DefaultFpsLevelsSpec;
         bool fpsLevelsExplicit = false;
         bool fpsExplicit = false;
         bool widthExplicit = false;
@@ -583,6 +598,8 @@ public static class CliParser
         bool noRecompress = false;
         bool noEra = false;
         bool noRealtime = false;
+        int? rcMaxrate = null, rcMinrate = null, rcBufsize = null;
+        string? rcExtra = null, liveExtra = null;
         bool recompressOnly = false;
         var recompressCodecs = new List<string>();
         var recompressQualities = new List<int>();
@@ -1045,6 +1062,30 @@ public static class CliParser
                 case "--no-recompress": noRecompress = true; break;
                 case "--no-era": noEra = true; break;
                 case "--no-realtime": noRealtime = true; break;
+                case "--recompress-maxrate":
+                case "--recompress-minrate":
+                case "--recompress-bufsize":
+                {
+                    // `name` is the option; TryValue may advance `i`.
+                    string vbvOption = name;
+                    if (!TryValue(out string vbvRaw)
+                        || !int.TryParse(vbvRaw, NumberStyles.Integer,
+                            CultureInfo.InvariantCulture, out int vbvValue)
+                        || vbvValue <= 0 || vbvValue > 1_000_000)
+                        return (null, $"{vbvOption} requires a positive kbps value");
+                    if (vbvOption == "--recompress-maxrate") rcMaxrate = vbvValue;
+                    else if (vbvOption == "--recompress-minrate") rcMinrate = vbvValue;
+                    else rcBufsize = vbvValue;
+                    break;
+                }
+                case "--recompress-extra":
+                    if (!TryValue(out string rcExtraRaw)) return (null, "--recompress-extra requires a value");
+                    rcExtra = rcExtraRaw.Trim();
+                    break;
+                case "--extra-encoder-args":
+                    if (!TryValue(out string liveExtraRaw)) return (null, "--extra-encoder-args requires a value");
+                    liveExtra = liveExtraRaw.Trim();
+                    break;
                 case "--recompress-only": recompressOnly = true; break;
                 case "--recompress-codec":
                     if (!TryValue(out string recompressCodecValue))
@@ -1266,6 +1307,11 @@ public static class CliParser
             NoRecompress = noRecompress,
             NoEra = noEra,
             NoRealtime = noRealtime,
+            RecompressMaxrate = rcMaxrate,
+            RecompressMinrate = rcMinrate,
+            RecompressBufsize = rcBufsize,
+            RecompressExtra = rcExtra,
+            ExtraEncoderArgs = liveExtra,
             RecompressOnly = recompressOnly,
             RecompressCodecs = recompressCodecs,
             RecompressQualities = recompressQualities,
@@ -1303,7 +1349,7 @@ public static class CliParser
             ("--window", "SEC", "rolling window for the bitrate average (default: 2)"),
             ("--fps", "FPS", "target frame rate (default: 13)"),
             ("--fps-levels", "LIST", "adaptive FPS ladder; per entry FPS, FPS:drop-kbps or "
-                                      + "FPS:drop-kbps:rise-kbps (default: 13,8,5,3)"),
+                                      + "FPS:drop-kbps:rise-kbps (default: 13,12,10,8,5; none = off)"),
             ("--qv", "N", "video quality: CRF for libx264, q:v for other codecs"),
             ("--threads", "N", "FFmpeg thread count (default: 16)"),
             ("--buffer-frames", "N", "capture buffer depth (default: 6)"),
@@ -1438,6 +1484,12 @@ public static class CliParser
             ("--no-era", "", "do not use an era preset and remove the one saved in config.json"),
             ("--no-realtime", "", "encode as fast as the machine allows instead of replaying the "
                                 + "source's wall-clock cadence (direct compression, no live pacing)"),
+            ("--recompress-maxrate", "N", "VBV maxrate in kbps (requires -b:v: --recompress-video-kbps)"),
+            ("--recompress-minrate", "N", "VBV minrate in kbps (requires -b:v)"),
+            ("--recompress-bufsize", "N", "VBV buffer size in kbps (requires -b:v)"),
+            ("--recompress-extra", "ARGS", "extra FFmpeg args for the second pass, e.g. "
+                                         + "\"-preset slow -profile:v high -ac 1 -b:a 64k\""),
+            ("--extra-encoder-args", "ARGS", "extra FFmpeg args appended to the live encoder command"),
             ("--era", "ID", $"apply an era/site preset: {PostProcess.EraPresets.Ids} "
                           + "(custom ids from the settings file also work)"),
             ("--era-modern", "", "render a preset's second pass with libx264 + AAC in MP4 "

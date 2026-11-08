@@ -223,13 +223,15 @@ public sealed class CliArgsTests
             InputPath = "in.rm",
             OutputPath = "out.avi",
             Fps = 25,
-            FpsLevels = [25.0, 13.0, 8.0, 5.0, 3.0],
+            // v7.9.9.2: the era-standard default rungs, plus the derived base.
+            FpsLevels = [25.0, 13.0, 12.0, 10.0, 8.0, 5.0],
             FpsLevelKbps =
             [
                 new FpsRungSetting { Fps = 13.0 },
+                new FpsRungSetting { Fps = 12.0 },
+                new FpsRungSetting { Fps = 10.0 },
                 new FpsRungSetting { Fps = 8.0 },
                 new FpsRungSetting { Fps = 5.0 },
-                new FpsRungSetting { Fps = 3.0 },
             ],
         };
 

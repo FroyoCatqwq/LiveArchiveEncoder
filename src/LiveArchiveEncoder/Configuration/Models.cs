@@ -174,7 +174,7 @@ public sealed class Config
     /// </summary>
     public int? AudioStream { get; set; }
     public double Fps { get; set; } = Constants.DefaultFps;
-    public List<double> FpsLevels { get; set; } = [13.0, 8.0, 5.0, 3.0];
+    public List<double> FpsLevels { get; set; } = [.. Constants.DefaultFpsLevels];
 
     /// <summary>
     /// Bitrate thresholds per ladder rung, keyed by FPS rather than by position,
@@ -351,6 +351,12 @@ public sealed class Config
     /// as the machine allows (false). Persisted so the CUI toggle sticks.
     /// </summary>
     public bool RealTime { get; set; } = true;
+
+    /// <summary>v7.9.9.2: free-form output-side FFmpeg args for the live encoder.</summary>
+    public string ExtraEncoderArgs { get; set; } = "";
+
+    /// <summary>v7.9.9.2: most-recently-used input/output directories (newest first).</summary>
+    public List<string> RecentDirectories { get; set; } = [];
 
     /// <summary>
     /// v7.9.6.3: the frame shape a preset is captured in -- "source" (the

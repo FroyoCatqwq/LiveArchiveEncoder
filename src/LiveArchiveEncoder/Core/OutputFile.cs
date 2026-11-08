@@ -38,6 +38,86 @@ public static class OutputFile
     }
 
     /// <summary>
+    /// v7.9.9.2: check BEFORE a long encode that the destination can actually
+    /// be replaced. Until now a player/AV scanner holding the target was only
+    /// discovered by <see cref="Promote"/> after the whole realtime pass, and a
+    /// stale <c>.part</c> from a crashed run was never looked at at all.
+    ///
+    /// <para>A directory in the way is deliberately NOT rejected here:
+    /// v7.9.8.10's "keep the finished part" path owns that case and the e2e
+    /// suite pins its output.</para>
+    /// </summary>
+    public static (bool Ok, string? Error) EnsureTargetAvailable(FileInfo final)
+    {
+        string dir = Path.GetDirectoryName(final.FullName) ?? ".";
+        if (Directory.Exists(final.FullName)) return (true, null);
+
+        if (File.Exists(final.FullName))
+        {
+            try
+            {
+                using var probe = new FileStream(final.FullName, FileMode.Open,
+                    FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Killing a player cannot fix an ACL; report it immediately.
+                return (false, $"output is read-only or permission denied: {final.FullName}");
+            }
+            catch (IOException)
+            {
+                // v7.9.9.2: "either delete it or end the holding process". The
+                // usual holder is the ffplay WE launched after the last encode.
+                // Close exactly those, then probe again. Never touch a player
+                // the user opened from elsewhere.
+                ChildProcesses.KillAll();
+                try
+                {
+                    using var probe = new FileStream(final.FullName, FileMode.Open,
+                        FileAccess.ReadWrite, FileShare.None);
+                }
+                catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+                {
+                    return (false, $"output is in use by another program: {final.FullName}; "
+                        + "close the player (or pick another name) before encoding");
+                }
+            }
+        }
+
+        // Remove stale .part siblings from earlier crashed runs, best effort.
+        // A locked one is a hard error: the new run would collide with it.
+        string prefix = Path.GetFileNameWithoutExtension(final.Name) + ".";
+        string marker = ".part" + final.Extension;
+        try
+        {
+            foreach (string path in Directory.EnumerateFiles(dir))
+            {
+                string name = Path.GetFileName(path);
+                if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    || !name.EndsWith(marker, StringComparison.OrdinalIgnoreCase)) continue;
+                try { File.Delete(path); }
+                catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+                {
+                    // Same reasoning: a leftover player may be holding the part.
+                    ChildProcesses.KillAll();
+                    try { File.Delete(path); }
+                    catch (Exception)
+                    {
+                        return (false, $"stale part file is in use: {path}; "
+                            + "close the player holding it before encoding");
+                    }
+                }
+            }
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                        or ArgumentException or NotSupportedException)
+        {
+            // An unreadable directory will be reported by the encoder anyway.
+        }
+        return (true, null);
+    }
+
+    /// <summary>
     /// Move a finished part file onto its real name, replacing an older copy.
     /// Both names are in the same directory, so this is a rename, not a copy.
     ///
@@ -55,9 +135,7 @@ public static class OutputFile
         if (!part.Exists || part.Length == 0)
             throw new InvalidOperationException($"output is empty: {final.FullName}");
 
-        // v7.9.8.13.2: a directory and an ACL refusal are permanent failures;
-        // retrying them only adds ~1.5 s before the same error. Keep the old
-        // "keep the part" behaviour for those, immediately.
+        // A directory in the way is permanent (no retry or alternate can help).
         if (Directory.Exists(final.FullName))
             throw new IOException($"cannot place {final.FullName}: a directory is in the way");
 
@@ -71,12 +149,14 @@ public static class OutputFile
                     part.Name, final.FullName, false);
                 return final;
             }
-            catch (UnauthorizedAccessException)
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
             {
-                throw;                       // permission denied: no retry helps
-            }
-            catch (IOException exc)
-            {
+                // v7.9.9.2: on Windows a *sharing violation* (a player holding
+                // the target) surfaces as UnauthorizedAccessException just as a
+                // real ACL refusal does. v7.9.8.13.2 rethrew that immediately,
+                // which silently defeated the whole "(2)" fallback and threw
+                // away a finished encode -- exactly the reported bug. Treat both
+                // as retryable; the pre-flight already ruled out a true ACL.
                 last = exc;
                 if (attempt < 3) Thread.Sleep(250 * (attempt + 1));
             }

@@ -20,6 +20,86 @@
 
 ---
 
+## v7.9.9.2（2026-11-08）
+
+直接压缩音画同步修复、时代标准默认档位、路径记忆、文件占用治理、通用编码参数，外加一轮全项目审查。
+
+### 1. 直接压缩音画不同步（严重回归）
+
+* v7.9.9.1 的 `--no-realtime` 去掉两处节流后，主循环跑得比解码快：
+  `FrameBufferPool.TryTakeLatest` 每次丢弃除最新帧外的所有帧，捕获线程全速读帧又会在池满时
+  evict 最旧帧。实测 5 s / 65 槽只有 **3 个真实帧 + 62 个重复帧** —— 5 秒静帧配完整音频。
+* 非实时模式改为**一帧一槽握手**：捕获线程在池非空时等待（不丢帧），主循环在池空时等待
+  （不占槽、不重复）。修复后 `Fresh frames: 65 / Repeated slots: 0`，视频 5.076923 s / 66 帧、
+  音频 5.041633 s，与实时模式逐项一致；耗时仍 0.53 s（约 10×）。
+* 顺带修：持久化的 `RealTime=false`（CUI「参数 → 34.」）此前没有强制单级挡位，只有 CLI flag 会。
+
+### 2. 默认 fps 档位按时代标准
+
+* 13/8/5/3 只是 Python v6.3.3 移植基线的自造值，首级一步砍掉 38% 帧率、无年代依据。
+  改为项目自己 `EraPreset.SiteLadder()` 对 13–15 fps 站点使用的档位 **[13, 12, 10, 8, 5]**；
+  基础帧率仍 13，保持 v6.3.3 对比矩阵不变。
+* 收敛到 `Constants.DefaultFpsLevels` / `DefaultFpsLevelsSpec` 单一来源，消除 11 处硬编码
+  （Models / UserConfig / RealtimeOptions / CliOptions / EncoderMath / CliArgs / OptionCatalog / 帮助文本）。
+  旧 `config.json` 里恰好还是 `[13,8,5,3]` 的自动迁移，用户自定档位不动。
+* `--fps-levels none|off` 继续可删除动态挡位。
+
+### 3. 输入/输出路径记忆与自动补全
+
+* 新增 `Configuration/PathMemory.cs`：最多 8 个最近目录 MRU，持久化到 `config.json`；
+  读取时只保留存在、绝对、去重的路径。CLI 与 CUI 每次运行/保存都刷新。
+* `--output` 给**已存在的目录**时自动用 `<源文件名>_live.<容器扩展名>` 补全；
+  实测输入 `D:\...\Compressed` 得到 `test_src_live.avi`。CUI 输出菜单列出 `r1..rN`，
+  输入 `rN` 或直接给目录都可用。
+
+### 4. 文件占用与二次压缩链路
+
+* 新增 `OutputFile.EnsureTargetAvailable`：编码前用 `FileShare.None` 独占探测目标，
+  扫描并删除同目录其它运行残留的 `<stem>.<tag>.part<ext>`。inline / split / parallel /
+  二次压缩四条路径都调用。
+* 占用时先结束**本程序自己启动的**播放器（`Core/ChildProcesses.cs` + `Player.Launch` 跟踪），
+  再复查；仍占用才明确报错。**不碰用户从外部打开的程序**。
+* 修 v7.9.8.13.2 引入的回归：`Promote` 把 `UnauthorizedAccessException` 当永久 ACL 错误直接重抛，
+  而 Windows 上**共享冲突也抛这个异常** —— `name (2).ext` 另存兜底被整个绕过，完成的编码被丢掉。
+  现在两者统一重试 + 另存。
+* 修 `Recompress.Apply` 丢弃 `Promote` 返回值：新增 `ApplyWithPath` 返回真实落地路径，
+  `PostPipeline.Run` 与 CLI/CUI 的 `--recompress-only` 多遍链一路跟随，
+  「Recompressed:」报告也指向真实文件。竞态实测：目标在编码中途被锁 → 另存
+  `clip_web (2).mp4`、报告指向 `(2)`、exit 0。
+
+### 5. 二次压缩与直播编码的通用参数
+
+* CLI 新增 `--recompress-maxrate` / `--recompress-minrate` / `--recompress-bufsize`（kbps）、
+  `--recompress-extra`（自由 FFmpeg 参数）、`--extra-encoder-args`（直播编码侧）。
+  可表达 `-b:v` / `-c:v` / `-ac` / `-profile:v` / `-preset` / `-b:a` 等全部通用项；
+  项目原有的 `--x264-*` / `--openh264-*`、libx264 / libopenh264 选项保留。
+* **VBV 三件套必须与 `-b:v` 配套**：校验放在最终 fragment 生成之后（只看 flag 是否解析，
+  会漏掉「无 codec/era 时空 fragment」的情况），并拒绝 `minrate > maxrate`。
+  实测缺 `-b:v` → exit 2 明确报错；完整 → `-b:v 250k -maxrate 300k -minrate 100k -bufsize 600k`。
+* 修 `ComposeSecondPass`（CUI 改编码器时）只保留 `-vf`、把用户手写的 `-preset` / `-profile:v` /
+  `-maxrate` / `-bufsize` / `-minrate` / `-x264-params` / `-map` / `-t` 全部抹掉：
+  改为只替换由 `VideoArgs` / `AudioArgs` 重新生成的 flag，其余原样保留。
+* 直播侧 `--extra-encoder-args` 用与 `--recompress-args` 相同的 tokenizer 解析后追加到输出参数段。
+
+### 6. 全项目审查修复
+
+* `Toolchain.RunLong` 的 tail 缓冲外层 `if (tail.Length < 4000)` 守卫把诊断**冻结在前 4000 字符**，
+  失败原因往往在后面；改为始终追加再裁剪。
+* `AppLog.Redact` 只认带 `://` 的凭据、且多个 `@` 时用第一个：`--proxy user:pass@host:8080`
+  曾原样落盘。改为取最后一个 `@`，且仅当 userinfo 含 `:` 才脱敏。
+* `PipeReaders` 无换行的超长输出永远不进 `Emit`、`PipeReader` 内部缓冲无限增长：
+  单行限 256 KB，并按 `MaxLine` 分块冲刷。
+* 其它：`CliArgs.LadderSpec` 默认判定不再写死旧档位；新 VBV 数值一律 InvariantCulture。
+
+### 7. 测试
+
+* 新增 `V7992Tests`（8 项：默认档位、none、PathMemory、通用参数往返、VBV 校验、占用预检）
+  与 `tests/e2e/test_direct_and_paths.py`（9 项：A/V 同步、无挡位、目录补全与 MRU、VBV、
+  通用参数、残留 part、独占锁拒绝、另存竞态）。
+* Windows：单测 **709 全过** / e2e **148 全过** / 清单 195 文件无漂移。
+
+---
+
 ## v7.9.9.1（2026-11-08）
 
 日志精简、fps 挡位可关、直接压缩（不模拟直播）、二次压缩码率与音频可选，外加一轮

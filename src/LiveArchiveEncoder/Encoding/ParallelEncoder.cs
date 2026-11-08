@@ -58,6 +58,9 @@ public static class ParallelEncoder
         Directory.CreateDirectory(stageDir);
         // The join lands in a ".part" sibling and is renamed onto the real name
         // only once it has passed the checks below.
+        // v7.9.9.2: same pre-flight as the inline/split paths.
+        (bool canWrite, string? lockError) = Core.OutputFile.EnsureTargetAvailable(dst);
+        if (!canWrite) throw new InvalidOperationException(lockError);
         FileInfo part = Core.OutputFile.PartPath(dst);
         // v7.9.8.10: once every join check has passed, the part is the product.
         bool finished = false;

@@ -53,14 +53,32 @@ public static class Recompress
     /// is what the pipeline actually loops over.
     /// </summary>
     public static (bool Ok, string? Error) Apply(
-        string ffmpeg, string input, string output, RecompressSettings settings) =>
-        !settings.Enabled ? (true, null)
-        : settings.Stages().FirstOrDefault() is { } first
-            ? Apply(ffmpeg, input, output, first)
-            : (true, null);
+        string ffmpeg, string input, string output, RecompressSettings settings)
+    {
+        if (!settings.Enabled) return (true, null);
+        if (settings.Stages().FirstOrDefault() is not { } first) return (true, null);
+        (bool ok, string? error, _) = ApplyWithPath(ffmpeg, input, output, first);
+        return (ok, error);
+    }
 
-    /// <summary>Run one pass, writing to <c>output.part.ext</c> until it succeeds.</summary>
+    /// <summary>
+    /// Compatibility shim for the single-pass callers that do not need the
+    /// placed path. The pipeline uses <see cref="ApplyWithPath"/>.
+    /// </summary>
     public static (bool Ok, string? Error) Apply(
+        string ffmpeg, string input, string output, RecompressPass pass)
+    {
+        (bool ok, string? error, _) = ApplyWithPath(ffmpeg, input, output, pass);
+        return (ok, error);
+    }
+
+    /// <summary>
+    /// Run one pass, writing to <c>output.part.ext</c> until it succeeds.
+    /// v7.9.9.2: returns where the file REALLY landed, because Promote may save
+    /// it as <c>name (2).ext</c> when the target is held by a player. The old
+    /// two-tuple made PostPipeline derive a `_web` name that did not exist.
+    /// </summary>
+    public static (bool Ok, string? Error, string? PlacedPath) ApplyWithPath(
         string ffmpeg, string input, string output, RecompressPass pass)
     {
         // v7.9.8.1: the same ".part" rule the live pass follows. This stage was
@@ -70,10 +88,13 @@ public static class Recompress
         // looks finished. The live product survives a bad second pass; its
         // predecessor did not.
         var dst = new FileInfo(output);
+        (bool available, string? availabilityError) = OutputFile.EnsureTargetAvailable(dst);
+        if (!available) return (false, availabilityError, null);
+
         FileInfo part = OutputFile.PartPath(dst);
 
         (List<string> argv, string? error) = BuildArgv(ffmpeg, input, part.FullName, pass);
-        if (error is not null) return (false, error);
+        if (error is not null) return (false, error, null);
 
         string? dir = Path.GetDirectoryName(output);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
@@ -92,25 +113,26 @@ public static class Recompress
                                        or IOException)
         {
             OutputFile.Discard(part);
-            return (false, exc.Message);
+            return (false, exc.Message, null);
         }
 
         if (result.ExitCode != 0)
         {
             OutputFile.Discard(part);
-            return (false, $"recompress failed (exit {result.ExitCode}): {Tail(result.Stderr)}");
+            return (false, $"recompress failed (exit {result.ExitCode}): {Tail(result.Stderr)}", null);
         }
 
         part.Refresh();
         if (!part.Exists || part.Length == 0)
         {
             OutputFile.Discard(part);
-            return (false, "the recompressed file was not produced");
+            return (false, "the recompressed file was not produced", null);
         }
 
         try
         {
-            OutputFile.Promote(part, dst);
+            FileInfo placed = OutputFile.Promote(part, dst);
+            return (true, null, placed.FullName);
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
                                        or InvalidOperationException)
@@ -119,10 +141,8 @@ public static class Recompress
             // delete the only good copy here; keep it and say where instead.
             OutputFile.Keep(part, dst, exc.Message);
             return (false, $"could not put the recompressed file in place: {exc.Message}; "
-                + $"the finished file is kept at {part.FullName}");
+                + $"the finished file is kept at {part.FullName}", null);
         }
-
-        return (true, null);
     }
 
     /// <summary>
