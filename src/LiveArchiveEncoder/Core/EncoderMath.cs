@@ -258,6 +258,16 @@ public static class EncoderMath
     public static (List<double> Fps, List<FpsRungSetting> Settings, string? Error) ParseLevelSpec(
         string raw)
     {
+        // v7.9.9.1: "none"/"off" removes the dynamic ladder. SelectLevels always
+        // appends the base rate, so an empty list is exactly one rung, and
+        // TargetLevel already returns 0 when the ladder has a single entry.
+        string trimmed = raw.Trim();
+        if (trimmed.Equals("none", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            return ([], [], null);
+        }
+
         var fps = new List<double>();
         var settings = new List<FpsRungSetting>();
 
@@ -313,12 +323,17 @@ public static class EncoderMath
         return string.Join(",", SelectLevels(baseFps, levels).Select(fps =>
         {
             FpsRungSetting? rung = rungs?.FirstOrDefault(x => Math.Abs(x.Fps - fps) < 1e-6);
-            if (rung is null) return fps.ToString("G6");
-            string text = rung.DropAboveKbps is { } drop
-                ? $"{fps:G6}:{drop:G6}"
-                : fps.ToString("G6");
-            if (rung.RiseBelowKbps is { } rise) text += $":{rise:G6}";
+            // v7.9.9.1: this string is fed back into ParseLevelSpec, so it must
+            // use the invariant culture. A de-DE machine used to render 12.5 as
+            // "12,5", and the comma is this ladder's own separator.
+            string text = rung?.DropAboveKbps is { } drop
+                ? $"{Inv(fps)}:{Inv(drop)}"
+                : Inv(fps);
+            if (rung?.RiseBelowKbps is { } rise) text += $":{Inv(rise)}";
             return text;
+
+            static string Inv(double value) =>
+                value.ToString("G6", CultureInfo.InvariantCulture);
         }));
     }
 

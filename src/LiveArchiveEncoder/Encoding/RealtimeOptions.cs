@@ -24,6 +24,15 @@ public sealed record RealtimeOptions
     public List<double> FpsLevels { get; init; } = [13.0, 8.0, 5.0, 3.0];
 
     /// <summary>
+    /// v7.9.9.1: <c>--no-realtime</c> — encode as fast as the machine allows
+    /// instead of replaying the source's wall-clock cadence. Both pacing points
+    /// (capture thread and slot loop) are conditional on this, and the caller
+    /// pins a single-rung ladder because the bitrate window no longer maps to
+    /// programme seconds.
+    /// </summary>
+    public bool RealTime { get; init; } = true;
+
+    /// <summary>
     /// Per-rung bitrate thresholds, keyed by FPS. Empty derives them from
     /// <see cref="LimitKbps"/>/<see cref="RecoverKbps"/>, which is the v7.6 rule.
     /// </summary>

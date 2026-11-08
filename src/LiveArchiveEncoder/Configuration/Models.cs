@@ -347,6 +347,12 @@ public sealed class Config
     public bool EraNative { get; set; } = true;
 
     /// <summary>
+    /// v7.9.9.1: replay the source's wall-clock cadence (true) or encode as fast
+    /// as the machine allows (false). Persisted so the CUI toggle sticks.
+    /// </summary>
+    public bool RealTime { get; set; } = true;
+
+    /// <summary>
     /// v7.9.6.3: the frame shape a preset is captured in -- "source" (the
     /// preset's own), "4:3" or "16:9". Null and "source" mean the same thing,
     /// so a settings file from before the switch keeps its exact behaviour.

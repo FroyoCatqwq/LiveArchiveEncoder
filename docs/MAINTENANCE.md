@@ -110,7 +110,7 @@ net11 目标验证；e2e 因需要实时时钟与 legacy 编码器，不进 CI�
 | 环境变量 | 作用 |
 | --- | --- |
 | `LAE_LOG_DIR` | 自定义日志目录；e2e 的 `harness.py` 会指到套件私有根 |
-| `LAE_LOG_LEVEL` | `verbose` / `warning` / `error`，默认 `information` |
+| `LAE_LOG_LEVEL` | `verbose` / `information` / `warning` / `error`，**默认 `error`**（v7.9.9.1：普通运行不产生日志；出错时附带最近 200 条上下文快照） |
 | `LAE_LOG_MIRROR=0` | 不把控制台输出镜像进日志 |
 | `LAE_LOG=0` | 完全关闭日志 |
 

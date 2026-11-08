@@ -141,7 +141,12 @@ public static class Recompress
         string dir = Path.GetDirectoryName(inputPath) ?? ".";
         string stem = Path.GetFileNameWithoutExtension(inputPath);
 
-        string ext = container.Or("mp4").TrimStart('.').ToLowerInvariant();
+        // v7.9.9.1: the container name becomes a file extension, so it must not
+        // carry a separator or a parent reference -- a typo used to be able to
+        // write outside the input's directory.
+        string ext = new([.. container.Or("mp4").TrimStart('.').ToLowerInvariant()
+            .Where(char.IsAsciiLetterOrDigit)]);
+        if (ext.Length == 0) ext = "mp4";
         return Path.Combine(dir, stem + Suffix(pass) + "." + ext);
     }
 

@@ -35,15 +35,16 @@ public static class SubtitleSetup
                 Console.WriteLine(L.T("fontpack.skipsub"));
             else
                 Console.WriteLine(L.T("fontpack.found", Path.GetFileName(chosen[0])));
+        }
 
-            // A path the user typed by hand must exist; the discovery itself
-            // only returns files that do.
-            foreach (string sub in chosen)
-            {
-                if (File.Exists(sub)) continue;
-                Console.Error.WriteLine($"ERROR: {L.T("fontpack.badsub", sub)}");
-                return (cli, 2);
-            }
+        // v7.9.9.1: validate every path, including ones the user typed with
+        // --subtitle. This check used to sit inside the discovery branch, so a
+        // hand-written path skipped it and failed much later in the encoder.
+        foreach (string sub in subs)
+        {
+            if (File.Exists(sub)) continue;
+            Console.Error.WriteLine($"ERROR: {L.T("fontpack.badsub", sub)}");
+            return (cli, 2);
         }
 
         if (cli.FontPack is { Length: > 0 } pack)

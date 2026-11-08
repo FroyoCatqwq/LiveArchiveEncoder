@@ -23,6 +23,9 @@ public static class PipeReaders
 {
     private const int BlockSize = 16 * 1024;
 
+    /// <summary>Cap for one diagnostic line, so a missing newline cannot grow it.</summary>
+    private const int MaxLine = 256 * 1024;
+
     public static async Task ProgressReaderAsync(
         Stream stderr, OutputMonitor monitor, CancellationToken token)
     {
@@ -146,9 +149,12 @@ public static class PipeReaders
     {
         int length = (int)raw.Length;
         if (length == 0) return true;
+        // v7.9.9.1: a line with no terminator for megabytes must not grow the
+        // reusable buffer without bound; keep the prefix only.
+        if (length > MaxLine) length = MaxLine;
         if (length > line.Length)
-            Array.Resize(ref line, Math.Max(line.Length * 2, length));
-        raw.CopyTo(line.AsSpan(0, length));
+            Array.Resize(ref line, Math.Min(MaxLine, Math.Max(line.Length * 2, length)));
+        raw.Slice(0, length).CopyTo(line.AsSpan(0, length));
 
         if (line[length - 1] == (byte)'\r') length--;
         int start = 0;

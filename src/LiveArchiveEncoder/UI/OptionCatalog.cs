@@ -191,6 +191,7 @@ public static class OptionCatalog
         new Spec("--recompress", Kind.Flag, []),
         new Spec("--no-recompress", Kind.Flag, []),
         new Spec("--no-era", Kind.Flag, []),
+        new Spec("--no-realtime", Kind.Flag, []),
         new Spec("--recompress-only", Kind.Flag, []),
         new Spec("--recompress-args", Kind.File, []),
         new Spec("--recompress-container", Kind.Value, ["mp4", "mkv", "avi", "flv"]),

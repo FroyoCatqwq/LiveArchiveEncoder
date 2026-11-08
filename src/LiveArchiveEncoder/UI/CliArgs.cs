@@ -178,6 +178,8 @@ public static class CliArgs
             argv.AddRange(["--openh264-rc", c.OpenH264Rc]);
         if (c.OpenH264SkipFrames) argv.Add("--openh264-skip-frames");
         if (!c.EraNative) argv.Add("--era-modern");
+        // v7.9.9.1: a direct (non-realtime) encode is a remembered decision.
+        if (!c.RealTime) argv.Add("--no-realtime");
         if (c.EraAspect is { Length: > 0 } eraShape
             && !string.Equals(eraShape, "source", StringComparison.OrdinalIgnoreCase))
             argv.AddRange(["--era-aspect", eraShape]);

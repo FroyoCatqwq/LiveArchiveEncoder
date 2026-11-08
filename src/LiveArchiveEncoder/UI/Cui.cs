@@ -1580,6 +1580,9 @@ public static partial class Cui
             Row(29, L.T("param.cropanchor"), c.FitMode == "crop" ? c.CropAnchor : "-");
             Row(30, L.T("param.padcolor"), c.FitMode == "fit" ? c.PadColor : "-");
             Row(31, L.T("param.sizepreset"), L.T("param.sizepreset.hint"));
+            // v7.9.9.1: live simulation vs direct compression.
+            Row(34, L.T("param.realtime"),
+                c.RealTime ? L.T("param.realtime.on") : L.T("param.realtime.off"));
             // v7.9.8.8: OpenH264's two dials. Shown only for that encoder,
             // because for every other one the row would be a setting that never
             // reaches FFmpeg -- the "q:v 9 under libopenh264" mistake again.
@@ -1645,6 +1648,13 @@ public static partial class Cui
                         break;
                     case "33" when enc == "libopenh264":
                         c.OpenH264SkipFrames = !c.OpenH264SkipFrames;
+                        break;
+                    case "34":
+                        // v7.9.9.1: direct compression instead of a live
+                        // simulation. Persisted, so the choice survives a restart.
+                        c.RealTime = !c.RealTime;
+                        Console.WriteLine(c.RealTime
+                            ? L.T("param.realtime.on") : L.T("param.realtime.off"));
                         break;
                     case "7":
                         c.Threads = ReadInt(L.T("param.prompt.threads", c.Threads), c.Threads);
@@ -2274,7 +2284,10 @@ public static partial class Cui
                 DestinationPath = c.OutputPath.FullName,
                 Encoder = c.Encoder,
                 Fps = c.Fps,
-                FpsLevels = c.FpsLevels,
+                // v7.9.9.1: a direct encode has no wall-clock mapping for the
+                // bitrate window, so it runs a single rung.
+                FpsLevels = c.RealTime ? c.FpsLevels : [c.Fps],
+                RealTime = c.RealTime,
                 FpsLevelKbps = c.FpsLevelKbps,
                 Quality = c.Qv,
                 Threads = c.Threads,
@@ -2960,6 +2973,12 @@ public static partial class Cui
             Console.WriteLine($" 5. {L.Pad(L.T("rc.menu.codec"), 30)} = {video}");
             Console.WriteLine($" 6. {L.Pad(qualityRow, 30)} = {quality}");
             Console.WriteLine($" 7. {L.Pad(L.T("rc.menu.audio"), 30)} = {audio}");
+            // v7.9.9.1: the audio bitrate used to be reachable only from a
+            // hand-written fragment, even though the CLI has had the option.
+            string audioKbpsLabel = KbpsOf(tokens, "-b:a") is { } audioKbpsNow
+                ? $"{audioKbpsNow.ToString(CultureInfo.InvariantCulture)} kbps"
+                : L.T("value.auto");
+            Console.WriteLine($" a. {L.Pad(L.T("rc.menu.audiokbps"), 30)} = {audioKbpsLabel}");
             // v7.9.8.4: the chain beyond the first pass. This is the menu row
             // whose strings shipped in v7.9.8.3 with nothing wired to them, so a
             // CUI user could not build a two-hop chain at all.
@@ -2974,6 +2993,9 @@ public static partial class Cui
             switch (Ask().Trim())
             {
                 case "0": return;
+                case "a":
+                    EditRecompressAudioKbps(c);
+                    break;
                 case "9":
                     // v7.9.9: "do not use" really deletes the saved chain,
                     // not just disables the stage. The first pass Args and
@@ -3097,6 +3119,38 @@ public static partial class Cui
             ? c.Recompress.Args
             : ComposeSecondPass(tokens, codec, int.TryParse(QualityOf(tokens), out int q) ? q : null, raw, null);
         Console.WriteLine(L.T("rc.audio.set", raw));
+    }
+
+    /// <summary>
+    /// v7.9.9.1: the second pass's audio bitrate. It was reachable only by
+    /// hand-writing the fragment before; --recompress-audio-kbps existed on the
+    /// CLI but had no menu row.
+    /// </summary>
+    private static void EditRecompressAudioKbps(Config c)
+    {
+        (List<string> tokens, _) = PostProcess.PostArgs.Parse(c.Recompress.Args);
+        string video = PostProcess.RecompressCodecs.DetectVideoCodec(tokens) ?? "libx264";
+        string audio = PostProcess.RecompressCodecs.DetectAudioCodec(tokens)
+            ?? PostProcess.RecompressCodecs.RecommendedAudio(video);
+        int? current = KbpsOf(tokens, "-b:a");
+
+        Console.Write(L.T("rc.prompt.audiokbps",
+            current?.ToString(CultureInfo.InvariantCulture) ?? L.T("value.auto"), audio));
+        string raw = Ask().Trim();
+        if (raw.Length == 0) return;
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int kbps)
+            || kbps <= 0 || kbps > 512)
+        {
+            Console.WriteLine(L.T("param.badvalue", raw));
+            return;
+        }
+
+        SecondPassVideoCodec? codec = PostProcess.RecompressCodecs.FindVideo(video);
+        if (codec is null) return;
+        int? quality = int.TryParse(QualityOf(tokens), NumberStyles.Integer,
+            CultureInfo.InvariantCulture, out int q) ? q : null;
+        c.Recompress.Args = ComposeSecondPass(tokens, codec, quality, audio, kbps);
+        Console.WriteLine(L.T("rc.audiokbps.set", kbps));
     }
 
     /// <summary>
@@ -3227,7 +3281,10 @@ public static partial class Cui
         Console.Write(L.T("rc.prompt.quality", currentQuality.Length > 0 ? currentQuality : "auto", codec.QualityFlag));
         string raw = Ask().Trim();
         if (raw.Length == 0) return;
-        if (!int.TryParse(raw, out int quality) || quality < 1 || quality > 63)
+        // v7.9.9.1: same culture as the prompt above (Invariant); the two used
+        // to disagree on a comma-decimal machine.
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture,
+                out int quality) || quality < 1 || quality > 63)
         {
             Console.WriteLine(L.T("param.badvalue", raw));
             return;
@@ -3261,12 +3318,18 @@ public static partial class Cui
         // already carried. Every caller rewrites the whole video half, so
         // without this an unrelated edit (the audio codec, say) would drop the
         // number back to the catalog default and call it unchanged.
-        int? bitrate = codec.QualityFlag.Length > 0 ? null : videoKbps ?? BitrateOf(tokens);
-        parts.Add(PostProcess.RecompressCodecs.VideoArgs(
-            codec,
-            codec.QualityFlag.Length > 0 ? quality ?? codec.DefaultQuality : null,
-            bitrate));
-        parts.Add(PostProcess.RecompressCodecs.AudioArgs(audioCodec, audioKbps, null, null));
+        // v7.9.9.1: an explicit bitrate now wins for every codec too; otherwise
+        // the fragment's own -b:v is kept (see the note above).
+        int? bitrate = videoKbps ?? BitrateOf(tokens);
+        parts.Add(PostProcess.RecompressCodecs.VideoArgs(codec, quality, bitrate));
+        // v7.9.9.1: keep the audio numbers the fragment already carried. Every
+        // caller rewrites the audio half, so editing the video codec used to
+        // reset -b:a / -ar / -ac to catalog defaults (aac 96k, stereo, source Hz).
+        parts.Add(PostProcess.RecompressCodecs.AudioArgs(
+            audioCodec,
+            audioKbps ?? KbpsOf(tokens, "-b:a"),
+            IntOf(tokens, "-ar"),
+            IntOf(tokens, "-ac")));
         return string.Join(' ', parts);
     }
 
@@ -3284,15 +3347,30 @@ public static partial class Cui
     /// Whatever follows <c>-b:v</c>, in kbps, or null when the fragment carries
     /// none. The fragments this program writes spell it <c>300k</c>.
     /// </summary>
-    private static int? BitrateOf(IReadOnlyList<string> tokens)
+    private static int? BitrateOf(IReadOnlyList<string> tokens) => KbpsOf(tokens, "-b:v");
+
+    /// <summary>Value after <paramref name="flag"/> in kbps, with or without a k suffix.</summary>
+    private static int? KbpsOf(IReadOnlyList<string> tokens, string flag)
     {
         for (int i = 0; i < tokens.Count - 1; i++)
         {
-            if (tokens[i] != "-b:v") continue;
+            if (!string.Equals(tokens[i], flag, StringComparison.Ordinal)) continue;
             string raw = tokens[i + 1].Trim();
             if (raw.EndsWith('k') || raw.EndsWith('K')) raw = raw[..^1];
             return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int kbps)
                 && kbps > 0 ? kbps : null;
+        }
+        return null;
+    }
+
+    /// <summary>Plain integer after <paramref name="flag"/> (-ar / -ac), or null.</summary>
+    private static int? IntOf(IReadOnlyList<string> tokens, string flag)
+    {
+        for (int i = 0; i < tokens.Count - 1; i++)
+        {
+            if (!string.Equals(tokens[i], flag, StringComparison.Ordinal)) continue;
+            return int.TryParse(tokens[i + 1].Trim(), NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out int value) && value > 0 ? value : null;
         }
         return null;
     }

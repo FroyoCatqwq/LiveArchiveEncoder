@@ -79,12 +79,17 @@ public sealed class RecompressFlagTests
         await Assert.That(qualityError!).Contains("does not apply to libopenh264");
         await Assert.That(qualityError!).Contains("--recompress-video-kbps");
 
+        // v7.9.9.1: a bitrate is no longer refused for a quality-driven codec --
+        // when no quality was asked for it becomes -b:v, which is what "choose
+        // the bitrate" means. Quality still wins when both are given (see the
+        // mixed-chain test below).
         (CliOptions? kbps, _) = CliParser.Parse(
             ["clip.mkv", "--recompress-codec", "libx264", "--recompress-video-kbps", "700"]);
-        (_, string? kbpsError) = Cli.ResolveRecompress(kbps!, null, true);
-        await Assert.That(kbpsError).IsNotNull();
-        await Assert.That(kbpsError!).Contains("does not apply to libx264");
-        await Assert.That(kbpsError!).Contains("-crf");
+        (Configuration.RecompressSettings bitrate, string? kbpsError) =
+            Cli.ResolveRecompress(kbps!, null, true);
+        await Assert.That(kbpsError).IsNull();
+        await Assert.That(bitrate.Args).Contains("-b:v 700k");
+        await Assert.That(bitrate.Args.Contains("-crf", StringComparison.Ordinal)).IsFalse();
     }
 
     [Test]

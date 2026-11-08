@@ -673,7 +673,14 @@ public static class Cli
             // measurement of the share itself.
             Iperf3Host = args.Iperf3Host,
             Fps = config.Fps,
-            FpsLevels = levels,
+            // v7.9.9.1: --no-realtime encodes as fast as the machine allows. The
+            // bitrate window no longer maps to programme seconds, so a ladder
+            // would misfire on its first estimate; pin one rung for the run
+            // only -- config.FpsLevels (and the settings file) keep the real one.
+            FpsLevels = args.NoRealtime ? [config.Fps] : levels,
+            // The CLI flag is per-run; the persisted choice comes from the CUI
+            // toggle. Either one can turn pacing off.
+            RealTime = !args.NoRealtime && config.RealTime,
             FpsLevelKbps = levelKbps,
             Quality = config.Qv,
             QualityExplicit = args.Qv.HasValue,
@@ -832,7 +839,8 @@ public static class Cli
         }
 
         // An era/site preset carries the fragment, so --era alone is enough.
-        PostProcess.EraPreset? era = args.Era is { Length: > 0 } eraId
+        // v7.9.9.1: --no-era must mean the same thing here as on the main path.
+        PostProcess.EraPreset? era = !args.NoEra && args.Era is { Length: > 0 } eraId
             ? PostProcess.EraPresets.Find(eraId)
             : null;
         if (args.Era is { Length: > 0 } && era is null)
@@ -1050,13 +1058,11 @@ public static class Cli
         // bitrate. A property of the chain, not of the pass being built -- see
         // the refusal below.
         bool anyQualityPass = false;
-        bool anyBitratePass = false;
         foreach (string name in args.RecompressCodecs)
         {
             SecondPassVideoCodec? known = RecompressCodecs.FindVideo(name);
             if (known is null) continue;        // reported as an unknown codec in the loop
             if (known.QualityFlag.Length > 0) anyQualityPass = true;
-            else anyBitratePass = true;
         }
         for (int i = 0; i < count; i++)
         {
@@ -1107,25 +1113,18 @@ public static class Cli
                             + $"{codec.Name} (pass {i + 1}); it uses --recompress-video-kbps");
                     }
                 }
-                if (videoKbps is not null && codec.QualityFlag.Length > 0)
+                if (videoKbps is not null && quality is null
+                    && codec.QualityFlag.Length > 0 && !args.Quiet)
                 {
-                    if (!anyBitratePass)
-                    {
-                        return (rc, $"--recompress-video-kbps does not apply to {codec.Name} (pass {i + 1}): "
-                            + $"it is driven by {codec.QualityFlag}; use --recompress-quality");
-                    }
-                    if (!args.Quiet)
-                    {
-                        Console.WriteLine($"NOTE: --recompress-video-kbps does not apply to "
-                            + $"{codec.Name} (pass {i + 1}); it is driven by {codec.QualityFlag}");
-                    }
+                    // v7.9.9.1: an explicit bitrate is honoured for every codec
+                    // now (VideoArgs routes to the at-bitrate form), so this is
+                    // informational -- it says what replaces the quality knob.
+                    Console.WriteLine($"NOTE: {codec.Name} (pass {i + 1}) uses -b:v {videoKbps} kbps "
+                        + $"instead of {codec.QualityFlag}.");
                 }
 
                 fragment = string.Join(' ',
-                    RecompressCodecs.VideoArgs(
-                        codec,
-                        codec.QualityFlag.Length > 0 ? quality ?? codec.DefaultQuality : null,
-                        videoKbps),
+                    RecompressCodecs.VideoArgs(codec, quality, videoKbps),
                     RecompressCodecs.AudioArgs(audio, kbps > 0 ? kbps : null, null, null));
                 container ??= RecompressCodecs.DefaultContainer(codec.Name, audio) ?? codec.Containers[0];
             }

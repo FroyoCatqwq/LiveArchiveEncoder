@@ -228,7 +228,15 @@ public static class RealtimeEncoder
                 StreamSelection.VideoMap(o.VideoStream), o.StartSeconds)
             : VideoFilter.Simple(vf);
         int frameSize = PixelFormatUtil.RawFrameSize(width, height, transportFmt);
-        int? targetSlots = duration is null ? null : (int)Math.Ceiling(duration.Value * o.Fps - 1e-9);
+        // v7.9.9.1: a bogus duration (an HTTP source with a wrong Content-Length)
+        // used to overflow the int conversion into a negative slot count, which
+        // stopped the run at zero slots and reported "output is empty".
+        int? targetSlots = null;
+        if (duration is { } targetSpan && double.IsFinite(targetSpan) && targetSpan > 0)
+        {
+            double slotsNeeded = Math.Ceiling(targetSpan * Math.Max(0.1, o.Fps) - 1e-9);
+            targetSlots = slotsNeeded >= int.MaxValue ? int.MaxValue : (int)slotsNeeded;
+        }
         string muxer = o.Encoder.FormatName;
         dst.Directory?.Create();
 
@@ -930,10 +938,15 @@ public static class RealtimeEncoder
 
                     // Python resets the deadline when the slot is already overdue
                     // instead of trying to catch up; keep that behaviour.
-                    nextDeadline += (long)(interval * frequency);
-                    long nowTicks = Stopwatch.GetTimestamp();
-                    if (nextDeadline > nowTicks) HighResolutionTimer.WaitUntil(nextDeadline);
-                    else nextDeadline = nowTicks;
+                    // v7.9.9.1: --no-realtime removes this pacing entirely, so
+                    // the decoder is drained as fast as the encoder accepts it.
+                    if (o.RealTime)
+                    {
+                        nextDeadline += (long)(interval * frequency);
+                        long nowTicks = Stopwatch.GetTimestamp();
+                        if (nextDeadline > nowTicks) HighResolutionTimer.WaitUntil(nextDeadline);
+                        else nextDeadline = nowTicks;
+                    }
                 }
             }
             catch (Exception ex)
@@ -1022,10 +1035,14 @@ public static class RealtimeEncoder
                     continue;
                 }
 
-                long nowSlotTicks = Stopwatch.GetTimestamp();
-                nextSlot += slotIntervalTicks;
-                if (nextSlot > nowSlotTicks) HighResolutionTimer.WaitUntil(nextSlot);
-                else nextSlot = nowSlotTicks;
+                // v7.9.9.1: --no-realtime emits slots back to back.
+                if (o.RealTime)
+                {
+                    long nowSlotTicks = Stopwatch.GetTimestamp();
+                    nextSlot += slotIntervalTicks;
+                    if (nextSlot > nowSlotTicks) HighResolutionTimer.WaitUntil(nextSlot);
+                    else nextSlot = nowSlotTicks;
+                }
 
                 encoderProc.Refresh();
                 if (encoderProc.HasExited)

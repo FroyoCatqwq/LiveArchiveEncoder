@@ -193,6 +193,9 @@ public sealed class UserConfig
     /// </summary>
     public bool EraNative { get; set; } = true;
 
+    /// <summary>v7.9.9.1: false = encode as fast as possible (no live pacing).</summary>
+    public bool RealTime { get; set; } = true;
+
     /// <summary>
     /// v7.9.6.3: frame shape for the applied preset -- "source", "4:3" or
     /// "16:9". Null in a file written before the switch existed, which reads as
@@ -504,6 +507,7 @@ public static class ConfigStore
         Subtitles = CloneSubtitles(c.Subtitles),
         EraPreset = c.EraPreset,
         EraNative = c.EraNative,
+        RealTime = c.RealTime,
         EraAspect = c.EraAspect,
         H264Impl = c.H264Impl,
         CustomEras = [.. c.CustomEras.Select(EraConfigMap.ToConfig)],
@@ -671,6 +675,7 @@ public static class ConfigStore
         if (stored.Subtitles is not null) c.Subtitles = CloneSubtitles(stored.Subtitles);
         c.EraPreset = stored.EraPreset;
         c.EraNative = stored.EraNative;
+        c.RealTime = stored.RealTime;
         c.EraAspect = stored.EraAspect;
         c.H264Impl = stored.H264Impl;
 

@@ -230,8 +230,26 @@ public static class RecompressCodecs
 
         if (codec.QualityFlag.Length > 0)
         {
+            // v7.9.9.1: an explicit bitrate is honoured for a quality-driven
+            // codec too -- a site's ladder is written in kbps. When the caller
+            // gives BOTH, quality wins: a mixed chain hands each number to the
+            // pass that can use it, and overriding that would silently change
+            // the pass the user wrote `--recompress-quality` for.
             if (quality is { } q)
+            {
                 parts.AddRange([codec.QualityFlag, q.ToString(CultureInfo.InvariantCulture)]);
+            }
+            else if (kbps is { } requested && requested > 0)
+            {
+                // VideoArgsAtBitrate drops the codec's own "-b:v 0" so a
+                // constant-quality default cannot override the request.
+                return VideoArgsAtBitrate(codec, requested);
+            }
+            else
+            {
+                parts.AddRange([codec.QualityFlag,
+                    codec.DefaultQuality.ToString(CultureInfo.InvariantCulture)]);
+            }
         }
         else
         {

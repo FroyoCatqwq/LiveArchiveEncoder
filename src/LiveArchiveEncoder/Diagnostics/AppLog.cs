@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Threading.Channels;
 using System.Threading.RateLimiting;
@@ -25,6 +26,11 @@ namespace LiveArchiveEncoder.Diagnostics;
 /// <see cref="ChannelWriter{T}.TryWrite"/>; a single background consumer writes
 /// through Serilog. The channel is unbounded so logging can never apply
 /// back-pressure to the encoder.</item>
+/// <item>v7.9.9.1: the file threshold is <b>Error by default</b> -- an ordinary
+/// run should not grow a log. Structured events are still collected in a
+/// 200-entry in-memory ring, and the first error of a run flushes that ring
+/// into the file, so a bug report has context without paying for it every time.
+/// LAE_LOG_LEVEL=verbose restores the full trace (including the UI mirror).</item>
 /// <item>Both Microsoft.Extensions.Logging (ILoggerFactory / ILogger) and
 /// Serilog are real: the factory is a SerilogLoggerFactory, so a future DI
 /// migration can hand out the same logger. Serilog is configured in code, not
@@ -42,8 +48,10 @@ public static class AppLog
 
     /// <summary>Full path of the rolling log file, or null when logging is off/unavailable.</summary>
     /// <remarks>
-    /// C# 14's <c>field</c> keyword keeps a one-line guard on the setter
-    /// without declaring a separate backing field.
+    /// v7.9.9.1: the file no longer carries a date suffix (rolling is by size),
+    /// so this path is the file the user will actually find. It used to report
+    /// <c>lae-.log</c>, which Serilog expanded to <c>lae-YYYYMMDD.log</c> and
+    /// which therefore never existed.
     /// </remarks>
     public static string? LogPath
     {
@@ -69,16 +77,25 @@ public static class AppLog
     private static Microsoft.Extensions.Logging.ILogger? _logger;
     private static Task? _drain;
     private static RateLimiter? _sampler;
+    private static ContextSink? _context;
     private static TextWriter? _originalOut;
     private static TextWriter? _originalError;
     private static int _started;
+    private static int _closing;
     private static int _closed;
+    private static int _flushing;
     private static int _suppressed;
     private static string _operation = "startup";
 
+    /// <summary>
+    /// Threshold the file sink uses. Error by default; the ring sink always
+    /// sees Verbose so context exists when an error is finally written.
+    /// </summary>
+    private static LogEventLevel _fileLevel = LogEventLevel.Error;
+
     private readonly record struct Entry(
         LogLevel Level, string Template, object?[] Args,
-        Exception? Exception, string Operation);
+        string? ExceptionText, string Operation);
 
     /// <summary>
     /// Initialise logging. Safe to call more than once; never throws (a broken
@@ -90,41 +107,20 @@ public static class AppLog
         if (Interlocked.Exchange(ref _started, 1) != 0) return;
         if (Environment.GetEnvironmentVariable("LAE_LOG") == "0") return;
 
+        _fileLevel = ParseLevel();
+
         try
         {
             string dir = LaePaths.LogDirectory;
             Directory.CreateDirectory(dir);
-            string file = Path.Combine(dir, "lae-.log");
+            string file = Path.Combine(dir, "lae.log");
+            _context = new ContextSink();
 
-            _serilog = new LoggerConfiguration()
-                .MinimumLevel.Is(ParseLevel())
-                .Enrich.WithProperty("RunId", RunId)
-                .WriteTo.File(
-                    file,
-                    rollingInterval: RollingInterval.Day,
-                    retainedFileCountLimit: 7,
-                    // The self-update applier briefly runs alongside the parent
-                    // process, and a user may open two shells. A shared sink
-                    // lets both write the same daily file without an IOException
-                    // that would otherwise downgrade one of them to the temp dir.
-                    shared: true,
-                    outputTemplate:
-                    "{Timestamp:o} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-                .CreateLogger();
-
+            _serilog = Build(file);
             Factory = new SerilogLoggerFactory(_serilog, dispose: false);
             _logger = Factory.CreateLogger("LiveArchiveEncoder");
             LogPath = file;
-
-            _sampler = new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
-            {
-                TokenLimit = 40,
-                TokensPerPeriod = 40,
-                ReplenishmentPeriod = TimeSpan.FromSeconds(1),
-                AutoReplenishment = true,
-                QueueLimit = 0,
-            });
-
+            _sampler = NewSampler();
             _drain = Task.Run(DrainAsync);
         }
         catch (Exception)
@@ -133,16 +129,13 @@ public static class AppLog
             // simply unavailable and the program carries on unchanged.
             try
             {
-                string fallback = Path.Combine(Path.GetTempPath(), "lae-.log");
-                _serilog = new LoggerConfiguration()
-                    .MinimumLevel.Is(LogEventLevel.Information)
-                    .Enrich.WithProperty("RunId", RunId)
-                    .WriteTo.File(fallback, rollingInterval: RollingInterval.Day,
-                        retainedFileCountLimit: 3)
-                    .CreateLogger();
+                string fallback = Path.Combine(Path.GetTempPath(), "lae.log");
+                _context ??= new ContextSink();
+                _serilog = Build(fallback);
                 Factory = new SerilogLoggerFactory(_serilog, dispose: false);
                 _logger = Factory.CreateLogger("LiveArchiveEncoder");
                 LogPath = fallback;
+                _sampler = NewSampler();
                 _drain = Task.Run(DrainAsync);
             }
             catch (Exception) { _logger = null; }
@@ -152,12 +145,47 @@ public static class AppLog
             && Environment.GetEnvironmentVariable(LaePaths.LogMirrorVariable) != "0")
             InstallConsoleMirror();
 
-        Info("run.start args={Args} pid={Pid} os={Os} log={LogPath}",
+        Info("run.start args={Args} pid={Pid} os={Os} level={Level} log={LogPath}",
             Redact(string.Join(' ', Environment.GetCommandLineArgs().Skip(1))),
             Environment.ProcessId,
             OperatingSystem.IsWindows() ? "windows" : "linux",
+            _fileLevel.ToString(),
             LogPath ?? "unavailable");
     }
+
+    private static Serilog.Core.Logger Build(string file) =>
+        new LoggerConfiguration()
+            // v7.9.9.1: the logger itself stays verbose so the ring sink can
+            // collect context; the file sink is the one that filters.
+            .MinimumLevel.Verbose()
+            .Enrich.WithProperty("RunId", RunId)
+            .WriteTo.Sink(_context!, restrictedToMinimumLevel: LogEventLevel.Verbose)
+            .WriteTo.File(
+                file,
+                restrictedToMinimumLevel: _fileLevel,
+                // Size rolling keeps LogPath honest: there is no date suffix to
+                // guess, so the path reported at startup is the real one.
+                rollingInterval: RollingInterval.Infinite,
+                fileSizeLimitBytes: 16 * 1024 * 1024,
+                rollOnFileSizeLimit: true,
+                retainedFileCountLimit: 7,
+                // The self-update applier briefly runs alongside the parent
+                // process, and a user may open two shells. A shared sink lets
+                // both write the same file without an IOException.
+                shared: true,
+                outputTemplate:
+                "{Timestamp:o} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .CreateLogger();
+
+    private static RateLimiter NewSampler() =>
+        new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
+        {
+            TokenLimit = 40,
+            TokensPerPeriod = 40,
+            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+            AutoReplenishment = true,
+            QueueLimit = 0,
+        });
 
     /// <summary>Mark the beginning of one interactive operation (one encode).</summary>
     public static void BeginOperation(string? name = null)
@@ -178,19 +206,28 @@ public static class AppLog
     public static void Warn(string template, params object?[] args) =>
         Write(LogLevel.Warning, template, args, null);
 
-    public static void Error(Exception? exc, string template, params object?[] args) =>
+    public static void Error(Exception? exc, string template, params object?[] args)
+    {
         Write(LogLevel.Error, template, args, exc);
+        FlushContext();
+    }
 
-    public static void Error(string template, params object?[] args) =>
+    public static void Error(string template, params object?[] args)
+    {
         Write(LogLevel.Error, template, args, null);
+        FlushContext();
+    }
 
     /// <summary>
     /// Rate-limited diagnostic channel for high-frequency repeated events
     /// (FFmpeg stderr lines, retry attempts). Key events and UI output are
-    /// never throttled -- those go through Info()/Ui() and are always recorded.
+    /// never throttled.
     /// </summary>
     public static void Sampled(string template, params object?[] args)
     {
+        // Below Debug nothing would reach the file anyway; skip the limiter.
+        if (_fileLevel > LogEventLevel.Debug) return;
+
         RateLimiter? limiter = _sampler;
         if (limiter is null) { Debug(template, args); return; }
 
@@ -205,10 +242,16 @@ public static class AppLog
         Debug(template, args);
     }
 
-    /// <summary>Record a line the user saw, without adding or changing any output.</summary>
+    /// <summary>
+    /// Record a line the user saw, without adding or changing any output.
+    /// v7.9.9.1: only when the threshold is Information or lower. Otherwise the
+    /// mirror would pay for a queue write per line (and per \r progress redraw)
+    /// for records the file sink is going to drop.
+    /// </summary>
     public static void Ui(string stream, string text)
     {
         if (string.IsNullOrEmpty(text)) return;
+        if (_fileLevel > LogEventLevel.Information) return;
         Write(LogLevel.Information, "ui.{Stream} {Text}", [stream, Redact(text)], null);
     }
 
@@ -219,7 +262,28 @@ public static class AppLog
         // stored (SelfUpdate's LAE_UPDATE_TOKEN is documented as never logged).
         for (int i = 0; i < args.Length; i++)
             if (args[i] is string s) args[i] = Redact(s);
-        Queue.Writer.TryWrite(new Entry(level, template, args, exc, _operation));
+        // v7.9.9.1: an exception message can carry a URL or proxy credentials,
+        // and Serilog renders {Exception} verbatim. Redact it as one string and
+        // log it as a message argument instead.
+        string? exceptionText = exc is null ? null : Redact(exc.ToString());
+        Queue.Writer.TryWrite(new Entry(level, template, args, exceptionText, _operation));
+    }
+
+    /// <summary>
+    /// Write the recent in-memory context once, at Error level, so the file
+    /// sink (which filters everything below Error by default) still records it.
+    /// </summary>
+    private static void FlushContext()
+    {
+        ContextSink? context = _context;
+        if (context is null) return;
+        if (Interlocked.Exchange(ref _flushing, 1) != 0) return;
+        try
+        {
+            foreach ((LogEventLevel level, string message) in context.Snapshot())
+                Write(LogLevel.Error, "ctx[{Level}] {Message}", [level.ToString(), message], null);
+        }
+        finally { Volatile.Write(ref _flushing, 0); }
     }
 
     private static async Task DrainAsync()
@@ -228,6 +292,14 @@ public static class AppLog
         {
             try
             {
+                string message = entry.Template;
+                object?[] args = entry.Args;
+                if (entry.ExceptionText is { Length: > 0 } text)
+                {
+                    message = entry.Template + Environment.NewLine + "{ExceptionText}";
+                    args = [.. entry.Args, text];
+                }
+
                 // Serilog's message template syntax is the same as MEL's, so
                 // properties survive the SerilogLoggerFactory bridge. The
                 // template is dynamic (callers supply it), so a cached
@@ -235,9 +307,9 @@ public static class AppLog
                 // fit this one dynamic sink.
 #pragma warning disable CA1848, CA1873, CA2254
                 Microsoft.Extensions.Logging.LoggerExtensions.Log(
-                    _logger!, entry.Level, default(EventId), entry.Exception,
-                    "{RunId}/{OperationId} " + entry.Template,
-                    [RunId, entry.Operation, .. entry.Args]);
+                    _logger!, entry.Level, default(EventId), null,
+                    "{RunId}/{OperationId} " + message,
+                    [RunId, entry.Operation, .. args]);
 #pragma warning restore CA1848, CA1873, CA2254
             }
             catch (Exception)
@@ -258,6 +330,9 @@ public static class AppLog
     /// <summary>Drain the queue and restore the console. Called once from Main's finally.</summary>
     public static void Close()
     {
+        // v7.9.9.1: CAS first. Two racing callers used to both pass the check
+        // and write run.end twice; correctness should not depend on the caller.
+        if (Interlocked.CompareExchange(ref _closing, 1, 0) != 0) return;
         if (Volatile.Read(ref _closed) != 0) return;
 
         // Write the terminating event BEFORE closing the queue: Write() drops
@@ -265,7 +340,7 @@ public static class AppLog
         if (_logger is not null)
             Info("run.end suppressed={Suppressed}", Volatile.Read(ref _suppressed));
 
-        if (Interlocked.Exchange(ref _closed, 1) != 0) return;
+        Interlocked.Exchange(ref _closed, 1);
 
         if (_originalOut is not null) Console.SetOut(_originalOut);
         if (_originalError is not null) Console.SetError(_originalError);
@@ -291,35 +366,48 @@ public static class AppLog
         return raw?.Trim().ToLowerInvariant() switch
         {
             "verbose" or "trace" or "debug" => LogEventLevel.Verbose,
+            "info" or "information" => LogEventLevel.Information,
             "warning" or "warn" => LogEventLevel.Warning,
-            "error" => LogEventLevel.Error,
-            _ => LogEventLevel.Information,
+            // v7.9.9.1: an ordinary run must not grow a log. Error is the
+            // default; everything above is opt-in.
+            _ => LogEventLevel.Error,
         };
     }
 
-    private static string Redact(string value)
+    /// <summary>
+    /// In-memory ring of recent events. v7.9.9.1: with the file sink at Error,
+    /// this is what makes an error report readable -- FlushContext re-emits the
+    /// ring at Error level.
+    /// </summary>
+    private sealed class ContextSink : Serilog.Core.ILogEventSink
     {
-        // Tokens and proxy credentials must never reach the log file.
-        string? token = Environment.GetEnvironmentVariable("LAE_UPDATE_TOKEN");
-        if (!string.IsNullOrEmpty(token)) value = value.Replace(token, "***", StringComparison.Ordinal);
+        private const int Capacity = 200;
+        private readonly ConcurrentQueue<(LogEventLevel Level, string Message)> _items = new();
 
-        int scheme = value.IndexOf("://", StringComparison.Ordinal);
-        if (scheme < 0) return value;
-        int at = value.IndexOf('@', scheme + 3);
-        int slash = value.IndexOf('/', scheme + 3);
-        if (at <= 0 || (slash >= 0 && slash < at)) return value;
-        int colon = value.IndexOf(':', scheme + 3);
-        if (colon < 0 || colon > at) return value;
-        return string.Concat(value.AsSpan(0, colon + 1), "***", value.AsSpan(at));
+        public void Emit(LogEvent logEvent)
+        {
+            _items.Enqueue((logEvent.Level, logEvent.RenderMessage()));
+            while (_items.Count > Capacity) _items.TryDequeue(out _);
+        }
+
+        /// <summary>Take everything collected so far, so a second error does not repeat it.</summary>
+        public List<(LogEventLevel Level, string Message)> Snapshot()
+        {
+            var taken = new List<(LogEventLevel, string)>(_items.Count);
+            while (_items.TryDequeue(out (LogEventLevel Level, string Message) item))
+                taken.Add(item);
+            return taken;
+        }
     }
 
     /// <summary>
-    /// Forwards every character unchanged to the original writer while
-    /// collecting complete lines (split on CR/LF, so '\r' progress redraws do
-    /// not become thousands of one-character entries).
+    /// Forwards console output unchanged and records each line as a structured
+    /// event. Writes are buffered until a line terminator so a <c>\r</c>
+    /// progress redraw becomes one record instead of one per repaint.
     /// </summary>
     private sealed class MirrorWriter(TextWriter inner, string stream) : TextWriter
     {
+        private const int MaxLine = 8 * 1024;
         private readonly StringBuilder _line = new();
 
         public override System.Text.Encoding Encoding => inner.Encoding;
@@ -328,35 +416,28 @@ public static class AppLog
         {
             inner.Write(value);
             if (value is '\n' or '\r') FlushLine();
-            else _line.Append(value);
+            else if (_line.Length < MaxLine) _line.Append(value);
         }
 
         public override void Write(string? value)
         {
-            inner.Write(value);
             if (value is null) return;
+            inner.Write(value);
             foreach (char c in value)
             {
                 if (c is '\n' or '\r') FlushLine();
-                else _line.Append(c);
+                else if (_line.Length < MaxLine) _line.Append(c);
             }
         }
 
         public override void WriteLine(string? value)
         {
             inner.WriteLine(value);
-            if (value is not null)
-                foreach (char c in value)
-                {
-                    if (c is '\n' or '\r') FlushLine();
-                    else _line.Append(c);
-                }
+            if (value is not null && _line.Length < MaxLine) _line.Append(value);
             FlushLine();
         }
 
-        public override void WriteLine() { inner.WriteLine(); FlushLine(); }
-
-        public override void Flush() { FlushLine(); inner.Flush(); }
+        public override void Flush() => inner.Flush();
 
         private void FlushLine()
         {
@@ -365,11 +446,20 @@ public static class AppLog
             _line.Clear();
             Ui(stream, text);
         }
+    }
 
-        protected override void Dispose(bool disposing)
-        {
-            FlushLine();
-            base.Dispose(disposing);
-        }
+    private static string Redact(string value)
+    {
+        // Never let the update token or a URL's userinfo reach the log.
+        string? token = Environment.GetEnvironmentVariable("LAE_UPDATE_TOKEN");
+        if (!string.IsNullOrEmpty(token))
+            value = value.Replace(token, "***", StringComparison.Ordinal);
+
+        int at = value.IndexOf('@', StringComparison.Ordinal);
+        if (at <= 0) return value;
+
+        int scheme = value.LastIndexOf("://", at, StringComparison.Ordinal);
+        if (scheme < 0) return value;
+        return value[..(scheme + 3)] + "***" + value[at..];
     }
 }

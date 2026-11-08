@@ -334,6 +334,13 @@ public sealed class CliOptions
     public bool NoEra { get; init; }
 
     /// <summary>
+    /// v7.9.9.1: encode as fast as the machine allows instead of replaying the
+    /// source's wall-clock cadence ("direct compression" rather than a live
+    /// simulation). One rung and no pacing; see RealtimeOptions.RealTime.
+    /// </summary>
+    public bool NoRealtime { get; init; }
+
+    /// <summary>
     /// v7.9.5.1: pick a pass's video codec by name instead of writing a
     /// fragment. The container follows the codec when none was named.
     /// Repeatable, paired by position with the quality and audio flags.
@@ -575,6 +582,7 @@ public static class CliParser
         var recompressContainers = new List<string>();
         bool noRecompress = false;
         bool noEra = false;
+        bool noRealtime = false;
         bool recompressOnly = false;
         var recompressCodecs = new List<string>();
         var recompressQualities = new List<int>();
@@ -1036,6 +1044,7 @@ public static class CliParser
                     break;
                 case "--no-recompress": noRecompress = true; break;
                 case "--no-era": noEra = true; break;
+                case "--no-realtime": noRealtime = true; break;
                 case "--recompress-only": recompressOnly = true; break;
                 case "--recompress-codec":
                     if (!TryValue(out string recompressCodecValue))
@@ -1256,6 +1265,7 @@ public static class CliParser
             RecompressContainers = recompressContainers,
             NoRecompress = noRecompress,
             NoEra = noEra,
+            NoRealtime = noRealtime,
             RecompressOnly = recompressOnly,
             RecompressCodecs = recompressCodecs,
             RecompressQualities = recompressQualities,
@@ -1426,6 +1436,8 @@ public static class CliParser
                                     + "existing file, then exit"),
             ("--no-recompress", "", "disable the recompress stage"),
             ("--no-era", "", "do not use an era preset and remove the one saved in config.json"),
+            ("--no-realtime", "", "encode as fast as the machine allows instead of replaying the "
+                                + "source's wall-clock cadence (direct compression, no live pacing)"),
             ("--era", "ID", $"apply an era/site preset: {PostProcess.EraPresets.Ids} "
                           + "(custom ids from the settings file also work)"),
             ("--era-modern", "", "render a preset's second pass with libx264 + AAC in MP4 "

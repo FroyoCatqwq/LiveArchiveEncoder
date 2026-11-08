@@ -725,10 +725,14 @@ public static class Toolchain
         // v7.9.9: the two pipe readers are producers, one Channel consumer
         // owns the tail buffer and the log callback. This removes the lock and
         // keeps stdout/stderr in arrival order without blocking either pipe.
-        Channel<string> lines = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        // v7.9.9.1: bounded, dropping the oldest lines. An unbounded queue plus
+        // a consumer that died (a throwing log callback) used to grow with the
+        // download for as long as it ran.
+        Channel<string> lines = Channel.CreateBounded<string>(new BoundedChannelOptions(4096)
         {
             SingleReader = true,
             SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest,
             AllowSynchronousContinuations = false,
         });
         void Pipe(StreamReader reader)
@@ -742,7 +746,10 @@ public static class Toolchain
         {
             await foreach (string line in lines.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                log?.Invoke(line);
+                // v7.9.9.1: a logging callback that throws must not kill the
+                // drain -- otherwise the pipes keep writing to a channel nobody
+                // reads (a multi-GB download used to grow there without bound).
+                try { log?.Invoke(line); } catch (Exception) { /* best effort */ }
                 AppLog.Sampled("toolchain.output {Line}", line);
                 if (tail.Length < 4000)
                 {
@@ -754,8 +761,15 @@ public static class Toolchain
 
         Task outTask = Task.Run(() => Pipe(proc.StandardOutput));
         Task errTask = Task.Run(() => Pipe(proc.StandardError));
-        Task.WaitAll(outTask, errTask);
-        lines.Writer.TryComplete();
+        try
+        {
+            Task.WaitAll(outTask, errTask);
+        }
+        finally
+        {
+            // Complete even when a reader threw, or the consumer waits forever.
+            lines.Writer.TryComplete();
+        }
         consumer.GetAwaiter().GetResult();
 
         proc.WaitForExit();
