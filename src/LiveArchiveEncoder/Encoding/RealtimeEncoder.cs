@@ -36,7 +36,17 @@ public static class RealtimeEncoder
     /// is a plain single pass.
     /// </summary>
     public static EncodeResult Run(RealtimeOptions o, CancellationToken cancellationToken = default)
-        => o.Parallel > 1 ? ParallelEncoder.Run(o, cancellationToken) : RunSingle(o, cancellationToken);
+    {
+        if (o.Parallel <= 1) return RunSingle(o, cancellationToken);
+
+        // v7.9.9.6: the split-audio pipeline has no shard stage -- it encodes
+        // one video pass and one audio pass -- so --parallel used to be
+        // discarded without a word. RunSplit() says so once; don't print the
+        // same note here or the caller sees it twice.
+        if (o.AudioMode != AudioMode.Inline) return RunSplit(o, cancellationToken);
+
+        return ParallelEncoder.Run(o, cancellationToken);
+    }
 
     /// <summary>Single-pass encode: one decoder process, one encoder process.</summary>
     public static EncodeResult RunSingle(RealtimeOptions o, CancellationToken cancellationToken = default)
@@ -467,6 +477,10 @@ public static class RealtimeEncoder
     {
         if (o.AudioMode == AudioMode.Inline) return Run(o, cancellationToken);
 
+        // v7.9.9.6: this is the entry point the CLI calls, so the shard count
+        // has to be reported here too -- Run() only sees the inline path.
+        if (o.Parallel > 1 && o.Verbose) Console.WriteLine(L.T("note.parallelsplit"));
+
         // Probe once with a throwaway pass over the source to know whether audio
         // is even in play before committing to the split pipeline.
         bool videoStarted = false;
@@ -490,7 +504,10 @@ public static class RealtimeEncoder
             {
                 Console.WriteLine(L.T("note.splitunavailable", exc.Message));
             }
-            return Run(o, cancellationToken);
+            // v7.9.9.6: re-entering Run() with Parallel > 1 and AudioMode still
+            // Auto would hit the same branch above and recurse forever. The
+            // fallback is the single-process pipeline by definition.
+            return RunSingle(o, cancellationToken);
         }
     }
 

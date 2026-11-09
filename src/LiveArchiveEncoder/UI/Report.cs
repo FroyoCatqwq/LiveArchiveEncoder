@@ -114,6 +114,19 @@ public static class Report
             if (warning is not null) Line(L.T("report.roqnote"), warning);
             if (c.AudioEncoder == "roq_dpcm") Line(L.T("report.roqaudio"), L.T("report.roqaudio.value"));
         }
+        // v7.9.6: live simulation vs a direct file-to-file run changes how the
+        // bitrate window is interpreted, so the dump has to say which one runs.
+        Line(L.T("param.realtime"), c.RealTime ? L.T("value.yes") : L.T("value.no"));
+        if (c.Encoder?.Name == "libopenh264")
+        {
+            // v7.9.9.6: the parameter menu sets these two, but the dump never
+            // showed them, so a value that did not reach the encoder was
+            // invisible from the one screen meant to prove it.
+            Line(L.T("param.oh264rc"), c.OpenH264Rc);
+            Line(L.T("param.oh264skip"), c.OpenH264SkipFrames ? L.T("value.yes") : L.T("value.no"));
+        }
+        if (c.ExtraEncoderArgs is { Length: > 0 } extraArgs)
+            Line(L.T("param.extraargs"), extraArgs);
         Line(L.T("report.threads"), c.Threads.ToString(CultureInfo.InvariantCulture));
         Line(L.T("report.buffer"), $"{c.BufferFrames} {L.T("param.buffer.frames")}");
         Line(L.T("report.hwaccel"), c.Hwaccel);

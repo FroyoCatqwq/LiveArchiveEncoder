@@ -614,25 +614,10 @@ public static class Cli
         // the equivalent command line must not either.
         if (args.SaveConfig is { Length: > 0 } || args.EmitArgs)
         {
-            // v7.9.8.3: the subtitle request lives on the command line only -- the
-            // Config the encoder receives is assembled further down, so a settings
-            // file written here used to forget every --subtitle / --subtitle-aspect
-            // and the "equivalent command line" lost them too. Fold the flags into
-            // the snapshot before capturing it.
-            if (args.SubtitleFiles.Count > 0 || args.SubtitleStream is not null)
-            {
-                config.Subtitles = new Configuration.SubtitleConfig
-                {
-                    Mode = args.SubtitleMode,
-                    Files = [.. args.SubtitleFiles],
-                    Stream = args.SubtitleStream,
-                    Codec = args.SubtitleCodec,
-                    FontDir = args.SubtitleFontDir,
-                    FallbackFont = args.SubtitleFont,
-                    BoxAspect = args.SubtitleAspect ?? config.Subtitles.BoxAspect,
-                };
-            }
-
+            // v7.9.9.6: MergeStoredPreferences already folded every subtitle
+            // flag into config.Subtitles (through SubtitlesForRun). Rebuilding
+            // the block here again dropped the stored font directory and font
+            // family whenever a run named a file, because those args are null.
             UserConfig captured = ConfigStore.Capture(config);
             if (args.SaveConfig is { Length: > 0 } savePath)
             {
@@ -956,7 +941,9 @@ public static class Cli
         }
 
         FileInfo dst = outputs[^1];
-        if (string.Equals(Path.GetFullPath(dst.FullName), src.FullName, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(Path.GetFullPath(dst.FullName), src.FullName,
+                OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         {
             Console.Error.WriteLine("ERROR: output must differ from input");
             return 2;
@@ -994,6 +981,16 @@ public static class Cli
         // v7.9.9.2: report the file that really exists. After an alternate
         // "(2)" save, `dst` is the name the player was holding, not our output.
         if (!args.Quiet) Console.WriteLine(L.T("rc.only.done", hopInput));
+
+        // v7.9.9.6: --play was silently ignored on this path, although the
+        // live path has always honoured it.
+        if (args.Play != PlayMode.Off)
+        {
+            (bool played, string? playError) =
+                Player.Launch(args.Play, hopInput, ffmpeg, args.PlayerPath);
+            if (!played && playError is not null)
+                Console.Error.WriteLine($"ERROR: {playError}");
+        }
         return 0;
     }
 
@@ -1078,16 +1075,27 @@ public static class Cli
     /// The subtitle block this run asked for, laid over the stored one so a flag
     /// that names one field does not discard the rest.
     /// </summary>
-    private static SubtitleConfig SubtitlesForRun(SubtitleConfig saved, CliOptions args) => new()
+    internal static SubtitleConfig SubtitlesForRun(SubtitleConfig saved, CliOptions args)
     {
-        Mode = args.SubtitleMode,
-        Files = [.. args.SubtitleFiles],
-        Stream = args.SubtitleStream,
-        Codec = args.SubtitleCodec ?? saved.Codec,
-        FontDir = args.SubtitleFontDir ?? saved.FontDir,
-        FallbackFont = args.SubtitleFont ?? saved.FallbackFont,
-        BoxAspect = args.SubtitleAspect ?? saved.BoxAspect,
-    };
+        // v7.9.9.6: a path or a stream replaces the selection; a flag that only
+        // names a field (mode, codec, font, font dir) must leave the rest of
+        // the stored request intact. Before this, `--subtitle-mode off` with a
+        // stored sidecar was ignored (files untouched, mode kept) and
+        // `--subtitle-font X` reset the mode and dropped the file list.
+        bool picked = args.SubtitleFiles.Count > 0 || args.SubtitleStream is not null;
+        return new SubtitleConfig
+        {
+            Mode = args.SubtitleModeExplicit || picked ? args.SubtitleMode : saved.Mode,
+            Files = args.SubtitleFiles.Count > 0
+                ? [.. args.SubtitleFiles]
+                : args.SubtitleStream is not null ? [] : [.. saved.Files],
+            Stream = args.SubtitleStream ?? (args.SubtitleFiles.Count > 0 ? null : saved.Stream),
+            Codec = args.SubtitleCodecExplicit ? args.SubtitleCodec : saved.Codec,
+            FontDir = args.SubtitleFontDirExplicit ? args.SubtitleFontDir : saved.FontDir,
+            FallbackFont = args.SubtitleFontExplicit ? args.SubtitleFont : saved.FallbackFont,
+            BoxAspect = args.SubtitleAspect ?? saved.BoxAspect,
+        };
+    }
 
     internal static (RecompressSettings Settings, string? Error) ResolveRecompress(
         CliOptions args, PostProcess.EraPreset? era, bool eraNative, (int W, int H)? eraSize = null,

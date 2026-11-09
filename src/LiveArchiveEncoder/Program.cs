@@ -636,8 +636,7 @@ public static class Program
             }
 
             Console.WriteLine(L.T("update.available", release.Tag, release.PageUrl ?? ""));
-            if (release.Prerelease)
-                Console.WriteLine("NOTE: this is a pre-release tag; --update will not install it.");
+            if (release.Prerelease) Console.WriteLine(L.T("update.prerelease", release.Tag));
             return 3;
         }
 

@@ -2,7 +2,7 @@
 
 **English** · [中文](v8-handover.md)
 
-Baseline version: **v7.9.9.5** (2026-11-09).
+Baseline version: **v7.9.9.6** (2026-11-09).
 
 This is the handover point between v7 and v8. It does not repeat the architecture
 description (see [`architecture.en.md`](architecture.en.md)); it answers four
@@ -18,14 +18,18 @@ acceptance**.
 | --- | --- | --- |
 | language / runtime | C# / .NET 10 + .NET 11 (JIT, NativeAOT, self-contained) | Rust, full rewrite |
 | goal | bugfix / hotfix / small features | structural redesign |
-| behaviour baseline | Python v6.3.3 reference + this repo's e2e | must match v7.9.9.5 item by item |
+| behaviour baseline | Python v6.3.3 reference + this repo's e2e | must match v7.9.9.6 item by item |
 | structural changes | **no longer accepted** | all of them happen here |
 
 v7.9.9.5 was a whole-project audit (83 product source files, ~29.5k lines; 52
 unit-test files; 23 e2e files). It fixed process lifetime, cancellation,
-concurrency, three-state settings and untrusted-input defects and added regression
-tests. The full list is the v7.9.9.5 entry in [`CHANGELOG.en.md`](CHANGELOG.en.md)
-(summary) and [`CHANGELOG.md`](CHANGELOG.md) (authoritative).
+concurrency, three-state settings and untrusted-input defects. v7.9.9.6 is a
+second audit on the same baseline: it connects settings the CUI accepted but the
+run dropped (OpenH264 dials, explicit q:v, single subtitle fields) and keeps the
+shell alive across a broken config, an unreadable directory or a bad choice. No
+default encode parameter changed. The full lists are the v7.9.9.5 / v7.9.9.6
+entries in [`CHANGELOG.en.md`](CHANGELOG.en.md) (summary) and
+[`CHANGELOG.md`](CHANGELOG.md) (authoritative).
 
 **Why freeze now**: many v7 constraints (`-threads` position, realtime pacing, the
 rate-control formula, the giant UI classes, global state) are part of the v6.3.3
@@ -101,8 +105,8 @@ product definition and must be registered explicitly in the baseline.
 | --- | --- | --- |
 | static review | two independent read-only reviews (encode core/pipes; UI/CLI/config/update/network), each finding required a file:line and a trigger | 45 confirmed issues + 6 pending |
 | live runs | `--version` / `--help` / `--cpu-info`, no-input and mutually exclusive switches, proxy positionals, four completion shells, CUI enter+quit, a real direct encode (901,294 B product), `--save-config` → `--emit-args` round trip | all as expected |
-| unit tests | TUnit, both TFMs (`net10.0` / `net11.0`) | 734 / 734, 0 warnings |
-| e2e | `tools/e2e.py` two phases (timing / shared_config serial, rest under xdist) | 242 passed / 2 skipped |
+| unit tests | TUnit, both TFMs (`net10.0` / `net11.0`) | 741 / 741, 0 warnings (7 added in v7.9.9.6) |
+| e2e | `tools/e2e.py` two phases (timing / shared_config serial, rest under xdist) | 213 + 2 skipped (parallel), 29 (serial); 242 passed / 2 skipped total |
 | gates | `tools/check-slnx.py` manifest drift + bilingual pairing | pass |
 
 Fix themes: **cancellation reaching every short-lived child**, **bounded pipe reads
@@ -114,7 +118,7 @@ longer flattened**, **untrusted feed/URL names cleaned before they become paths*
 
 ## 4. Problems deliberately left to v8
 
-These were **not** changed in v7.9.9.5, for one of three reasons: they would break
+These were **not** changed in v7.9.9.5 / v7.9.9.6, for one of three reasons: they would break
 equivalence, they need structural work, or there is no verifiable criterion. The
 rewrite must give an explicit "change / keep" decision for each.
 
@@ -152,7 +156,7 @@ rewrite must give an explicit "change / keep" decision for each.
 | `ShardPlanner` float tail | an early `break` pins the last `End` to `rangeEnd` but leaves `Slots`; needs a floating-point boundary case |
 | update trust model | only the release JSON's `sha256`, no code signing, no automatic rollback, no `.old`; redesign for enterprise distribution |
 | Linux NativeAOT / glibc | AOT output is bound to the build host's glibc; v8 must decide how static Rust linking meets a dynamic FFmpeg |
-| pre-release comparison | `VersionTag.Parse` deliberately drops `-rc1` / `+build` (pinned by unit tests); v7.9.9.5 only refuses installation in `Install`. v8 should implement real SemVer precedence |
+| pre-release comparison | `VersionTag.Parse` deliberately drops `-rc1` / `+build` (pinned by unit tests); v7.9.9.6 only refuses installation in `Install`. v8 should implement real SemVer precedence |
 
 ---
 
@@ -161,7 +165,7 @@ rewrite must give an explicit "change / keep" decision for each.
 **Without this, v8 cannot be accepted.** Build it before the first crate:
 
 1. **argv snapshots** — record `decCmd` / `encCmd` / `preflight` / `recompress`
-   vectors from v7.9.9.5 for every encoder × preset × option combination,
+   vectors from v7.9.9.6 for every encoder × preset × option combination,
    including order and float text. Store as `insta`/JSON snapshots; make them v8's
    first test group.
 2. **Product fingerprints** — container structure (`ffprobe` stream/format fields),

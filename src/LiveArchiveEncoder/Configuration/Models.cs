@@ -189,6 +189,14 @@ public sealed class Config
     public int Qv { get; set; } = 8;
 
     /// <summary>
+    /// v7.9.9.6: true when the user typed the quality number this session, as
+    /// opposed to a default or a preset's value. Intra-only calibration may
+    /// retune the latter toward the bitrate ceiling but must never override a
+    /// number somebody chose. Runtime only -- deliberately not persisted.
+    /// </summary>
+    public bool QvExplicit { get; set; }
+
+    /// <summary>
     /// v7.9.8.8: how OpenH264's rate control is driven -- <c>bitrate</c> (the
     /// default, and the only mode that holds a ceiling), <c>quality</c> (spend
     /// up to ~20% over the ceiling to keep the picture) or <c>timestamp</c>

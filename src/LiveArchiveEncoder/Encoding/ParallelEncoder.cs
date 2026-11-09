@@ -450,6 +450,14 @@ public static class ParallelEncoder
         RealtimeOptions o, double? duration, string sourcePixFmt, double? sourceKbps)
     {
         if (o.Parallel <= 1) return null;
+
+        // v7.9.9.6: a copied subtitle track carries timestamps relative to the
+        // source. Each shard would rebase it to its own segment start, and the
+        // concat join cannot restore the offsets, so every shard's subtitles
+        // would land at the head of that segment. Burned-in text is part of the
+        // picture and safe; copying is not.
+        if (o.Subtitles is { Active: true, Mode: SubtitleMode.Copy })
+            return L.T("parallel.subcopy");
         // v7.9.6.3: a network source is measured, not assumed. Until this
         // version every network path was a single pass on the theory that N
         // readers on one link stall each other -- true of a congested Wi-Fi hop,

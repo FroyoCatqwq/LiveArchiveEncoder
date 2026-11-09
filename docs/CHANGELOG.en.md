@@ -7,6 +7,65 @@ edition, [`CHANGELOG.md`](CHANGELOG.md) — entries there are kept verbatim, wit
 measurements and reasoning behind each decision. `⚠` marks a change a user can
 notice in an output, a default, a file name or a CLI contract.
 
+## v7.9.9.6 (2026-11-09) — second audit: menu promises, subtitle fields, shell survival
+
+Second full-project audit. No default encode parameter changed; v6.3.3 equivalence
+is intact. The theme is "a setting the UI accepts must reach FFmpeg, and one bad
+answer must not end the shell".
+
+**CUI**
+
+* The OpenH264 dials (rows 32/33) now actually reach `RealtimeOptions`; they were
+  accepted by the menu and ignored by the run.
+* A hand-typed q:v is marked `QualityExplicit`, so intra-only calibration no longer
+  rewrites it. Presets, encoder switches and profile loads reset the flag.
+* The era, container and resolution menus all advertised `0 = keep` but only an
+  empty line worked; typing 0 produced "unknown era preset '0'", "'0' is not a
+  container" or a format error. All three now show a `0. Back` row and accept 0.
+* The encoder list says "not probed" instead of "?", and the prompt says `r=back`
+  (refresh is main-menu 5).
+* An unreadable input directory is reported instead of crashing the shell; a
+  directory with more than 200 videos says only the first 200 are shown.
+* A `config.json` that exists but cannot be parsed is never overwritten: CUI uses
+  `TryLoad`, refuses every write-back and warns at startup. Previously the first
+  menu edit replaced the user's real file with defaults.
+* Main-menu handlers are wrapped in a `try/catch` (except OOM), so one bad choice
+  prints an error and returns to the menu.
+
+**CLI**
+
+* `--subtitle-mode`, `--subtitle-codec`, `--subtitle-font` and
+  `--subtitle-font-dir` now take effect on their own. `TouchedSubtitles` only
+  looked at files/stream, so `--subtitle-mode off` was ignored and
+  `--subtitle-font` was dropped. A single field now merges over the stored block;
+  naming a file or stream replaces the selection.
+* `--save-config` no longer rebuilds the subtitle block a second time, which used
+  to drop the stored font directory/family when a run named a file.
+* `--recompress-only` honours `--play`.
+* `--help` / `--version` short-circuit later arguments (`--help --bogus` is help,
+  exit 0), and `--` ends option parsing for names beginning with `-`.
+* `--parallel` with split audio says sharding does not apply and runs one pass;
+  the inline fallback now calls `RunSingle` directly instead of recursing in Auto
+  mode. `--parallel` with a copied subtitle track also falls back to one pass,
+  because each shard would rebase the subtitle timeline.
+* Platform-aware path comparison in the CUI output/input check, recompress-only
+  and `CorrectExtension` (Linux `A.avi` and `a.avi` are different files).
+
+**Consistency**
+
+* `FirstRun` also refuses to overwrite an unparsable `config.json`.
+* `ReadDouble` rejects NaN/Infinity.
+* Pre-release notices are localized and shown by both `--update-check` and the CUI
+  update menu.
+* `PrintConfig` shows realtime/direct mode, OpenH264 rate control/skip frames and
+  extra encoder args.
+
+**Tests**: +7 unit tests (`V7996Tests.cs`, 734 → 741), both TFMs green with 0
+warnings; e2e 213 passed + 2 skipped (parallel) and 29 passed (serial), 242 passed
+/ 2 skipped in total; `tools/check-slnx.py` passes. Live runs with the requested
+pwsh covered the 0 rows, the "not probed" column, a corrupt config, the split-audio
+parallel note, `--help --bogus`, `--`, and subtitle overrides in `--save-config`.
+
 ## v7.9.9.5 (2026-11-09) — full audit, cancellation/concurrency fixes, v8 handover
 
 **v7 enters maintenance mode** (bugfix / hotfix / small features); v8 is a full

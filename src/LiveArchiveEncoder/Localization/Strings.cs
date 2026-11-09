@@ -44,6 +44,7 @@ public static class L
         ["value.off"] = "off",
         ["value.none"] = "none",
         ["value.auto"] = "auto",
+        ["value.notprobed"] = "not probed",
         ["value.custom"] = "custom",
         ["value.fallback"] = "fallback/custom",
         ["value.notdetected"] = "not detected",
@@ -65,6 +66,12 @@ public static class L
         ["menu.language"] = "Language",
         ["menu.parallel"] = "Parallel shards",
         ["menu.parallel.off"] = "off (single pass)",
+        // v7.9.9.6: --parallel and the split-audio pipeline are mutually
+        // exclusive; the encoder says so instead of ignoring the shard count.
+        ["note.parallelsplit"] = "NOTE: parallel sharding does not apply when audio is encoded "
+            + "separately (--audio-mode separate/auto); running one pass.",
+        ["parallel.subcopy"] = "a copied subtitle track cannot be sharded (its timeline would "
+            + "drift across the join); running one pass instead",
         ["parallel.prompt"] = "Parallel shards (1 = off) [{0}]: ",
         ["parallel.set"] = "Parallel shards set to {0}. Only concatenation-safe containers "
             + "(avi, mp4, flv, asf, mpeg) are actually sharded; the rest fall back to a single pass.",
@@ -184,6 +191,7 @@ public static class L
         ["config.settingsfile"] = "Settings file",
         ["config.restored"] = "Restored settings",
         ["config.savefailed"] = "WARNING: could not write settings to {0}",
+        ["config.broken.keep"] = "WARNING: {0} cannot be parsed; it will NOT be overwritten this session.",
         ["config.saved"] = "Settings written to {0} (no encode was run).",
 
         // ---- v7.9.3: command line preview + named settings files ----
@@ -213,12 +221,14 @@ public static class L
         ["input.novideo"] = "No common video files found in that directory.",
         ["input.selectnumber"] = "Select number: ",
         ["input.invalid"] = "Invalid selection.",
+        ["input.more"] = "(showing the first {0} of {1} files; narrow the directory to see the rest)",
+        ["input.unreadable"] = "That directory cannot be read: {0}",
         ["input.select"] = "Select a valid input video first.",
 
         ["encoder.selectfirst"] = "Select a video encoder first.",
         ["encoder.heading"] = "=== Legacy / classic encoders detected from current FFmpeg ===",
         ["encoder.pixfmts"] = "pixel formats",
-        ["encoder.prompt"] = "Select encoder number (r=refresh): ",
+        ["encoder.prompt"] = "Select encoder number (r=back): ",
         ["encoder.outofrange"] = "out of range",
         ["encoder.invalid"] = "Invalid selection: {0}",
         ["encoder.fpsadjusted"] = "{0}: requested {1} fps is unsupported; using {2} fps.",
@@ -613,6 +623,7 @@ public static class L
         ["update.feed"] = "feed      : {0}",
         ["update.uptodate"] = "already the newest build ({0}).",
         ["update.available"] = "a newer build is available: {0}  {1}",
+        ["update.prerelease"] = "NOTE: {0} is a pre-release tag; it will not be installed over a stable build.",
         ["update.applyhint"] = "press 2 to download and install it.",
         ["update.confirm"] = "download and replace this program now? [Y/n] ",
         ["update.checkfailed"] = "could not read the release feed: {0}",
@@ -656,6 +667,7 @@ public static class L
         ["rc.args.empty"] = "Arguments cannot be empty; write at least one option.",
         ["rc.args.rejected"] = "Those arguments were rejected: {0}",
         ["rc.container.set"] = "Output container: {0}.",
+        ["rc.container.rejected"] = "That container cannot hold this codec pair: {0}",
         ["rc.hint"] = "Example: -vf \"scale=320:240,fps=15\" -c:v libx264 -crf 28 -ac 1 -b:a 32k",
         ["rc.only.input"] = "Recompress only -- input : {0}",
         ["rc.only.output"] = "Recompress only -- output: {0}",
@@ -828,6 +840,7 @@ public static class L
         ["value.off"] = "关闭",
         ["value.none"] = "无",
         ["value.auto"] = "自动",
+        ["value.notprobed"] = "未探测",
         ["value.custom"] = "自定义",
         ["value.fallback"] = "回退/自定义",
         ["value.notdetected"] = "未检测到",
@@ -849,6 +862,9 @@ public static class L
         ["menu.language"] = "界面语言",
         ["menu.parallel"] = "并行分片数",
         ["menu.parallel.off"] = "关闭（单次编码）",
+        ["note.parallelsplit"] = "注意：音频分离编码（--audio-mode separate/auto）时不能并行分片，"
+            + "本次按单遍编码。",
+        ["parallel.subcopy"] = "复制字幕流时不能分片（字幕时间轴会在拼接处漂移），本次按单遍编码。",
         ["parallel.prompt"] = "并行分片数（1=关闭）[{0}]: ",
         ["parallel.set"] = "并行分片数已设为 {0}。只有可安全拼接的容器（avi、mp4、flv、asf、mpeg）"
             + "会真正分片，其余容器自动回退为单次编码。",
@@ -956,6 +972,7 @@ public static class L
         ["config.settingsfile"] = "配置文件",
         ["config.restored"] = "已恢复上次配置",
         ["config.savefailed"] = "警告：无法写入配置到 {0}",
+        ["config.broken.keep"] = "警告：{0} 无法解析；本次会话不会覆盖它。",
         ["config.saved"] = "设置已写入 {0}（未执行编码）。",
 
         // ---- v7.9.3：命令行预览 + 命名配置文件 ----
@@ -985,12 +1002,14 @@ public static class L
         ["input.novideo"] = "该目录下没有找到常见视频文件。",
         ["input.selectnumber"] = "请选择序号: ",
         ["input.invalid"] = "无效的选择。",
+        ["input.more"] = "（只显示前 {0} 个，共 {1} 个文件；缩小目录范围可看到其余文件）",
+        ["input.unreadable"] = "无法读取该目录：{0}",
         ["input.select"] = "请先选择有效的输入视频。",
 
         ["encoder.selectfirst"] = "请先选择视频编码器。",
         ["encoder.heading"] = "=== 当前 FFmpeg 检测到的复古/经典编码器 ===",
         ["encoder.pixfmts"] = "像素格式",
-        ["encoder.prompt"] = "选择编码器序号（r=刷新）: ",
+        ["encoder.prompt"] = "选择编码器序号（r=返回）: ",
         ["encoder.outofrange"] = "超出范围",
         ["encoder.invalid"] = "无效选择：{0}",
         ["encoder.fpsadjusted"] = "{0}：请求的 {1} fps 不受支持，改用 {2} fps。",
@@ -1367,6 +1386,7 @@ public static class L
         ["update.feed"] = "信息源    ：{0}",
         ["update.uptodate"] = "已经是最新版本（{0}）。",
         ["update.available"] = "有更新的版本：{0}  {1}",
+        ["update.prerelease"] = "注意：{0} 是预发布标签，不会覆盖稳定版安装。",
         ["update.applyhint"] = "按 2 下载并安装。",
         ["update.confirm"] = "现在下载并替换本程序？[Y/n] ",
         ["update.checkfailed"] = "读不到发布信息：{0}",
@@ -1409,6 +1429,7 @@ public static class L
         ["rc.args.empty"] = "参数不能为空，至少写一个选项。",
         ["rc.args.rejected"] = "这些参数被拒绝：{0}",
         ["rc.container.set"] = "输出容器：{0}。",
+        ["rc.container.rejected"] = "该容器装不下这组编码：{0}",
         ["rc.hint"] = "示例：-vf \"scale=320:240,fps=15\" -c:v libx264 -crf 28 -ac 1 -b:a 32k",
         ["rc.only.input"] = "仅二次压缩 - 输入：{0}",
         ["rc.only.output"] = "仅二次压缩 - 输出：{0}",

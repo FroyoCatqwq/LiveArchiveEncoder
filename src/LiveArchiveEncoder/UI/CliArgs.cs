@@ -152,7 +152,8 @@ public static class CliArgs
         }
 
         // Subtitles: nothing is emitted for an inactive request, because
-        // "burn with nothing picked" is exactly what the defaults already mean.
+        // "burn with nothing picked" is exactly what the defaults already mean
+        // (an "off" block with leftover files/stream included).
         if (c.Subtitles.Active)
         {
             foreach (string file in c.Subtitles.Files) argv.AddRange(["--subtitle", file]);

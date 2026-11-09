@@ -14,7 +14,7 @@ authoritative full text and provide an English summary — see
 | [`era-presets.en.md`](era-presets.en.md) | 32 presets (5 `generic/<year>` plus 27 `site/year` rows across 13 sites), evidence grading, q:v / CRF calibration, drop/rise windows, old id aliases |
 | [`toolchain-builds.en.md`](toolchain-builds.en.md) | Six FFmpeg sources (five auto-downloadable) plus unified 7-Zip, codec differences measured on both platforms |
 | [`architecture.en.md`](architecture.en.md) | Technical description: architecture and process model, core mechanisms (pacing, frame pool, ladder, rate control, sharding, post-processing), strengths and weaknesses, v8 (Rust) migration design |
-| [`v8-handover.en.md`](v8-handover.en.md) | Frozen v7 baseline: behaviour contract to inherit, the v7.9.9.5 audit, trade-offs left to v8, golden-baseline acceptance criteria |
+| [`v8-handover.en.md`](v8-handover.en.md) | Frozen v7 baseline: behaviour contract to inherit, the v7.9.9.5 / v7.9.9.6 audits, trade-offs left to v8, golden-baseline acceptance criteria |
 | [`MAINTENANCE.en.md`](MAINTENANCE.en.md) | Directory responsibilities, commands, post-change checklist, documentation contract, release flow, log and diagnostics |
 | [`capability-matrix.en.md`](capability-matrix.en.md) | Container × frame-rate × pixel-format measurements (v7.9.6 snapshot, archived) |
 | [`test-report-v7.en.md`](test-report-v7.en.md) | Measured v7 port-acceptance report (archived, English original) |

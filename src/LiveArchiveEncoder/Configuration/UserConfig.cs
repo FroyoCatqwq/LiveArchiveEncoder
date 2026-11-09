@@ -642,6 +642,10 @@ public static class ConfigStore
         c.Recover = stored.Recover;
         c.Window = stored.Window;
         c.Qv = stored.Qv;
+        // v7.9.9.6: a value loaded from a file or a profile is not a number
+        // the user typed in this session, so intra-only calibration may still
+        // retune it. Editing row 6 sets the flag again.
+        c.QvExplicit = false;
         // A stored mode this build cannot honour (hand-edited file, older
         // beta) falls back to the default rather than failing to load: the
         // setting is an optimisation, not a reason to refuse the run.

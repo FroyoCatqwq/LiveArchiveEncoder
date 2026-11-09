@@ -58,7 +58,13 @@ public static class FirstRun
         FfmpegDist dist = choices[picked - 1];
         // The proxy is the one already configured: a user behind one set it on
         // an earlier run, and asking again here would bury the actual question.
-        UserConfig stored = ConfigStore.Load();
+        // v7.9.9.6: an unparsable config.json is not replaced by defaults here
+        // either -- same rule as --update and --ffmpeg-download.
+        string configPath = ConfigStore.DefaultPath;
+        bool configExists = File.Exists(configPath);
+        UserConfig? loaded = ConfigStore.TryLoad(configPath);
+        bool canPersist = !configExists || loaded is not null;
+        UserConfig stored = loaded ?? new UserConfig();
         Console.WriteLine(L.T("tc.installing", dist.Label));
         Console.WriteLine(dist.Homepage);
 
@@ -72,7 +78,7 @@ public static class FirstRun
         // Remembered as the active source, exactly like --ffmpeg-download does,
         // so the next start finds it without a prompt.
         stored.FfmpegSource = dist.Id;
-        ConfigStore.Save(stored);
+        if (canPersist) ConfigStore.Save(stored);
 
         string? exe = Toolchain.FFmpegFor(dist.Id);
         if (exe is not null)

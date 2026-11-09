@@ -123,6 +123,14 @@ public sealed class CliOptions
     /// <summary>burn (into the picture), copy (as a stream) or off.</summary>
     public string SubtitleMode { get; init; } = "burn";
 
+    // v7.9.9.6: "was this field named on the command line?" -- a lone
+    // --subtitle-mode off must be able to disable the stored sidecar request,
+    // and a lone --subtitle-font must not wipe the stored file list.
+    public bool SubtitleModeExplicit { get; init; }
+    public bool SubtitleCodecExplicit { get; init; }
+    public bool SubtitleFontDirExplicit { get; init; }
+    public bool SubtitleFontExplicit { get; init; }
+
     /// <summary>Explicit subtitle codec for copy mode; null picks it per container.</summary>
     public string? SubtitleCodec { get; init; }
 
@@ -429,7 +437,9 @@ public sealed class CliOptions
     /// --subtitle-aspect only changes one field of it.
     /// </summary>
     public bool TouchedSubtitles =>
-        SubtitleFiles.Count > 0 || SubtitleStream is not null;
+        SubtitleFiles.Count > 0 || SubtitleStream is not null
+        || SubtitleModeExplicit || SubtitleCodecExplicit
+        || SubtitleFontDirExplicit || SubtitleFontExplicit;
 
     /// <summary>
     /// v7.9.5.1: render an era/site preset with libx264 + AAC in MP4 instead of
@@ -541,6 +551,10 @@ public static class CliParser
         string? subtitleCodec = null;
         string? subtitleFontDir = null;
         string? subtitleFont = null;
+        bool subtitleModeExplicit = false;
+        bool subtitleCodecExplicit = false;
+        bool subtitleFontDirExplicit = false;
+        bool subtitleFontExplicit = false;
         string? subtitleAspect = null;
         string? fontImport = null;
         bool listSubtitleFonts = false;
@@ -634,6 +648,25 @@ public static class CliParser
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i];
+
+            // v7.9.9.6: argparse prints help/version and exits before it looks
+            // at anything after them, so `prog --help --bogus` is help, not an
+            // error. The switch used to set a flag and keep validating.
+            if (arg is "-h" or "--help" or "--version")
+            {
+                if (arg == "--version") showVersion = true;
+                else help = true;
+                break;
+            }
+
+            // v7.9.9.6: "--" ends option parsing, which is the only way to
+            // name an input that itself begins with '-' (`-- -clip.mp4 out.mp4`).
+            if (arg == "--")
+            {
+                for (int j = i + 1; j < args.Length; j++) positionals.Add(args[j]);
+                break;
+            }
+
             if (!arg.StartsWith('-'))
             {
                 positionals.Add(arg);
@@ -790,18 +823,22 @@ public static class CliParser
                     subtitleMode = subtitleMode.Trim().ToLowerInvariant();
                     if (!Constants.SubtitleModes.Contains(subtitleMode))
                         return (null, $"--subtitle-mode must be one of {string.Join(", ", Constants.SubtitleModes)}");
+                    subtitleModeExplicit = true;
                     break;
                 case "--subtitle-codec":
                     if (!TryValue(out subtitleCodec)) return (null, "--subtitle-codec requires a value");
                     subtitleCodec = subtitleCodec.Trim().ToLowerInvariant();
+                    subtitleCodecExplicit = true;
                     break;
                 case "--subtitle-font-dir":
                     if (!TryValue(out string fontDirRaw)) return (null, "--subtitle-font-dir requires a directory");
                     subtitleFontDir = fontDirRaw.Trim().Trim('"');
+                    subtitleFontDirExplicit = true;
                     break;
                 case "--subtitle-font":
                     if (!TryValue(out string fontRaw)) return (null, "--subtitle-font requires a family name");
                     subtitleFont = fontRaw.Trim().Trim('"');
+                    subtitleFontExplicit = true;
                     break;
                 // v7.9.8.3: the shape the text is laid out in.
                 case "--subtitle-aspect":
@@ -1267,9 +1304,13 @@ public static class CliParser
             SubtitleFiles = subtitleFiles,
             SubtitleStream = subtitleStream,
             SubtitleMode = subtitleMode,
+            SubtitleModeExplicit = subtitleModeExplicit,
             SubtitleCodec = subtitleCodec,
+            SubtitleCodecExplicit = subtitleCodecExplicit,
             SubtitleFontDir = subtitleFontDir,
+            SubtitleFontDirExplicit = subtitleFontDirExplicit,
             SubtitleFont = subtitleFont,
+            SubtitleFontExplicit = subtitleFontExplicit,
             SubtitleAspect = subtitleAspect,
             FontImport = fontImport,
             ListSubtitleFonts = listSubtitleFonts,

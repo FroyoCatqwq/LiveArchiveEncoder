@@ -39,14 +39,22 @@ public static partial class Cui
         // Restore the previous session before anything is printed, so the banner
         // itself is already in the language the user left behind.
         var c = new Config();
-        UserConfig stored = ConfigStore.Load();
+        // v7.9.9.6: distinguish "no file" from "a file we cannot parse". The
+        // former may be created on exit; the latter must not be overwritten by
+        // the defaults Load() would otherwise hand us.
+        string configPath = ConfigStore.DefaultPath;
+        bool configExists = File.Exists(configPath);
+        UserConfig? loaded = ConfigStore.TryLoad(configPath);
+        _canPersist = !configExists || loaded is not null;
+        UserConfig stored = loaded ?? new UserConfig();
         // v7.9.9.5: a small but valid settings file ({"Language":"zh","Fps":25})
         // has neither Encoder nor SavedAt. Judging "restored" by those fields
         // skipped Apply entirely and silently started the menu from defaults.
-        // The file's existence is the fact that matters; Load() answers safe
-        // defaults when it cannot be parsed.
-        bool restored = File.Exists(ConfigStore.DefaultPath);
+        // The file's existence is the fact that matters.
+        bool restored = configExists && loaded is not null;
         if (restored) ConfigStore.Apply(stored, c, encoders);
+        if (configExists && loaded is null)
+            Console.WriteLine(L.T("config.broken.keep", configPath));
         if (ffmpegSource.HasText) c.FfmpegSource = ffmpegSource;
 
         // Precedence: --lang on the command line beats the stored preference,
@@ -158,6 +166,11 @@ public static partial class Cui
                 Persist(c);
                 return 0;
             }
+            // v7.9.9.6: one bad menu choice (unreadable share, corrupt probe
+            // reply, unexpected IO) must not end the shell. Ctrl+C keeps its
+            // own quiet return below.
+            try
+            {
             switch (pick)
             {
                 case "1":
@@ -320,17 +333,34 @@ public static partial class Cui
                     Console.WriteLine(L.T("menu.invalid"));
                     break;
             }
+            }
+            catch (OperationCanceledException)
+            {
+                // Interrupt.Request() already reported it.
+            }
+            catch (Exception exc) when (exc is not OutOfMemoryException)
+            {
+                Console.WriteLine($"{L.T("error.prefix")}{exc.Message}");
+            }
         }
     }
 
     private static void Persist(Config c)
     {
+        // v7.9.9.6: Load() answers defaults for an unparsable config.json. The
+        // shell used to start from those defaults and then write them back on
+        // the first menu edit (or on exit), silently destroying the user's
+        // real file. An existing unreadable file is not ours to replace.
+        if (!_canPersist) return;
         // v7.9.9.2: every save refreshes the recently-used directory list.
         PathMemory.Remember(c.RecentDirectories,
             c.InputPath?.DirectoryName, c.OutputPath?.DirectoryName);
         if (ConfigStore.Save(ConfigStore.Capture(c))) return;
         Console.WriteLine(L.T("config.savefailed", ConfigStore.DefaultPath));
     }
+
+    /// <summary>False when an unparsable settings file must be preserved.</summary>
+    private static bool _canPersist = true;
 
     /// <summary>
     /// Where the session has to go when stdin ends, installed by
@@ -499,6 +529,7 @@ public static partial class Cui
         }
 
         Console.WriteLine(L.T("update.available", release.Tag, release.PageUrl ?? ""));
+        if (release.Prerelease) Console.WriteLine(L.T("update.prerelease", release.Tag));
         Console.WriteLine(L.T("update.applyhint"));
     }
 
@@ -1283,27 +1314,45 @@ public static partial class Cui
             return null;
         }
 
-        var files = new DirectoryInfo(raw).EnumerateFiles()
-            .Where(p => Constants.VideoExtensions.Contains(p.Extension.ToLowerInvariant()))
-            .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        List<FileInfo> files;
+        try
+        {
+            files = new DirectoryInfo(raw).EnumerateFiles()
+                .Where(p => Constants.VideoExtensions.Contains(p.Extension.ToLowerInvariant()))
+                .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                        or System.Security.SecurityException)
+        {
+            // v7.9.9.6: an unreadable directory (ACL, disconnected share,
+            // protected system folder) used to throw out of the menu handler
+            // and end the whole shell. A menu should survive a bad answer.
+            Console.WriteLine(L.T("input.unreadable", exc.Message));
+            return null;
+        }
+
         if (files.Count == 0)
         {
             Console.WriteLine(L.T("input.novideo"));
             return null;
         }
 
-        for (int i = 0; i < Math.Min(200, files.Count); i++)
+        int shown = Math.Min(200, files.Count);
+        for (int i = 0; i < shown; i++)
             Console.WriteLine($" {i + 1,3}. {files[i].Name}");
+        if (files.Count > shown)
+            Console.WriteLine(L.T("input.more", shown, files.Count));
 
         Console.Write(L.T("input.selectnumber"));
-        if (!int.TryParse(Ask().Trim(), out int idx))
+        if (!int.TryParse(Ask().Trim(), NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out int idx))
         {
             Console.WriteLine(L.T("input.invalid"));
             return null;
         }
         idx -= 1;
-        if (idx < 0 || idx >= Math.Min(200, files.Count))
+        if (idx < 0 || idx >= shown)
         {
             Console.WriteLine(L.T("input.invalid"));
             return null;
@@ -1318,8 +1367,10 @@ public static partial class Cui
         for (int i = 0; i < encoders.Count; i++)
         {
             EncoderInfo item = encoders[i];
+            // v7.9.9.6: "?" read like a defect. The list is lazily probed, so
+            // say that instead of printing a question mark next to 36 encoders.
             string pix = item.Caps is { SupportedPixFmts.Count: > 0 } caps
-                ? string.Join(",", caps.SupportedPixFmts) : "?";
+                ? string.Join(",", caps.SupportedPixFmts) : L.T("value.notprobed");
             string marker = c.Encoder is not null && item.Name == c.Encoder.Name ? " <" : "";
             Console.WriteLine($" {i + 1,3}. {item.Name,-14} [{item.Family,-18}] {item.Description}{marker}");
             Console.WriteLine($"       {L.T("encoder.pixfmts")}: {pix}");
@@ -1391,6 +1442,7 @@ public static partial class Cui
             if (!sizeExact) Console.WriteLine(L.T("encoder.sizesdjusted", chosen.Name, c.Width, c.Height));
 
             c.Qv = EncoderMath.DefaultQuality(effective.Name);
+            c.QvExplicit = false;
 
             // Audio follows the container. v7.9.3.1: this used to null the
             // current codec when it no longer muxed and then unconditionally
@@ -1681,6 +1733,10 @@ public static partial class Cui
                         break;
                     case "6":
                         c.Qv = ReadInt(L.T("param.prompt.quality", qualityLabel, c.Qv), c.Qv);
+                        // v7.9.9.6: a number typed here is a request; the
+                        // intra-only calibration in RealtimeEncoder may tune a
+                        // preset's/default's number but not this one.
+                        c.QvExplicit = true;
                         break;
                     case "32" when enc == "libopenh264":
                         c.OpenH264Rc = PickRateControl(c.OpenH264Rc);
@@ -1985,7 +2041,9 @@ public static partial class Cui
         Console.Write(L.T("container.prompt"));
 
         string raw = Ask().Trim().ToLowerInvariant();
-        if (raw.Length == 0) return;
+        // The prompt already says "[0 = keep]"; the code used to treat 0 as a
+        // container name and answer "'0' is not a container ... can write".
+        if (raw.Length == 0 || raw == "0") return;
 
         string wanted = int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
             && idx >= 1 && idx <= allowed.Count
@@ -2049,7 +2107,9 @@ public static partial class Cui
         Console.Write(L.T("param.size.prompt"));
 
         string raw = Ask().Trim().ToLowerInvariant();
-        if (raw.Length == 0) return;
+        // Same mismatch as the container menu: the prompt advertises 0 as
+        // "keep" and the parser handed it to the WxH reader.
+        if (raw.Length == 0 || raw == "0") return;
 
         if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
             && idx >= 1 && idx <= presets.Length)
@@ -2185,7 +2245,11 @@ public static partial class Cui
     {
         string raw = ReadRaw(prompt);
         if (raw.Length == 0) return fallback;
-        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
+        // v7.9.9.6: "NaN" and "Infinity" parse as doubles. ValidateCommonConfig
+        // then rejected the whole config on every redraw while the bad number
+        // stayed in the field; a keystroke is still not a crash, so fall back.
+        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+            && double.IsFinite(value))
             return value;
 
         Console.WriteLine(L.T("param.badvalue", raw));
@@ -2226,8 +2290,11 @@ public static partial class Cui
 
         c.OutputPath ??= DefaultOutput(source, c.Encoder);
         c.OutputPath.Directory?.Create();
+        // v7.9.9.6: case is significant on Linux; /tmp/A.avi and /tmp/a.avi
+        // are two files and refusing the second was a Windows-only rule.
         if (string.Equals(Path.GetFullPath(c.OutputPath.FullName), Path.GetFullPath(source.FullName),
-                StringComparison.OrdinalIgnoreCase))
+                OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         {
             Console.WriteLine(L.T("output.sameasinput"));
             return;
@@ -2347,6 +2414,12 @@ public static partial class Cui
                 ExtraEncoderArgs = c.ExtraEncoderArgs,
                 FpsLevelKbps = c.FpsLevelKbps,
                 Quality = c.Qv,
+                QualityExplicit = c.QvExplicit,
+                // v7.9.9.6: the OpenH264 dials are set in the parameter menu
+                // (rows 32/33), but this initialiser never handed them to the
+                // encoder -- the menu accepted a value the run ignored.
+                OpenH264Rc = c.OpenH264Rc,
+                OpenH264SkipFrames = c.OpenH264SkipFrames,
                 Threads = c.Threads,
                 LimitKbps = c.Limit,
                 RecoverKbps = c.Recover,
@@ -2533,6 +2606,9 @@ public static partial class Cui
         Console.WriteLine($"  a. {L.Pad(L.T("era.menu.aspect"), 26)} = {c.EraAspect ?? "source"}");
         Console.WriteLine($"  h. {L.Pad(L.T("era.menu.h264"), 26)} = "
             + (c.H264Impl ?? L.T("era.h264.auto")));
+        // v7.9.9.6: every other submenu has a 0 row. Without one, following the
+        // prompt and typing 0 was answered with "unknown era preset '0'".
+        Console.WriteLine($"  0. {L.T("param.back")}");
 
         Console.Write(L.T("era.prompt", c.EraPreset ?? ""));
         string pick = Ask().Trim();
@@ -2540,6 +2616,7 @@ public static partial class Cui
 
         switch (pick.ToLowerInvariant())
         {
+            case "0": return;
             case "n": EditCustomEra(c, encoders, null); return;
             case "e": EditCustomEra(c, encoders, AskPresetId()); return;
             case "d": DeleteCustomEra(c); return;
@@ -2657,7 +2734,11 @@ public static partial class Cui
         // previous encoder had put there, so an MPEG q:v 9 became crf 9 the
         // moment the row (or the user) chose libx264 -- 935 kbps into a 320 kbps
         // stream, and the frame-rate ladder fell to its last rung immediately.
-        if (live && c.Encoder is not null) c.Qv = preset.QualityFor(c.Encoder.Name);
+        if (live && c.Encoder is not null)
+        {
+            c.Qv = preset.QualityFor(c.Encoder.Name);
+            c.QvExplicit = false;
+        }
         if (encoder && c.Encoder is not null)
         {
             List<string>? usable = AudioCatalog.Compatible(
@@ -2984,6 +3065,9 @@ public static partial class Cui
             Console.WriteLine($"{L.T("error.prefix")}{L.T("era.custom.notcustom", id)}");
             return;
         }
+        // v7.9.9.6: the menu's "current preset" label pointed at a row that no
+        // longer exists. The resolved values stay; only the label is cleared.
+        if (string.Equals(c.EraPreset, id, StringComparison.OrdinalIgnoreCase)) c.EraPreset = null;
         PostProcess.EraPresets.SetCustom(c.CustomEras);
         Console.WriteLine(L.T("era.custom.deleted", id));
     }
@@ -3105,6 +3189,18 @@ public static partial class Cui
                     string container = Ask().Trim().TrimStart('.').ToLowerInvariant();
                     if (container.Length > 0)
                     {
+                        // v7.9.9.6: this menu accepted "matroska" or "foo" and
+                        // the run failed minutes later in the muxer. When the
+                        // fragment already names a codec, check the pair here.
+                        string? bad = video == "-"
+                            ? null
+                            : PostProcess.RecompressCodecs.ValidateContainer(
+                                video, audio == "-" ? null : audio, container);
+                        if (bad is not null)
+                        {
+                            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.container.rejected", bad)}");
+                            break;
+                        }
                         c.Recompress.Container = container;
                         Console.WriteLine(L.T("rc.container.set", container));
                     }
@@ -3597,7 +3693,10 @@ public static partial class Cui
             outputs.Add(PostProcess.Recompress.DeriveOutputPath(
                 src.FullName, stages[i].Container, i + 1));
 
-        if (string.Equals(Path.GetFullPath(outputs[^1]), src.FullName, StringComparison.OrdinalIgnoreCase))
+        // v7.9.9.6: /tmp/A.avi and /tmp/a.avi are two files on Linux.
+        if (string.Equals(Path.GetFullPath(outputs[^1]), src.FullName,
+                OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         {
             Console.WriteLine(L.T("output.sameasinput"));
             return;
@@ -3633,6 +3732,11 @@ public static partial class Cui
                 }
                 // v7.9.9.2: follow "name (2).ext" on later hops.
                 input = placed ?? outputs[i];
+            }
+            catch (OperationCanceledException)
+            {
+                // Interrupt.Request() already explained it.
+                return;
             }
             catch (Exception exc)
             {

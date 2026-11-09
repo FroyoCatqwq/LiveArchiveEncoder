@@ -82,7 +82,9 @@ internal static class OutputNaming
         {
             bool taken = candidate.Exists
                 || (avoidFullPath is not null
-                    && string.Equals(candidate.FullName, avoidFullPath, StringComparison.OrdinalIgnoreCase));
+                    && string.Equals(candidate.FullName, avoidFullPath,
+                        OperatingSystem.IsWindows()
+                            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
             if (!taken) break;
             candidate = new FileInfo(Path.Combine(dir, $"{stem} ({n}){wanted}"));
         }
