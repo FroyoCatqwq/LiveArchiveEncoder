@@ -66,6 +66,15 @@ public static class Interrupt
             // is safe.
             try { _source.Cancel(); }
             catch (ObjectDisposedException) { /* a late reader disposed it */ }
+            catch (AggregateException exc)
+            {
+                // v7.9.9.5: Cancel() runs every registered callback on this
+                // thread and aggregates their exceptions. One misbehaving
+                // callback used to escape the CancelKeyPress handler as an
+                // unhandled exception -- with e.Cancel already set, nothing
+                // could then terminate the process.
+                AppLog.Warn("interrupt.callbackerror count={Count}", exc.InnerExceptions.Count);
+            }
         }
     }
 

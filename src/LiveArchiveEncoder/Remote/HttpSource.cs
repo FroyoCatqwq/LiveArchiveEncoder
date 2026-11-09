@@ -54,11 +54,25 @@ public static class HttpSource
         StringBuilder safe = new(decoded.Length);
         foreach (char c in decoded)
         {
-            if (c is '/' or '\\' or '\0') safe.Append('_');
+            // v7.9.9.5: path separators were only half the problem. A URL's
+            // last segment can decode to "C:evil.mp4" (an ADS / drive-relative
+            // path on Windows), "CON", "..", or contain characters no Windows
+            // filename may hold. The result becomes the default output stem, so
+            // it has to be a plain filename on every platform.
+            if (c is '/' or '\\' or '\0' or ':' or '*' or '?' or '"' or '<' or '>' or '|'
+                || c < 0x20) safe.Append('_');
             else safe.Append(c);
         }
-        string name = safe.ToString().Trim();
-        return name.Length > 0 ? name : "remote";
+        string name = safe.ToString().Trim().TrimEnd('.');
+        if (name.Length == 0 || name is "." or "..") return "remote";
+        string stem = name.Split('.')[0].ToUpperInvariant();
+        if (stem is "CON" or "PRN" or "AUX" or "NUL"
+            or "COM1" or "COM2" or "COM3" or "COM4" or "COM5" or "COM6" or "COM7" or "COM8" or "COM9"
+            or "LPT1" or "LPT2" or "LPT3" or "LPT4" or "LPT5" or "LPT6" or "LPT7" or "LPT8" or "LPT9")
+        {
+            return "_" + name;
+        }
+        return name;
     }
 
     /// <summary>

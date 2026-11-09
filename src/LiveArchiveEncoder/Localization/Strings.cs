@@ -1594,7 +1594,19 @@ public static class L
     public static string T(string key, params object?[] args)
     {
         string template = T(key);
-        return args.Length == 0 ? template : string.Format(template, args);
+        if (args.Length == 0) return template;
+        try
+        {
+            // v7.9.9.5: explicit invariant formatting, and no crash when a
+            // template and its arguments disagree. A missing placeholder used
+            // to throw FormatException out of a menu handler and be reported as
+            // "Invalid selection" (or escape all the way to Program.Main).
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture, template, args);
+        }
+        catch (FormatException)
+        {
+            return template + " (" + string.Join(", ", args) + ")";
+        }
     }
 
     /// <summary>yes / no, localised.</summary>

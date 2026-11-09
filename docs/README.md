@@ -10,8 +10,10 @@
 | --- | --- |
 | [`usage.md`](usage.md) | 完整用户手册：CLI、CUI、编码器表、码控、并行、配置、补全、远程源、FFmpeg 工具链、播放、二次压缩链、时代预设、字幕、像素格式、自更新、排错、自测 |
 | [`requirements.md`](requirements.md) | 操作系统 / CPU / 内存 / 磁盘 / 字体 / 权限 / 网络、实测环境、性能预期、不支持的做法 |
-| [`era-presets.md`](era-presets.md) | 33 个 `站点/年份` 预设、证据分级（A/B/C）、q:v 与 CRF 标定、降档/升档窗口、旧 id 别名 |
+| [`era-presets.md`](era-presets.md) | 32 个预设（5 条 `generic/年份` + 13 个站点的 27 条 `site/year`）、证据分级（A/B/C）、q:v 与 CRF 标定、降档/升档窗口、旧 id 别名 |
 | [`toolchain-builds.md`](toolchain-builds.md) | 六个 FFmpeg 来源（五个可自动下载）加统一 7-Zip、两端实测的编解码器差异 |
+| [`architecture.md`](architecture.md) | 技术说明：架构与进程模型、核心机制（节拍/帧池/阶梯/码控/分片/后处理）、突出点与不足、v8（Rust）迁移设计 |
+| [`v8-handover.md`](v8-handover.md) | v7 冻结基线：必须继承的行为契约、v7.9.9.5 审计结果、留给 v8 的取舍与黄金基准验收条件 |
 | [`MAINTENANCE.md`](MAINTENANCE.md) | 目录职责、常用命令、改动后检查清单、文档命名与链接契约、发布流程、日志与诊断 |
 | [`capability-matrix.md`](capability-matrix.md) | 容器 × 帧率 × 像素格式实测矩阵（v7.9.6 快照，已归档） |
 | [`test-report-v7.md`](test-report-v7.md) | v7 移植验收测量报告（已归档，中文摘要） |

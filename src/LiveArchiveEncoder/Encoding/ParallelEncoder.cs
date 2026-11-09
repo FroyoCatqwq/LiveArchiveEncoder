@@ -52,10 +52,12 @@ public static class ParallelEncoder
             return RealtimeEncoder.RunSingle(o, cancellationToken);
         }
 
-        int shards = o.Parallel;
+        // v7.9.9.5: the UI clamps --parallel, but the encoder layer is also an
+        // API (tests, shards, a future front end). Unclamped, one bad value
+        // would start thousands of FFmpeg process pairs and exhaust the machine.
+        int shards = Math.Clamp(o.Parallel, 1, Constants.MaxParallelShards);
         string stageDir = Path.Combine(
             Path.GetTempPath(), "lae_shards_" + Guid.NewGuid().ToString("N")[..12]);
-        Directory.CreateDirectory(stageDir);
         // The join lands in a ".part" sibling and is renamed onto the real name
         // only once it has passed the checks below.
         // v7.9.9.2: same pre-flight as the inline/split paths.
@@ -67,6 +69,9 @@ public static class ParallelEncoder
 
         try
         {
+            // v7.9.9.5: inside the try, so the "output is in use" refusal above
+            // cannot leave an empty staging directory behind.
+            Directory.CreateDirectory(stageDir);
             double span = duration!.Value;
 
             // Whole-slot boundaries, clamped so no shard ever asks for a time
@@ -154,7 +159,7 @@ public static class ParallelEncoder
                 o.FFmpeg, "-hide_banner", "-loglevel", "error",
                 "-f", "concat", "-safe", "0", "-i", listPath,
                 "-c", "copy", "-y", joinedPath,
-            ], timeoutSeconds: Math.Max(120, (int)span * 2), cancellationToken: cancellationToken);
+            ], timeoutSeconds: JoinTimeout(span), cancellationToken: cancellationToken);
 
             if (join.ExitCode != 0)
             {
@@ -199,7 +204,7 @@ public static class ParallelEncoder
                 remuxArgs.AddRange(["-y", part.FullName]);
 
                 CaptureResult remux = ProcessRunner.Run(remuxArgs,
-                    timeoutSeconds: Math.Max(120, (int)span * 2), cancellationToken: cancellationToken);
+                    timeoutSeconds: JoinTimeout(span), cancellationToken: cancellationToken);
 
                 if (remux.ExitCode != 0)
                 {
@@ -399,6 +404,15 @@ public static class ParallelEncoder
     /// </summary>
     public static EncoderInfo StagingEncoder(EncoderInfo encoder) =>
         encoder.WithContainer("mkv", "matroska");
+
+    /// <summary>
+    /// v7.9.9.5: `(int)span * 2` overflowed to a negative number for ranges
+    /// longer than ~34 years and silently turned a generous join budget into
+    /// 120 s. Bounded in seconds so ProcessRunner's millisecond budget stays
+    /// finite as well.
+    /// </summary>
+    private static int JoinTimeout(double span) =>
+        (int)Math.Clamp(Math.Max(120.0, span * 2.0), 120.0, int.MaxValue / 1000.0);
 
     /// <summary>
     /// What the link has to sustain for the run to keep up: the source's own

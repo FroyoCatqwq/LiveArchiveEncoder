@@ -40,6 +40,13 @@ public sealed class FrameBufferPool
 
     public FrameBufferPool(int capacity, int frameSize)
     {
+        // v7.9.9.5: fail with a readable message before `new byte[frameSize]`
+        // turns a bad geometry into an OverflowException (or a zero-length
+        // buffer that makes every frame read look like EOF).
+        ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(frameSize, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            (long)frameSize, int.MaxValue / (long)(capacity + 2L));
         FrameSize = frameSize;
         _readyCapacity = Math.Max(1, capacity);
 

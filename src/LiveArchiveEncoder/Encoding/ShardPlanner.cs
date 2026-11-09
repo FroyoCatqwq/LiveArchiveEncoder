@@ -30,8 +30,14 @@ public static class ShardPlanner
         int wanted = Math.Max(1, shards);
         double rangeEnd = start + span;
 
-        int fpsSlots = (int)Math.Ceiling(span * fps - 1e-9);
-        if (fpsSlots < 1) fpsSlots = 1;
+        // v7.9.9.5: (int) of a huge/NaN double is undefined and could come
+        // back negative or 1, collapsing a long range into a single slot.
+        // RealtimeEncoder already clamps targetSlots this way; the planner
+        // has to agree with it.
+        double slotsNeeded = Math.Ceiling(span * fps - 1e-9);
+        int fpsSlots = !double.IsFinite(slotsNeeded) || slotsNeeded >= int.MaxValue
+            ? int.MaxValue
+            : Math.Max(1, (int)slotsNeeded);
         // More shards than slots would leave shard-sized holes in the timeline.
         if (fpsSlots < wanted) wanted = fpsSlots;
 

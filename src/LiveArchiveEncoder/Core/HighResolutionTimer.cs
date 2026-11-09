@@ -92,7 +92,10 @@ public static class HighResolutionTimer
             double remainingMs = remaining * 1000.0 / frequency;
             if (remainingMs >= 1.5)
             {
-                Thread.Sleep((int)(remainingMs - 1));
+                // v7.9.9.5: a corrupt deadline far in the future used to cast
+                // to a negative int and throw ArgumentOutOfRangeException from
+                // the pacing loop, halfway through an encode.
+                Thread.Sleep((int)Math.Clamp(remainingMs - 1, 1, int.MaxValue));
             }
             else if (remainingMs >= 0.5)
             {

@@ -427,32 +427,46 @@ public static class AppLog
     {
         private const int MaxLine = 8 * 1024;
         private readonly StringBuilder _line = new();
+        // v7.9.9.5: shard progress, the slot loop and stderr readers all write
+        // to the mirrored console concurrently. StringBuilder is not thread
+        // safe: interleaved writes produced garbled log lines and, under load,
+        // ArgumentOutOfRangeException from a concurrent Append/Clear.
+        private readonly object _gate = new();
 
         public override System.Text.Encoding Encoding => inner.Encoding;
 
         public override void Write(char value)
         {
-            inner.Write(value);
-            if (value is '\n' or '\r') FlushLine();
-            else if (_line.Length < MaxLine) _line.Append(value);
+            lock (_gate)
+            {
+                inner.Write(value);
+                if (value is '\n' or '\r') FlushLine();
+                else if (_line.Length < MaxLine) _line.Append(value);
+            }
         }
 
         public override void Write(string? value)
         {
             if (value is null) return;
-            inner.Write(value);
-            foreach (char c in value)
+            lock (_gate)
             {
-                if (c is '\n' or '\r') FlushLine();
-                else if (_line.Length < MaxLine) _line.Append(c);
+                inner.Write(value);
+                foreach (char c in value)
+                {
+                    if (c is '\n' or '\r') FlushLine();
+                    else if (_line.Length < MaxLine) _line.Append(c);
+                }
             }
         }
 
         public override void WriteLine(string? value)
         {
-            inner.WriteLine(value);
-            if (value is not null && _line.Length < MaxLine) _line.Append(value);
-            FlushLine();
+            lock (_gate)
+            {
+                inner.WriteLine(value);
+                if (value is not null && _line.Length < MaxLine) _line.Append(value);
+                FlushLine();
+            }
         }
 
         public override void Flush() => inner.Flush();

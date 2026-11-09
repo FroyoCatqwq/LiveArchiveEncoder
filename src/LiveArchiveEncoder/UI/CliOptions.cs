@@ -107,6 +107,16 @@ public sealed class CliOptions
         SubtitlesDiscovered = true;
     }
 
+    /// <summary>
+    /// v7.9.9.5: a subtitle the user typed is a real setting (it must survive
+    /// into the saved snapshot), unlike one discovered by filename.
+    /// </summary>
+    internal void ApplyExplicitSubtitles(IReadOnlyList<string> files)
+    {
+        _subtitleFiles = files;
+        SubtitlesDiscovered = false;
+    }
+
     /// <summary>Absolute index of an embedded subtitle track to use.</summary>
     public int? SubtitleStream { get; init; }
 
@@ -982,12 +992,23 @@ public static class CliParser
                 // so `--gh-proxy --quiet` must not eat --quiet; "off" and "-"
                 // turn it back off.
                 case "--gh-proxy":
+                    // v7.9.9.5: the bare form used to swallow ANY following
+                    // token that did not start with '-', including the positional
+                    // input (`--gh-proxy in.rm out.rm` wrote "in.rm" into the
+                    // settings file as a URL prefix and shifted both names).
+                    // Also refuse an unparseable value here, instead of letting
+                    // it reach a 40 MB download before failing.
+                    string? frontError;
                     if (inlineValue is not null)
-                        ghProxy = NormaliseFront(inlineValue);
-                    else if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
-                        ghProxy = NormaliseFront(args[++i]);
+                        ghProxy = NormaliseFront(inlineValue, out frontError);
+                    else if (i + 1 < args.Length && LooksLikeFront(args[i + 1]))
+                        ghProxy = NormaliseFront(args[++i], out frontError);
                     else
+                    {
                         ghProxy = FFmpeg.GitHubProxy.DefaultPrefix;
+                        frontError = null;
+                    }
+                    if (frontError is not null) return (null, $"--gh-proxy: {frontError}");
                     break;
                 case "--no-gh-proxy":
                     ghProxy = "";
@@ -1551,11 +1572,32 @@ public static class CliParser
     /// An unparseable URL is passed through unchanged so that <c>Cli.Run</c> can
     /// refuse it with a message instead of the download failing 40 MB in.
     /// </summary>
-    private static string NormaliseFront(string value)
+    private static string NormaliseFront(string value, out string? error)
     {
+        error = null;
         string text = value.Trim();
         if (text is "" or "-" or "off" or "none" or "no") return "";
         if (text is "on" or "yes" or "default") return FFmpeg.GitHubProxy.DefaultPrefix;
-        return FFmpeg.GitHubProxy.Normalise(text).Prefix ?? text;
+        (string? prefix, error) = FFmpeg.GitHubProxy.Normalise(text);
+        return prefix ?? text;
+    }
+
+    /// <summary>
+    /// v7.9.9.5: decide whether the token after a bare <c>--gh-proxy</c> is a
+    /// value or the positional input. Only URLs, the on/off words and bare
+    /// hostnames qualify; an ordinary filename is left for the positional pass.
+    /// </summary>
+    private static bool LooksLikeFront(string value)
+    {
+        string text = value.Trim();
+        if (text.Length == 0 || text.StartsWith('-')) return false;
+        if (text is "off" or "none" or "no" or "on" or "yes" or "default" or "-") return true;
+        if (text.Contains("://", StringComparison.Ordinal) || text.EndsWith('/')) return true;
+        if (File.Exists(text) || text.Contains('/') || text.Contains('\\')) return false;
+        if (!text.Contains('.')) return false;
+        string ext = Path.GetExtension(text).TrimStart('.').ToLowerInvariant();
+        // A media/data filename has a short extension; a bare host has a TLD.
+        return ext is "com" or "net" or "org" or "io" or "dev" or "cn"
+            or "app" or "xyz" or "site" or "top" or "me" or "cc";
     }
 }

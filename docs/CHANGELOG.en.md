@@ -7,6 +7,52 @@ edition, [`CHANGELOG.md`](CHANGELOG.md) — entries there are kept verbatim, wit
 measurements and reasoning behind each decision. `⚠` marks a change a user can
 notice in an output, a default, a file name or a CLI contract.
 
+## v7.9.9.5 (2026-11-09) — full audit, cancellation/concurrency fixes, v8 handover
+
+**v7 enters maintenance mode** (bugfix / hotfix / small features); v8 is a full
+rewrite in Rust. All 83 product source files, 52 unit-test files and 23 e2e files
+were audited, plus live CLI and CUI runs.
+
+* **Ctrl+C now reaches every child process.** `ProcessRunner.Run` links the
+  process-wide interrupt token into every short-lived ffprobe/preflight/download
+  call; pipe reads after child exit have a 5 s bound and abandoned tasks are
+  observed. Download headers have a 60 s timeout; `RunLong`, `Execute`'s startup
+  path, `WriteFrame` and the split-audio staging cleanup no longer orphan
+  processes, handles or `%TEMP%` directories. `Program.Main` maps cancellation to
+  130 and any other uncaught exception to `ERROR:` + 1.
+* **Concurrency.** Capability-cache reads/writes and serialisation share a gate;
+  config/cache/shell-profile writes use unique temporary files and atomic rename;
+  the console mirror's buffer is locked; toolchain staging directories are unique;
+  staging creation moved inside `try`; shard count clamped in the encoder layer.
+* **Three-state settings.** `--no-realtime` reaches `Config` (the CUI toggle is
+  honoured by the CLI, the CLI flag stays per-run); `H264Impl` no longer turns a
+  preset choice into an explicit override; `--no-gh-proxy` survives
+  `--emit-args`; `CliArgs.Num` uses `R` so numbers round-trip exactly; explicit
+  `--subtitle` files are no longer treated as a one-run discovery.
+* ⚠ **CLI contract**: encode options without an input file are now refused with
+  exit 2 instead of being silently discarded before the menu opens. ⚠ `--update`
+  and `--update-check` together are a usage error. ⚠ Pre-release tags (`-rc1`) are
+  reported but never installed over a stable build. ⚠ A split-pipeline failure
+  after the video pass has started is reported, not silently replayed inline.
+* **Untrusted input.** Release tags and asset names are bounded/sanitised (no
+  stack overflow, no drive-relative or ADS paths); URL-derived output names cannot
+  become drive letters, dot segments or device names; `--gh-proxy` values are
+  validated at parse time and no longer swallow the positional input.
+* **Correctness.** Ladder migration runs once per file; broken `config.json` is
+  never overwritten with defaults by an update check or toolchain install; POSIX
+  path comparisons are case-sensitive; reported average bitrate uses the real
+  file size; progress reader drains its tail before cancellation.
+* **Completion catalog**: new `OptionalValue` kind, `--recompress-args` is free
+  text again, PowerShell value completion reads `CommandElements[-2]`.
+* **Tests**: 16 new unit tests (718 → 734), both TFMs green with 0 warnings,
+  `test_realmedia.py` split into per-case scratch directories so xdist no longer
+  collides on shared `.part` files. Full e2e: 242 passed / 2 skipped. Live smoke
+  covers CLI exits, CUI banner+quit, four completion shells, a real encode and a
+  `--save-config` → `--emit-args` round trip.
+* **v8 preparation**: new `v8-handover.md` / `.en.md` records the frozen behaviour
+  contract, the full fix list, the deliberate trade-offs left for the rewrite and
+  the golden-baseline prerequisite.
+
 ## v7.9.9.4 (2026-11-08) — cleanup, documentation refresh, bilingual docs
 
 * Removed what nothing used: `tools/benchmark.ps1`, `tools/probe_audio_limits.py`,

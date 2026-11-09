@@ -127,19 +127,28 @@ public sealed class Capabilities
     /// </summary>
     public EncoderCaps EncoderCaps(EncoderInfo encoder)
     {
-        if (encoder.Caps is not null) return encoder.Caps;
-        if (_profile.Caps.TryGetValue(encoder.Name, out EncoderCaps? cached))
+        // v7.9.9.5: one Capabilities instance is shared by every shard under
+        // --parallel N. Without this gate, N threads could mutate
+        // _profile.Caps (a Dictionary) and serialise it while another thread
+        // was mid-write: an InvalidOperationException, a corrupt JSON cache,
+        // or N redundant ffmpeg -h launches. The same gate also covers Save,
+        // so a snapshot is never taken halfway through a probe.
+        lock (BuildProfileStore.ProfileGate)
         {
-            encoder.Caps = cached;
-            return cached;
-        }
+            if (encoder.Caps is not null) return encoder.Caps;
+            if (_profile.Caps.TryGetValue(encoder.Name, out EncoderCaps? cached))
+            {
+                encoder.Caps = cached;
+                return cached;
+            }
 
-        EncoderCaps caps = FFmpegCapabilities.ProbeEncoderCaps(_ffmpeg, encoder);
-        encoder.Caps = caps;
-        _profile.Caps[encoder.Name] = caps;
-        // Best effort: a read-only cache directory must not fail a run.
-        if (_cachePath is not null) BuildProfileStore.Save(_cachePath, _profile);
-        return caps;
+            EncoderCaps caps = FFmpegCapabilities.ProbeEncoderCaps(_ffmpeg, encoder);
+            encoder.Caps = caps;
+            _profile.Caps[encoder.Name] = caps;
+            // Best effort: a read-only cache directory must not fail a run.
+            if (_cachePath is not null) BuildProfileStore.Save(_cachePath, _profile);
+            return caps;
+        }
     }
 
 }
@@ -152,6 +161,13 @@ public static class BuildProfileStore
 
     private static readonly Dictionary<string, Capabilities> Memory = new(StringComparer.Ordinal);
     private static readonly Lock Gate = new();
+
+    /// <summary>
+    /// v7.9.9.5: a Monitor (re-entrant on the same thread) rather than
+    /// <see cref="Lock"/>: EncoderCaps holds it and calls Save, which takes it
+    /// again. All mutation and serialisation of a live profile happens under it.
+    /// </summary>
+    internal static readonly object ProfileGate = new();
 
     /// <summary>
     /// Capabilities for this FFmpeg. Loads the cache when its identity matches,
@@ -286,21 +302,32 @@ public static class BuildProfileStore
 
     internal static void Save(string path, BuildProfile profile)
     {
-        try
+        lock (ProfileGate)
         {
-            string? dir = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            // v7.9.9.5: a fixed "<path>.tmp" made two concurrent writers (two
+            // shards, or two program instances) interleave their writes and
+            // rename each other's file. A per-write name keeps it atomic.
+            string temp = path + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp";
+            try
+            {
+                string? dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-            profile.BuiltAt = DateTimeOffset.Now;
-            string json = JsonSerializer.Serialize(profile, BuildProfileJsonContext.Default.BuildProfile);
-            string temp = path + ".tmp";
-            File.WriteAllText(temp, json);
-            File.Move(temp, path, overwrite: true);
-        }
-        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
-                                        or NotSupportedException or ArgumentException)
-        {
-            // A cache that cannot be written is a slower run, not a failed one.
+                profile.BuiltAt = DateTimeOffset.Now;
+                string json = JsonSerializer.Serialize(profile, BuildProfileJsonContext.Default.BuildProfile);
+                File.WriteAllText(temp, json);
+                File.Move(temp, path, overwrite: true);
+            }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                            or NotSupportedException or ArgumentException)
+            {
+                // A cache that cannot be written is a slower run, not a failed one.
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); }
+                catch (Exception exc) when (exc is IOException or UnauthorizedAccessException) { }
+            }
         }
     }
 }

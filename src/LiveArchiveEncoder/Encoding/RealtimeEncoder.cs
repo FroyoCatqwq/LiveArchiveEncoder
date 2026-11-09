@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
+using LiveArchiveEncoder.Diagnostics;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Frames;
 using LiveArchiveEncoder.Localization;
@@ -56,7 +57,11 @@ public static class RealtimeEncoder
                 ? $"Input not found: {src.FullName}"
                 : $"Input not found: {src.FullName}\n{hint}");
         }
-        if (!urlSource && string.Equals(src!.FullName, dst.FullName, StringComparison.OrdinalIgnoreCase))
+        // v7.9.9.5: case is part of a POSIX path. On Linux `clip.mp4` and
+        // `CLIP.MP4` are different files and must not be refused.
+        StringComparison pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!urlSource && string.Equals(src!.FullName, dst.FullName, pathComparison))
             throw new ArgumentException("Output must differ from input");
 
         // One string for "where the frames come from": the resolved local path,
@@ -211,7 +216,11 @@ public static class RealtimeEncoder
         // v7.9 #2: subtitles are validated here, before anything expensive, and
         // rendered last so the text is neither scaled nor cropped with the
         // picture. The plan owns a staging directory when it extracts a track.
-        SubtitlePlan? subs = o.Subtitles?.Active == true
+        // v7.9.9.5: own the plan for the WHOLE method, not only the three
+        // guarded blocks below. Intra-only calibration, the write-target check
+        // and the verbose banner can all throw, and each used to leave the
+        // extracted subtitle track in %TEMP%\lae_subs_* forever.
+        using SubtitlePlan? subs = o.Subtitles?.Active == true
             ? SubtitleTrack.Plan(
                 source, o.Subtitles!, o.Encoder.FormatName, availableFilters,
                 o.AvailableSubtitleEncoders ?? profile.SubtitleEncoders,
@@ -460,15 +469,23 @@ public static class RealtimeEncoder
 
         // Probe once with a throwaway pass over the source to know whether audio
         // is even in play before committing to the split pipeline.
+        bool videoStarted = false;
         try
         {
-            return RunSplitCore(o, cancellationToken);
+            return RunSplitCore(o, cancellationToken, ref videoStarted);
         }
-        catch (Exception exc) when (exc is InvalidOperationException or IOException
-                                        or UnauthorizedAccessException
-                                        or TimeoutException or ArgumentException)
+        // v7.9.9.5: only a FEASIBILITY failure may fall back to the inline
+        // pipeline. Once the video pass has started, an audio timeout, a mux
+        // failure, a full disk or a bad argument must surface: replaying the
+        // entire realtime encode (and discarding the first product) used to
+        // double the work and hide the real error behind "split unavailable".
+        // OperationCanceledException is intentionally not caught at all.
+        catch (Exception exc) when (!videoStarted
+                                   && o.AudioMode == AudioMode.Auto
+                                   && exc is InvalidOperationException or IOException
+                                        or UnauthorizedAccessException or TimeoutException
+                                        or ArgumentException)
         {
-            if (o.AudioMode == AudioMode.Separate) throw;
             if (o.Verbose)
             {
                 Console.WriteLine(L.T("note.splitunavailable", exc.Message));
@@ -477,7 +494,8 @@ public static class RealtimeEncoder
         }
     }
 
-    private static EncodeResult RunSplitCore(RealtimeOptions o, CancellationToken cancellationToken)
+    private static EncodeResult RunSplitCore(
+        RealtimeOptions o, CancellationToken cancellationToken, ref bool videoStarted)
     {
         var dst = new FileInfo(Path.GetFullPath(o.DestinationPath));
 
@@ -539,7 +557,6 @@ public static class RealtimeEncoder
         }
 
         string stageDir = Path.Combine(Path.GetTempPath(), "live_archive_v7_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(stageDir);
         string videoOnly = Path.Combine(stageDir, $"video.{o.Encoder.Extension}");
         string audioOnly = Path.Combine(stageDir, $"audio.{AudioTrack.ContainerFor(o.AudioEncoder!)}");
         // v7.9.9.2: fail fast instead of discovering a player lock after a
@@ -561,8 +578,17 @@ public static class RealtimeEncoder
 
         try
         {
+            // v7.9.9.5: create the staging directory INSIDE the try. It used
+            // to be created before EnsureTargetAvailable, whose "output is in
+            // use" exception then left an empty %TEMP% directory with no
+            // finally to clean it up.
+            Directory.CreateDirectory(stageDir);
             double span = duration.Value;
             int audioTimeout = (int)Math.Max(120.0, span * 2.0 + 120.0);
+
+            // From here on a fallback to the inline pipeline would replay a
+            // whole realtime encode; RunSplit must let the failure surface.
+            videoStarted = true;
 
             // Stage 1 + 2 run concurrently: the audio encoder is not bound by the
             // realtime pacing that governs the video slot loop.
@@ -669,9 +695,23 @@ public static class RealtimeEncoder
             audioStop.Cancel();
             if (audioTask is not null)
             {
-                try { audioTask.Wait(5000); } catch { /* cancelled: already handled */ }
+                // v7.9.9.5: ProcessRunner's cancel path needs its own Kill +
+                // WaitForExit(5000) before the task completes. A single 5 s
+                // Wait raced that cleanup, so the staging directory was
+                // deleted while the audio FFmpeg still had files open; on
+                // Windows the delete failed silently and the directory (and
+                // sometimes the process) survived the command.
+                var deadline = System.Diagnostics.Stopwatch.StartNew();
+                while (!audioTask.IsCompleted && deadline.Elapsed < TimeSpan.FromSeconds(20))
+                {
+                    try { audioTask.Wait(250); } catch { break; }
+                }
             }
-            try { Directory.Delete(stageDir, recursive: true); } catch { /* best effort */ }
+            try { Directory.Delete(stageDir, recursive: true); }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+            {
+                AppLog.Warn("encode.stageleftover dir={Dir} error={Error}", stageDir, exc.Message);
+            }
         }
     }
 
@@ -906,20 +946,38 @@ public static class RealtimeEncoder
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        Task decoderStderrTask = PipeReaders.DiagnosticsReaderAsync(
-            decoder.StandardError.BaseStream,
-            line =>
-            {
-                lock (diagnosticsLock)
+        Task decoderStderrTask;
+        Task progressTask;
+        try
+        {
+            decoderStderrTask = PipeReaders.DiagnosticsReaderAsync(
+                decoder.StandardError.BaseStream,
+                line =>
                 {
-                    decoderDiagnostics.Add(line);
-                    if (decoderDiagnostics.Count > 64) decoderDiagnostics.RemoveAt(0);
-                }
-            },
-            cts.Token);
+                    lock (diagnosticsLock)
+                    {
+                        decoderDiagnostics.Add(line);
+                        if (decoderDiagnostics.Count > 64) decoderDiagnostics.RemoveAt(0);
+                    }
+                },
+                cts.Token);
 
-        Task progressTask = PipeReaders.ProgressReaderAsync(
-            encoderProc.StandardError.BaseStream, monitor, cts.Token);
+            progressTask = PipeReaders.ProgressReaderAsync(
+                encoderProc.StandardError.BaseStream, monitor, cts.Token);
+        }
+        catch (Exception)
+        {
+            // v7.9.9.5: both children are already running here, but the main
+            // try/finally that kills them has not been entered yet. A failure
+            // while opening a redirected stream (or a disposed external token)
+            // used to orphan two FFmpeg processes holding the network source
+            // and the .part output open for the rest of the session.
+            cts.Cancel();
+            try { decoder.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            try { encoderProc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            encoderProc.Dispose();
+            throw;
+        }
 
         void CaptureWorker()
         {
@@ -1303,6 +1361,12 @@ public static class RealtimeEncoder
             }
 
             captureThread.Join(5000);
+            // v7.9.9.5: the encoder has exited, so its stderr is at EOF. Let
+            // the progress reader consume the last total_size / progress=end
+            // lines before cancelling it -- cancelling first made
+            // ForEachLineAsync drop its buffered tail and under-report the
+            // finished file's average bitrate (sometimes as zero).
+            try { progressTask.Wait(500); } catch { /* diagnostics only */ }
             cts.Cancel();
             try { Task.WaitAll([progressTask, decoderStderrTask], 3000); } catch { /* diagnostics only */ }
 
@@ -1325,7 +1389,11 @@ public static class RealtimeEncoder
             }
 
             double measuredDuration = duration ?? Math.Max(0.001, slots / o.Fps);
-            long totalBytes = monitor.TotalBytes();
+            // v7.9.9.5: the finished .part file is the ground truth. A
+            // -progress stream truncated by shutdown (or by a muxer that never
+            // emitted a final total_size) must not lower the reported bitrate.
+            dst.Refresh();
+            long totalBytes = Math.Max(monitor.TotalBytes(), dst.Length);
             double avgTotalKbps = totalBytes * 8.0 / measuredDuration / 1000.0;
             double avgVideoKbps = Math.Max(0.0, avgTotalKbps - (hasAudio ? o.AudioKbps : 0.0));
 
@@ -1523,7 +1591,21 @@ public static class RealtimeEncoder
     private static void WriteFrame(Stream stdin, byte[] payload, int count, CancellationToken token)
     {
         Task write = stdin.WriteAsync(payload.AsMemory(0, count), token).AsTask();
-        write.WaitAsync(TimeSpan.FromSeconds(WriteDeadlineSeconds), token).GetAwaiter().GetResult();
+        try
+        {
+            write.WaitAsync(TimeSpan.FromSeconds(WriteDeadlineSeconds), token).GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            // v7.9.9.5: the underlying write can still fault later, when the
+            // caller's finally disposes the stream. Observe it so a timeout
+            // does not leave an unobserved task exception behind.
+            _ = write.ContinueWith(static t => _ = t.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            throw;
+        }
         stdin.Flush();
     }
 

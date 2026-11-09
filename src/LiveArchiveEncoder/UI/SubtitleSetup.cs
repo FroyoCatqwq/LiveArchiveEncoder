@@ -26,11 +26,17 @@ public static class SubtitleSetup
         }
 
         List<string> subs = [.. cli.SubtitleFiles];
+        // v7.9.9.5: only a file found by name is a per-run discovery. When the
+        // user typed --subtitle explicitly, marking the whole request as
+        // "discovered" made Cli.Run restore the OLD subtitles into the snapshot
+        // and the typed path vanished after one run.
+        bool discovered = false;
         if (subs.Count == 0)
         {
             IReadOnlyList<string> found = SubtitleDiscovery.Find(cli.Input);
             IReadOnlyList<string> chosen = ChooseSubtitles(cli.Input, found, Interactive());
             subs.AddRange(chosen);
+            discovered = chosen.Count > 0;
             if (chosen.Count == 0)
                 Console.WriteLine(L.T("fontpack.skipsub"));
             else
@@ -62,7 +68,8 @@ public static class SubtitleSetup
             }
         }
 
-        cli.ApplyDiscoveredSubtitles(subs);
+        if (discovered) cli.ApplyDiscoveredSubtitles(subs);
+        else cli.ApplyExplicitSubtitles(subs);
         return (cli, null);
     }
 

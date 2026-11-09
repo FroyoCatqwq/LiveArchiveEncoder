@@ -163,7 +163,10 @@ public static class Toolchain
 
         string home = Home(dist.Id);
         string bin = BinDir(dist.Id);
-        string staging = Path.Combine(Root, ".staging", dist.Id);
+        // v7.9.9.5: two concurrent installs of the same distribution used to
+        // share one staging path and delete each other's download mid-flight.
+        string staging = Path.Combine(Root, ".staging",
+            dist.Id + "-" + Guid.NewGuid().ToString("N")[..8]);
         string extractDir = Path.Combine(staging, "extract");
 
         try
@@ -397,8 +400,16 @@ public static class Toolchain
         string url, string destination, string? proxy, Action<string> log,
         string? bearer = null)
     {
+        // v7.9.9.5: a server that accepts the connection and never sends
+        // response headers used to hang forever (HttpClient.Timeout is
+        // InfiniteTimeSpan here on purpose), and Ctrl+C could not interrupt
+        // either GetAsync or the body read.
+        using var interrupt = CancellationTokenSource.CreateLinkedTokenSource(
+            Core.Interrupt.CurrentToken);
         try
         {
+            using var headers = CancellationTokenSource.CreateLinkedTokenSource(interrupt.Token);
+            headers.CancelAfter(TimeSpan.FromSeconds(60));
             // SocketsHttpHandler, not HttpClientHandler: the latter is a thin
             // wrapper that does not expose ConnectTimeout.
             using var handler = new SocketsHttpHandler();
@@ -434,7 +445,8 @@ public static class Toolchain
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearer!.Trim());
             }
             using HttpResponseMessage response =
-                client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+                client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, headers.Token)
+                    .GetAwaiter().GetResult();
             if (!response.IsSuccessStatusCode)
             {
                 // The body of a 403 usually says who blocked it (CDN, WAF, proxy)
@@ -448,7 +460,8 @@ public static class Toolchain
 
             long? total = response.Content.Headers.ContentLength;
             using FileStream file = File.Create(destination);
-            using Stream stream = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
+            using Stream stream = response.Content.ReadAsStreamAsync(interrupt.Token)
+                .GetAwaiter().GetResult();
 
             var buffer = new byte[1024 * 1024];
             long written = 0;
@@ -460,13 +473,14 @@ public static class Toolchain
             using var idle = new CancellationTokenSource();
             while (true)
             {
+                interrupt.Token.ThrowIfCancellationRequested();
                 int read;
                 idle.CancelAfter(StallTimeout);
                 try
                 {
                     read = stream.ReadAsync(buffer, idle.Token).AsTask().GetAwaiter().GetResult();
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (!interrupt.IsCancellationRequested)
                 {
                     return (false,
                         $"download stalled: no data for {StallTimeout.TotalSeconds:F0}s "
@@ -491,6 +505,9 @@ public static class Toolchain
                                         or TaskCanceledException or System.Net.Sockets.SocketException
                                         or OperationCanceledException)
         {
+            // A real interrupt belongs to the shell-wide cancellation contract
+            // (exit 130), not to "download failed".
+            if (exc is OperationCanceledException && interrupt.IsCancellationRequested) throw;
             return (false, exc.Message);
         }
     }
@@ -786,13 +803,33 @@ public static class Toolchain
         {
             // Complete even when a reader threw, or the consumer waits forever.
             lines.Writer.TryComplete();
+            // v7.9.9.5: on the cancel path the old code threw straight out of
+            // `using proc`, leaving three background Tasks reading streams that
+            // had just been disposed. Kill and give them a bounded moment to
+            // notice EOF before the Process is released.
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
+            catch (Exception) { /* already gone */ }
+            try { Task.WaitAll([outTask, errTask], 2000); } catch { /* diagnostics only */ }
+            Observe(outTask);
+            Observe(errTask);
         }
         try { consumer.GetAwaiter().GetResult(); }
         catch (Exception) { /* diagnostics only */ }
 
-        proc.WaitForExit();
-        return (proc.ExitCode, tail.ToString());
+        // v7.9.9.5: a child that closed both pipes but stayed alive made this
+        // wait unbounded. A downloader has no reason to outlive its output.
+        if (!proc.WaitForExit(10000))
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            proc.WaitForExit(5000);
+        }
+        return (proc.HasExited ? proc.ExitCode : -1, tail.ToString());
     }
+
+    private static void Observe(Task task) =>
+        _ = task.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     private static string? FindOnPath(string name)
     {

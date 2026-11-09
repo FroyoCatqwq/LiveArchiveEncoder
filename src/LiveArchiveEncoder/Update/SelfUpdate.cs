@@ -38,6 +38,13 @@ public sealed class Release
     public string? Notes { get; init; }
     public string? PageUrl { get; init; }
     public required List<ReleaseAsset> Assets { get; init; }
+
+    /// <summary>
+    /// v7.9.9.5: VersionTag deliberately drops a `-rc1` / `+build` suffix for
+    /// comparison, so without this flag a pre-release would compare as newer
+    /// than the stable build and be installed over it.
+    /// </summary>
+    public bool Prerelease { get; init; }
 }
 
 public enum Outcome
@@ -289,7 +296,12 @@ public static class SelfUpdate
                     // A name that carries a path separator would be used as a file
                     // name later; refuse it here rather than sanitising it into a
                     // different asset.
-                    if (name!.Contains('/') || name.Contains('\\')) continue;
+                    // v7.9.9.5: a feed is untrusted JSON. Drive-relative names,
+                    // ADS colons, dot segments and absurd lengths must not
+                    // become local paths either (they are cleaned again below).
+                    if (name.Contains('/') || name.Contains('\\') || name.Contains(':')
+                        || name is "." or ".." || name.Length > 256
+                        || name.Trim().Length == 0) continue;
 
                     assets.Add(new ReleaseAsset
                     {
@@ -309,6 +321,8 @@ public static class SelfUpdate
                 Notes = Text(root, "body"),
                 PageUrl = Text(root, "html_url"),
                 Assets = assets,
+                Prerelease = tag!.Trim().TrimStart('v', 'V').AsSpan()
+                    .IndexOfAny(LiveArchiveEncoder.Core.CharSets.VersionSuffix) >= 0,
             }, null);
         }
     }
@@ -346,6 +360,18 @@ public static class SelfUpdate
         {
             Say($"{release.Tag} is not newer than {Current}.");
             return new UpdateReport { Kind = Outcome.UpToDate, Tag = release.Tag, Release = release };
+        }
+
+        // v7.9.9.5: VersionTag.Parse drops a -rc1/+build suffix, so an RC
+        // tag with the same numeric part would otherwise replace a stable
+        // installation as if it were a later release.
+        if (release.Prerelease)
+        {
+            return new UpdateReport
+            {
+                Kind = Outcome.Failed, Tag = release.Tag, Release = release,
+                Error = $"'{release.Tag}' is a pre-release tag; it will not replace a stable install",
+            };
         }
 
         if (Pick(release) is not { } asset)
@@ -399,7 +425,8 @@ public static class SelfUpdate
         // then renamed once it is proven good: the staging directory is worth
         // being able to read by hand when something goes wrong, and
         // "LiveArchiveEncoder-v9.9.9-win-x64.zip.part" says what it is.
-        string archive = Path.Combine(staging, asset.Name);
+        // v7.9.9.5: never use the feed's name verbatim as a local file name.
+        string archive = Path.Combine(staging, SafeAssetName(asset.Name));
         string partial = archive + ".part";
         Say($"Downloading {asset.Name} ({asset.Size:N0} bytes)...");
         (bool downloaded, string? downloadError) =
@@ -1050,14 +1077,28 @@ public static class SelfUpdate
     /// <summary>A tag is used as a directory name, so anything but a plain name is folded out of it.</summary>
     private static string SafeName(string tag)
     {
-        Span<char> buffer = stackalloc char[tag.Length];
-        int length = 0;
-        foreach (char ch in tag)
+        // v7.9.9.5: the tag comes from an untrusted release feed. Sizing a
+        // stackalloc by its length let a multi-megabyte tag overflow the stack
+        // -- a StackOverflowException cannot be caught, even by Program.Main's
+        // catch-all, and the process died outside the exit-code contract.
+        int length = Math.Min(tag.Length, 192);
+        string cleaned = string.Create(length, tag, static (span, source) =>
         {
-            buffer[length++] = char.IsAsciiLetterOrDigit(ch) || ch is '.' or '_' or '-'
-                ? ch : '_';
-        }
-        return length == 0 ? "new" : new string(buffer[..length]);
+            for (int i = 0; i < span.Length; i++)
+            {
+                char ch = source[i];
+                span[i] = char.IsAsciiLetterOrDigit(ch) || ch is '.' or '_' or '-' ? ch : '_';
+            }
+        });
+        return cleaned.Length == 0 ? "new" : cleaned;
+    }
+
+    /// <summary>A feed-supplied asset name reduced to a plain local filename.</summary>
+    private static string SafeAssetName(string name)
+    {
+        string cleaned = SafeName(name);
+        // "." and ".." survive SafeName's alphabet but are directory aliases.
+        return cleaned is "." or ".." || cleaned.Trim('.').Length == 0 ? "payload" : cleaned;
     }
 
     private static (string? Body, string? Error) Fetch(string url, string? proxy, int timeoutSeconds)

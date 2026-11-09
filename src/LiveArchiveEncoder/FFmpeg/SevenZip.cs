@@ -103,6 +103,9 @@ public static class SevenZip
                           + $"install it manually from {ReleasePage}");
         }
 
+        // v7.9.9.5: the installer/archive is several MB and was left in the
+        // private 7-Zip directory on every successful install.
+        TryDelete(asset);
         log?.Invoke($"7-Zip ready at {exe}");
         return (exe, null);
     }

@@ -191,7 +191,8 @@ public static class Cli
             ? new FileInfo(outputArg)
             : DefaultOutput(src, encoder, urlInput ? args.Input! : null);
         if (!urlInput && string.Equals(Path.GetFullPath(dst.FullName), Path.GetFullPath(src!.FullName),
-                StringComparison.OrdinalIgnoreCase))
+                OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         {
             Console.Error.WriteLine("ERROR: output must differ from input");
             return 2;
@@ -547,7 +548,13 @@ public static class Cli
                     ? null
                     : era?.Id ?? (args.Era is null ? stored.EraPreset : null),
                 EraNative = eraNative,
-                H264Impl = h264Impl,
+                // v7.9.9.5: keep the three-state meaning. h264Impl is the
+                // RESOLVED encoder (a preset may have chosen it), while the
+                // settings file must remember only what the user explicitly
+                // picked -- null means "let the preset decide". Persisting the
+                // resolved value made --save-config/--emit-args replay as an
+                // explicit --h264 and silently defeat the era preset.
+                H264Impl = args.H264Impl ?? stored.H264Impl,
                 // v7.9.5.1: the user's own presets travel with the run, so
                 // saving the settings file keeps them.
                 CustomEras = [.. EraPresets.Custom],
@@ -656,6 +663,9 @@ public static class Cli
         // invocation must never fail because the settings file could not be
         // written, so the result is ignored.
         UserConfig snapshot = ConfigStore.Capture(config);
+        // v7.9.9.5: --no-realtime is a per-run flag, not a preference. Let the
+        // run use it without rewriting the CUI toggle in config.json.
+        if (args.NoRealtime) snapshot.RealTime = stored.RealTime;
         // v7.9.8.6: the stored recompress chain is one thing a run must not adopt --
         // "no second pass unless --recompress says so" is older and stronger than
         // "remember the last run". Merging it into the live Config made every plain
@@ -1012,6 +1022,11 @@ public static class Cli
         c.FfmpegProxy = args.FfmpegProxy ?? stored.FfmpegProxy;
         c.AutoUpdateCheck = stored.AutoUpdateCheck;
         c.EraAspect = args.EraAspect ?? stored.EraAspect;
+        // v7.9.9.5: the CUI toggle is a remembered setting, the CLI flag is a
+        // per-run override. Neither reached Config before, so a setting saved
+        // by the menu was ignored by the CLI, and --no-realtime did not show up
+        // in the captured snapshot that is written back to disk.
+        c.RealTime = !args.NoRealtime && stored.RealTime;
 
         c.FfmpegSource = args.FfmpegSourceExplicit ? args.FfmpegSource : stored.FfmpegSource;
 

@@ -22,6 +22,124 @@
 
 ---
 
+## v7.9.9.5（2026-11-09）
+
+一次全项目审计与收尾版本：把 v7 的进程生命周期、取消、并发与"三态设置"漏洞
+系统性清掉，固定 v8 重写的行为基线。**v7 自此进入维护模式**（bugfix / hotfix /
+小功能），v8 是用 Rust 彻底重写的版本。
+
+审计覆盖 83 个产品源文件（约 29.5k 行）、52 个单测文件、23 个 e2e 文件，外加
+CLI 与 CUI 的实际运行检查。以下每条都能在源码或测试里对上号。
+
+### 1. 取消与进程生命周期
+
+| 修复 | 原来的后果 |
+| --- | --- |
+| `ProcessRunner.Run` 把进程级 `Interrupt.CurrentToken` 链接进每一次短命调用 | 只有长驻编码进程响应 Ctrl+C；ffprobe / 预检 / 下载 / 探测器仍跑满 30–300 s 超时，临时目录与进程残留 |
+| 子进程退出后对 stdout/stderr 读取加 5 s 上界，并观察被放弃的 Task | 孙进程继承管道句柄时 `ReadToEndAsync` 永不见 EOF，整个进程挂死；Ctrl+C 无效 |
+| `Program.Main` 统一 `OperationCanceledException` → 130、其它未捕获异常 → `ERROR:` + 1 | 早期路径的取消会变成未处理异常 + 堆栈，退出码脱离约定 |
+| `Interrupt.Request` 捕获回调抛出的 `AggregateException` | 一个异常回调在 `e.Cancel=true` 之后终止进程且无法接管 |
+| `RealtimeEncoder.Execute` 在启动两个 FFmpeg 之后、进入主 `try` 之前的初始化失败也会杀干净子进程 | 两个孤儿 FFmpeg 持有网络源连接与 `.part` 文件 |
+| `WriteFrame` 超时后观察底层写任务 | 超时路径留下未观察的任务异常，帧缓冲所有权不明 |
+| `Toolchain.DownloadHttp` 加 60 s 响应头超时并使 GetAsync / 响应体可取消 | "连上了但永不返回响应头"的 CDN 永久挂起；Ctrl+C 无效 |
+| `Toolchain.RunLong` 取消后等待管道读取任务、给 `WaitForExit` 加界 | 被释放的流仍被三个后台 Task 读取；子进程关了管道却活着时永久阻塞 |
+| `RunSplitCore` 最多等 20 s 让音频任务释放 staging 目录再删除 | Windows 上删不掉目录，中间文件与 FFmpeg 残留 |
+
+### 2. 并发与资源
+
+* `BuildProfileStore` 用一个可重入门闩保护能力档案的读写与序列化，`--parallel N`
+  下不再并发写 `Dictionary` 或互踩缓存文件；缓存临时名带随机段。
+* `ConfigStore.Save` 同样加唯一临时名与锁；`AppLog.MirrorWriter` 的
+  `StringBuilder` 加锁，分片进度与 stderr 日志不再写出乱码或抛
+  `ArgumentOutOfRangeException`。
+* 工具链 staging 目录每次安装唯一；`ToolchainPath` 写 `.profile` / `.bashrc` /
+  `.zshrc` 改成"临时文件 + 原子替换"，保留原 CRLF/LF，并对 POSIX 路径做 shell
+  转义；7-Zip 安装包在成功后删除。
+* `ParallelEncoder` 把 staging 目录创建移入 `try`（"输出被占用"不再泄漏空目录）、
+  在编码器层 clamp 分片数到 `MaxParallelShards`、join/remux 超时不再整数溢出；
+  `ShardPlanner` 对超长范围钳到 `int.MaxValue` 槽。
+* `HighResolutionTimer.WaitUntil`、`PixelFormatCatalog.FrameBytes`、
+  `FrameBufferPool` 构造参数补边界检查，超大几何给出可读的参数错误而不是在帧池
+  里变成 `OverflowException` 或负长度。
+* `SubtitlePlan` 改为 `using` 声明覆盖整个 `RunSingle`，预检之后的任意异常路径都
+  不再泄漏 `%TEMP%\lae_subs_*`。
+
+### 3. CLI / CUI 的三态与一致性
+
+* **`--no-realtime` 真正进入 `Config`**：CUI 里持久化的"直接编码"开关此前被 CLI
+  忽略；CLI 的 per-run 开关也不会改写 `config.json`（`--save-config` 仍把它写进
+  用户明确要求的文件，回放保持等价）。
+* **`H264Impl` 保持三态**：`Cli.Run` 不再把"预设解析出的编码器"当成用户显式选择
+  写回设置文件，`--emit-args` 不再凭空多出 `--h264`。
+* **`CliArgs.FromUserConfig` 输出 `--no-gh-proxy`**：`GhProxy=""`（明确关闭）过去
+  在等价命令行里消失，回放时又去探测并自动选择前端。
+* `--gh-proxy` 的 bare 形式不再吞掉位置参数（`--gh-proxy in.rm out.rm` 曾把
+  `in.rm` 写进配置当前缀），并且不可解析的值在解析阶段就拒绝。
+* `CliArgs.Num` 从 `G6` 改为 `R`：`1234567.89` 不再被打印成 `1.23457E+06`；
+  `Quote` 补上 `'`、`$`、反引号、`%`、`!`、通配符与换行。
+* `SubtitleSetup` 区分"按名字发现的 sidecar"与"用户显式给出的 `--subtitle`"，
+  后者不再被当作一次性发现而从设置快照里抹掉。
+* `L.T(key, args)` 统一 `InvariantCulture`，且模板与参数数量不符时不再抛
+  `FormatException`（历史上被菜单吞成 "Invalid selection"）。
+* CUI 用"设置文件是否存在"判断是否恢复，精简的合法 `config.json` 不再被忽略。
+* `OptionCatalog` 新增 `OptionalValue` 种类：`--emit-args`、`--gh-proxy`、
+  `--ffmpeg-download`、`--ffmpeg-env` 的 bare 形式不再被 zsh 当成"必须填值"；
+  `--recompress-args` 从"文件路径"改回自由文本；PowerShell 补全取
+  `CommandElements[-2]` 作为前一个词，值补全终于能命中。
+* **⚠ 行为变化**：无输入文件却带编码类选项时（如 `--encoder libx264`），不再静默
+  丢弃并进入菜单，而是报 `ERROR` 并返回 2，提示补 `INPUT [OUTPUT]` 或去掉选项。
+  仅影响这种本来就没有意义的用法；`--lang`、`--quiet`、`--update-feed`、
+  `--ffmpeg-source` 等真正配置菜单的选项照旧。
+* **⚠ 行为变化**：`--update` 与 `--update-check` 同时给出时报参数错误（2），
+  不再由 check 分支静默吞掉 `--update`。
+* `RunUpdate` 与 `--ffmpeg-download` 改用 `TryLoad`：一次更新检查或工具链安装不再
+  用全默认对象覆盖损坏的 `config.json`；`UserConfig.TryLoad` 补
+  `NotSupportedException` / `ArgumentException`；
+  `Normalise` 的 ladder 迁移加一次性标记，用户显式选的 `13,8,5,3` 不再每次启动
+  被改写。
+
+### 4. 安全与输出正确性
+
+* `SelfUpdate.SafeName` 按 feed 的 tag 长度分配栈内存 → 改为堆分配并截断到 192
+  字符；`asset.Name` 拒绝盘符/ADS/`..`/超长名，落地文件名统一清洗，杜绝
+  `StackOverflowException` 与路径逃逸。
+* **⚠ 行为变化**：带 `-rc1` / `+build` 后缀的 tag 不再被自动安装（仍可被
+  `--update-check` 看到，并给出提示）。`VersionTag` 的解析语义不变，单测仍断言
+  后缀在比较时被忽略。
+* `UpdateState.IsFresh` 拒绝未来的 `CheckedAt`（时钟回拨不再永久跳过更新检查）。
+* `HttpSource.FileNameFromUrl` 过滤冒号、Windows 非法字符、`.` / `..` 与保留设备名。
+* 路径比较改用平台相关比较：Linux 上 `clip.mp4` → `CLIP.MP4` 不再被误判为同文件，
+  MRU 目录也不会把 `/mnt/A` 与 `/mnt/a` 合并。
+* 报告的平均码率取 `max(-progress 累计字节, 实际 .part 文件大小)`，并在取消
+  progress reader 前给它 500 ms 消费最后的 `total_size` / `progress=end`。
+* `RunSplit` 只在**可行性阶段**回退 inline；视频编码开始后的超时、磁盘或参数错误
+  直接上报，不再重跑整段实时编码并掩盖真实原因。
+
+### 5. 质量保障
+
+* 新增 `V7995Tests.cs`（16 个用例）覆盖上述三态、往返精度、代理值、URL 文件名、
+  预发布标记、shell 转义、补全种类、帧池/分片边界与一次性 ladder 迁移。
+  单测：718 → **734**，双 TFM（net10.0 / net11.0）各全绿、0 警告。
+* e2e：`test_realmedia.py` 的四个用例改用独立 scratch 子目录，xdist 下不再因共享
+  `tests/out/realmedia` 的 `.part` 清理与占位目录 rmtree 撞锁（`SHFileOperationW
+  0x20`）。全量：**213 passed + 2 skipped**（并行阶段）、**29 passed**（串行独占
+  阶段），共 242 passed / 2 skipped。
+* 运行检查：`--version` / `--help` / `--cpu-info`、无输入与互斥开关的退出码、
+  `--gh-proxy` 位置参数、四种 shell 的补全脚本、CUI 菜单进入与退出（rc=0）、
+  真实编码（direct 模式，产物 901 294 B）、`--save-config` → `--emit-args` 往返。
+* `tools/check-slnx.py` 清单门禁、双语成对检查通过。
+
+### 6. 为 v8 做准备
+
+* 新增 [`v8-handover.md`](v8-handover.md) / `v8-handover.en.md`：冻结的行为契约、
+  本次审计的完整修复清单、**明确不修而留给 v8 的取舍**、以及 Rust 重写的验收
+  前置条件（argv/产物黄金基准）。
+* 仍保留给 v8 的项目（都是会改变 v6.3.3 等价性或需要结构性改动的）：
+  `OutputMonitor` 窗口淘汰用墙钟、速率分母用媒体时间；`-threads` 的位置；CUI
+  不接受 CLI 编码选项（现在只是明确报错）；`Toolchain.CopyInto` 非事务；巨型类与
+  全局状态；无 `--json` / metrics / tracing；自更新无代码签名与回滚；并行无
+  CPU/IO 配额；Linux NativeAOT 的 glibc 绑定。
+
 ## v7.9.9.4（2026-11-08）
 
 一次纯清理与文档工程版本：删掉没人用的代码与脚本，把文档理顺、补齐、并做成中英双语。

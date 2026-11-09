@@ -54,7 +54,17 @@ public sealed record PixFmtInfo(
         long size = IsBitPacked
             ? (long)((width + 7) / 8) * height
             : (long)Math.Round((long)width * height * BytesPerPixel, MidpointRounding.AwayFromZero);
-        return (int)(HasPalette ? size + PixelFormatCatalog.PaletteBytes : size);
+        long total = HasPalette ? size + PixelFormatCatalog.PaletteBytes : size;
+        // v7.9.9.5: an unchecked long -> int cast turned a huge geometry into
+        // a negative frame size, which then failed as an opaque overflow deep
+        // inside FrameBufferPool. Report the real constraint where it arises.
+        if (total <= 0 || total > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(width),
+                $"{Name} needs {total} bytes for a {width}x{height} frame; "
+                + "the raw video pipe cannot carry more than 2 GiB per frame");
+        }
+        return (int)total;
     }
 
     /// <summary>"10-bit 4:2:0, 3.00 B/px" -- what the format actually is.</summary>

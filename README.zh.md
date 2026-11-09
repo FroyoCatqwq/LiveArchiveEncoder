@@ -18,6 +18,8 @@ v6.3.3 的行为等价移植（原文逐字保留在 `reference/`），内部按
 | 时代预设与数字来源 | [`docs/era-presets.md`](docs/era-presets.md) | [`docs/era-presets.en.md`](docs/era-presets.en.md) |
 | FFmpeg / 7-Zip 构建与编解码器差异 | [`docs/toolchain-builds.md`](docs/toolchain-builds.md) | [`docs/toolchain-builds.en.md`](docs/toolchain-builds.en.md) |
 | 构建、测试、发布（维护者） | [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) | [`docs/MAINTENANCE.en.md`](docs/MAINTENANCE.en.md) |
+| 技术说明：架构、机制、优缺点、v8 迁移 | [`docs/architecture.md`](docs/architecture.md) | [`docs/architecture.en.md`](docs/architecture.en.md) |
+| v8 交接：冻结契约与审计基线 | [`docs/v8-handover.md`](docs/v8-handover.md) | [`docs/v8-handover.en.md`](docs/v8-handover.en.md) |
 | 版本历史（v7.9.8 起） | [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | [`docs/CHANGELOG.en.md`](docs/CHANGELOG.en.md) |
 | 版本历史（v6.2.2 → v7.9.7） | [`docs/CHANGELOG-archive.md`](docs/CHANGELOG-archive.md) | [`docs/CHANGELOG-archive.en.md`](docs/CHANGELOG-archive.en.md) |
 | 容器 × 帧率 × 像素格式矩阵 | [`docs/capability-matrix.md`](docs/capability-matrix.md) | [`docs/capability-matrix.en.md`](docs/capability-matrix.en.md) |

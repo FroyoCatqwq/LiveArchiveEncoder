@@ -123,6 +123,10 @@ public static class CliArgs
         // travel with the line -- otherwise the copy would probe and pick a front
         // the original was told not to use.
         if (c.GhProxy is { Length: > 0 } front) argv.AddRange(["--gh-proxy", front]);
+        // v7.9.9.5: "" is a remembered decision ("off, stop probing"), not a
+        // missing value. Emitting nothing made the replayed line probe and
+        // silently choose a front the original was told not to use.
+        else if (c.GhProxy is not null && c.GhProxy.Length == 0) argv.Add("--no-gh-proxy");
         // v7.9.8.5: only the non-default travels. "check on start" is the default,
         // so a line printed from a settings file that turned it off has to say so
         // -- otherwise replaying the line would quietly turn it back on.
@@ -222,7 +226,8 @@ public static class CliArgs
     /// this output is a convenience rather than a shell-safe serialisation.
     /// </summary>
     private static readonly SearchValues<char> NeedsQuoting =
-        SearchValues.Create([' ', '\t', '"', '&', '|', '<', '>', '^', '(', ')', ';']);
+        SearchValues.Create([' ', '\t', '"', '\'', '&', '|', '<', '>', '^', '(', ')',
+            ';', '$', '`', '%', '!', '*', '?', '\n', '\r']);
 
     /// <summary>Quote one token when it needs it.</summary>
     public static string Quote(string token)
@@ -282,10 +287,11 @@ public static class CliArgs
 
     private static bool Same(double a, double b) => Math.Abs(a - b) < 1e-9;
 
-    /// <summary>Invariant, no trailing zeros: 13.0 prints as "13", 12.5 as "12.5".</summary>
-    private static string Num(double value)
-    {
-        string text = value.ToString("G6", CultureInfo.InvariantCulture);
-        return text;
-    }
+    /// <summary>
+    /// Invariant, round-trippable, no trailing zeros: 13.0 prints as "13",
+    /// 12.5 as "12.5". v7.9.9.5: "G6" silently rounded a threshold such as
+    /// 1234567.89 down to 1.23457E+06, so the "equivalent command line" was
+    /// not equivalent at all. "R" is the shortest round-trippable form.
+    /// </summary>
+    private static string Num(double value) => value.ToString("R", CultureInfo.InvariantCulture);
 }

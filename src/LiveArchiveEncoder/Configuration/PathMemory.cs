@@ -26,7 +26,11 @@ public static class PathMemory
             if (!Directory.Exists(trimmed)) continue;
 
             string full = Path.GetFullPath(trimmed);
-            if (kept.Contains(full, StringComparer.OrdinalIgnoreCase)) continue;
+            // v7.9.9.5: case is significant on Linux; /mnt/A and /mnt/a are
+            // two real directories and collapsing them lost an MRU entry.
+            StringComparer comparison = OperatingSystem.IsWindows()
+                ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            if (kept.Contains(full, comparison)) continue;
             kept.Add(full);
             if (kept.Count >= Limit) break;
         }

@@ -31,6 +31,13 @@ public static class OptionCatalog
         /// <summary>Takes a value; <see cref="Spec.Choices"/> may suggest some.</summary>
         Value,
 
+        /// <summary>
+        /// v7.9.9.5: the value is optional (the bare form has a documented
+        /// default). A completer should still suggest values but must not force
+        /// the next token to be one -- `--gh-proxy --quiet` is legal.
+        /// </summary>
+        OptionalValue,
+
         /// <summary>Takes a path, so the shell should offer files.</summary>
         File,
     }
@@ -155,21 +162,21 @@ public static class OptionCatalog
 
         // ---- settings files (v7.9.1) ----
         new Spec("--save-config", Kind.File, []),
-        new Spec("--emit-args", Kind.Flag, []),
+        new Spec("--emit-args", Kind.OptionalValue, []),
 
         // ---- toolchain ----
         new Spec("--ffmpeg", Kind.File, []),
         new Spec("--ffprobe", Kind.File, []),
         new Spec("--ffmpeg-source", Kind.Value, ["path", .. FfmpegIds()]),
-        new Spec("--ffmpeg-download", Kind.Value, FfmpegIds()),
+        new Spec("--ffmpeg-download", Kind.OptionalValue, FfmpegIds()),
         new Spec("--ffmpeg-archive", Kind.File, []),
         new Spec("--ffmpeg-delete", Kind.Value, FfmpegIds()),
         new Spec("--ffmpeg-list", Kind.Flag, []),
-        new Spec("--ffmpeg-env", Kind.Value, ["auto", "powershell", "pwsh", "cmd", "bash", "zsh", "fish"]),
+        new Spec("--ffmpeg-env", Kind.OptionalValue, ["auto", "powershell", "pwsh", "cmd", "bash", "zsh", "fish"]),
         new Spec("--list-filters", Kind.Flag, []),
         new Spec("--proxy", Kind.Value,
             ["http://127.0.0.1:10808", "http://127.0.0.1:7890", "socks5://127.0.0.1:10808"]),
-        new Spec("--gh-proxy", Kind.Value, [FFmpeg.GitHubProxy.DefaultPrefix, FFmpeg.GitHubProxy.Off]),
+        new Spec("--gh-proxy", Kind.OptionalValue, [FFmpeg.GitHubProxy.DefaultPrefix, FFmpeg.GitHubProxy.Off]),
         new Spec("--no-gh-proxy", Kind.Flag, []),
         new Spec("--nnedi-update", Kind.Flag, []),
         new Spec("--nnedi-status", Kind.Flag, []),
@@ -200,7 +207,9 @@ public static class OptionCatalog
         new Spec("--recompress-extra", Kind.Value, []),
         new Spec("--extra-encoder-args", Kind.Value, []),
         new Spec("--recompress-only", Kind.Flag, []),
-        new Spec("--recompress-args", Kind.File, []),
+        // A free-text FFmpeg fragment, not a path: file completion would offer
+        // filenames where "-vf scale=..." belongs.
+        new Spec("--recompress-args", Kind.Value, []),
         new Spec("--recompress-container", Kind.Value, ["mp4", "mkv", "avi", "flv"]),
         new Spec("--recompress-codec", Kind.Value, []),
         new Spec("--recompress-quality", Kind.Value, []),

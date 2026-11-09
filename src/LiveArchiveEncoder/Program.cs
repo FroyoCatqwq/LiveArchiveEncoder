@@ -23,10 +23,20 @@ public static class Program
             AppLog.Info("process.exit code={ExitCode}", exitCode);
             return exitCode;
         }
+        catch (OperationCanceledException)
+        {
+            // v7.9.9.5: short-lived probes and toolchain downloads now honour
+            // Ctrl+C too. They can surface the cancellation from outside
+            // Cli.Run, so the shell-wide convention (130) must apply here as
+            // well instead of an unhandled exception and a stack trace.
+            AppLog.Warn("process.cancelled");
+            return 130;
+        }
         catch (Exception exc)
         {
             AppLog.Error(exc, "process.unhandled type={ExceptionType}", exc.GetType().Name);
-            throw;
+            Console.Error.WriteLine($"ERROR: {exc.Message}");
+            return 1;
         }
         finally { AppLog.Close(); }
     }
@@ -202,7 +212,14 @@ public static class Program
                     $"ERROR: unknown source '{cli.FfmpegDownload}'; choose one of {FFmpeg.FfmpegCatalog.Ids}");
                 return 2;
             }
-            UserConfig before = ConfigStore.Load();
+            // v7.9.9.5: same rule as RunUpdate -- a broken config.json must
+            // not be replaced by defaults just because a toolchain install
+            // wants to remember which distribution it fetched.
+            string cfgPath = ConfigStore.DefaultPath;
+            bool cfgExists = File.Exists(cfgPath);
+            UserConfig? loadedConfig = ConfigStore.TryLoad(cfgPath);
+            bool canPersist = !cfgExists || loadedConfig is not null;
+            UserConfig before = loadedConfig ?? new UserConfig();
             string? proxy = cli.FfmpegProxy ?? before.FfmpegProxy;
             // v7.9.8.3: the GitHub front, when one is configured or just typed.
             (string? front, string? frontError) = ResolveFront(before, cli.GhProxy);
@@ -247,12 +264,12 @@ public static class Program
                 Console.Error.WriteLine($"ERROR: {installError}");
                 return 1;
             }
-            UserConfig remembered = ConfigStore.Load();
+            UserConfig remembered = ConfigStore.TryLoad(cfgPath) ?? before;
             remembered.FfmpegSource = dist.Id;
             if (proxy is not null) remembered.FfmpegProxy = proxy;
             if (cli.GhProxy is not null)
                 remembered.GhProxy = front.HasText ? front : FFmpeg.GitHubProxy.Off;
-            ConfigStore.Save(remembered);
+            if (canPersist) ConfigStore.Save(remembered);
 
             // v7.9.8.11: an install has to reach the shell too -- otherwise cmd,
             // pwsh and bash still have no ffmpeg / ffprobe after this command.
@@ -493,6 +510,21 @@ public static class Program
 
         if (string.IsNullOrEmpty(cli.Input) && !cli.NoCui)
         {
+            // v7.9.9.5: the interactive shell rebuilds its state from
+            // config.json and never sees CliOptions. Encode options passed on
+            // the command line were silently discarded, so a user who typed
+            // `--encoder libx264 --limit 300` saw the OLD values in the menu
+            // and believed the run had been configured. Refuse instead of
+            // pretending; the few options that really do configure the shell
+            // are listed below.
+            string? dropped = EncodeOptionWithNoInput(args);
+            if (dropped is not null)
+            {
+                Console.Error.WriteLine(
+                    $"ERROR: '{dropped}' has no effect without an input file; "
+                    + "pass INPUT [OUTPUT], or open the menu without encode options.");
+                return 2;
+            }
             return Cui.Run(ffmpeg, ffprobe, btbn, caps, cli.Language, source,
                 cli.NoUpdateCheck, cli.UpdateFeed);
         }
@@ -538,8 +570,25 @@ public static class Program
     /// </summary>
     private static int RunUpdate(CliOptions cli)
     {
-        UserConfig stored = ConfigStore.Load();
+        // v7.9.9.5: Load() answers a fresh default object for an unparsable
+        // config.json. Saving that back (done below when --gh-proxy is given)
+        // used to overwrite every setting with defaults. A missing file is fine
+        // to create; an existing but broken one is not ours to replace.
+        string configPath = ConfigStore.DefaultPath;
+        bool configExists = File.Exists(configPath);
+        UserConfig? loaded = ConfigStore.TryLoad(configPath);
+        bool canPersist = !configExists || loaded is not null;
+        UserConfig stored = loaded ?? new UserConfig();
         string? proxy = cli.FfmpegProxy ?? stored.FfmpegProxy;
+
+        // v7.9.9.5: --update used to be silently swallowed when --update-check
+        // was present (the check branch returned first). A script that asked
+        // for both got "newer available" and no installation.
+        if (cli.UpdateCheck && cli.Update)
+        {
+            Console.Error.WriteLine("ERROR: --update and --update-check are mutually exclusive");
+            return 2;
+        }
 
         (string? front, string? frontError) = ResolveFront(stored, cli.GhProxy);
         if (frontError is not null)
@@ -563,7 +612,7 @@ public static class Program
         if (cli.GhProxy is not null)
         {
             stored.GhProxy = front.HasText ? front : FFmpeg.GitHubProxy.Off;
-            ConfigStore.Save(stored);
+            if (canPersist) ConfigStore.Save(stored);
         }
 
         string feed = Update.SelfUpdate.FeedOr(cli.UpdateFeed);
@@ -587,6 +636,8 @@ public static class Program
             }
 
             Console.WriteLine(L.T("update.available", release.Tag, release.PageUrl ?? ""));
+            if (release.Prerelease)
+                Console.WriteLine("NOTE: this is a pre-release tag; --update will not install it.");
             return 3;
         }
 
@@ -637,6 +688,31 @@ public static class Program
             return ("", null);
         }
         return FFmpeg.GitHubProxy.Normalise(raw);
+    }
+
+    /// <summary>
+    /// Options the interactive shell legitimately consumes. Everything else on
+    /// a command line without an input is an encode option that CUI would drop.
+    /// </summary>
+    private static readonly HashSet<string> CuiCompatibleOptions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "--lang", "--quiet", "--no-cui", "--no-update-check", "--update-feed",
+        "--ffmpeg", "--ffprobe", "--ffmpeg-source", "--proxy", "--gh-proxy",
+        "--no-gh-proxy", "--help", "-h", "--version", "--cpu-info", "--completion",
+        "--ffmpeg-env", "--ffmpeg-list", "--list-filters", "--list-pix-fmts",
+        "--nnedi-status", "--nnedi-update", "--list-subtitle-fonts", "--font-import",
+    };
+
+    /// <summary>First option that CUI would silently ignore, or null.</summary>
+    private static string? EncodeOptionWithNoInput(string[] args)
+    {
+        foreach (string arg in args)
+        {
+            if (!arg.StartsWith('-')) continue;
+            string name = arg.Split('=', 2)[0];
+            if (!CuiCompatibleOptions.Contains(name)) return arg;
+        }
+        return null;
     }
 
     /// <summary>

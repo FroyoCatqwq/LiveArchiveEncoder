@@ -36,6 +36,13 @@ public sealed class UserConfig
 
     public int Version { get; set; } = CurrentVersion;
 
+    /// <summary>
+    /// v7.9.9.5: the 13/8/5/3 -&gt; 13/12/10/8/5 ladder migration is meant to
+    /// run once per file. Without a marker it also overwrote a ladder the user
+    /// had deliberately chosen, on every single start.
+    /// </summary>
+    public bool LadderMigrated { get; set; }
+
     public string? InputPath { get; set; }
     public string? OutputPath { get; set; }
     public bool OutputIsAuto { get; set; } = true;
@@ -375,8 +382,14 @@ public static class ConfigStore
             if (loaded is not null) Normalise(loaded);
             return loaded;
         }
-        catch (Exception exc) when (exc is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception exc) when (exc is JsonException or IOException
+                                        or UnauthorizedAccessException or NotSupportedException
+                                        or ArgumentException)
         {
+            // v7.9.9.5: System.Text.Json reports an unsupported member type as
+            // NotSupportedException, not JsonException. A hand-edited file with
+            // a number where a list belongs used to escape as an unhandled
+            // exception instead of "cannot read this settings file".
             // A corrupt file must never keep the program from starting.
             return null;
         }
@@ -402,11 +415,15 @@ public static class ConfigStore
         // v7.9.9.2: an old config.json carrying the Python-baseline ladder would
         // otherwise pin 13/8/5/3 forever. Migrate only that exact unchanged value;
         // a ladder the user actually chose is left alone.
+        // v7.9.9.5: migrate only files that have not been through the
+        // migration yet. A ladder the user chose later (including the same
+        // 13/8/5/3) must survive a restart.
         c.FpsLevels = c.FpsLevels is { Count: > 0 } levels
-            ? (levels.SequenceEqual(Constants.LegacyFpsLevels)
+            ? (levels.SequenceEqual(Constants.LegacyFpsLevels) && !c.LadderMigrated
                 ? [.. Constants.DefaultFpsLevels]
                 : levels)
             : [.. Constants.DefaultFpsLevels];
+        c.LadderMigrated = true;
         c.FpsLevelKbps = c.FpsLevelKbps is { } rungs ? [.. rungs.Where(r => r is not null)] : [];
         // v7.9.9.2: stale/relative/duplicate recent directories must not leak
         // into the CUI menu or grow the settings file forever.
@@ -441,31 +458,47 @@ public static class ConfigStore
         c.PlayMode = c.PlayMode.Or("off");
     }
 
+    private static readonly object SaveGate = new();
+
     public static bool Save(UserConfig cfg, string? path = null)
     {
         string file = path ?? DefaultPath;
-        try
+        lock (SaveGate)
         {
-            string? dir = Path.GetDirectoryName(file);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            // v7.9.9.5: a per-write name, so two concurrent saves cannot
+            // truncate each other's temporary file before the rename.
+            string temp = file + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp";
+            try
+            {
+                string? dir = Path.GetDirectoryName(file);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-            cfg.SavedAt = DateTimeOffset.Now;
-            string json = JsonSerializer.Serialize(cfg, UserConfigJsonContext.Default.UserConfig);
+                cfg.SavedAt = DateTimeOffset.Now;
+                string json = JsonSerializer.Serialize(cfg, UserConfigJsonContext.Default.UserConfig);
 
-            string temp = file + ".tmp";
-            File.WriteAllText(temp, json);
-            File.Move(temp, file, overwrite: true);
-            return true;
-        }
-        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
-                                        or NotSupportedException or ArgumentException)
-        {
-            return false;
+                File.WriteAllText(temp, json);
+                File.Move(temp, file, overwrite: true);
+                return true;
+            }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException
+                                            or NotSupportedException or ArgumentException)
+            {
+                return false;
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); }
+                catch (Exception exc) when (exc is IOException or UnauthorizedAccessException) { }
+            }
         }
     }
 
     public static UserConfig Capture(Config c) => new()
     {
+        // v7.9.9.5: anything the program writes has been through the one-time
+        // ladder migration. Without this, the next load would see a user-chosen
+        // 13/8/5/3 ladder and silently replace it again.
+        LadderMigrated = true,
         InputPath = c.InputPath?.FullName,
         OutputPath = c.OutputPath?.FullName,
         OutputIsAuto = c.OutputIsAuto,

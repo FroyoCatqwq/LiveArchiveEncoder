@@ -83,12 +83,26 @@ public static class ToolchainPath
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// v7.9.9.5: the managed bin directory is user-controlled (LAE_CONFIG_DIR
+    /// and the profile directory can contain quotes, dollars or backticks).
+    /// Those characters are shell syntax inside double quotes; escape them
+    /// before writing a line the user's shell will execute on every login.
+    /// </summary>
+    private static string PosixEscape(string dir) =>
+        dir.Replace("\\", "\\\\").Replace("\"", "\\\"")
+           .Replace("$", "\\$").Replace("`", "\\`");
+
     /// <summary>The idempotent block written into a POSIX shell startup file.</summary>
     public static string ProfileBlock(string dir) =>
-        $"{BeginMarker}\nexport PATH=\"{dir}:$PATH\"\n{EndMarker}\n";
+        $"{BeginMarker}\nexport PATH=\"{PosixEscape(dir)}:$PATH\"\n{EndMarker}\n";
 
     public static string RemoveProfileBlock(string content)
     {
+        // v7.9.9.5: keep the file's original line endings. Rewriting a CRLF
+        // .bashrc to LF made the next read see a different file and produced a
+        // whole-file diff for one removed block.
+        string newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
         var kept = new List<string>();
         bool inside = false;
         foreach (string line in content.Replace("\r\n", "\n").Split('\n'))
@@ -101,8 +115,8 @@ public static class ToolchainPath
             }
             kept.Add(line);
         }
-        string body = string.Join("\n", kept).TrimEnd('\n');
-        return body.Length == 0 ? "" : body + "\n";
+        string body = string.Join(newline, kept).TrimEnd('\n', '\r');
+        return body.Length == 0 ? "" : body + newline;
     }
 
     /// <summary>Replace our block, so switching distributions rewrites it in place.</summary>
@@ -116,7 +130,7 @@ public static class ToolchainPath
         if (name is "cmd" or "command" or "bat") return $"set \"PATH={dir};%PATH%\"";
         if (name is "powershell" or "pwsh" or "ps") return $"$env:PATH = \"{dir};$env:PATH\"";
         if (name == "fish") return $"set -gx PATH \"{dir}\" $PATH";
-        return $"export PATH=\"{dir}:$PATH\"";
+        return $"export PATH=\"{PosixEscape(dir)}:$PATH\"";
     }
 
     /// <summary>Best guess for the shell that launched this process.</summary>
@@ -206,7 +220,7 @@ public static class ToolchainPath
                         if (!File.Exists(path)) continue;
                         string content = File.ReadAllText(path);
                         if (!content.Contains(binDir, StringComparison.Ordinal)) continue;
-                        File.WriteAllText(path, RemoveProfileBlock(content), new UTF8Encoding(false));
+                        WriteAtomic(path, RemoveProfileBlock(content));
                     }
                     DropSymlinks(home, binDir);
                 }
@@ -216,6 +230,27 @@ public static class ToolchainPath
                 EnvironmentVariableTarget.Process);
         }
         catch { /* best effort: the build itself is already gone */ }
+    }
+
+    /// <summary>
+    /// v7.9.9.5: shell startup files are not scratch files. A crash or a full
+    /// disk halfway through a direct File.WriteAllText left .profile truncated
+    /// and the user without a working shell. Write a private temporary file
+    /// first, then rename it into place.
+    /// </summary>
+    private static void WriteAtomic(string path, string content)
+    {
+        string temp = path + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp";
+        try
+        {
+            File.WriteAllText(temp, content, new UTF8Encoding(false));
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException) { }
+        }
     }
 
     private static void PublishWindows(string dir)
@@ -254,7 +289,7 @@ public static class ToolchainPath
             if (!File.Exists(path) && name != ".profile") continue;
             string old = File.Exists(path) ? File.ReadAllText(path) : "";
             string updated = InsertProfileBlock(old, dir);
-            if (updated != old) File.WriteAllText(path, updated, new UTF8Encoding(false));
+            if (updated != old) WriteAtomic(path, updated);
         }
 
         // ~/.local/bin is on PATH on Debian/Ubuntu login shells. Symlinks make

@@ -98,6 +98,19 @@ public static class Completion
                 continue;
             }
 
+            // v7.9.9.5: zsh's ":message:action" makes the value mandatory;
+            // "::message:action" keeps it optional. Bare `--gh-proxy` and
+            // `--ffmpeg-download` are legal, so a completer that waited for a
+            // value consumed the next option (`--quiet`) as that value.
+            if (option.OptionKind == OptionCatalog.Kind.OptionalValue)
+            {
+                string optional = string.Join(' ', Resolve(option.Choices, encoders));
+                sb.Append("        '").Append(option.Name).Append("::value:");
+                if (optional.Length > 0) sb.Append('(').Append(optional).Append(')');
+                sb.Append("'\n");
+                continue;
+            }
+
             if (option.OptionKind == OptionCatalog.Kind.File)
             {
                 sb.Append("        '").Append(option.Name).Append(":file:_files'\n");
@@ -158,7 +171,13 @@ public static class Completion
           .Append(exe).Append("' -ScriptBlock $laeCompleter\n\n");
         sb.Append("$laeCompleter = {\n    param($wordToComplete, $commandAst, $cursorPosition)\n");
         sb.Append("    $prev = $null\n    $elements = $commandAst.CommandElements\n");
-        sb.Append("    if ($elements.Count -gt 1) { $prev = [string]$elements[-1] }\n\n");
+        // v7.9.9.5: CommandElements[-1] is the word currently being typed,
+        // not the option before it. Taking it as $prev meant the choice map
+        // almost never matched, so PowerShell never completed a value.
+        sb.Append("    if ($elements.Count -gt 1) {\n");
+        sb.Append("        $last = [string]$elements[-1]\n");
+        sb.Append("        if ($last -eq $wordToComplete -and $elements.Count -gt 2) { $prev = [string]$elements[-2] }\n");
+        sb.Append("        else { $prev = $last }\n    }\n\n");
         sb.Append("    $map = @{\n");
         foreach (OptionCatalog.Spec option in OptionCatalog.ValueOptions)
         {

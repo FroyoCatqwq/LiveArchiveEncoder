@@ -30,6 +30,8 @@
     <File Path="archive/retired/RetiredWatermark.cs" />
   </Folder>
   <Folder Name="/docs/">
+    <File Path="docs/architecture.en.md" />
+    <File Path="docs/architecture.md" />
     <File Path="docs/CHANGELOG-archive.en.md" />
     <File Path="docs/CHANGELOG-archive.md" />
     <File Path="docs/CHANGELOG.en.md" />
@@ -50,6 +52,8 @@
     <File Path="docs/toolchain-builds.md" />
     <File Path="docs/usage.en.md" />
     <File Path="docs/usage.md" />
+    <File Path="docs/v8-handover.en.md" />
+    <File Path="docs/v8-handover.md" />
   </Folder>
   <Folder Name="/reference/">
     <File Path="reference/live_archive_encoder.py" />
@@ -217,6 +221,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/V798132Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V7992Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V7993Tests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/V7995Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V799Tests.cs" />
   </Folder>
   <Folder Name="/tests/e2e/">

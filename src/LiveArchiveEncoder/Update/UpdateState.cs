@@ -67,6 +67,10 @@ public sealed class UpdateState
     public bool IsFresh(TimeSpan ttl) =>
         CheckedAt is { } at
         && string.Equals(Result, "ok", StringComparison.Ordinal)
+        // v7.9.9.5: a clock set back (or a hand-edited future timestamp) made
+        // the elapsed time negative and < ttl true forever, so start-up update
+        // checks never ran again.
+        && DateTimeOffset.Now - at >= TimeSpan.Zero
         && DateTimeOffset.Now - at < ttl;
 }
 

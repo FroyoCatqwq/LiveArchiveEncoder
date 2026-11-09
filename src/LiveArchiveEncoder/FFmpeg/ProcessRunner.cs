@@ -60,14 +60,24 @@ public static class ProcessRunner
             try { proc.PriorityClass = priority.Value; } catch { /* not permitted; harmless */ }
         }
 
+        // v7.9.9.5: every short-lived probe/preflight/download child obeys the
+        // process-wide Ctrl+C token, not just the long-running encode. Linking it
+        // here is what makes all ~20 callers cancellable without threading a
+        // token through each of them: an interrupted run no longer leaves an
+        // ffprobe or an aria2c working on a temporary directory for its full
+        // 30..300 s timeout while the user waits for the prompt to come back.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, Core.Interrupt.CurrentToken);
+        CancellationToken token = linked.Token;
+
         // Read both pipes concurrently so neither can fill its buffer and deadlock.
-        Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync();
-        Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
+        Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync(token);
+        Task<string> stderrTask = proc.StandardError.ReadToEndAsync(token);
 
         // Wait in slices rather than one long call: neither a cancel nor the
         // deadline can be observed while blocked inside WaitForExit(ms).
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        int budgetMs = timeoutSeconds * 1000;
+        long budgetMs = (long)timeoutSeconds * 1000;
         while (!proc.WaitForExit(250))
         {
             // v7.9.8.10: drain both pipes BEFORE the process is disposed. These
@@ -75,12 +85,12 @@ public static class ProcessRunner
             // unobserved exceptions and FFmpeg's last words ("No space left on
             // device", "Could not write header") were lost -- the user saw only
             // "did not finish within 30s" with no idea why.
-            if (cancellationToken.IsCancellationRequested)
+            if (token.IsCancellationRequested)
             {
                 Kill(proc);
                 string why = Drain(stdoutTask, stderrTask);
                 throw new OperationCanceledException(
-                    $"{Path.GetFileName(args[0])} was cancelled" + Suffix(why), cancellationToken);
+                    $"{Path.GetFileName(args[0])} was cancelled" + Suffix(why), token);
             }
             if (clock.ElapsedMilliseconds >= budgetMs)
             {
@@ -91,8 +101,12 @@ public static class ProcessRunner
             }
         }
 
-        string stdout = stdoutTask.GetAwaiter().GetResult();
-        string stderr = stderrTask.GetAwaiter().GetResult();
+        // v7.9.9.5: the child has exited, but a grandchild that inherited the
+        // pipe handles can keep ReadToEndAsync from ever seeing EOF. Waiting
+        // without a bound here hung the process after the child was gone -- the
+        // very deadlock the sliced wait above exists to avoid.
+        string stdout = AwaitText(stdoutTask, proc);
+        string stderr = AwaitText(stderrTask, proc);
         AppLog.Info("child.exit exe={Exe} code={ExitCode} elapsedMs={ElapsedMs} stderr={Stderr}",
             args[0], proc.ExitCode, clock.ElapsedMilliseconds,
             stderr.Length > 400 ? stderr[..400] : stderr);
@@ -116,12 +130,40 @@ public static class ProcessRunner
         string text = "";
         foreach (Task<string> task in new[] { stdout, stderr })
         {
-            if (!task.IsCompletedSuccessfully) continue;
+            if (!task.IsCompletedSuccessfully) { Observe(task); continue; }
             string chunk = task.Result.Trim();
             if (chunk.Length > 0) text = chunk;         // stderr is read last: it wins
         }
         return text.Length > 400 ? text[..400] : text;
     }
+
+    /// <summary>
+    /// Await a pipe reader with a bound. A process that has exited normally
+    /// always closes its own pipes; when it does not, the only safe answer is to
+    /// stop waiting, observe the abandoned task and take the diagnostics we got.
+    /// </summary>
+    private static string AwaitText(Task<string> task, Process proc)
+    {
+        if (task.IsCompletedSuccessfully) return task.Result;
+        try
+        {
+            return task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        }
+        catch (Exception exc) when (exc is TimeoutException or OperationCanceledException
+                                        or IOException or ObjectDisposedException)
+        {
+            Observe(task);
+            try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            return "";
+        }
+    }
+
+    /// <summary>Keep an abandoned reader from becoming an unobserved task exception.</summary>
+    private static void Observe(Task task) =>
+        _ = task.ContinueWith(static t => _ = t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     private static string Suffix(string diagnostic) =>
         diagnostic.Length > 0 ? $"\n  last output: {diagnostic}" : "";

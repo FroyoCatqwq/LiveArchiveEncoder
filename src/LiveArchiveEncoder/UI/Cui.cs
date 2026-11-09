@@ -40,7 +40,12 @@ public static partial class Cui
         // itself is already in the language the user left behind.
         var c = new Config();
         UserConfig stored = ConfigStore.Load();
-        bool restored = stored.Encoder is not null || stored.SavedAt is not null;
+        // v7.9.9.5: a small but valid settings file ({"Language":"zh","Fps":25})
+        // has neither Encoder nor SavedAt. Judging "restored" by those fields
+        // skipped Apply entirely and silently started the menu from defaults.
+        // The file's existence is the fact that matters; Load() answers safe
+        // defaults when it cannot be parsed.
+        bool restored = File.Exists(ConfigStore.DefaultPath);
         if (restored) ConfigStore.Apply(stored, c, encoders);
         if (ffmpegSource.HasText) c.FfmpegSource = ffmpegSource;
 

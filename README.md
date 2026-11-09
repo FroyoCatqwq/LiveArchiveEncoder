@@ -24,6 +24,8 @@ edition of every document.
 | Era presets and where their numbers come from | [`docs/era-presets.en.md`](docs/era-presets.en.md) | [`docs/era-presets.md`](docs/era-presets.md) |
 | FFmpeg / 7-Zip builds and codec differences | [`docs/toolchain-builds.en.md`](docs/toolchain-builds.en.md) | [`docs/toolchain-builds.md`](docs/toolchain-builds.md) |
 | Build, test, release (maintainers) | [`docs/MAINTENANCE.en.md`](docs/MAINTENANCE.en.md) | [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) |
+| Technical description: architecture, mechanisms, strengths/weaknesses, v8 migration | [`docs/architecture.en.md`](docs/architecture.en.md) | [`docs/architecture.md`](docs/architecture.md) |
+| v8 handover: frozen behaviour contract and audit baseline | [`docs/v8-handover.en.md`](docs/v8-handover.en.md) | [`docs/v8-handover.md`](docs/v8-handover.md) |
 | Version history (v7.9.8 →) | [`docs/CHANGELOG.en.md`](docs/CHANGELOG.en.md) | [`docs/CHANGELOG.md`](docs/CHANGELOG.md) |
 | Version history (v6.2.2 → v7.9.7) | [`docs/CHANGELOG-archive.en.md`](docs/CHANGELOG-archive.en.md) | [`docs/CHANGELOG-archive.md`](docs/CHANGELOG-archive.md) |
 | Container × frame-rate × pixel-format matrix | [`docs/capability-matrix.en.md`](docs/capability-matrix.en.md) | [`docs/capability-matrix.md`](docs/capability-matrix.md) |
