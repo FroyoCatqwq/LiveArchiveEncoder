@@ -302,6 +302,7 @@ LiveArchiveEncoder.exe [选项] [输入文件] [输出文件]
 | `--recompress-only` | 关 | **v7.9.5**：跳过直播编码，直接对已有文件做二次压缩（见 §7.12） |
 | `--no-recompress` | — | 关掉二次压缩（优先于上面两个） |
 | `--era ID` | 无 | **v7.6 / v7.9.7**：应用预设，id 是 `site/year`（`youku/2007`、`bilibili/2012`、`generic/1998`）；旧 id 仍可用并提示已更名（见 §7.12） |
+| `--disc ID` | 无 | **v7.9.9.8**：目标物理介质 `dvd` / `vcd` / `svcd` / `cd`（CD-i），见 §7.19。它锁定编码器、容器、分辨率、帧率、码率、GOP 与音频（DVD = 720×576/720×480 MPEG-2 + AC-3 48 kHz；VCD/CD-i = 352×288/352×240 MPEG-1 1150 kbps + MP2 44.1 kHz 224 kbps）。制式按 `--fps` 判定，缺省 PAL |
 | `--era-modern` | 关 | **v7.9.5.1**：预设的第二遍用 libx264 + AAC 的 mp4，而不是站点当年的编码器 |
 | `--era-native` | 开 | **v7.9.5.1**：显式写"用站点自己的编码器"（默认行为，给脚本自证用） |
 | `--era-aspect` | `source` | **v7.9.6.3**：预设的画幅 `source` / `4:3` / `16:9`，只给编码器真支持的尺寸（见 §7.12） |
@@ -2257,6 +2258,39 @@ LiveArchiveEncoder --update-check      # 会自动直连 GitHub，不走前沿
 - **不联网确认"有没有新版"以外的任何事**：不统计、不上报。
 
 ---
+
+## 7.19 光盘镜像与介质约束（v7.9.9.8）
+
+**ISO 输入**：`*.iso` / `*.img` 可以直接当输入，但只接受两种布局 —— 含
+`VIDEO_TS/` 与 `*.IFO` 的 **DVD-Video**（FFmpeg 的 `dvdvideo` demuxer 直接读，
+自动跨 VOB 分片），以及含 `MPEGAV/*.DAT` 的 **Video CD**（用 7-Zip 解到临时目录）。
+其它 ISO（数据盘、蓝光）明确拒绝并退出 2。输出名按 ISO 原名推导。
+
+**介质约束**：`--disc dvd|vcd|svcd|cd`（CUI 参数页 `39.`）锁定：
+
+| 目标 | 编码器 | PAL / NTSC | 视频 | 音频 |
+| --- | --- | --- | --- | --- |
+| `dvd` | mpeg2video | 720×576@25 / 720×480@30 | 6000k，maxrate 8000，bufsize 1835k，GOP 15 | ac3 384k 48 kHz 2ch |
+| `vcd` | mpeg1video | 352×288@25 / 352×240@30 | 1150k CBR，bufsize 327k，GOP 15 | mp2 224k 44.1 kHz 2ch |
+| `svcd` | mpeg2video | 480×576@25 / 480×480@30 | 2520k，bufsize 917k，GOP 15 | mp2 224k 44.1 kHz 2ch |
+| `cd` | mpeg1video | 同 VCD | 同 VCD | 同 VCD |
+
+* 制式由 `--fps` 决定（29.97/30/23.976 = NTSC，25 = PAL）；不给时默认 PAL，
+  所以 720×480 的 NTSC 盘要写 `--fps 29.97`。
+* 介质是**硬约束**：它会覆盖 `--encoder` / `--container` / 尺寸 / 帧率 / 码率 / 音频，
+  覆盖时打印提示。`-maxrate/-bufsize/-g` 走 `ExtraEncoderArgs`，与 VBV 成对补全同路。
+* 多 title 的 DVD 只读**第一个** title；需要别的 title 先用外部工具提取对应 VOB。
+
+```powershell
+# 把 DVD 盘按 DVD-Video 规格重压一遍（前 60 秒）
+LiveArchiveEncoder.exe D:\discs\movie.iso out.mpg --disc dvd --end-time 00:01:00
+
+# NTSC 盘
+LiveArchiveEncoder.exe D:\discs\ntsc.iso out.mpg --disc dvd --fps 29.97
+
+# 把 VCD 的 DAT 重新做成 VCD
+LiveArchiveEncoder.exe MPEGAV\AVSEQ01.DAT out.mpg --disc vcd
+```
 
 ## 8. 实用命令示例
 

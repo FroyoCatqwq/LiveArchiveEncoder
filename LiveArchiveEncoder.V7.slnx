@@ -129,6 +129,8 @@
   </Folder>
   <Folder Name="/src/LiveArchiveEncoder/PostProcess/">
     <File Path="src/LiveArchiveEncoder/PostProcess/EraAspect.cs" />
+    <File Path="src/LiveArchiveEncoder/Core/DiscImage.cs" />
+    <File Path="src/LiveArchiveEncoder/PostProcess/DiscProfile.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/EraPreset.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/FontPack.cs" />
     <File Path="src/LiveArchiveEncoder/PostProcess/FontResolver.cs" />
@@ -183,6 +185,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/EncoderRateAndContainerTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/EraAspectTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/EraCustomAndCodecTests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/DiscProfileTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/EraFpsLadderTests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/EraH264Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/EraLiveQualityTests.cs" />
@@ -235,6 +238,7 @@
     <File Path="tests/e2e/test_config_conversion.py" />
     <File Path="tests/e2e/test_cui_smoke.py" />
     <File Path="tests/e2e/test_direct_and_paths.py" />
+    <File Path="tests/e2e/test_disc.py" />
     <File Path="tests/e2e/test_era_quality.py" />
     <File Path="tests/e2e/test_error_paths.py" />
     <File Path="tests/e2e/test_feature_sweep.py" />

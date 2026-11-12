@@ -144,6 +144,44 @@ public static class Cli
             encoder.Caps ??= caps.EncoderCaps(encoder);
         }
 
+        // v7.9.9.8: a disc target fixes the codec and the container -- those are
+        // what the physical format allows, not a preference. An explicit
+        // --encoder / --container that disagrees is refused instead of being
+        // silently overwritten, because the user asked for two incompatible
+        // things and only one of them can win.
+        // The flag wins for one run; otherwise the value remembered by the CUI
+        // applies, exactly like the era preset.
+        PostProcess.DiscProfile? discProfile =
+            PostProcess.DiscProfiles.Find(args.Disc ?? stored.Disc);
+        if (discProfile is not null)
+        {
+            EncoderInfo? discEncoder = encoders.FirstOrDefault(
+                e => string.Equals(e.Name, discProfile.Encoder, StringComparison.OrdinalIgnoreCase));
+            if (discEncoder is null)
+            {
+                Console.Error.WriteLine($"ERROR: {L.T("disc.encodermissing",
+                    discProfile.Id, discProfile.Encoder)}");
+                return 2;
+            }
+            // The disc format decides the codec; --encoder has a default value,
+            // so "was it typed?" cannot be answered. Say what was swapped
+            // instead of pretending there was no conflict.
+            if (!string.Equals(encoder.Name, discProfile.Encoder, StringComparison.OrdinalIgnoreCase)
+                && !args.Quiet)
+            {
+                Console.WriteLine(L.T("disc.codecoverride",
+                    discProfile.Id, encoder.Name, discProfile.Encoder));
+            }
+            encoder = discEncoder;
+            encoder.Caps = caps.EncoderCaps(encoder);
+            if (EncoderMath.ResolveContainer(encoder, discProfile.Container) is { } discContainer)
+            {
+                encoder = discContainer;
+                encoder.Caps ??= caps.EncoderCaps(encoder);
+            }
+
+        }
+
         // v7.9.8.8: the two OpenH264 dials are about one encoder, so a run that
         // encodes with another one has no use for them. Saying so is the whole
         // point of this version: a flag that is accepted and never reaches
@@ -166,6 +204,31 @@ public static class Cli
             return 2;
         }
 
+        // v7.9.9.8: a disc image. DVD-Video is handed to FFmpeg as the ISO
+        // itself (its dvdvideo demuxer reads MicroUDF, follows the IFO and
+        // stitches the VOB parts); a VCD image has no demuxer, so the MPEGAV
+        // payload is unpacked into a temp directory that `discLifetime` owns.
+        // Anything that is neither is refused here rather than encoded blind.
+        FileInfo? originalSrc = src;
+        DiscImage? discImage = null;
+        if (src is not null && Core.DiscImages.LooksLikeImage(src.FullName))
+        {
+            (DiscImage? resolved, string? discError) = Core.DiscImages.Resolve(src.FullName);
+            if (discError is not null)
+            {
+                Console.Error.WriteLine($"ERROR: {discError}");
+                return 2;
+            }
+            if (resolved is not null)
+            {
+                if (!args.Quiet)
+                    Console.WriteLine($"{resolved.Describe}: {Path.GetFileName(src.FullName)}");
+                discImage = resolved;
+                src = new FileInfo(resolved.MediaPath);
+            }
+        }
+        using DiscImage? discLifetime = discImage;
+
         // v7.9.6.3: a network source is no longer forced to a single pass. The
         // old rule ("N readers on one flaky link is the stall itself") is true
         // of a congested Wi-Fi hop and wrong about a gigabit LAN, so the
@@ -181,16 +244,19 @@ public static class Cli
         // there". Derive the filename from the source stem + the encoder's
         // container; a path that is not a directory keeps the old behaviour.
         string outputArg = args.Output ?? "";
+        // The product is named after what the user pointed at, not after the
+        // temporary file a VCD image was unpacked into.
         string outputStem = urlInput
             ? Path.GetFileNameWithoutExtension(Remote.HttpSource.FileNameFromUrl(args.Input!))
-            : Path.GetFileNameWithoutExtension(src!.Name);
+            : Path.GetFileNameWithoutExtension(originalSrc!.Name);
         string? completed = PathMemory.CompleteDirectory(outputArg, outputStem, encoder.Extension);
         if (completed is not null) outputArg = completed;
 
         FileInfo dst = outputArg.Length > 0
             ? new FileInfo(outputArg)
-            : DefaultOutput(src, encoder, urlInput ? args.Input! : null);
-        if (!urlInput && string.Equals(Path.GetFullPath(dst.FullName), Path.GetFullPath(src!.FullName),
+            : DefaultOutput(originalSrc!, encoder, urlInput ? args.Input! : null);
+        if (!urlInput && string.Equals(Path.GetFullPath(dst.FullName),
+                Path.GetFullPath(originalSrc!.FullName),
                 OperatingSystem.IsWindows()
                     ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         {
@@ -274,6 +340,23 @@ public static class Cli
         string effectiveScaleAlgo = args.ScaleAlgoExplicit
             ? args.ScaleAlgo
             : era?.ScaleAlgo ?? args.ScaleAlgo;
+
+        // v7.9.9.8: a disc target is not a fallback -- the format defines these
+        // numbers, so it overrides the era preset and the defaults. It is applied
+        // here, before ChooseBaseFps, or the user would read "mpeg1video does not
+        // support 13 fps, using 23.976" and then get a 25 fps encode.
+        if (discProfile is not null)
+        {
+            // The source has not been probed yet, so the television standard is
+            // decided by --fps when the user gave one (29.97/30/23.976 = NTSC,
+            // 25 = PAL). Without it the disc defaults to PAL, which is what a
+            // 625-line source needs and what the report prints.
+            bool palDisc = !args.FpsExplicit || effectiveFps < 27;
+            effectiveFps = palDisc ? discProfile.PalFps : discProfile.NtscFps;
+            effectiveWidth = discProfile.WidthFor(palDisc ? 25 : 30);
+            effectiveHeight = discProfile.HeightFor(palDisc ? 25 : 30);
+            effectiveLimit = discProfile.VideoKbps;
+        }
 
         // Caps are probed above and every container swap copies the reference
         // (EncoderInfo.WithContainer), so this is never null here.
@@ -677,6 +760,33 @@ public static class Cli
             if (!args.Quiet) Console.WriteLine(L.T("nnedi.inuse", nnediWeights));
         }
 
+        // v7.9.9.8: a disc target overrides every value the format defines. The
+        // encoder and container were already pinned above; size, frame rate,
+        // bitrate and audio are settled here. A disc is constant bitrate at a
+        // fixed frame rate, so the adaptive ladder is pinned to one rung.
+        PostProcess.DiscProfile? disc =
+            PostProcess.DiscProfiles.Find(args.Disc ?? stored.Disc);
+        bool discPal = config.Fps < 27;
+        int outWidth = disc is null ? config.Width : disc.WidthFor(discPal ? 25 : 30);
+        int outHeight = disc is null ? config.Height : disc.HeightFor(discPal ? 25 : 30);
+        double outFps = disc is null ? config.Fps : (discPal ? disc.PalFps : disc.NtscFps);
+        double outLimit = disc?.VideoKbps ?? config.Limit;
+        double outRecover = disc is null ? config.Recover : disc.VideoKbps * 0.75;
+        string outAudioEncoder = disc?.AudioEncoder ?? audioEncoder ?? "";
+        int outAudioKbps = disc?.AudioKbps ?? config.AudioKbps;
+        int? outAudioRate = disc?.AudioRate ?? config.AudioRate;
+        int outAudioChannels = disc?.AudioChannels ?? config.AudioChannels;
+        string extraArgs = args.ExtraEncoderArgs ?? config.ExtraEncoderArgs ?? "";
+        if (disc is not null)
+        {
+            extraArgs = (extraArgs.Length > 0 ? extraArgs + " " : "") + disc.EncoderArgs;
+            if (!args.Quiet)
+            {
+                Console.WriteLine(L.T("disc.applied", disc.Id, outWidth, outHeight, outFps,
+                    disc.VideoKbps, disc.AudioEncoder, disc.AudioKbps));
+            }
+        }
+
         var options = new Encoding.RealtimeOptions
         {
             FFmpeg = ffmpeg,
@@ -688,32 +798,34 @@ public static class Cli
             // link reference the encoder may quote alongside its own
             // measurement of the share itself.
             Iperf3Host = args.Iperf3Host,
-            Fps = config.Fps,
+            Fps = outFps,
             // v7.9.9.1: --no-realtime encodes as fast as the machine allows. The
             // bitrate window no longer maps to programme seconds, so a ladder
             // would misfire on its first estimate; pin one rung for the run
             // only -- config.FpsLevels (and the settings file) keep the real one.
             // v7.9.9.2: the persisted CUI toggle must pin a single rung too,
             // not just the --no-realtime flag. Both paths have to agree.
-            FpsLevels = (!args.NoRealtime && config.RealTime) ? levels : [config.Fps],
+            FpsLevels = disc is not null
+                ? [outFps]
+                : ((!args.NoRealtime && config.RealTime) ? levels : [config.Fps]),
             // The CLI flag is per-run; the persisted choice comes from the CUI
             // toggle. Either one can turn pacing off.
             RealTime = !args.NoRealtime && config.RealTime,
-            ExtraEncoderArgs = args.ExtraEncoderArgs ?? config.ExtraEncoderArgs ?? "",
-            FpsLevelKbps = levelKbps,
+            ExtraEncoderArgs = extraArgs,
+            FpsLevelKbps = disc is null ? levelKbps : [],
             Quality = config.Qv,
             QualityExplicit = args.Qv.HasValue,
             Threads = config.Threads,
-            LimitKbps = config.Limit,
-            RecoverKbps = config.Recover,
+            LimitKbps = outLimit,
+            RecoverKbps = outRecover,
             OpenH264Rc = config.OpenH264Rc,
             OpenH264SkipFrames = config.OpenH264SkipFrames,
             WindowSeconds = config.Window,
             BufferFrames = config.BufferFrames,
-            AudioEncoder = audioEncoder,
-            AudioKbps = config.AudioKbps,
-            AudioChannels = config.AudioChannels,
-            AudioRate = config.AudioRate,
+            AudioEncoder = outAudioEncoder,
+            AudioKbps = outAudioKbps,
+            AudioChannels = outAudioChannels,
+            AudioRate = outAudioRate,
             VideoStream = config.VideoStream,
             AudioStream = config.AudioStream,
             Subtitles = new Encoding.SubtitleSettings(
@@ -730,8 +842,8 @@ public static class Cli
                 ? caps.SubtitleEncoders
                 : null,
             Hwaccel = config.Hwaccel,
-            Width = config.Width,
-            Height = config.Height,
+            Width = outWidth,
+            Height = outHeight,
             FitMode = config.FitMode,
             CropAnchor = config.CropAnchor,
             PadColor = config.PadColor,

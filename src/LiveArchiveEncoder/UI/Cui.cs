@@ -1667,6 +1667,7 @@ public static partial class Cui
                 c.RealTime ? L.T("param.realtime.on") : L.T("param.realtime.off"));
             Row(35, L.T("param.extraargs"),
                 c.ExtraEncoderArgs.Length == 0 ? L.T("value.none") : c.ExtraEncoderArgs);
+            Row(39, L.T("disc.menu"), c.Disc ?? L.T("value.none"));
             // v7.9.9.3: the live encoder's VBV dials are visible too, not just
             // reachable by typing a raw string into 35. They share the same
             // ExtraEncoderArgs fragment (single source of truth).
@@ -1772,6 +1773,36 @@ public static partial class Cui
                     case "36": EditLiveVbvFlag(c, "-maxrate"); break;
                     case "37": EditLiveVbvFlag(c, "-minrate"); break;
                     case "38": EditLiveVbvFlag(c, "-bufsize"); break;
+                    case "39":
+                    {
+                        // v7.9.9.8: the disc target pins size, frame rate,
+                        // bitrate and audio. The encoder is chosen with item 3
+                        // because the detected list only exists there.
+                        Console.Write(L.T("disc.prompt", c.Disc ?? L.T("value.none")));
+                        string discRaw = Ask().Trim();
+                        if (discRaw.Length == 0) break;
+                        if (discRaw is "none" or "off" or "-")
+                        {
+                            c.Disc = null;
+                            Console.WriteLine(L.T("rc.flag.set", L.T("disc.menu"), L.T("value.none")));
+                            break;
+                        }
+                        if (PostProcess.DiscProfiles.Find(discRaw) is not { } chosen)
+                        {
+                            Console.WriteLine($"{L.T("error.prefix")}"
+                                + L.T("disc.unknown", PostProcess.DiscProfiles.IdList));
+                            break;
+                        }
+                        ApplyDisc(c, chosen);
+                        Console.WriteLine(L.T("disc.applied", chosen.Id, c.Width, c.Height,
+                            c.Fps, chosen.VideoKbps, chosen.AudioEncoder, chosen.AudioKbps));
+                        if (!string.Equals(c.Encoder?.Name, chosen.Encoder,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            Console.WriteLine(L.T("disc.encoderhint", chosen.Encoder));
+                        }
+                        break;
+                    }
                     case "7":
                         c.Threads = ReadInt(L.T("param.prompt.threads", c.Threads), c.Threads);
                         break;
@@ -3441,6 +3472,28 @@ public static partial class Cui
         c.Recompress.Args = PostProcess.FragmentEditor.FirstWins(candidate);
         Console.WriteLine(L.T("rc.flag.set", "-b:v",
             remove ? L.T("value.none") : raw + "k"));
+    }
+
+    /// <summary>
+    /// v7.9.9.8: write a disc profile's numbers into the settings. The CUI has
+    /// no CLI argument layer, so the profile is applied directly; its
+    /// -maxrate/-bufsize/-g go through the same extras fragment the CLI uses.
+    /// </summary>
+    private static void ApplyDisc(Config c, PostProcess.DiscProfile p)
+    {
+        c.Disc = p.Id;
+        bool pal = c.Fps < 27;
+        c.Fps = pal ? p.PalFps : p.NtscFps;
+        c.Width = p.WidthFor(pal ? 25 : 30);
+        c.Height = p.HeightFor(pal ? 25 : 30);
+        c.Limit = p.VideoKbps;
+        c.Recover = p.VideoKbps * 0.75;
+        c.AudioKbps = p.AudioKbps;
+        c.AudioChannels = p.AudioChannels;
+        c.AudioRate = p.AudioRate;
+        c.AudioEncoder = p.AudioEncoder;
+        c.ExtraEncoderArgs = PostProcess.FragmentEditor.Merge(
+            c.ExtraEncoderArgs, p.EncoderArgs);
     }
 
     /// <summary>

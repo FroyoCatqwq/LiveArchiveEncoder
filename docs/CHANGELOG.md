@@ -22,6 +22,78 @@
 
 ---
 
+## v7.9.9.8（2026-11-12）
+
+新增光盘镜像输入与 DVD / VCD / CD-i 介质约束。
+
+### 1. ISO 输入（DVD-Video 与 Video CD）
+
+`*.iso` / `*.img` 现在可以直接当输入。识别是**结构性**的，不看扩展名也不靠「ffprobe
+打得开就算」：
+
+| 布局 | 判据 | 处理 |
+| --- | --- | --- |
+| **DVD-Video** | 含 `VIDEO_TS/` 与 `*.IFO` | 直接把 ISO 交给 FFmpeg：它的 `dvdvideo` demuxer 读 MicroUDF、按 IFO 组装 `VTS_zz_1..9.VOB`。实测 `ffprobe -f dvdvideo` 正常，无需解包 |
+| **Video CD** | 含 `MPEGAV/` 与 `*.DAT` | FFmpeg 没有 VCD demuxer，用 7-Zip 把 `MPEGAV/*.DAT` 解到临时目录再编码，退出时清理 |
+| 其它 | 两者都不含 | `exit 2` 明确拒绝：`<名字> 不是 DVD-Video 或 VCD 镜像` |
+
+判定用 7-Zip 的目录列表（一份 `7z l -ba`），因为它同时支持 UDF 与 ISO 9660；损坏或
+不可读的镜像报「不是可读的光盘镜像」。输出文件名仍按**原 ISO 名**推导，不会因为 VCD
+解包成 `AVSEQ01.DAT` 而变成 `AVSEQ01_live.mpg`。
+
+`.iso` 与 `.dat` 也加进了 CUI 的目录列举扩展名，所以菜单里能直接看到。
+
+### 2. `--disc dvd|vcd|svcd|cd`：介质约束
+
+新增 `--disc ID`（CUI 参数页 `39.`）。它和 `--era` 是两个正交的轴：`--era` 管
+「哪个站、哪一年」，`--disc` 管「刻到哪种盘上」。约束取自公开规范：
+
+| 目标 | 编码器/容器 | 分辨率（PAL / NTSC） | 视频 | 音频 | GOP |
+| --- | --- | --- | --- | --- | --- |
+| `dvd` | mpeg2video / mpeg | 720×576 @25 / 720×480 @30 | 6000 kbps，maxrate 8000，bufsize 1835k | ac3 384k 48 kHz 2ch | 15 |
+| `vcd` | mpeg1video / mpeg | 352×288 @25 / 352×240 @30 | 1150 kbps CBR，bufsize 327k | mp2 224k 44.1 kHz 2ch | 15 |
+| `svcd` | mpeg2video / mpeg | 480×576 @25 / 480×480 @30 | 2520 kbps，bufsize 917k | mp2 224k 44.1 kHz 2ch | 15 |
+| `cd`（CD-i） | mpeg1video / mpeg | 同 VCD | 同 VCD | 同 VCD | 15 |
+
+* DVD-Video 的数字来自用户指定的 Wikipedia 条目：MPEG-2 视频上限 9.8 Mbit/s、
+PAL 720×576 / NTSC 720×480、AC-3 48 kHz 且 ≤448 kbit/s、4:2:0 8 bit。
+* VCD 的数字来自同站 White Book 条目：MPEG-1、352×288/352×240、1150 kbit/s CBR、
+MP2 44.1 kHz 224 kbit/s。
+* **CD-i（Green Book）与 VCD 的 MPEG-1 包络相同** —— 该条目只说两者因「规范的细微
+  差异」互不兼容，编码约束未给差异，所以这里不编造不同参数，只让 CD-i 可以被点名。
+* **GOP 长度（15 帧 ≈ 0.6 s）不在所引页面里**，是业界通行的实际限制；代码注释与文档
+  都标注了这一点。
+* 制式由 `--fps` 判定（29.97/30/23.976 = NTSC，25 = PAL）；不给 `--fps` 时默认 PAL。
+  **NTSC 源（如 720×480 的 DVD ISO）需要显式 `--fps 29.97`**。
+* 介质是硬约束：`--disc` 会覆盖 `--encoder` / `--container` / 尺寸 / 帧率 / 码率 /
+  音频，并在覆盖时打印提示。`-maxrate/-bufsize/-g` 通过 `ExtraEncoderArgs` 追加，
+  因此与 v7.9.9.7 的 VBV 成对补全共用同一条路径。
+* 持久化：CUI 里选过之后写进 `config.json` 的 `Disc`，命令行 `--disc` 只作用于本次。
+
+### 3. 实测（用户提供的素材）
+
+| 素材 | 结果 |
+| --- | --- |
+| `SJ01_SCN.iso`（1501 s，DVD-Video PAL） | 识别为 DVD-Video 镜像；`--disc dvd` → 720×576@25、mpeg2video、ac3 48 kHz 384 kbps，10 s 产物时长 10.005 s |
+| `D2_SCN.iso`（689 s，DVD-Video PAL） | 同上（probe 720×576@25 + ac3） |
+| `Gamehalo 271.iso`（NTSC，含两个 VTS） | `--fps 29.97 --disc dvd` → 720×480@30 |
+| `西部大案纪实（1）.dat`（VCD 2.0 PAL 裸流） | `--disc vcd` → 352×288@25、1150 kbps、mp2 44.1 kHz 224 kbps，产物 9.99 s |
+| 伪造的 `.iso` | `exit 2`「不是可读的光盘镜像」 |
+
+**已知限制**：一个 ISO 里有多个 title（`Gamehalo 271.iso` 有两个 VTS）时，FFmpeg 的
+dvdvideo demuxer 默认读**第一个** title（该盘约 21 s）；`--start-time/--end-time` 只能
+在所选 title 内裁切，暂不支持跨 title 或选择 title。需要别的 title 时先用外部工具
+提取对应 VOB。
+
+### 4. 测试
+
+* 新增 `DiscProfileTests`（9 项：四档参数与规范逐条对照、别名、VBV/GOP 成对、
+  PAL/NTSC 尺寸、镜像判据、不可读镜像、中英键）——单测 **762 全过**。
+* 新增 `tests/e2e/test_disc.py`（5 项：VCD 包络、DVD 包络、CD-i + NTSC 切换、
+  未知目标 exit 2、非视频 ISO 拒绝）。
+
+---
+
 ## v7.9.9.7（2026-11-12）
 
 修用户实跑中报出的 `flv` 编码器 `EINVAL`，补齐二次压缩的 `-b:v` 菜单，并做第三轮全项目审计修复。

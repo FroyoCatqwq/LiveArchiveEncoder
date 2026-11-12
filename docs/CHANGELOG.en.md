@@ -7,6 +7,70 @@ edition, [`CHANGELOG.md`](CHANGELOG.md) — entries there are kept verbatim, wit
 measurements and reasoning behind each decision. `⚠` marks a change a user can
 notice in an output, a default, a file name or a CLI contract.
 
+## v7.9.9.8 (2026-11-12) — disc images and disc targets
+
+### Disc images (DVD-Video and Video CD)
+
+`*.iso` / `*.img` are accepted as input. Recognition is **structural**, not by
+extension or by "ffprobe opens it":
+
+| Layout | Evidence | Handling |
+| --- | --- | --- |
+| **DVD-Video** | `VIDEO_TS/` plus `*.IFO` | The ISO is handed to FFmpeg: its `dvdvideo` demuxer reads MicroUDF, follows the IFO and stitches `VTS_zz_1..9.VOB`. Verified with `ffprobe -f dvdvideo`; no unpacking |
+| **Video CD** | `MPEGAV/` plus `*.DAT` | No VCD demuxer exists, so 7-Zip unpacks `MPEGAV/*.DAT` into a temp directory that is deleted on exit |
+| Anything else | neither | `exit 2`, "not a DVD-Video or VCD image" |
+
+The output keeps the **ISO's** name, so a VCD is not reported as `AVSEQ01_live.mpg`.
+
+### `--disc dvd|vcd|svcd|cd`
+
+A new axis, orthogonal to `--era`: the era is "which site, which year", the disc is
+"which physical format". Constraints follow the published specifications:
+
+| Target | Codec/container | PAL / NTSC | Video | Audio | GOP |
+| --- | --- | --- | --- | --- | --- |
+| `dvd` | mpeg2video / mpeg | 720×576@25 / 720×480@30 | 6000 kbps, maxrate 8000, bufsize 1835k | ac3 384k 48 kHz 2ch | 15 |
+| `vcd` | mpeg1video / mpeg | 352×288@25 / 352×240@30 | 1150 kbps CBR, bufsize 327k | mp2 224k 44.1 kHz 2ch | 15 |
+| `svcd` | mpeg2video / mpeg | 480×576@25 / 480×480@30 | 2520 kbps, bufsize 917k | mp2 224k 44.1 kHz 2ch | 15 |
+| `cd` (CD-i) | mpeg1video / mpeg | as VCD | as VCD | as VCD | 15 |
+
+* The DVD numbers come from the Wikipedia article the user cited (MPEG-2 up to
+  9.8 Mbit/s, 720×576 / 720×480, AC-3 48 kHz ≤448 kbit/s, 4:2:0 8-bit).
+* The VCD numbers come from the same encyclopaedia's White Book entry (MPEG-1,
+  352×288 / 352×240, 1150 kbit/s CBR, MP2 44.1 kHz 224 kbit/s).
+* **CD-i and VCD share the MPEG-1 envelope**: the cited page only says the two
+  differ by "minor differences between the standards", so no different numbers are
+  invented; the id exists so a CD-i target can be named.
+* **GOP length (15 frames, ~0.6 s) is not stated on those pages** — it is the
+  long-standing practical limit, and both the code and this note say so.
+* The television standard follows `--fps` (29.97/30/23.976 = NTSC, 25 = PAL);
+  without it the disc defaults to PAL, so a 720×480 NTSC image needs
+  `--fps 29.97`.
+* The disc is a hard constraint: it overrides `--encoder`, `--container`, size,
+  frame rate, bitrate and audio, and says so when it does. `-maxrate/-bufsize/-g`
+  travel through `ExtraEncoderArgs`, so they share the v7.9.9.7 VBV pairing.
+* The CUI remembers the choice in `config.json`; the CLI flag is per-run.
+
+### Measured on the supplied material
+
+`SJ01_SCN.iso` and `D2_SCN.iso` (DVD-Video PAL, 1501 s / 689 s) are read directly
+and encode to 720×576@25 mpeg2video + ac3 48 kHz 384 kbps; `Gamehalo 271.iso`
+(NTSC, two title sets) needs `--fps 29.97` and produces 720×480@30;
+`西部大案纪实（1）.dat` (VCD 2.0 PAL) encodes to 352×288@25, 1150 kbps, mp2
+44.1 kHz 224 kbps; a fake `.iso` exits 2.
+
+**Known limit**: FFmpeg's dvdvideo demuxer reads the **first** title only — an
+image with several VTS files (the `Gamehalo` disc) exposes about 21 s of it.
+`--start-time/--end-time` crop within that title; selecting another title is not
+supported yet.
+
+### Tests
+
+`DiscProfileTests` (9 cases) and `tests/e2e/test_disc.py` (5 cases). Unit suite
+**762 passed**.
+
+---
+
 ## v7.9.9.7 (2026-11-12) — flv EINVAL, CUI -b:v row, third audit
 
 Fixes a failure reported from a real 46-minute encode, adds the requested `-b:v`

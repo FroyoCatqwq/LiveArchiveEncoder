@@ -56,6 +56,12 @@ public static class Validation
     public static string? ValidateAudio(Config c)
     {
         if (c.Encoder is null || c.AudioEncoder is null) return null;
+        // v7.9.9.8: a container that carries no audio has nothing to validate.
+        // ConfigStore.Apply restores the stored "libmp3lame" over the null the
+        // encoder selection wrote, so h261 / h263 / a64 used to fail here with
+        // "the 'h261' container carries no audio stream" -- a run that has no
+        // audio track at all. The command already drops it with -an.
+        if (Constants.NoAudioFormats.Contains(c.Encoder.FormatName)) return null;
         return AudioCatalog.Validate(
             c.AudioEncoder, c.Encoder.FormatName, c.AudioRate, c.AudioChannels, c.AudioKbps);
     }

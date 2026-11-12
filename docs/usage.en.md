@@ -271,6 +271,7 @@ Input and output are positional and ordered; the output is derived when omitted.
 | `--recompress-only` | off | **v7.9.5**: skip the live pass and recompress an existing file (§7.12) |
 | `--no-recompress` | — | Turn the stage off (wins over the two above) |
 | `--era ID` | none | **v7.6 / v7.9.7**: apply a preset whose id is `site/year` (`youku/2007`, `bilibili/2012`, `generic/1998`); old ids still work and print a rename note (§7.12) |
+| `--disc ID` | none | **v7.9.9.8**: physical target `dvd` / `vcd` / `svcd` / `cd` (CD-i), see §7.19. It pins codec, container, resolution, frame rate, bitrate, GOP and audio (DVD = 720×576/720×480 MPEG-2 + AC-3 48 kHz; VCD/CD-i = 352×288/352×240 MPEG-1 1150 kbps + MP2 44.1 kHz 224 kbps). The television standard follows `--fps`, defaulting to PAL |
 | `--era-modern` | off | **v7.9.5.1**: use libx264 + AAC in mp4 for the second pass instead of the site's period encoder |
 | `--era-native` | on | **v7.9.5.1**: explicitly request the site's own encoder (the default; for self-documenting scripts) |
 | `--era-aspect` | `source` | **v7.9.6.3**: preset aspect `source` / `4:3` / `16:9`, only sizes the encoder really supports (§7.12) |
@@ -965,6 +966,42 @@ page answers 401/403/404. Both `--proxy` and `--gh-proxy` apply, exactly as for
 toolchain downloads.
 
 ---
+
+## 7.19 Disc images and disc targets (v7.9.9.8)
+
+**ISO input**: `*.iso` / `*.img` can be used directly, but only two layouts are
+accepted — **DVD-Video** (`VIDEO_TS/` plus `*.IFO`, read straight by FFmpeg's
+`dvdvideo` demuxer, which follows the IFO across VOB parts) and **Video CD**
+(`MPEGAV/*.DAT`, unpacked to a temp directory with 7-Zip). Any other image (a data
+disc, a Blu-ray) is refused with exit 2. The product keeps the ISO's name.
+
+**Disc targets**: `--disc dvd|vcd|svcd|cd` (CUI parameter row `39.`) pins:
+
+| Target | Codec | PAL / NTSC | Video | Audio |
+| --- | --- | --- | --- | --- |
+| `dvd` | mpeg2video | 720×576@25 / 720×480@30 | 6000k, maxrate 8000, bufsize 1835k, GOP 15 | ac3 384k 48 kHz 2ch |
+| `vcd` | mpeg1video | 352×288@25 / 352×240@30 | 1150k CBR, bufsize 327k, GOP 15 | mp2 224k 44.1 kHz 2ch |
+| `svcd` | mpeg2video | 480×576@25 / 480×480@30 | 2520k, bufsize 917k, GOP 15 | mp2 224k 44.1 kHz 2ch |
+| `cd` | mpeg1video | as VCD | as VCD | as VCD |
+
+* The standard follows `--fps` (29.97/30/23.976 = NTSC, 25 = PAL); without it the
+  disc defaults to PAL, so a 720×480 NTSC image needs `--fps 29.97`.
+* The disc is a **hard constraint**: it overrides `--encoder`, `--container`, size,
+  frame rate, bitrate and audio, and prints what it changed. `-maxrate/-bufsize/-g`
+  go through `ExtraEncoderArgs`, the same path the VBV pairing uses.
+* A multi-title DVD exposes only the **first** title; extract another VOB with an
+  external tool if you need it.
+
+```powershell
+# re-author a DVD to DVD-Video (first minute)
+LiveArchiveEncoder.exe D:\discs\movie.iso out.mpg --disc dvd --end-time 00:01:00
+
+# an NTSC disc
+LiveArchiveEncoder.exe D:\discs\ntsc.iso out.mpg --disc dvd --fps 29.97
+
+# rebuild a VCD from its DAT
+LiveArchiveEncoder.exe MPEGAV\AVSEQ01.DAT out.mpg --disc vcd
+```
 
 ## 8. Useful command lines
 

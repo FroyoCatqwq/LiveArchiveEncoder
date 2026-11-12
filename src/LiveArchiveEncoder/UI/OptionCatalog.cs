@@ -226,6 +226,7 @@ public static class OptionCatalog
 
         // ---- era presets (v7.9.5 / v7.9.7) ----
         new Spec("--era", Kind.Value, [.. PostProcess.EraPresets.All.Select(p => p.Id)]),
+        new Spec("--disc", Kind.Value, [.. PostProcess.DiscProfiles.All.Select(p => p.Id)]),
         new Spec("--era-aspect", Kind.Value, [.. PostProcess.EraAspects.Labels]),
         new Spec("--era-modern", Kind.Flag, []),
         new Spec("--era-native", Kind.Flag, []),

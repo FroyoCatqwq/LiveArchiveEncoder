@@ -460,6 +460,14 @@ public sealed class CliOptions
     public string? Era { get; init; }
 
     /// <summary>
+    /// v7.9.9.8: physical disc target -- dvd / vcd / svcd / cd (CD-i), see
+    /// <see cref="PostProcess.DiscProfiles"/>. It pins the encoder, container,
+    /// resolution, frame rate, bitrate, GOP and audio to what that disc format
+    /// allows, which is a different axis from the era presets.
+    /// </summary>
+    public string? Disc { get; init; }
+
+    /// <summary>
     /// v7.9.6.3: the frame shape an era preset should be captured and delivered
     /// in -- <c>source</c> (the preset's own), <c>4:3</c> or <c>16:9</c>. Only
     /// shapes the selected encoder can actually encode are accepted; see
@@ -635,6 +643,7 @@ public static class CliParser
         bool eraModern = false;
         bool eraNative = false;
         string? era = null;
+        string? disc = null;
         string? eraAspect = null;
         string? h264 = null;
         string? netTest = null;
@@ -1208,6 +1217,16 @@ public static class CliParser
                     // already registered.
                     break;
 
+                // v7.9.9.8: a physical disc target. Validated here because the
+                // table is static, unlike --era whose rows can be user-defined.
+                case "--disc":
+                    if (!TryValue(out string discRaw))
+                        return (null, "--disc requires a value");
+                    if (PostProcess.DiscProfiles.Find(discRaw) is not { } discProfile)
+                        return (null, $"--disc must be one of {PostProcess.DiscProfiles.IdList}");
+                    disc = discProfile.Id;
+                    break;
+
                 // v7.9.6.3: the shape a preset is captured and delivered in.
                 case "--era-aspect":
                     if (!TryValue(out string aspectRaw)) return (null, "--era-aspect requires a value");
@@ -1397,6 +1416,7 @@ public static class CliParser
             EraModern = eraModern,
             EraNative = eraNative,
             Era = era,
+            Disc = disc,
             EraAspect = eraAspect,
             H264Impl = h264,
             H264Explicit = h264 is not null,
@@ -1569,6 +1589,9 @@ public static class CliParser
             ("--era-modern", "", "render a preset's second pass with libx264 + AAC in MP4 "
                                + "instead of the codec that site used"),
             ("--era-native", "", "render a preset's second pass with the site's own codec (default)"),
+            ("--disc", "ID",
+                $"target a physical disc format: {PostProcess.DiscProfiles.IdList} "
+                + "(pins codec, resolution, frame rate, bitrate, GOP and audio)"),
             ("--era-aspect", "4:3|16:9|source",
                 "capture and deliver a preset in this frame shape; only shapes the "
                 + "selected encoder can encode are accepted (default: source)"),

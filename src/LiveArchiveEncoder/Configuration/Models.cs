@@ -348,6 +348,12 @@ public sealed class Config
     public string? EraPreset { get; set; }
 
     /// <summary>
+    /// v7.9.9.8: physical disc target (dvd / vcd / svcd / cd). Remembered like
+    /// the era preset; the CLI flag still wins for one run.
+    /// </summary>
+    public string? Disc { get; set; }
+
+    /// <summary>
     /// v7.9.5.1: render an era/site preset with the codec that site actually
     /// served (Sorenson Spark for 2007, VP9 for 2015) instead of a modern
     /// H.264 viewing copy. True by default: the artefacts are the point.

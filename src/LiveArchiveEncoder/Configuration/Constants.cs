@@ -25,7 +25,7 @@ public static class Constants
     /// compares <c>tag_name</c> from the feed with this value, so a forgotten
     /// bump makes the program offer its own version as an upgrade forever.</para>
     /// </summary>
-    public const string Version = "7.9.9.7";
+    public const string Version = "7.9.9.8";
 
     public const int DefaultWidth = 256;
     public const int DefaultHeight = 192;
@@ -62,6 +62,9 @@ public static class Constants
             ".avi", ".mov", ".mp4", ".mkv", ".webm", ".wmv", ".mpg", ".mpeg",
             ".m4v", ".flv", ".rm", ".rmvb", ".ts", ".m2ts", ".vob", ".ogv", ".asf",
             ".roq", ".amv",
+            // v7.9.9.8: disc images and the payload files a Video CD carries.
+            // ".iso" is only accepted when DiscImages recognises the layout.
+            ".iso", ".dat",
         }.ToFrozenSet();
 
     public static readonly string[] ModernPrefixes =
