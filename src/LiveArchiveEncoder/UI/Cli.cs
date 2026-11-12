@@ -1193,6 +1193,20 @@ public static class Cli
                 fragment = era?.RecompressArgsFor(eraNative, eraSize, h264Impl) ?? "";
                 container ??= era?.ContainerFor(eraNative) ?? "mp4";
             }
+            else if (i < args.RecompressArgs.Count
+                     && At(args.RecompressVideoKbps, i) is { } explicitKbps)
+            {
+                // v7.9.9.7: --recompress-video-kbps used to be read ONLY in the
+                // catalog-generated branch above, so a hand-written
+                // --recompress-args swallowed it silently (the fragment kept its
+                // own -b:v 240k). Apply the explicit number to the fragment and
+                // drop the constant-quality flags that would conflict with it.
+                fragment = PostProcess.FragmentEditor.SetFlag(
+                    fragment, "-b:v",
+                    $"{explicitKbps.ToString(System.Globalization.CultureInfo.InvariantCulture)}k");
+                foreach (string qualityFlag in new[] { "-crf", "-q:v", "-qscale:v" })
+                    fragment = PostProcess.FragmentEditor.SetFlag(fragment, qualityFlag, null);
+            }
 
             (RecompressPass pass, string? error) = BuildPass(
                 fragment, container, args, era, i == 0, codecName is not null,

@@ -786,6 +786,7 @@ an extra output and can overwrite an unrelated file.
  e. Preset                       -preset
  f. Profile:v                    -profile:v
  g. Audio channels               -ac
+ h. Video bitrate (-b:v)         -b:v (v7.9.9.7)
  8. Further passes (chain)       2nd pass onwards (NOT the CLI's --recompress-extra)
  9. Disable recompress           delete the whole chain
  0. Back
@@ -796,10 +797,22 @@ into the **same fragment** as the CLI options (second pass into the fragment of 
 live side into `ExtraEncoderArgs`), so `--emit-args`, changing the encoder and changing
 the quality all keep them. `none` deletes a flag; an empty answer keeps it.
 
-**VBV needs `-b:v`**: give `--recompress-video-kbps` (or a `-b:v` inside the fragment),
-otherwise FFmpeg silently ignores the triple. The CUI checks this before writing back,
-and also refuses `minrate > maxrate`. The live command generates `-b:v` itself, so the
-parameter menu only checks the bounds.
+**For the recompress pass, VBV needs `-b:v`**: use row `h.`,
+`--recompress-video-kbps`, or a `-b:v` inside the fragment, otherwise FFmpeg silently
+ignores the triple. The CUI checks this before writing back and refuses
+`minrate > maxrate`. Rows `h.` and `6` are mutually exclusive: setting a bitrate removes
+`-crf`/`-q:v`, and editing quality removes `-b:v`.
+
+**v7.9.9.7**: FFmpeg's MPEG-video-family encoders (flv1, h261, …) additionally require
+`-maxrate` and `-bufsize` **as a pair**; giving only one makes `avcodec_open2` return
+EINVAL (-22) mid-encode. On the live side (parameter menu 35/36/37/38 and
+`--extra-encoder-args`) the missing half is now **completed automatically**: a missing
+buffer becomes two seconds of maxrate, a missing maxrate becomes half the buffer. The
+3-frame preflight and the real encode share the same normalisation, so these
+combinations no longer die halfway through. libx264 / mpeg4 / libopenh264 do accept a
+half-pair, so valid configurations are not rejected; `minrate > maxrate` is still
+refused at exit 2 before encoding. Legacy encoders use `-q:v`, not a generated
+`-b:v` — the earlier claim that the live command always emits `-b:v` was wrong.
 
 Item 8 lists the existing passes 2..N in one prompt: **a fragment appends a pass**, **a
 number deletes that pass**, **`-` clears them all**. The container of a new pass is

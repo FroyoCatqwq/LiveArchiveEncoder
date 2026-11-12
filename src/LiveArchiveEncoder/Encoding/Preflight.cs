@@ -59,7 +59,11 @@ public static class Preflight
         double? limitKbps = null,
         string? transportFmt = null,
         string? openH264Rc = null,
-        bool openH264SkipFrames = false)
+        bool openH264SkipFrames = false,
+        // v7.9.9.7: --extra-encoder-args is part of the real encode command.
+        // A trial without it proved a DIFFERENT command (a -maxrate without
+        // -bufsize passed the trial and then failed in avcodec_open2 mid-run).
+        string extraEncoderArgs = "")
     {
         string tempDir = Path.Combine(Path.GetTempPath(),
             "live_archive_preflight_" + Guid.NewGuid().ToString("N"));
@@ -152,6 +156,20 @@ public static class Preflight
                 cmd.AddRange(ArgsBuilder.X264ColorArgs(colors));
             }
             cmd.AddRange(ArgsBuilder.ColorArgs(stream, colors, encoder.Name));
+            // Same position as BuildEncoderCommand: after the generated
+            // video/audio options, before the muxer and output.
+            if (extraEncoderArgs is { Length: > 0 } extra)
+            {
+                // Must normalise EXACTLY as BuildEncoderCommand does, or the
+                // trial would still be validating a different command.
+                (string normalized, string? _) =
+                    PostProcess.FragmentEditor.NormalizeVbvPair(extra);
+                (List<string> tokens, string? parseError) =
+                    PostProcess.PostArgs.Parse(normalized);
+                if (parseError is not null)
+                    throw new InvalidOperationException($"--extra-encoder-args: {parseError}");
+                cmd.AddRange(tokens);
+            }
             cmd.AddRange(["-f", muxer, "-y", output]);
 
             CaptureResult result = ProcessRunner.Run(cmd, 120);

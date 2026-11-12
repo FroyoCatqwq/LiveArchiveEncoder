@@ -1509,6 +1509,7 @@ libx264 → auto）。
  e. 编码预设                     -preset
  f. Profile:v                    -profile:v
  g. 音频声道                     -ac
+ h. 视频码率（-b:v）             -b:v（v7.9.9.7）
  8. 后续遍数（链）               第 2 遍起的链（**不是** CLI 的 --recompress-extra）
  9. 不使用二次压缩               删除整条链
  0. 返回
@@ -1519,9 +1520,18 @@ libx264 → auto）。
 设置、`none` 删除、留空不改。它们和 CLI 选项写的是**同一份 fragment**（二次压缩写第 2 项
 的参数段、直播写 `ExtraEncoderArgs`），所以 `--emit-args`、改编码器、改质量都不会弄丢。
 
-**VBV 三件套必须与 `-b:v` 一起给**（`--recompress-video-kbps`，或第 2 项里手写的 `-b:v`），
-否则 FFmpeg 静默忽略；CUI 在写回前检查这一点与 `minrate <= maxrate`。直播编码命令自带
-`-b:v`，所以参数菜单只校验大小关系。
+**二次压缩的 VBV 三件套必须与 `-b:v` 一起给**（菜单 `h.`、CLI
+`--recompress-video-kbps`，或第 2 项里手写的 `-b:v`），否则 FFmpeg 静默忽略；CUI 在
+写回前检查这一点与 `minrate <= maxrate`。行 `h.` 与行 `6`（质量）互斥：设码率会移除
+`-crf`/`-q:v`，改质量会移除 `-b:v`。
+
+**v7.9.9.7**：FFmpeg 的 MPEG-video 系编码器（`flv1`/`h261` 等）还要求 `-maxrate` 与
+`-bufsize` **成对出现**，只给一个会在 `avcodec_open2` 直接 EINVAL(-22)。直播侧（参数菜单
+35/36/37/38 与 `--extra-encoder-args`）现在会**自动补齐缺的那一半**：缺缓冲时按
+`-maxrate × 2`（两秒缓冲）补 `-bufsize`，缺上限时按 `-bufsize ÷ 2` 补 `-maxrate`；
+3 帧预演与真实编码用同一份补全结果，所以这类组合不再等到编码中途才崩。
+`libx264` / `mpeg4` / `libopenh264` 接受半套参数，因此不会误拒合法配置；
+`minrate > maxrate` 仍在编码前 exit 2 明确拒绝。
 
 第 8 项进去列出现有的第 2..N 遍，一个提示框管三件事：**输入一段参数=追一遍**、
 **输入编号=删掉那一遍**、**输入 `-`=全部清空**。新增那遍的容器按它的编码器推导

@@ -1761,6 +1761,10 @@ public static partial class Cui
                         {
                             (List<string> _, string? extraError) =
                                 PostProcess.PostArgs.Parse(extraInput);
+                            // v7.9.9.7: a -maxrate without -bufsize makes FFmpeg
+                            // fail in avcodec_open2 after the live encode has
+                            // already started. Refuse it while the user is here.
+                            extraError ??= PostProcess.FragmentEditor.ValidateVbvPair(extraInput);
                             if (extraError is not null) throw new FormatException(extraError);
                         }
                         c.ExtraEncoderArgs = extraInput;
@@ -3130,6 +3134,10 @@ public static partial class Cui
             Console.WriteLine($" e. {L.Pad(L.T("rc.menu.preset"), 30)} = {FlagLabel(tokens, "-preset")}");
             Console.WriteLine($" f. {L.Pad(L.T("rc.menu.profile"), 30)} = {FlagLabel(tokens, "-profile:v")}");
             Console.WriteLine($" g. {L.Pad(L.T("rc.menu.channels"), 30)} = {FlagLabel(tokens, "-ac")}");
+            // v7.9.9.7: -b:v was reachable only by hand-editing the whole
+            // fragment in row 2 (or by --recompress-video-kbps in the CLI).
+            // Row 6 is the codec's quality knob, which is a different mode.
+            Console.WriteLine($" h. {L.Pad(L.T("rc.menu.videobitrate"), 30)} = {FlagLabel(tokens, "-b:v")}");
             // v7.9.8.4: the chain beyond the first pass. v7.9.9.3: this is the
             // pass-2+ CHAIN, not the CLI's --recompress-extra free-form args --
             // renamed so the two are no longer confused.
@@ -3153,6 +3161,7 @@ public static partial class Cui
                 case "e": EditSecondPassFlag(c, "-preset", false); break;
                 case "f": EditSecondPassFlag(c, "-profile:v", false); break;
                 case "g": EditSecondPassFlag(c, "-ac", false); break;
+                case "h": EditVideoBitrate(c); break;
                 case "9":
                     // v7.9.9: "do not use" really deletes the saved chain,
                     // not just disables the stage. The first pass Args and
@@ -3390,10 +3399,57 @@ public static partial class Cui
             PostProcess.FragmentEditor.ValidateVbv,
             value => c.Recompress.Args = value);
 
-    /// <summary>Live pass: the encoder generates its own -b:v, so only bounds apply.</summary>
+    /// <summary>
+    /// v7.9.9.7: row h edits -b:v directly. -b:v and constant-quality modes
+    /// (-crf / -q:v / -qscale:v) are mutually exclusive: setting a bitrate
+    /// removes them, and ComposeSecondPass removes -b:v when row 6 edits quality.
+    /// </summary>
+    private static void EditVideoBitrate(Config c)
+    {
+        (List<string> tokens, _) = PostProcess.PostArgs.Parse(c.Recompress.Args);
+        string current = (BitrateOf(tokens)?.ToString(CultureInfo.InvariantCulture)
+                          ?? L.T("value.auto")) + " kbps";
+        Console.Write(L.T("rc.prompt.flag", "-b:v", current));
+        string raw = Ask().Trim();
+        if (raw.Length == 0) return;
+
+        bool remove = raw is "none" or "off" or "-";
+        string candidate;
+        if (remove)
+            candidate = PostProcess.FragmentEditor.SetFlag(c.Recompress.Args, "-b:v", null);
+        else
+        {
+            if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture,
+                    out int kbps) || kbps <= 0)
+            {
+                Console.WriteLine($"{L.T("error.prefix")}bitrate must be a positive number of kbps");
+                return;
+            }
+            candidate = PostProcess.FragmentEditor.SetFlag(
+                c.Recompress.Args, "-b:v", $"{kbps.ToString(CultureInfo.InvariantCulture)}k");
+            foreach (string qualityFlag in new[] { "-crf", "-q:v", "-qscale:v" })
+                candidate = PostProcess.FragmentEditor.SetFlag(candidate, qualityFlag, null);
+        }
+
+        (List<string> _, string? parseError) = PostProcess.PostArgs.Parse(candidate);
+        string? error = parseError ?? PostProcess.FragmentEditor.ValidateVbv(candidate);
+        if (error is not null)
+        {
+            Console.WriteLine($"{L.T("error.prefix")}{L.T("rc.vbv.bad", error)}");
+            return;
+        }
+        c.Recompress.Args = PostProcess.FragmentEditor.FirstWins(candidate);
+        Console.WriteLine(L.T("rc.flag.set", "-b:v",
+            remove ? L.T("value.none") : raw + "k"));
+    }
+
+    /// <summary>
+    /// Live pass: no -b:v requirement (legacy encoders use -q:v), but FFmpeg's
+    /// hard -maxrate/-bufsize pairing rule still applies to every encoder.
+    /// </summary>
     private static void EditLiveVbvFlag(Config c, string flag) =>
         EditFragmentFlag(c.ExtraEncoderArgs, flag, true,
-            PostProcess.FragmentEditor.ValidateBounds,
+            PostProcess.FragmentEditor.ValidateVbvPair,
             value => c.ExtraEncoderArgs = value);
 
     /// <summary>

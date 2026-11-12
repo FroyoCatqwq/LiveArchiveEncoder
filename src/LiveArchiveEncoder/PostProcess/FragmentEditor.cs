@@ -20,9 +20,16 @@ public static class FragmentEditor
         {
             if (!string.Equals(tokens[i], flag, StringComparison.Ordinal)) continue;
             string raw = tokens[i + 1].Trim();
-            if (raw.EndsWith('k') || raw.EndsWith('K')) raw = raw[..^1];
-            return int.TryParse(raw, NumberStyles.Integer,
-                CultureInfo.InvariantCulture, out int kbps) && kbps > 0 ? kbps : null;
+            double scale = 1;
+            if (raw.EndsWith('M') || raw.EndsWith('m')) { raw = raw[..^1]; scale = 1000; }
+            else if (raw.EndsWith('k') || raw.EndsWith('K')) raw = raw[..^1];
+            // v7.9.9.7: the codec catalog itself emits "-b:v 0" (VP9/AV1 in
+            // CRF mode) and "-b:v 1M" (VP8). Treating 0 as "absent" made
+            // ValidateVbv reject those legitimate fragments.
+            if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture,
+                    out double number) || number < 0 || double.IsNaN(number)) return null;
+            double kbps = number * scale;
+            return kbps <= int.MaxValue ? (int)kbps : null;
         }
         return null;
     }
@@ -40,7 +47,10 @@ public static class FragmentEditor
         {
             if (string.Equals(tokens[i], flag, StringComparison.Ordinal))
             {
-                if (i + 1 < tokens.Count && !tokens[i + 1].StartsWith('-')) i++;
+                // v7.9.9.7: a value-less switch (-an, -shortest, ...) must not
+                // swallow the following option's flag or value.
+                if (!PostArgs.IsValueLess(flag)
+                    && i + 1 < tokens.Count && !tokens[i + 1].StartsWith('-')) i++;
                 continue;
             }
             parts.Add(tokens[i]);
@@ -75,7 +85,11 @@ public static class FragmentEditor
             }
             merged.Add(token);
         }
-        return string.Join(' ', merged);
+        // v7.9.9.7: extras may repeat a flag internally (--recompress-maxrate
+        // 300 plus --recompress-extra "-maxrate 400k"). FFmpeg is last-wins, so
+        // the explicit CLI value would silently lose. FirstWins keeps the FIRST
+        // occurrence, which is the base fragment's / the first explicit one.
+        return FirstWins(string.Join(' ', merged));
     }
 
     /// <summary>
@@ -103,6 +117,51 @@ public static class FragmentEditor
                 + "set --recompress-video-kbps, or put -b:v in the fragment";
         }
         return null;
+    }
+
+    /// <summary>
+    /// v7.9.9.7: FFmpeg's MPEG-video-family encoders (flv1, mpeg4, h261, ...)
+    /// refuse to open when only one of -maxrate / -bufsize is present:
+    /// <c>Either both buffer size and max rate or neither must be specified</c>
+    /// (avcodec_open2 → EINVAL -22). Library encoders (libx264, libopenh264)
+    /// tolerate the same fragment, so *rejecting* it would break valid configs.
+    ///
+    /// <para>Complete the pair instead. A missing buffer is two seconds of
+    /// maxrate -- the same rule ArgsBuilder.VideoQualityArgs already uses -- and
+    /// a missing maxrate is half the buffer. Both the 3-frame preflight and the
+    /// real encode call this, so they always validate the same command.</para>
+    /// </summary>
+    public static (string Fragment, string? Note) NormalizeVbvPair(string fragment)
+    {
+        List<string> tokens = PostArgs.Tokenize(fragment);
+        bool hasMax = HasFlag(tokens, "-maxrate");
+        bool hasBuf = HasFlag(tokens, "-bufsize");
+        if (hasMax == hasBuf) return (fragment, null);
+
+        if (hasMax && Kbps(tokens, "-maxrate") is { } maxRate)
+        {
+            int buffer = maxRate * 2;
+            return (SetFlag(fragment, "-bufsize", $"{buffer.ToString(CultureInfo.InvariantCulture)}k"),
+                $"-maxrate {maxRate}k had no -bufsize; added -bufsize {buffer}k");
+        }
+        if (hasBuf && Kbps(tokens, "-bufsize") is { } bufferRate)
+        {
+            int max = System.Math.Max(1, bufferRate / 2);
+            return (SetFlag(fragment, "-maxrate", $"{max.ToString(CultureInfo.InvariantCulture)}k"),
+                $"-bufsize {bufferRate}k had no -maxrate; added -maxrate {max}k");
+        }
+        // Malformed values ("-maxrate abc") are left for FFmpeg to explain.
+        return (fragment, null);
+    }
+
+    /// <summary>Min&lt;=max, the one VBV rule that is safe for every encoder.</summary>
+    public static string? ValidateVbvPair(string fragment) => ValidateBounds(fragment);
+
+    private static bool HasFlag(IReadOnlyList<string> tokens, string flag)
+    {
+        foreach (string token in tokens)
+            if (string.Equals(token, flag, StringComparison.Ordinal)) return true;
+        return false;
     }
 
     /// <summary>

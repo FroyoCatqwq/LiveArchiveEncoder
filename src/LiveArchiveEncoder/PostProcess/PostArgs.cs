@@ -116,6 +116,9 @@ public static class PostArgs
             "-ignore_unknown", "-copy_unknown", "-re", "-benchmark",
         };
 
+    /// <summary>So editors do not swallow the next token after a switch.</summary>
+    public static bool IsValueLess(string flag) => ValueLessFlags.Contains(flag);
+
     public static (List<string> Tokens, string? Error) Parse(string? fragment)
     {
         List<string> tokens = Tokenize(fragment);

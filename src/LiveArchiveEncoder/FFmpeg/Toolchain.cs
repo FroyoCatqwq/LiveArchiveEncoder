@@ -792,6 +792,10 @@ public static class Toolchain
             {
                 token.ThrowIfCancellationRequested();
             }
+            // v7.9.9.7: the loop body never runs when both readers finish
+            // inside the very first 250 ms window. Check once more so Ctrl+C
+            // during a short install still tears the child tree down.
+            token.ThrowIfCancellationRequested();
         }
         catch (Exception)
         {

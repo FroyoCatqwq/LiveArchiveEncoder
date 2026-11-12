@@ -47,8 +47,40 @@ public static class OutputFile
     /// v7.9.8.10's "keep the finished part" path owns that case and the e2e
     /// suite pins its output.</para>
     /// </summary>
-    /// <summary>Type-init timestamp: a .part created after this belongs to a live run.</summary>
-    private static readonly DateTime StartedUtc = DateTime.UtcNow;
+    /// <summary>
+    /// v7.9.9.7: a .part is abandoned only when the pid encoded in its tag is
+    /// no longer alive. The old rule compared creation time against THIS
+    /// process's type-init time: a concurrently running process B sees A's
+    /// in-progress part as "old", and on POSIX / UNC an open handle does not
+    /// prevent File.Delete, so B silently destroyed A's finished encode.
+    /// A pid we cannot resolve (or that has been recycled) is treated as live:
+    /// keeping one stale file is cheaper than losing a product.
+    /// </summary>
+    private static bool IsAbandonedPart(string name)
+    {
+        int markerAt = name.LastIndexOf(".part", StringComparison.OrdinalIgnoreCase);
+        if (markerAt < 0) return false;
+        int tagStart = name.LastIndexOf('.', markerAt - 1);
+        if (tagStart < 0) return false;
+        ReadOnlySpan<char> tag = name.AsSpan(tagStart + 1, markerAt - tagStart - 1);
+        // Current writers always emit <pid-hex><8 guid chars>; anything shorter
+        // or non-hex is a legacy fixed-name part that no live process can own.
+        if (tag.Length < 9) return true;
+        foreach (char c in tag)
+            if (!Uri.IsHexDigit(c)) return true;
+        if (!int.TryParse(tag[..^8], System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out int pid) || pid <= 0)
+            return false;
+        if (pid == Environment.ProcessId) return false;
+        try
+        {
+            using System.Diagnostics.Process proc = System.Diagnostics.Process.GetProcessById(pid);
+            return proc.HasExited;
+        }
+        catch (ArgumentException) { return true; }             // pid is gone
+        catch (InvalidOperationException) { return false; }    // cannot tell: keep it
+        catch (System.ComponentModel.Win32Exception) { return false; }
+    }
 
     public static (bool Ok, string? Error) EnsureTargetAvailable(FileInfo final)
     {
@@ -99,7 +131,9 @@ public static class OutputFile
                 string name = Path.GetFileName(path);
                 if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
 
-                if (File.GetCreationTimeUtc(path) >= StartedUtc) continue;
+                // A part owned by a still-running process is never ours to
+                // delete, regardless of when it was created.
+                if (!IsAbandonedPart(name)) continue;
                 try
                 {
                     // Windows: a live FFmpeg holds the part open. POSIX has no

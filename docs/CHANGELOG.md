@@ -22,6 +22,116 @@
 
 ---
 
+## v7.9.9.7（2026-11-12）
+
+修用户实跑中报出的 `flv` 编码器 `EINVAL`，补齐二次压缩的 `-b:v` 菜单，并做第三轮全项目审计修复。
+
+### 1. 报告中的 bug：`encoder exited before final frame (code -22)`
+
+用户的配置是 `--encoder flv` + 时代预设 `tudou/2006` + 附加编码参数
+`-maxrate 300k -minrate 128k`，46 分钟的素材编码在第 3 个槽失败：
+
+```
+[enc:flv] Error while opening encoder - maybe incorrect parameters ...
+code -22
+```
+
+**根因**（手工用同一个 FFmpeg 逐个消元后确证）：
+
+```
+-q:v 11 -maxrate 300k -minrate 128k  =>  -22
+  Either both buffer size and max rate or neither must be specified
+-q:v 11 -maxrate 300k -bufsize 600k -minrate 128k  =>  0
+```
+
+FFmpeg 的 MPEG-video 系编码器（`flv1` / `mpeg4` / `h261` …）在 `avcodec_open2`
+阶段要求 `-maxrate` 与 `-bufsize` **成对出现**，缺一个直接 EINVAL。而
+`libx264` / `mpeg4` / `libopenh264` 对同样的半套参数是接受的 —— 所以不能一律硬拒绝。
+
+**为什么之前没抓到**：`--extra-encoder-args` 只做了注入防护解析就原样拼进 live 命令，
+3 帧预演**完全不带这些 token**，于是预检证明的是另一条命令；FFmpeg 收到真实命令才在
+第一个帧打开编码器时崩溃。用户看到的是等了很久之后一句晦涩的 `code -22`。
+
+**修法**（四处一起改，缺一不可）：
+
+* 新增 `FragmentEditor.NormalizeVbvPair`：缺 `-bufsize` 时按 `-maxrate × 2`（两秒缓冲，
+  与 `ArgsBuilder.VideoQualityArgs` 的 CRF 分支同一规则）自动补上；缺 `-maxrate` 时补
+  `-bufsize ÷ 2`。半套参数变成合法的一套，用户的原命令**不用改就能跑**。
+* `BuildEncoderCommand` 与 `Preflight.Video` **调用同一个补全函数**，预检从此验证的就是
+  真实命令。实测用户原参数：exit 0、产出 818 KB 的 `.flv`。
+* `Preflight.Video` 新增 `extraEncoderArgs` 参数；`--extra-encoder-args` 现在的任何组合
+  都会在编码前 3 帧预演里被验证。
+* `ValidateCommonConfig` 对**最终生效值**（包括从 `config.json` 恢复的旧值）做注入防护
+  与 `minrate <= maxrate` 校验，坏值在 exit 2 明确报出，而不是等 FFmpeg 崩。
+* 主编码 FFmpeg 命令现在也记 `encoder.argv`（Info 级，默认 Error 阈值下零开销）——
+  之前只有 ffprobe / 预检会记日志，出问题时恰恰缺最关键的命令行。
+
+### 2. 二次压缩新增 `-b:v` 选项（菜单 `h.`）
+
+* CUI 二次压缩菜单新增 `h. 视频码率（-b:v）`，与 `6. 质量（crf / q:v）` 分开：
+  行 6 是编码器的质量旋钮，行 h 直接改目标码率。两者互斥——设置码率会移除
+  `-crf` / `-q:v` / `-qscale:v`，改质量时 `ComposeSecondPass` 会移除 `-b:v`。
+* 修 **M1**：`--recompress-video-kbps` 此前只在「编码目录生成 fragment」的分支里被读取，
+  用户手写 `--recompress-args "-c:v ... -b:v 240k"` 时这个 flag **静默失效**。
+  现在会改写手写片段里的 `-b:v`，并保留 catalog 生成片段的既有语义。
+* 中英双语键 `rc.menu.videobitrate` 已加入 `Strings.cs`。
+
+### 3. 审计修复（按严重性）
+
+**严重**
+
+* **S1 无限递归**：`--parallel N` + `--audio-mode separate/auto` 时，`RunSplitCore` 的三条
+  正常返回路径（无音轨 / 时长未知 / 复制字幕 / muxer 不可分）都 `return Run(o, ...)`，
+  而 `Run` 又按「Parallel>1 且非 Inline」重新进入 `RunSplit` —— 栈溢出。三处改为
+  `RunSingle`，与 v7.9.9.6 的异常回退一致。
+* **S2 iperf3 绕过抖动检查**：`--iperf3` 曾用单样本的 iperf3 结果**取代**读源测量，
+  `jitter` 与首字节延迟被强制算成 0，任何 ≥2.5x 的吞吐都会放行分片，在不稳定链路上
+  误开并行。现在 iperf3 只作参考（写 Info 日志），判定始终用真实读源测量，与
+  `--iperf3` 的帮助文案和 `ParallelEncoder` 的注释重新对齐。
+* **S3 分片否决文案自相矛盾**：用户日志里 `125.8x headroom` 与「余量不足」并列 ——
+  真正否决的是 51% 抖动（>30% 上限），但所有否决都套同一个 `parallel.nettooslow`。
+  现在 `NetworkMeasurement` 记录 `RejectReason`（吞吐 / 抖动 / 延迟），中英各三句分别说明
+  哪个门槛没过。
+* **S5 误删并发运行的 `.part`**：旧规则用「创建时间早于本进程类型初始化」判断残留，
+  并发进程 B 会把 A 正在写的 part 当旧文件删掉（POSIX/UNC 上打开句柄不阻止删除）。
+  现在解析 `PartPath` 里的 `pid+guid` tag：只有**该 pid 已退出**的 part 才清理；
+  无法解析的旧格式（短 tag / 非 hex）仍按残留处理，pid 复用或查不到则保守保留。
+
+**中等**
+
+* **M2** `FragmentEditor.Kbps` 只认 `k` 后缀且拒绝 0，导致 catalog 自己生成的
+  `-b:v 0`（VP9/AV1 CRF 模式）被 `ValidateVbv` 误判成「没有目标码率」。现支持 `M` 后缀
+  与显式 0。
+* **M3** `FragmentEditor.Merge` 只按 base 去重，extras 内部重复的 `-maxrate` 会让
+  FFmpeg last-wins 无声覆盖显式值；末尾统一走 `FirstWins`。
+* **M9** 非实时一帧一槽握手的消费侧自旋没有上界，解码器卡住但没退出时会永久挂住；
+  加 30 秒超时并给出可读错误。
+* **M8** `Toolchain.RunLong` 在两个管道恰好于首个 250 ms 窗口内完成时跳过循环体，
+  Ctrl+C 不触发 kill；窗口结束后补一次检查。
+* **L1** `CliOptions.TryValue` 只拒绝**已登记**的 `--long` 选项，未知 `--bogus` 会被当成
+  前一个选项的值吞掉；现在任何 `--` 开头都拒绝（单破折号的 FFmpeg 片段仍合法）。
+* **L2** `FragmentEditor.SetFlag` 对 `-an` / `-shortest` 这类无值开关会吞掉紧邻的下一个
+  token；改用 `PostArgs.IsValueLess`。
+
+### 4. 测试
+
+* 新增 `V7997Tests.cs`（12 项：VBV 自动补全的三种形态、库编码器不被误拒、
+  无值开关、`Merge` 去重、`M`/`0` 解析、未知长选项、手写片段码率、catalog 片段保持质量、
+  中英键、否决原因与 headroom）。单测 **753 全过**。
+* 新增 4 个 e2e：半套 VBV 的 `flv` 真实出片、不可能的 min/max 提前拒绝、
+  手写片段的 `-b:v` 落到真实 FFmpeg argv（从 verbose 日志的 `child.spawn` 断言）。
+* Windows 全量 e2e、Linux 双平台验证见 Release 说明。
+
+### 5. 已知遗留（本轮未改，评估后保留）
+
+`S4` 网络探测缓存的 `required` 在 `--net-test` 与编码器里算法不同（缓存必然 miss，
+同一次运行测两遍）；`M7` 自更新 `.rollback` 用固定目录，并发更新会互踩；
+`M4/M5/M6` 网络探测的 jitter 分母、`FromHttp` 无长度时取不到样本、8000/8388.608
+单位偏差；`L3/L4/L5` KillAll 计数、CTS 不 dispose、AppLog 降级半构造对象。
+这些都不影响本轮报告的路径，且改动面较大，留待下一轮带独立测试矩阵处理。
+
+---
+
 ## v7.9.9.6（2026-11-09）
 
 第二次全项目审计的收尾版本：把"CUI 菜单里能改、运行时却被丢掉"的选项逐条对齐到

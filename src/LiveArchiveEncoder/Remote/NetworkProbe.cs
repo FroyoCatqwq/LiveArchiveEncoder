@@ -24,7 +24,11 @@ public sealed record NetworkMeasurement(
     double JitterPercent,
     int Samples,
     double RequiredKbps,
-    bool Adequate)
+    bool Adequate,
+    // v7.9.9.7: WHICH threshold vetoed sharding. Adequate is a three-way AND,
+    // and the old single message blamed headroom even when 125x headroom was
+    // present and jitter (51%) was the actual reason.
+    string? RejectReason = null)
 {
     /// <summary>Delivered throughput as a multiple of what the encode needs.</summary>
     public double Headroom => RequiredKbps <= 0 ? 0 : MebibytesPerSecond * 8000.0 / RequiredKbps;
@@ -111,9 +115,20 @@ public static class NetworkProbe
             $"{source}|{iperf3Host}|{(int)Math.Round(requiredKbps)}");
         if (Cache.TryGetValue(key, out NetworkMeasurement? cached)) return cached;
 
-        NetworkMeasurement? measured = iperf3Host.HasText
-            ? FromIperf3(iperf3Host!, requiredKbps)
-            : FromReads(source, requiredKbps);
+        // v7.9.9.7: iperf3 measures the link between two iperf3 endpoints and
+        // says nothing about this source's own disk or per-connection limits.
+        // It used to REPLACE the source probe with a single-sample result, which
+        // forced jitter to 0 and first-byte latency to 0 -- so any throughput
+        // number >= 2.5x silently enabled sharding on an unstable link. It is
+        // an extra reference; the source read remains the authority.
+        NetworkMeasurement? measured = FromReads(source, requiredKbps);
+        if (iperf3Host.HasText)
+        {
+            NetworkMeasurement? link = FromIperf3(iperf3Host!, requiredKbps);
+            if (link is not null)
+                Diagnostics.AppLog.Info("netprobe.iperf3 {Summary}", link.Summary);
+            if (measured is null) measured = link;
+        }
 
         // v7.9.9.3: a transient failure must NOT be cached for the whole
         // session -- one bad read used to disable sharding until restart, even
@@ -367,10 +382,15 @@ public static class NetworkProbe
         double firstByte = latencies[latencies.Count / 2];
 
         double neededMib = requiredKbps / 8000.0;       // kbps -> MiB/s
-        bool adequate = median >= neededMib * HeadroomFactor
-                        && jitter <= JitterLimitPercent
-                        && firstByte <= LatencyLimitMs;
+        bool throughputOk = median >= neededMib * HeadroomFactor;
+        bool jitterOk = jitter <= JitterLimitPercent;
+        bool latencyOk = firstByte <= LatencyLimitMs;
+        bool adequate = throughputOk && jitterOk && latencyOk;
+        string? reason = adequate ? null
+            : !throughputOk ? "throughput"
+            : !jitterOk ? "jitter" : "latency";
 
-        return new NetworkMeasurement(kind, median, firstByte, jitter, rates.Count, requiredKbps, adequate);
+        return new NetworkMeasurement(kind, median, firstByte, jitter, rates.Count,
+            requiredKbps, adequate, reason);
     }
 }

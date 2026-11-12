@@ -298,7 +298,8 @@ public static class RealtimeEncoder
                 limitKbps: o.LimitKbps,
                 transportFmt: transportFmt,
                 openH264Rc: o.OpenH264Rc,
-                openH264SkipFrames: o.OpenH264SkipFrames);
+                openH264SkipFrames: o.OpenH264SkipFrames,
+                extraEncoderArgs: o.ExtraEncoderArgs);
         }
 
         // A hardware method is only ever used after it has decoded a frame here,
@@ -542,7 +543,10 @@ public static class RealtimeEncoder
             && o.AudioEncoder is not null
             && !Constants.NoAudioFormats.Contains(o.Encoder.FormatName);
 
-        if (!hasAudio || duration is null) return Run(o, cancellationToken);
+        // v7.9.9.7: RunSingle, not Run. Re-entering Run() with Parallel > 1 and
+        // a non-inline AudioMode goes straight back into RunSplit -> here,
+        // recursing forever. Three paths below had the same bug.
+        if (!hasAudio || duration is null) return RunSingle(o, cancellationToken);
 
         // v7.9 #2: the split pipeline rejoins video and audio with -c copy and
         // would drop a carried subtitle track, so that combination runs inline.
@@ -551,7 +555,7 @@ public static class RealtimeEncoder
         {
             if (o.Verbose)
                 Console.WriteLine(L.T("note.subtitleinline"));
-            return Run(o, cancellationToken);
+            return RunSingle(o, cancellationToken);
         }
 
         (int? audioRate, int audioChannels, int audioKbps) = Validation.EffectiveAudioSettings(
@@ -570,7 +574,7 @@ public static class RealtimeEncoder
         {
             if (o.Verbose)
                 Console.WriteLine(L.T("note.splitmux", muxReason));
-            return Run(o, cancellationToken);
+            return RunSingle(o, cancellationToken);
         }
 
         string stageDir = Path.Combine(Path.GetTempPath(), "live_archive_v7_" + Guid.NewGuid().ToString("N"));
@@ -882,7 +886,11 @@ public static class RealtimeEncoder
         // override a generated knob (e.g. -preset / -maxrate) as FFmpeg expects.
         if (o.ExtraEncoderArgs is { Length: > 0 } extra)
         {
-            (List<string> tokens, string? parseError) = PostProcess.PostArgs.Parse(extra);
+            (string normalized, string? vbvNote) =
+                PostProcess.FragmentEditor.NormalizeVbvPair(extra);
+            if (vbvNote is not null) AppLog.Info("encoder.vbv {Note}", vbvNote);
+            (List<string> tokens, string? parseError) =
+                PostProcess.PostArgs.Parse(normalized);
             if (parseError is not null)
                 throw new InvalidOperationException($"--extra-encoder-args: {parseError}");
             cmd.AddRange(tokens);
@@ -892,6 +900,10 @@ public static class RealtimeEncoder
         // reconnect family is decode-only and would be rejected here.
         cmd.AddRange(Remote.Smb.RemoteWriteArgs(dst.FullName));
         cmd.AddRange(["-flush_packets", "1", "-progress", "pipe:2", "-f", muxer, "-y", dst.FullName]);
+        // v7.9.9.7: the long-lived encoder processes were the only children not
+        // logged, so a failed encode left no record of the exact argv. Info level
+        // is a no-op under the default Error threshold.
+        AppLog.Info("encoder.argv {Argv}", string.Join(' ', cmd));
         return cmd;
     }
 
@@ -1163,9 +1175,18 @@ public static class RealtimeEncoder
                     // v7.9.9.3: SpinWait backs off; the old Sleep(0) loop ran a
                     // whole core at 100% while waiting for a slow decoder.
                     var backoff = new SpinWait();
+                    // v7.9.9.7: a stalled decoder that never exits (a hung
+                    // network read) used to park this loop forever, with no
+                    // cancellation and no diagnostic. Bound the handshake.
+                    var stall = System.Diagnostics.Stopwatch.StartNew();
                     while (pool.ReadyCount == 0 && !captureState.Done
                            && !cancellationToken.IsCancellationRequested)
+                    {
+                        if (stall.Elapsed > TimeSpan.FromSeconds(30))
+                            throw new TimeoutException(
+                                "decoder produced no frame for 30 s in direct mode");
                         backoff.SpinOnce();
+                    }
                     if (pool.ReadyCount == 0 && captureState.Done) break;
                 }
 

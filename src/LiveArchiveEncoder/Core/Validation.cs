@@ -104,6 +104,20 @@ public static class Validation
         if (c.BufferFrames <= 0) throw new ArgumentException("capture buffer must be > 0");
         if (c.Width <= 0 || c.Height <= 0) throw new ArgumentException("resolution must be positive");
         if (c.Qv < 0) throw new ArgumentException("quality must be >= 0");
+        // v7.9.9.7: --extra-encoder-args reaches the live encoder command
+        // verbatim, and can also be restored from config.json. Validate the
+        // FINAL value here (not only at parse time) so a remembered bad fragment
+        // is reported before a minutes-long live encode instead of dying in
+        // FFmpeg with an opaque EINVAL.
+        if (c.ExtraEncoderArgs is { Length: > 0 } liveExtra)
+        {
+            (List<string> _, string? parseError) = PostProcess.PostArgs.Parse(liveExtra);
+            if (parseError is not null)
+                throw new ArgumentException($"--extra-encoder-args: {parseError}");
+            string? vbvError = PostProcess.FragmentEditor.ValidateVbvPair(liveExtra);
+            if (vbvError is not null)
+                throw new ArgumentException($"--extra-encoder-args: {vbvError}");
+        }
         // v7.9.8.10: only the lower bound was checked. --qv 999 (or -q:v 0 on
         // an MPEG encoder) reached FFmpeg and died in preflight with an opaque
         // "Video preflight failed", while QualityRange already knew the scale.

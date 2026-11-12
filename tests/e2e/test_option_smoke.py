@@ -623,9 +623,13 @@ def test_capability_cache_is_written_once(exe, src, workdir):
     later run reads it.
     """
     import os
+    import uuid
 
+    # v7.9.9.7: workdir("options") is a FIXED scratch path shared by every test
+    # in this module. Under pytest -n another test can leave a caps-*.json here,
+    # making "exactly one cache file" fail for a reason unrelated to caching.
     out = workdir("options")
-    root = out / "caps-root"
+    root = out / ("caps-root-" + uuid.uuid4().hex[:8])
     env = {**os.environ, "LAE_CONFIG_DIR": str(root)}
 
     first = run([str(exe), "--list-filters", "--ffmpeg-source", "path", "--lang", "en"],

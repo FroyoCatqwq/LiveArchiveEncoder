@@ -477,7 +477,18 @@ public static class ParallelEncoder
             if (measured is null)
                 return L.T("parallel.netmeasurefailed", required);
             if (!measured.Adequate)
-                return L.T("parallel.nettooslow", measured.Summary);
+            {
+                // v7.9.9.7: name the threshold that actually failed. Throughput
+                // can be 125x while jitter vetoes sharding; saying "not enough
+                // headroom" there was flatly wrong.
+                return measured.RejectReason switch
+                {
+                    "throughput" => L.T("parallel.netslow.throughput", measured.Summary),
+                    "jitter" => L.T("parallel.netslow.jitter", measured.Summary),
+                    "latency" => L.T("parallel.netslow.latency", measured.Summary),
+                    _ => L.T("parallel.nettooslow", measured.Summary),
+                };
+            }
             if (o.Verbose) Console.WriteLine(L.T("parallel.netok", measured.Summary));
         }
         if (duration is null) return "source duration is unknown";

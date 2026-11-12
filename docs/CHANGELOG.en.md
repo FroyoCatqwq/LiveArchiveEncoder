@@ -7,6 +7,74 @@ edition, [`CHANGELOG.md`](CHANGELOG.md) — entries there are kept verbatim, wit
 measurements and reasoning behind each decision. `⚠` marks a change a user can
 notice in an output, a default, a file name or a CLI contract.
 
+## v7.9.9.7 (2026-11-12) — flv EINVAL, CUI -b:v row, third audit
+
+Fixes a failure reported from a real 46-minute encode, adds the requested `-b:v`
+row to the recompress menu, and closes a third round of audit findings.
+
+### 1. The reported bug: `encoder exited before final frame (code -22)`
+
+The run used `--encoder flv` with `tudou/2006` and
+`--extra-encoder-args "-maxrate 300k -minrate 128k"`. Parameter elimination against
+the same FFmpeg binary gave:
+
+```
+-q:v 11 -maxrate 300k -minrate 128k                 => -22
+  Either both buffer size and max rate or neither must be specified
+-q:v 11 -maxrate 300k -minrate 128k -bufsize 600k   => 0
+```
+
+FFmpeg's MPEG-video-family encoders (flv1, h261, …) require `-maxrate` and
+`-bufsize` **as a pair** in `avcodec_open2`. libx264 / mpeg4 / libopenh264 accept the
+same half-pair, so a blanket rejection would break valid configurations. The 3-frame
+preflight never carried `--extra-encoder-args`, so it validated a *different* command
+and the real encode died when the first frame opened the encoder.
+
+**Fix**: `FragmentEditor.NormalizeVbvPair` completes the missing half (a missing
+buffer = two seconds of maxrate, the same rule the CRF path uses); both
+`BuildEncoderCommand` and `Preflight.Video` call it, so the trial now proves the real
+command. `ValidateCommonConfig` validates the final value (including one restored from
+`config.json`) and rejects a `minrate > maxrate` typo at exit 2. The long-lived encoder
+argv is now logged at Info level. Measured: the user's original parameters exit 0 and
+produce a valid `.flv`.
+
+### 2. CUI recompress: a `-b:v` row
+
+Row `h. Video bitrate (-b:v)` is separate from row 6 (the codec's quality knob);
+they are mutually exclusive. Also fixes `--recompress-video-kbps` being silently
+ignored when `--recompress-args` was hand-written.
+
+### 3. Audit fixes
+
+* **S1**: `--parallel N` + `--audio-mode separate/auto` recursed forever via three
+  `return Run(o, …)` paths in `RunSplitCore` — now `RunSingle`.
+* **S2**: `--iperf3` replaced the source probe with a single sample, forcing jitter and
+  latency to zero and enabling sharding on unstable links — iperf3 is a reference only.
+* **S3**: `NetworkMeasurement.RejectReason` names the threshold that vetoed sharding;
+  a 125.8x-headroom / 51%-jitter link no longer reports "not enough headroom" (six
+  new en/zh strings).
+* **S5**: stale `.part` cleanup now checks the pid encoded in `PartPath`'s tag, so a
+  concurrent process's in-progress product is never deleted on POSIX / UNC.
+* **M2/M3**: `Kbps` understands `1M` and an explicit `0`; `Merge` deduplicates flags
+  repeated inside extras via `FirstWins`.
+* **M9/M8**: the direct-mode frame handshake has a 30 s stall timeout; `Toolchain.RunLong`
+  checks cancellation even when both pipes finish inside the first poll window.
+* **L1/L2**: an unknown `--long` option is no longer swallowed as a value; `SetFlag`
+  does not eat the next token after a value-less switch.
+
+### 4. Tests and known leftovers
+
+`V7997Tests.cs` (12 unit cases) and four new e2e cases (half-pair `flv` produces a
+file, impossible bounds exit 2, real FFmpeg argv carries the explicit `-b:v`). Unit
+tests **753 passed**.
+
+Deliberately left for a later round with its own test matrix: network-probe cache key
+mismatch (S4), the fixed `.rollback` directory (M7), jitter denominator / HTTP length
+/ unit constant (M4–M6), KillAll counting / CTS disposal / AppLog fallback (L3–L5).
+AOT remains unverified.
+
+---
+
 ## v7.9.9.6 (2026-11-09) — second audit: menu promises, subtitle fields, shell survival
 
 Second full-project audit. No default encode parameter changed; v6.3.3 equivalence
