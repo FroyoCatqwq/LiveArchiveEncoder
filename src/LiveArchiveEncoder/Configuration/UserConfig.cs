@@ -207,6 +207,9 @@ public sealed class UserConfig
     /// <summary>v7.9.9.2: free-form output-side FFmpeg args for the live encoder.</summary>
     public string ExtraEncoderArgs { get; set; } = "";
 
+    /// <summary>v7.9.9.10: horizontal / random / empty (off).</summary>
+    public string Tearing { get; set; } = "";
+
     /// <summary>v7.9.9.2: most-recently-used input/output directories (newest first).</summary>
     public List<string> RecentDirectories { get; set; } = [];
 
@@ -560,6 +563,7 @@ public static class ConfigStore
         EraNative = c.EraNative,
         RealTime = c.RealTime,
         ExtraEncoderArgs = c.ExtraEncoderArgs,
+        Tearing = c.Tearing,
         RecentDirectories = [.. c.RecentDirectories],
         EraAspect = c.EraAspect,
         H264Impl = c.H264Impl,
@@ -734,6 +738,7 @@ public static class ConfigStore
         c.EraNative = stored.EraNative;
         c.RealTime = stored.RealTime;
         c.ExtraEncoderArgs = stored.ExtraEncoderArgs ?? "";
+        c.Tearing = stored.Tearing ?? "";
         c.RecentDirectories = [.. stored.RecentDirectories ?? []];
         c.EraAspect = stored.EraAspect;
         c.H264Impl = stored.H264Impl;

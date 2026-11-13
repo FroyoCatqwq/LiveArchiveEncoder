@@ -22,6 +22,49 @@
 
 ---
 
+## v7.9.9.10（2026-11-13）
+
+新增可选的「画面撕裂」，并修掉 v7.9.9.9 对比时暴露出的码率缺陷。
+
+### 1. `--tearing horizontal|random`：允许画面撕裂
+
+模拟**掉垂直同步**留下的水平错位：上半幅取上一帧、下半幅取当前帧。
+
+```
+LiveArchiveEncoder.exe in.mp4 out.mkv --encoder libx264 --tearing horizontal
+LiveArchiveEncoder.exe in.mp4 out.mkv --encoder libx264 --tearing random
+LiveArchiveEncoder.exe in.mp4 out.mkv --tearing off        # 默认
+```
+
+* 实现是 `tblend=all_expr='if(lt(Y,<撕裂线>),B,A)'`，追加在滤镜链**末尾**（`format`
+  之后）——撕裂线落在交付画面上，而不是某个中间帧上。
+* `horizontal`：固定在画面中线（`H*0.5`）。`random`：撕裂线随帧号下移
+  （`H*mod(N*37\,100)/100`），连续帧撕在不同高度，更像信号故障。
+* 默认关闭：本工具默认忠实编码，撕裂是**按需产出的瑕疵**。
+* CUI 参数页 `39.` 可设，并写进 `config.json`；`--tearing off` 清除。
+
+### 2. 修：`--era dvd`（及 `--disc dvd`）码率只有三分之一
+
+对比 v7.9.9.9 时发现：`--era dvd` 的 10 秒产物只有 **2091 kbps**，而预设写的是
+6000。原因是 FFmpeg 里 **`-q:v` 会压过 `-b:v`**——介质预设同时带了
+`-b:v 6000k`（来自 `ExtraEncoderArgs`）和 `-q:v 10`（来自 `LiveQv`），编码器选了
+量化器、静默丢掉目标码率。
+
+* 新增 `ArgsBuilder.PinsBitrate`：附加参数里出现 `-b:v` / `-maxrate` 时，
+  `VideoQualityArgs` 改发 `-b:v <上限>` 而不是 `-q:v`。
+* 三处命令构建（真实编码、预检、分离音频的视频遍）都走同一判断，所以预检验证的
+  就是真实命令。
+* 实测：同一份 10 秒素材从 **2091 → 6319 kbps**（6000 视频 + 384 音频 + 容器开销）。
+
+### 3. 测试
+
+* 新增 `V79910Tests`（6 项：两种撕裂表达式、无模式为空、码率优先级、
+  滤镜链末尾、中英键）——单测 **768 全过**。
+* 新增 `tests/e2e/test_tearing.py`（4 项：默认无撕裂、horizontal 落在链上、
+  random 的逗号转义、`--era dvd` 实测 > 4000 kbps 防回归）。
+
+---
+
 ## v7.9.9.9（2026-11-13）
 
 把光盘介质并入「时代预设」，并修掉 v7.9.9.8 镜像实现里的三个真实缺陷。

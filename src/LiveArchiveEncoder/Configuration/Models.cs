@@ -363,6 +363,9 @@ public sealed class Config
     /// <summary>v7.9.9.2: free-form output-side FFmpeg args for the live encoder.</summary>
     public string ExtraEncoderArgs { get; set; } = "";
 
+    /// <summary>v7.9.9.10: reproduce a dropped vsync -- horizontal / random, empty = off.</summary>
+    public string Tearing { get; set; } = "";
+
     /// <summary>v7.9.9.2: most-recently-used input/output directories (newest first).</summary>
     public List<string> RecentDirectories { get; set; } = [];
 

@@ -815,6 +815,7 @@ public static class Cli
             // toggle. Either one can turn pacing off.
             RealTime = !args.NoRealtime && config.RealTime,
             ExtraEncoderArgs = extraArgs,
+            Tearing = args.Tearing ?? config.Tearing ?? "",
             FpsLevelKbps = disc is null ? levelKbps : [],
             Quality = config.Qv,
             QualityExplicit = args.Qv.HasValue,

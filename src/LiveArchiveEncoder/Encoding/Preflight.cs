@@ -140,7 +140,8 @@ public static class Preflight
                 // been in the wrapper since 2014, and the probe exists to catch
                 // the rare build that dropped it, not to make every caller
                 // prove it ran one.
-                encoder.Caps is null || encoder.Caps.HasRcMode));
+                encoder.Caps is null || encoder.Caps.HasRcMode,
+                ArgsBuilder.PinsBitrate(extraEncoderArgs)));
             // v7.9.6: an explicit request is also pinned on the encoder side, so
             // the output really keeps it instead of being quietly retuned to the
             // encoder's own default.

@@ -1667,6 +1667,8 @@ public static partial class Cui
                 c.RealTime ? L.T("param.realtime.on") : L.T("param.realtime.off"));
             Row(35, L.T("param.extraargs"),
                 c.ExtraEncoderArgs.Length == 0 ? L.T("value.none") : c.ExtraEncoderArgs);
+            Row(39, L.T("param.tearing"),
+                c.Tearing.Length == 0 ? L.T("value.none") : c.Tearing);
 
             // v7.9.9.3: the live encoder's VBV dials are visible too, not just
             // reachable by typing a raw string into 35. They share the same
@@ -1773,6 +1775,28 @@ public static partial class Cui
                     case "36": EditLiveVbvFlag(c, "-maxrate"); break;
                     case "37": EditLiveVbvFlag(c, "-minrate"); break;
                     case "38": EditLiveVbvFlag(c, "-bufsize"); break;
+                    case "39":
+                    {
+                        // v7.9.9.10: an artefact on request -- the picture only
+                        // tears when the user asks for it.
+                        Console.Write(L.T("param.prompt.tearing",
+                            c.Tearing.Length == 0 ? L.T("value.none") : c.Tearing));
+                        string tearRaw = Ask().Trim().ToLowerInvariant();
+                        if (tearRaw.Length == 0) break;
+                        switch (tearRaw)
+                        {
+                            case "horizontal" or "h": c.Tearing = "horizontal"; break;
+                            case "random" or "r": c.Tearing = "random"; break;
+                            case "none" or "off" or "-": c.Tearing = ""; break;
+                            default:
+                                Console.WriteLine($"{L.T("error.prefix")}"
+                                    + "tearing must be horizontal, random or none");
+                                break;
+                        }
+                        Console.WriteLine(L.T("note.tearing",
+                            c.Tearing.Length == 0 ? L.T("value.none") : c.Tearing));
+                        break;
+                    }
                     // v7.9.9.9: the disc targets moved into the era table (menu
                     // 14), so there is no separate row here any more.
                     case "7":

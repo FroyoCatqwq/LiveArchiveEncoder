@@ -41,7 +41,8 @@ public static class ArgsBuilder
     /// </summary>
     public static List<string> VideoQualityArgs(
         string name, int quality, double? limitKbps = null,
-        string? rcMode = null, bool allowSkipFrames = false, bool supportsRcMode = true)
+        string? rcMode = null, bool allowSkipFrames = false, bool supportsRcMode = true,
+        bool preferBitrate = false)
     {
         double ceiling = limitKbps is { } kbps && kbps > 0 ? kbps : FallbackCeilingKbps;
 
@@ -73,7 +74,15 @@ public static class ArgsBuilder
                 ];
 
             default:
-                return ["-q:v", quality.ToString(CultureInfo.InvariantCulture)];
+                // v7.9.9.10: -q:v WINS over -b:v inside FFmpeg -- the encoder
+                // silently ignores the target bitrate. A caller that pinned one
+                // (a disc target, or --extra-encoder-args "-b:v 3000k") gets
+                // the bitrate form, which is what its preset actually asked
+                // for. This is why --era dvd used to encode at 2.1 Mbps while
+                // its preset said 6000.
+                return preferBitrate
+                    ? ["-b:v", $"{ceiling.ToString("G6", CultureInfo.InvariantCulture)}k"]
+                    : ["-q:v", quality.ToString(CultureInfo.InvariantCulture)];
         }
     }
 
@@ -316,7 +325,8 @@ public static class ArgsBuilder
         string deintMode,
         string deintParity,
         bool deintMarkedOnly,
-        string? nnediWeights = null)
+        string? nnediWeights = null,
+        string? tearing = null)
     {
         string mode = Core.EncoderMath.CanonicalFitMode(fitMode);
         var filters = new List<string>();
@@ -341,8 +351,48 @@ public static class ArgsBuilder
         }
 
         filters.Add($"format={transportFmt}");
+
+        // v7.9.9.10: the optional tear, applied to the finished frame so the
+        // split lands on the delivered picture rather than on an intermediate
+        // one. Appended last: tblend needs two frames of the same format, and
+        // everything before this point has already produced exactly that.
+        string tear = TearingChain(tearing);
+        if (tear.Length > 0) filters.Add(tear);
         return string.Join(',', filters);
     }
+
+    /// <summary>
+    /// The filter that reproduces a dropped vertical sync: <c>tblend</c> mixes
+    /// the previous frame into this one, and the expression decides per row
+    /// which of the two survives, so the top of the picture is one frame behind
+    /// the bottom.
+    ///
+    /// <para>An empty string means "no tear", which is the default: the tool is
+    /// a faithful encoder unless the user asks for the artefact on purpose.
+    /// Note that <c>tblend</c> holds one frame back, so a torn run is short by
+    /// one frame at the head -- expected for a filter that needs a predecessor.
+    /// </para>
+    /// </summary>
+    /// <summary>
+    /// True when the free-form extras already pin a bitrate, in which case
+    /// <c>-q:v</c> must not be emitted: FFmpeg prefers the quantiser and would
+    /// silently ignore the bitrate the preset asked for.
+    /// </summary>
+    public static bool PinsBitrate(string? extras) =>
+        extras is { Length: > 0 }
+        && (extras.Contains("-b:v", StringComparison.Ordinal)
+            || extras.Contains("-maxrate", StringComparison.Ordinal));
+
+    public static string TearingChain(string? mode) => mode switch
+    {
+        // A fixed split half way down.
+        "horizontal" => "tblend=all_expr='if(lt(Y,H*0.5),B,A)'",
+        // The split walks down the frame as N grows, so consecutive frames tear
+        // at different heights -- closer to a signal fault than a clean splice.
+        // The comma is escaped because FFmpeg's expression parser splits there.
+        "random" => "tblend=all_expr='if(lt(Y,H*mod(N*37\\,100)/100),B,A)'",
+        _ => "",
+    };
 
     /// <summary>
     /// Python's <c>f"{fps:g}"</c> uses 6 significant digits; C#'s bare "G" is a

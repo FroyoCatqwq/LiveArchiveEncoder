@@ -221,7 +221,7 @@ public static class RealtimeEncoder
         string vf = ArgsBuilder.BuildFilters(
             width, height, o.Fps, o.FitMode, o.CropAnchor, o.PadColor, scaleAlgo,
             transportFmt, o.Deinterlace, o.DeintMode, o.DeintParity, o.DeintMarkedOnly,
-            o.NnediWeights);
+            o.NnediWeights, o.Tearing);
 
         // v7.9 #2: subtitles are validated here, before anything expensive, and
         // rendered last so the text is neither scaled nor cropped with the
@@ -831,7 +831,8 @@ public static class RealtimeEncoder
         cmd.AddRange(["-c:v", o.Encoder.Name]);
         cmd.AddRange(ArgsBuilder.VideoQualityArgs(
             o.Encoder.Name, o.Quality, o.LimitKbps, o.OpenH264Rc, o.OpenH264SkipFrames,
-            o.Encoder.Caps is null || o.Encoder.Caps.HasRcMode));
+            o.Encoder.Caps is null || o.Encoder.Caps.HasRcMode,
+            ArgsBuilder.PinsBitrate(o.ExtraEncoderArgs)));
         // v7.9.6: pin the format on the encoder side too when the user named
         // one. The pipe already carries --pix_fmt, but without this the encoder
         // is free to hand the muxer its own default (measured: libx264 given
@@ -1503,7 +1504,8 @@ public static class RealtimeEncoder
             };
             videoCmd.AddRange(ArgsBuilder.VideoQualityArgs(
                 o.Encoder.Name, o.Quality, o.LimitKbps, o.OpenH264Rc, o.OpenH264SkipFrames,
-                o.Encoder.Caps is null || o.Encoder.Caps.HasRcMode));
+                o.Encoder.Caps is null || o.Encoder.Caps.HasRcMode,
+            ArgsBuilder.PinsBitrate(o.ExtraEncoderArgs)));
             // v7.9.8.11.1: the probe must carry the same picture flags as the
             // real encode, or MJPEG fails its full-range check here and the
             // split route silently falls back to inline.

@@ -271,6 +271,7 @@ Input and output are positional and ordered; the output is derived when omitted.
 | `--recompress-only` | off | **v7.9.5**: skip the live pass and recompress an existing file (§7.12) |
 | `--no-recompress` | — | Turn the stage off (wins over the two above) |
 | `--era ID` | none | **v7.6 / v7.9.7**: apply a preset whose id is `site/year` (`youku/2007`, `bilibili/2012`, `generic/1998`); old ids still work and print a rename note (§7.12) |
+| `--tearing MODE` | `off` | **v7.9.9.10**: reproduce a dropped vertical sync — the top of the picture lags one frame. `horizontal` splits at the middle, `random` walks the split down the frame; `off` (default) leaves the picture alone. CUI parameter row `39.` |
 | `--disc ID` | none | **v7.9.9.9**: a **shorthand** for `--era disc/<ID>`, i.e. `--era dvd` / `--era vcd` / `--era svcd` / `--era cd` (CD-i), see §7.19. The four targets are rows of the era table and pin codec, container, resolution, frame rate, bitrate, GOP and audio. The flag survives so a v7.9.9.8 script keeps working; new scripts use `--era` |
 | `--era-modern` | off | **v7.9.5.1**: use libx264 + AAC in mp4 for the second pass instead of the site's period encoder |
 | `--era-native` | on | **v7.9.5.1**: explicitly request the site's own encoder (the default; for self-documenting scripts) |

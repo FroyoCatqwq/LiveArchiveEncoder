@@ -40,6 +40,14 @@ public sealed record RealtimeOptions
     public string ExtraEncoderArgs { get; init; } = "";
 
     /// <summary>
+    /// v7.9.9.10: reproduce a dropped vertical sync. <c>horizontal</c> puts a
+    /// fixed tear half way down, <c>random</c> walks the split down the frame.
+    /// Empty (the default) leaves the picture untouched -- this is an artefact
+    /// on request, not a behaviour change.
+    /// </summary>
+    public string Tearing { get; init; } = "";
+
+    /// <summary>
     /// Per-rung bitrate thresholds, keyed by FPS. Empty derives them from
     /// <see cref="LimitKbps"/>/<see cref="RecoverKbps"/>, which is the v7.6 rule.
     /// </summary>

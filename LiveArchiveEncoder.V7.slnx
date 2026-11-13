@@ -227,6 +227,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/V7995Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V7996Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V7997Tests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/V79910Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V799Tests.cs" />
   </Folder>
   <Folder Name="/tests/e2e/">
@@ -239,6 +240,7 @@
     <File Path="tests/e2e/test_cui_smoke.py" />
     <File Path="tests/e2e/test_direct_and_paths.py" />
     <File Path="tests/e2e/test_disc.py" />
+    <File Path="tests/e2e/test_tearing.py" />
     <File Path="tests/e2e/test_era_quality.py" />
     <File Path="tests/e2e/test_error_paths.py" />
     <File Path="tests/e2e/test_feature_sweep.py" />

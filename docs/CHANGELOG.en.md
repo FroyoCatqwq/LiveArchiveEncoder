@@ -7,6 +7,43 @@ edition, [`CHANGELOG.md`](CHANGELOG.md) — entries there are kept verbatim, wit
 measurements and reasoning behind each decision. `⚠` marks a change a user can
 notice in an output, a default, a file name or a CLI contract.
 
+## v7.9.9.10 (2026-11-13) — opt-in tearing, and the DVD bitrate fix
+
+### `--tearing horizontal|random`
+
+Reproduces a dropped vertical sync: the top of the picture takes the previous
+frame, the bottom takes the current one.
+
+```
+LiveArchiveEncoder.exe in.mp4 out.mkv --encoder libx264 --tearing horizontal
+LiveArchiveEncoder.exe in.mp4 out.mkv --encoder libx264 --tearing random
+LiveArchiveEncoder.exe in.mp4 out.mkv --tearing off        # default
+```
+
+* Implemented as `tblend=all_expr='if(lt(Y,<split>),B,A)'`, appended at the **end**
+  of the filter chain (after `format`) so the split lands on the delivered picture.
+* `horizontal` splits at the middle (`H*0.5`); `random` walks the split down the
+  frame (`H*mod(N*37\,100)/100`), so consecutive frames tear at different heights.
+* Off by default: the tool encodes faithfully unless the artefact is requested.
+* CUI parameter row `39.` sets it and remembers it in `config.json`.
+
+### Fix: `--era dvd` (and `--disc dvd`) encoded at a third of its bitrate
+
+Comparing against v7.9.9.9: a 10 s `--era dvd` product measured **2091 kbps** while
+the preset says 6000. **`-q:v` wins over `-b:v`** inside FFmpeg, and the media row
+carried both (`-b:v 6000k` from the extras, `-q:v 10` from `LiveQv`), so the encoder
+picked the quantiser and silently dropped the target bitrate.
+
+`ArgsBuilder.PinsBitrate` now detects `-b:v` / `-maxrate` in the extras and makes
+`VideoQualityArgs` emit `-b:v <ceiling>` instead of `-q:v`. All three command builders
+(real encode, preflight, the split-audio video pass) share the check, so the trial
+validates the real command. Measured: the same 10 s clip went **2091 → 6319 kbps**.
+
+Tests: `V79910Tests` (6 cases) and `tests/e2e/test_tearing.py` (4 cases, including a
+`--era dvd` bitrate guard). Unit suite **768 passed**.
+
+---
+
 ## v7.9.9.9 (2026-11-13) — disc targets become era presets; three image bugs
 
 ### The disc targets joined `--era`

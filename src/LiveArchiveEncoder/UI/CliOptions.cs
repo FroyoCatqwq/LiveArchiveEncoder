@@ -460,6 +460,14 @@ public sealed class CliOptions
     public string? Era { get; init; }
 
     /// <summary>
+    /// v7.9.9.10: reproduce a dropped vertical sync in the live pass --
+    /// <c>horizontal</c> or <c>random</c>. Null/empty leaves the picture
+    /// untouched; the artefact is opt-in because the tool is a faithful encoder
+    /// by default.
+    /// </summary>
+    public string? Tearing { get; init; }
+
+    /// <summary>
     /// v7.9.6.3: the frame shape an era preset should be captured and delivered
     /// in -- <c>source</c> (the preset's own), <c>4:3</c> or <c>16:9</c>. Only
     /// shapes the selected encoder can actually encode are accepted; see
@@ -636,6 +644,7 @@ public static class CliParser
         bool eraNative = false;
         string? era = null;
         string? discShorthand = null;
+        string? tearing = null;
         string? eraAspect = null;
         string? h264 = null;
         string? netTest = null;
@@ -1221,6 +1230,21 @@ public static class CliParser
                     discShorthand = "disc/" + discProfile.Id;
                     break;
 
+                // v7.9.9.10: the tear is a per-run artefact request.
+                case "--tearing":
+                    if (!TryValue(out string tearingRaw))
+                        return (null, "--tearing requires a value: horizontal or random");
+                    tearing = tearingRaw.Trim().ToLowerInvariant() switch
+                    {
+                        "horizontal" => "horizontal",
+                        "random" => "random",
+                        "off" or "none" => "",
+                        _ => null,
+                    };
+                    if (tearing is null)
+                        return (null, "--tearing must be horizontal, random, off");
+                    break;
+
                 // v7.9.6.3: the shape a preset is captured and delivered in.
                 case "--era-aspect":
                     if (!TryValue(out string aspectRaw)) return (null, "--era-aspect requires a value");
@@ -1412,6 +1436,7 @@ public static class CliParser
             // v7.9.9.9: --disc resolves to its preset row, which is the same
             // field --era writes, so downstream code has one path.
             Era = discShorthand ?? era,
+            Tearing = tearing,
 
             EraAspect = eraAspect,
             H264Impl = h264,
@@ -1588,6 +1613,9 @@ public static class CliParser
             ("--disc", "ID",
                 $"target a physical disc format: {PostProcess.DiscProfiles.IdList} "
                 + "(pins codec, resolution, frame rate, bitrate, GOP and audio)"),
+            ("--tearing", "horizontal|random|off",
+                "reproduce a dropped vertical sync in the live pass: the top of the "
+                + "picture lags one frame behind the bottom (off by default)"),
             ("--era-aspect", "4:3|16:9|source",
                 "capture and deliver a preset in this frame shape; only shapes the "
                 + "selected encoder can encode are accepted (default: source)"),
