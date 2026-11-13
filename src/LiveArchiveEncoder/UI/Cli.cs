@@ -151,8 +151,12 @@ public static class Cli
         // things and only one of them can win.
         // The flag wins for one run; otherwise the value remembered by the CUI
         // applies, exactly like the era preset.
-        PostProcess.DiscProfile? discProfile =
-            PostProcess.DiscProfiles.Find(args.Disc ?? stored.Disc);
+        // v7.9.9.9: a disc target is a preset row now (--era disc/dvd, or the
+        // --disc shorthand that resolves to it), so there is one lookup and one
+        // place that knows the constraints.
+        PostProcess.DiscProfile? discProfile = era?.Disc is { } selectedDisc
+            ? PostProcess.DiscProfiles.Find(selectedDisc)
+            : null;
         if (discProfile is not null)
         {
             EncoderInfo? discEncoder = encoders.FirstOrDefault(
@@ -764,8 +768,7 @@ public static class Cli
         // encoder and container were already pinned above; size, frame rate,
         // bitrate and audio are settled here. A disc is constant bitrate at a
         // fixed frame rate, so the adaptive ladder is pinned to one rung.
-        PostProcess.DiscProfile? disc =
-            PostProcess.DiscProfiles.Find(args.Disc ?? stored.Disc);
+        PostProcess.DiscProfile? disc = discProfile;
         bool discPal = config.Fps < 27;
         int outWidth = disc is null ? config.Width : disc.WidthFor(discPal ? 25 : 30);
         int outHeight = disc is null ? config.Height : disc.HeightFor(discPal ? 25 : 30);

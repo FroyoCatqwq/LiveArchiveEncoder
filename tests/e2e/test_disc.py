@@ -36,7 +36,8 @@ def test_disc_vcd_pins_the_video_cd_envelope(exe, src, tmp_path):
     cfg = _cfg(tmp_path)
     out = tmp_path / "vcd.mpg"
 
-    proc = _run(exe, cfg, str(src), str(out), "--disc", "vcd",
+    # v7.9.9.9: the disc targets are era presets, so --era names them directly.
+    proc = _run(exe, cfg, str(src), str(out), "--era", "vcd",
                 "--end", "00:00:02", "--no-realtime",
                 "--ffmpeg-source", "path", "--lang", "en", "--quiet")
     assert proc.returncode == 0, (proc.stdout[-700:], proc.stderr[-700:])
@@ -54,7 +55,7 @@ def test_disc_dvd_pins_the_dvd_video_envelope(exe, src, tmp_path):
     cfg = _cfg(tmp_path)
     out = tmp_path / "dvd.mpg"
 
-    proc = _run(exe, cfg, str(src), str(out), "--disc", "dvd",
+    proc = _run(exe, cfg, str(src), str(out), "--era", "disc/dvd",
                 "--end", "00:00:02", "--no-realtime",
                 "--ffmpeg-source", "path", "--lang", "en", "--quiet")
     assert proc.returncode == 0, (proc.stdout[-700:], proc.stderr[-700:])

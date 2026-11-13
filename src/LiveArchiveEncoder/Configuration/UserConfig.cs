@@ -194,8 +194,6 @@ public sealed class UserConfig
     /// <summary>Last applied era preset id, or null for "custom settings".</summary>
     public string? EraPreset { get; set; }
 
-    /// <summary>v7.9.9.8: physical disc target (dvd / vcd / svcd / cd).</summary>
-    public string? Disc { get; set; }
 
     /// <summary>
     /// v7.9.5.1: whether a preset's second pass uses the site's own codec.
@@ -559,7 +557,6 @@ public static class ConfigStore
         Recompress = CloneRecompress(c.Recompress),
         Subtitles = CloneSubtitles(c.Subtitles),
         EraPreset = c.EraPreset,
-        Disc = c.Disc,
         EraNative = c.EraNative,
         RealTime = c.RealTime,
         ExtraEncoderArgs = c.ExtraEncoderArgs,
@@ -734,7 +731,6 @@ public static class ConfigStore
         if (stored.Recompress is not null) c.Recompress = CloneRecompress(stored.Recompress);
         if (stored.Subtitles is not null) c.Subtitles = CloneSubtitles(stored.Subtitles);
         c.EraPreset = stored.EraPreset;
-        c.Disc = stored.Disc;
         c.EraNative = stored.EraNative;
         c.RealTime = stored.RealTime;
         c.ExtraEncoderArgs = stored.ExtraEncoderArgs ?? "";

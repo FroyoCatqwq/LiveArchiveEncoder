@@ -460,14 +460,6 @@ public sealed class CliOptions
     public string? Era { get; init; }
 
     /// <summary>
-    /// v7.9.9.8: physical disc target -- dvd / vcd / svcd / cd (CD-i), see
-    /// <see cref="PostProcess.DiscProfiles"/>. It pins the encoder, container,
-    /// resolution, frame rate, bitrate, GOP and audio to what that disc format
-    /// allows, which is a different axis from the era presets.
-    /// </summary>
-    public string? Disc { get; init; }
-
-    /// <summary>
     /// v7.9.6.3: the frame shape an era preset should be captured and delivered
     /// in -- <c>source</c> (the preset's own), <c>4:3</c> or <c>16:9</c>. Only
     /// shapes the selected encoder can actually encode are accepted; see
@@ -643,7 +635,7 @@ public static class CliParser
         bool eraModern = false;
         bool eraNative = false;
         string? era = null;
-        string? disc = null;
+        string? discShorthand = null;
         string? eraAspect = null;
         string? h264 = null;
         string? netTest = null;
@@ -1217,14 +1209,16 @@ public static class CliParser
                     // already registered.
                     break;
 
-                // v7.9.9.8: a physical disc target. Validated here because the
-                // table is static, unlike --era whose rows can be user-defined.
+                // v7.9.9.9: --disc is a shorthand for --era disc/<id>. The disc
+                // rows live in the preset table, so there is exactly one place
+                // that knows the constraints; the flag stays so a script written
+                // against v7.9.9.8 keeps working.
                 case "--disc":
                     if (!TryValue(out string discRaw))
                         return (null, "--disc requires a value");
                     if (PostProcess.DiscProfiles.Find(discRaw) is not { } discProfile)
                         return (null, $"--disc must be one of {PostProcess.DiscProfiles.IdList}");
-                    disc = discProfile.Id;
+                    discShorthand = "disc/" + discProfile.Id;
                     break;
 
                 // v7.9.6.3: the shape a preset is captured and delivered in.
@@ -1415,8 +1409,10 @@ public static class CliParser
             OpenH264SkipFrames = openH264SkipFrames,
             EraModern = eraModern,
             EraNative = eraNative,
-            Era = era,
-            Disc = disc,
+            // v7.9.9.9: --disc resolves to its preset row, which is the same
+            // field --era writes, so downstream code has one path.
+            Era = discShorthand ?? era,
+
             EraAspect = eraAspect,
             H264Impl = h264,
             H264Explicit = h264 is not null,

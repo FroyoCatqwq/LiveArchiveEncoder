@@ -223,7 +223,7 @@ public sealed class EraPresetTests
             // bare slug. Nothing else is allowed, because the id travels on a
             // command line unquoted.
             await Assert.That(System.Text.RegularExpressions.Regex
-                .IsMatch(id, "^[a-z0-9_]+(/[0-9]{4})?$")).IsTrue().Because(id);
+                .IsMatch(id, "^([a-z0-9_]+(/[0-9]{4})?|disc/[a-z0-9]+)$")).IsTrue().Because(id);
         }
     }
 
@@ -299,7 +299,10 @@ public sealed class EraPresetTests
         // v7.9.6.2 as well, but they are a dozen parallel ladders of the same
         // years (sina06 and sohu06 are both 320x240), so monotonicity only
         // holds for the era table.
-        IReadOnlyList<EraPreset> eras = [.. EraPresets.All.Where(p => p.Kind == EraKind.Era)];
+        // v7.9.9.9: media rows (disc/*) are not years -- excluding them keeps
+        // "each row is bigger than the one before" meaning what it says.
+        IReadOnlyList<EraPreset> eras =
+            [.. EraPresets.All.Where(p => p.Kind == EraKind.Era && p.Disc is null)];
         for (int i = 1; i < eras.Count; i++)
         {
             EraPreset older = eras[i - 1];
@@ -361,6 +364,12 @@ public sealed class EraPresetTests
     {
         foreach (EraPreset preset in EraPresets.All.Where(p => p.BuiltIn))
         {
+            // v7.9.9.9: the four disc rows use "disc/<id>", which is not a year.
+            if (preset.Disc is not null)
+            {
+                await Assert.That(preset.Id).IsEqualTo("disc/" + preset.Disc).Because(preset.Id);
+                continue;
+            }
             await Assert.That(preset.Id).IsEqualTo($"{preset.Site}/{preset.Year}").Because(preset.Id);
             await Assert.That(preset.Year).IsGreaterThanOrEqualTo(1990).Because(preset.Id);
             await Assert.That(preset.Year).IsLessThanOrEqualTo(2100).Because(preset.Id);

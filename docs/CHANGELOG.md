@@ -22,6 +22,54 @@
 
 ---
 
+## v7.9.9.9（2026-11-13）
+
+把光盘介质并入「时代预设」，并修掉 v7.9.9.8 镜像实现里的三个真实缺陷。
+
+### 1. 介质预设并入 `--era`
+
+`dvd` / `vcd` / `svcd` / `cd`（CD-i）现在是**时代预设表里的四行**，id 为
+`disc/dvd` … `disc/cd`，并接受简写 `dvd` / `vcd` / `svcd` / `cd` / `cd-i` / `cdi`：
+
+```powershell
+LiveArchiveEncoder.exe in.mp4 out.mpg --era dvd          # 刻成 DVD-Video
+LiveArchiveEncoder.exe in.mp4 out.mpg --era vcd          # 刻成 Video CD
+LiveArchiveEncoder.exe in.mp4 out.mpg --era disc/svcd    # 完整 id 也认
+```
+
+* 四行的数字不再重复：它们由 `DiscProfiles` 派生，`DiscProfile` 仍是唯一来源。
+* 行上多了新字段 `EraPreset.Disc`（介质 id），CLI 的介质逻辑改为从选中的 era 行取，
+  原来三处重复的 `args.Disc ?? stored.Disc` 判断合并成一处。
+* `--disc dvd` 保留为**简写**（内部解析成 `--era disc/dvd`），v7.9.9.8 写的脚本不受影响；
+  `--era` 与 `--disc` 同时给时 `--disc` 优先。
+* CUI 的「时代预设」（菜单 14）自动多出 `disc` 组：先列 dvd/vcd/svcd/cd，选中即应用
+  尺寸、帧率、码率、音频，并把 `-maxrate/-bufsize/-g` 追加到附加编码参数。
+  参数页原来的 `39. 介质目标` 与 `Config.Disc` 字段随之删除——入口只有一个。
+
+### 2. 镜像实现的三个缺陷（v7.9.9.8 引入）
+
+* **7-Zip 退出码被丢弃**：解包时只检查「有没有解出 `.DAT`」，7-Zip 返回 1（部分成功）
+  或 2（失败）时若恰好解出一个文件，就会拿截断的载荷去编码。现在 `>= 2` 直接判失败，
+  并把 7z 的尾部输出带进错误里。
+* **`Path.GetFullPath` 在 try 之外**：DVD 分支的超长路径 / 畸形路径会抛异常穿透
+  `Resolve` 的「要么镜像要么原因」契约，CLI 直接崩栈而不是打一行 `ERROR:`。现在整个
+  `ResolveCore` 被 try 包住。
+* **失败原因被压成一句话**：`7z l` 非 0 时（杀毒拦截、镜像被独占、网络共享超时）
+  原来只报「不是可读的光盘镜像」，`listing` 被整条丢弃。现在附 `[7z <code>] <尾部输出>`。
+* 顺带：7-Zip 子进程改为 250 ms 轮询 + `Interrupt.CurrentToken`，Ctrl+C 可以终止一次
+  挂住的镜像扫描（原来只能等满 180 秒）。
+
+### 3. 测试
+
+* `EraFpsLadderTests` / `PostProcessingTests` 的四条通用不变量（阶梯至少两级、
+  像素与码率单调递增、id 形状 `site/year`）现在明确只作用于站点行；介质行用
+  `disc/<id>` 形状并自带单级阶梯。
+* `test_disc.py` 改为验证新入口：`--era vcd`、`--era disc/dvd`，并保留 `--disc cd` /
+  `--disc dvd --fps 29.97` 两条简写路径。
+* 单测 **762 全过**，中英双语键与清单双向校验通过。
+
+---
+
 ## v7.9.9.8（2026-11-12）
 
 新增光盘镜像输入与 DVD / VCD / CD-i 介质约束。

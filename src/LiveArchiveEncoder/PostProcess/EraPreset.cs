@@ -77,6 +77,14 @@ public sealed class EraPreset
 
     /// <summary>Legacy encoder name as FFmpeg spells it. Null on a bare site preset.</summary>
     public string? Encoder { get; init; }
+
+    /// <summary>
+    /// v7.9.9.9: set on the four physical-media rows (dvd / vcd / svcd / cd).
+    /// They are not "a site in a year" -- they describe a disc format, and the
+    /// numbers come from <see cref="DiscProfiles"/>. The value is the profile id;
+    /// null on every site/era row.
+    /// </summary>
+    public string? Disc { get; init; }
     public int? Width { get; init; }
     public int? Height { get; init; }
     public double? Fps { get; init; }
@@ -459,8 +467,51 @@ public static class EraPresets
 {
     private const string Generic = "generic";
 
+    /// <summary>
+    /// v7.9.9.9: the four disc formats, expressed as era rows so one flag covers
+    /// both ideas -- <c>--era dvd</c> says "make it belong on that medium" the
+    /// same way <c>--era youku/2007</c> says "make it look like that site".
+    /// The numbers are not repeated here: <see cref="DiscProfiles"/> remains the
+    /// single source and these rows are derived from it.
+    /// </summary>
+    private static IEnumerable<EraPreset> DiscRows()
+    {
+        int order = 0;
+        foreach (DiscProfile profile in DiscProfiles.All)
+        {
+            order++;
+            yield return new EraPreset
+            {
+                Id = "disc/" + profile.Id,
+                Site = "disc",
+                Kind = EraKind.Era,
+                YearFrom = order,
+                YearTo = order,
+                Disc = profile.Id,
+                NoteKey = "era.disc." + profile.Id,
+                Encoder = profile.Encoder,
+                Width = profile.PalWidth,
+                Height = profile.PalHeight,
+                Fps = profile.PalFps,
+                // A disc format is constant frame rate; one rung says exactly
+                // that, and keeps every "a live row has a ladder" invariant true.
+                FpsLevels = [profile.PalFps],
+                LimitKbps = profile.VideoKbps,
+                LiveQv = 10,
+                LiveCrf = 23,
+                AudioEncoder = profile.AudioEncoder,
+                AudioKbps = profile.AudioKbps,
+                AudioRate = profile.AudioRate,
+                AudioChannels = profile.AudioChannels,
+            };
+        }
+    }
+
     private static readonly IReadOnlyList<EraPreset> BuiltIn =
     [
+        // Physical media lead: they are the coarsest constraint there is.
+        .. DiscRows(),
+
         // ---- the web in general, before "a video site" was a business ----
         GenericRow(1998, "rv20", 160, 120, 10, 45, 16, 16000, 1, 12, 28,
             "era.generic.1998", ladder: [10, 8, 5, 3], crf: 34),
@@ -573,6 +624,14 @@ public static class EraPresets
             ["flv07"] = "generic/2007",
             ["mp4_10"] = "generic/2010",
             ["hd14"] = "generic/2014",
+            // v7.9.9.9: the disc ids are reachable without the "disc/" prefix,
+            // which is how people say them.
+            ["dvd"] = "disc/dvd",
+            ["vcd"] = "disc/vcd",
+            ["svcd"] = "disc/svcd",
+            ["cd"] = "disc/cd",
+            ["cd-i"] = "disc/cd",
+            ["cdi"] = "disc/cd",
             // The five generic rows are also reachable by the generic-<year>
             // spelling the CLI help used to suggest.
             ["generic-1998"] = "generic/1998",

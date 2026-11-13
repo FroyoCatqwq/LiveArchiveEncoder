@@ -7,6 +7,52 @@ edition, [`CHANGELOG.md`](CHANGELOG.md) — entries there are kept verbatim, wit
 measurements and reasoning behind each decision. `⚠` marks a change a user can
 notice in an output, a default, a file name or a CLI contract.
 
+## v7.9.9.9 (2026-11-13) — disc targets become era presets; three image bugs
+
+### The disc targets joined `--era`
+
+`dvd` / `vcd` / `svcd` / `cd` (CD-i) are now four rows of the era table with the ids
+`disc/dvd` … `disc/cd`, plus the shorthands `dvd` / `vcd` / `svcd` / `cd` / `cd-i` /
+`cdi`:
+
+```powershell
+LiveArchiveEncoder.exe in.mp4 out.mpg --era dvd          # author as DVD-Video
+LiveArchiveEncoder.exe in.mp4 out.mpg --era vcd          # author as Video CD
+LiveArchiveEncoder.exe in.mp4 out.mpg --era disc/svcd    # the full id works too
+```
+
+* The numbers are derived from `DiscProfiles`, which stays the single source; a new
+  `EraPreset.Disc` field marks the four rows and the CLI now takes the profile from the
+  selected preset instead of three separate `args.Disc ?? stored.Disc` lookups.
+* `--disc dvd` survives as a **shorthand** (it resolves to `--era disc/dvd`), so a script
+  written against v7.9.9.8 keeps working; if both are given, `--disc` wins.
+* CUI menu 14 gains a `disc` group automatically (dvd, vcd, svcd, cd); picking one applies
+  size, rate, bitrate and audio and appends `-maxrate/-bufsize/-g` to the extra args.
+  Parameter row `39.` and the `Config.Disc` field are gone — one entry point.
+
+### Three defects in the v7.9.9.8 image code
+
+* **7-Zip's exit code was ignored.** Only "did a `.DAT` appear" was checked, so a partial
+  extraction (exit 1) or a failed one (exit 2) that happened to leave one file was
+  encoded. Now `>= 2` fails and the tail of 7-Zip's output travels with the error.
+* **`Path.GetFullPath` sat outside the try.** A too-long or malformed path escaped
+  `Resolve`'s "an image or a reason" contract and crashed the CLI with a stack trace;
+  the whole `ResolveCore` is guarded now.
+* **The reason was thrown away.** When `7z l` returned non-zero (blocked binary, locked
+  image, timed-out share) the code printed "not a readable disc image" and discarded the
+  listing. It now appends `[7z <code>] <tail>`.
+* Also: 7-Zip is polled every 250 ms and honours `Interrupt.CurrentToken`, so Ctrl+C
+  stops a hung scan instead of waiting out the 180 s timeout.
+
+### Tests
+
+The four generic era invariants (a two-rung ladder, monotonically growing pixels and
+bitrate, the `site/year` id shape) now explicitly apply to site rows only; media rows use
+`disc/<id>` with a single rung. `test_disc.py` covers `--era vcd`, `--era disc/dvd` and
+keeps `--disc cd` / `--disc dvd --fps 29.97` for the shorthand. Unit suite **762 passed**.
+
+---
+
 ## v7.9.9.8 (2026-11-12) — disc images and disc targets
 
 ### Disc images (DVD-Video and Video CD)

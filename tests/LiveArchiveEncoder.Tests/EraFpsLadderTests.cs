@@ -42,6 +42,9 @@ public sealed class EraFpsLadderTests
     {
         foreach (EraPreset era in EraPresets.WithLiveLayer)
         {
+            // v7.9.9.9: media rows (disc/dvd ...) pin a single frame rate -- a
+            // disc format has no adaptive ladder, so they carry no rungs.
+            if (era.Disc is not null) continue;
             double[] levels = era.FpsLevels ?? [];
             await Assert.That(levels.Length).IsGreaterThanOrEqualTo(2).Because(era.Id);
             await Assert.That(levels[0]).IsEqualTo(era.Fps!.Value).Because($"{era.Id} starts at its base rate");
