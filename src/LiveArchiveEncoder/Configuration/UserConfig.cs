@@ -701,7 +701,10 @@ public static class ConfigStore
         c.X264Profile = stored.X264Profile.Or("");
         c.X264Level = stored.X264Level.Or("");
         // Never restore a nonsensical shard count from an older/corrupt file.
-        c.Parallel = Math.Max(1, stored.Parallel);
+        // v7.9.9.11: CLI and CUI both cap shards at MaxParallelShards; a hand
+        // edited config with e.g. 1000000 used to display that value in the
+        // menu even though ParallelEncoder clamped it at run time.
+        c.Parallel = Math.Clamp(stored.Parallel, 1, Constants.MaxParallelShards);
         c.Language = stored.Language.HasText ? stored.Language : c.Language;
 
         // A source that is not installed is still remembered (so an install picks

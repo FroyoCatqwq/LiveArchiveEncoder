@@ -7,6 +7,36 @@ edition, [`CHANGELOG.md`](CHANGELOG.md) — entries there are kept verbatim, wit
 measurements and reasoning behind each decision. `⚠` marks a change a user can
 notice in an output, a default, a file name or a CLI contract.
 
+## v7.9.9.11 (2026-11-18) — full-project audit bugfixes
+
+A maintenance release for the v7.9 line. **Default encoding parameters and output
+bytes are unchanged**; every fix addresses bad input, numeric boundaries, process
+lifecycle, or config/update robustness. No v8 work is included.
+
+* **Encoder capability probing** now reads stderr as well as stdout. Some builds write
+  `ffmpeg -h encoder=...` to stderr, which used to leave OpenH264's `-rc_mode` and the
+  supported pixel-format/rate lists empty (≈3× bitrate overshoot, silent yuv420p fallback).
+* **Timeouts and overflow**: the separate-audio budget had the unchecked double→int
+  conversion already fixed for shard joining in v7.9.9.5; both now clamp and reject
+  NaN/Infinity. `NormalizeVbvPair` no longer writes a negative `-bufsize` for huge
+  `-maxrate` values.
+* **`--pad-color` injection**: colour values with filter-graph metacharacters are
+  rejected across CLI, CUI and `config.json`; `black` is unchanged.
+* **Process lifecycle**: disc-image pipe reads are bounded and observed; CUI's EOF
+  exit closes `AppLog` before `Environment.Exit`; the self-update applier verifies the
+  parent's start time so a reused PID cannot cause a 120 s wait.
+* **Arguments/config/update/log**: `--ffmpeg-env=` uses the same shell whitelist; the
+  no-input guard skips option values beginning with `-`; integer parsing and version
+  tags use `InvariantCulture`; restored `Parallel` is clamped on both sides; staging
+  cleanup survives clock roll-back; release digests must be real hex; log redaction
+  handles multiple credentialed URLs per line. The maintainer guide's push proxy is
+  corrected from the dead `10808` to `20808`.
+
+Tests: `V79911Tests` (7 new cases). Unit suite **775 total / 773 passed / 2 skipped**;
+e2e **253 passed / 2 skipped**; manifest 222 files, all docs paired, no drift.
+
+---
+
 ## v7.9.9.10 (2026-11-13) — opt-in tearing, and the DVD bitrate fix
 
 ### `--tearing horizontal|random`

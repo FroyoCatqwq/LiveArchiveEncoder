@@ -187,6 +187,16 @@ public static class DiscImages
         };
         foreach (string a in args) info.ArgumentList.Add(a);
 
+        // v7.9.9.11: a grandchild inheriting the pipe handles can keep EOF from
+        // arriving after 7-Zip itself exited. ProcessRunner already bounds this
+        // wait; the disc-image path must not hang forever -- nor leave the read
+        // tasks unobserved on the timeout/cancel path.
+        static string ReadBounded(Task<string> task)
+        {
+            try { return task.Wait(TimeSpan.FromSeconds(5)) ? task.Result : ""; }
+            catch { return ""; }
+        }
+
         try
         {
             using Process? proc = Process.Start(info);
@@ -202,12 +212,14 @@ public static class DiscImages
                 if (token.IsCancellationRequested || clock.Elapsed > TimeSpan.FromSeconds(180))
                 {
                     try { proc.Kill(entireProcessTree: true); } catch (Exception) { /* gone */ }
+                    _ = ReadBounded(outTask);
+                    _ = ReadBounded(errTask);
                     return (-1, token.IsCancellationRequested
                         ? "cancelled"
                         : "7-Zip timed out after 180 s");
                 }
             }
-            string text = outTask.GetAwaiter().GetResult() + errTask.GetAwaiter().GetResult();
+            string text = ReadBounded(outTask) + ReadBounded(errTask);
             return (proc.ExitCode, text);
         }
         catch (Exception exc) when (exc is IOException or UnauthorizedAccessException

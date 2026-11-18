@@ -140,7 +140,9 @@ public static class FragmentEditor
 
         if (hasMax && Kbps(tokens, "-maxrate") is { } maxRate)
         {
-            int buffer = maxRate * 2;
+            // v7.9.9.11: `int * 2` wrapped negative for -maxrate above
+            // ~1.07e9 kbps (allowed by Kbps()), writing a negative -bufsize.
+            long buffer = Math.Min((long)maxRate * 2, int.MaxValue);
             return (SetFlag(fragment, "-bufsize", $"{buffer.ToString(CultureInfo.InvariantCulture)}k"),
                 $"-maxrate {maxRate}k had no -bufsize; added -bufsize {buffer}k");
         }

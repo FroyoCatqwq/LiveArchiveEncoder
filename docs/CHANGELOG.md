@@ -22,6 +22,64 @@
 
 ---
 
+## v7.9.9.11（2026-11-18）
+
+全项目审查后的 bugfix 版本。**默认编码参数与产物字节不变**；修复的都是异常输入、
+边界数值、进程生命周期与配置/更新健壮性问题。v7.9 系列继续维护，不涉及 v8 迁移。
+
+### 1. 编码器能力探测漏读 stderr
+
+`ffmpeg -h encoder=NAME` 在部分构建/包装器里把帮助写到 stderr。原实现只取 stdout，
+于是 OpenH264 的 `-rc_mode` 与 `SupportedPixFmts` / `SupportedRates` 全部为空 ——
+表现为 OpenH264 退回默认缓冲模式造成约 3 倍码率超调、像素格式静默回退 yuv420p。
+现在与 `VerifyNamedFilters`、`BuildProfileStore.Sweep` 一致，合并两路流解析。
+
+### 2. 超时与整数溢出
+
+* 分离音频的超时 `(int)(span*2+120)` 与 v7.9.9.5 已修的分片合并超时是同一类缺陷：
+  超长/损坏时长会回绕为负数，第一帧就杀掉音频子进程。两处都改为 Clamp，并一起补上
+  `NaN` / `Infinity` 防护（`int` 转换原本会得到 0）。
+* `FragmentEditor.NormalizeVbvPair` 的 `maxRate * 2` 在 `-maxrate` 超过约 1.07e9 kbps
+  时负数溢出，写出 `-bufsize -294967296k`。改为 `long` 并夹到 `int.MaxValue`。
+
+### 3. `--pad-color` 可注入滤镜链
+
+颜色值未校验就拼进 `pad=W:H:X:Y:VALUE`；`black,fps=1000`、`black:eval=init` 之类的值
+会追加 pad 选项乃至新滤镜。现在 CLI / CUI / `config.json` 三条入口统一拒绝含
+`: , = ' " [ ] ; \ ( )` 或空白的颜色值，默认 `black` 不变。
+
+### 4. 进程与退出路径
+
+* 7-Zip 镜像扫描在子进程退出后无界等待管道；派生进程持有句柄时会永久挂起，
+  超时/取消分支还遗留未观察的读取任务。改为 5 秒有界等待并观察任务。
+* CUI 的 EOF 退出调用 `Environment.Exit(0)`，跳过 `Main` 的 finally，`AppLog.Close()`
+  从不执行 —— `run.end` 与队列尾部丢失。现在退出前先关日志（Close 幂等）。
+* 自更新 applier 等待父进程时只按 PID 取进程；PID 被复用会对无关进程空等 120 秒。
+  现在复核启动时间，不一致即视为父进程已退出。
+
+### 5. 参数、配置、更新与日志
+
+* `--ffmpeg-env=turbo`（等号形式）绕过 shell 白名单，与空格形式行为不一致；现在统一校验。
+* 无输入文件的选项白名单把以 `-` 开头的**取值**（如 `--ffmpeg -myffmpeg`）误报为编码选项；
+  现在跳过已知取值型选项的下一个 token。
+* CLI 整数选项改用 `InvariantCulture`（原来用 CurrentCulture），与浮点和 `--emit-args` 一致；
+  `VersionTag.Parse` 同样改为 Invariant 并拒绝 `+7` 这类带符号字段。
+* 从 `config.json` 恢复 `Parallel` 时只夹了下界，CUI 会显示 1000000 而实际只跑 8 分片；
+  现在上下界都夹到 `1..MaxParallelShards`。
+* 时钟回拨让未完成的 staging 目录因负差值被永久跳过清理，改用 `Duration()`（与
+  `UpdateState.IsFresh` 一致）。release feed 的 `digest` 现在必须是 64 位十六进制，
+  不再把 64 个垃圾字符当成有效 SHA-256。
+* 日志脱敏原来只用最后一个 `@` 配最后一个 `://`，多 URL 一行会互相串扰；改为逐段匹配。
+* 维护文档中的 git 推送代理端口从已失效的 `10808` 更正为 `20808`。
+
+### 6. 测试
+
+新增 `V79911Tests`（7 项：stderr 能力解析、超时边界/NaN、pad 颜色注入、VBV 溢出、
+ffmpeg-env 白名单、无输入选项扫描、版本解析）。单测 **775 总计 / 773 通过 / 2 环境跳过**；
+e2e 两阶段 **253 通过 / 2 跳过**；`.slnx` 222 文件、中英文档全部成对，无漂移。
+
+---
+
 ## v7.9.9.10（2026-11-13）
 
 新增可选的「画面撕裂」，并修掉 v7.9.9.9 对比时暴露出的码率缺陷。

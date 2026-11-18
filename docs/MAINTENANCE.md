@@ -106,7 +106,7 @@ python tools/e2e.py        # 全量 e2e（分两阶段，见 §4）
 
    命名必须与 `SelfUpdate.AssetSuffix()` 完全一致，否则用户会被更新到错误的运行时形态。
 4. `publish/release/notes-<版本>.md` 写说明，正文附四个包的 SHA-256。
-5. `git add -A` → commit → `git -c http.proxy=http://127.0.0.1:10808 push origin main`
+5. `git add -A` → commit → `git -c http.proxy=http://127.0.0.1:20808 push origin main`
    （直连常被重置；用临时参数，不改 git 配置）。
 6. `gh release create v<版本> <四个包> --notes-file … --target main`。
 7. 验证：四个资产的 GitHub `digest` 与本地 SHA-256 一致、正式版、`--update-check`

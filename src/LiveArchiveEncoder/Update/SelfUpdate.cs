@@ -546,10 +546,27 @@ public static class SelfUpdate
         try
         {
             using Process parent = Process.GetProcessById(parentPid);
+            DateTime parentStarted = parent.StartTime;
             if (!parent.WaitForExit(120_000))
             {
-                Console.Error.WriteLine($"ERROR: the running program (pid {parentPid}) did not exit");
-                return 1;
+                // v7.9.9.11: the pid may have been reused while we waited.
+                // Waiting on an unrelated process for the full timeout would
+                // turn a successful update into a spurious "did not exit".
+                bool reused = false;
+                try
+                {
+                    using Process current = Process.GetProcessById(parentPid);
+                    reused = current.StartTime != parentStarted;
+                }
+                catch (Exception exc) when (exc is ArgumentException or InvalidOperationException)
+                {
+                    reused = true;
+                }
+                if (!reused)
+                {
+                    Console.Error.WriteLine($"ERROR: the running program (pid {parentPid}) did not exit");
+                    return 1;
+                }
             }
         }
         catch (Exception exc) when (exc is ArgumentException or InvalidOperationException)
@@ -619,8 +636,13 @@ public static class SelfUpdate
             foreach (string staging in Directory.EnumerateDirectories(dir, StagingPrefix + "*"))
             {
                 bool finished = File.Exists(Path.Combine(staging, DoneMarker));
+                // v7.9.9.11: UpdateState.IsFresh already guards a clock that
+                // jumped backwards; a negative difference here kept every
+                // unfinished staging directory forever. Duration() is the
+                // same fix for this second freshness check.
                 if (!finished
-                    && DateTime.UtcNow - Directory.GetCreationTimeUtc(staging) < TimeSpan.FromMinutes(10))
+                    && (DateTime.UtcNow - Directory.GetCreationTimeUtc(staging)).Duration()
+                       < TimeSpan.FromMinutes(10))
                 {
                     continue;
                 }
@@ -1172,7 +1194,11 @@ public static class SelfUpdate
         string value = digest!.Trim();
         if (value.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
             value = value[7..];
-        return value.Length == 64 ? value.ToLowerInvariant() : null;
+        // v7.9.9.11: 64 non-hex characters are not a SHA-256. Accepting them
+        // deferred a clear feed error until after the download and printed
+        // garbage in the mismatch message.
+        return value.Length == 64 && value.All(Uri.IsHexDigit)
+            ? value.ToLowerInvariant() : null;
     }
 
     private static string? Text(JsonElement element, string name) =>

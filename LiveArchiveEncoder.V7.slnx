@@ -228,6 +228,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/V7996Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V7997Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V79910Tests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/V79911Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V799Tests.cs" />
   </Folder>
   <Folder Name="/tests/e2e/">

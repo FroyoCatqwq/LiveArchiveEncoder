@@ -123,7 +123,7 @@ period context. What needs correcting is current documentation and code comments
    Names must match `SelfUpdate.AssetSuffix()` exactly, or users update to the wrong
    runtime flavour.
 4. Write `publish/release/notes-<version>.md` with the four SHA-256 digests.
-5. `git add -A` → commit → `git -c http.proxy=http://127.0.0.1:10808 push origin main`
+5. `git add -A` → commit → `git -c http.proxy=http://127.0.0.1:20808 push origin main`
    (a direct connection is often reset; use a temporary option, never change the
    git config).
 6. `gh release create v<version> <four assets> --notes-file … --target main`.

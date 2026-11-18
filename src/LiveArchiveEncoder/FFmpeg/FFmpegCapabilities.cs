@@ -196,7 +196,15 @@ public static partial class FFmpegCapabilities
                 p.Stderr.Trim() is { Length: > 0 } err ? err : $"cannot query encoder {encoder.Name}");
         }
 
-        string text = p.Stdout;
+        // v7.9.9.11: some builds and wrappers write `-h encoder=...` to stderr.
+        // VerifyNamedFilters and BuildProfileStore.Sweep already inspect both
+        // streams; parsing only stdout silently lost OpenH264's -rc_mode and
+        // the supported pixel-format list on those builds.
+        return ParseEncoderText(p.Stdout + "\n" + p.Stderr, encoder);
+    }
+
+    internal static EncoderCaps ParseEncoderText(string text, EncoderInfo encoder)
+    {
         var pix = new List<string>();
         var rates = new List<double>();
 

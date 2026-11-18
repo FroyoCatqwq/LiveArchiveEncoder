@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using System.Threading.RateLimiting;
 using Microsoft.Extensions.Logging;
@@ -64,6 +65,10 @@ public static class AppLog
 
     /// <summary>Current operation id (one encode inside a longer CUI session).</summary>
     public static string CurrentOperation => _operation;
+
+    private static readonly Regex UserInfoPattern = new(
+        @"(?<scheme>[A-Za-z][A-Za-z0-9+.\-]*://)?(?<userinfo>[^\s/@]+:[^\s/@]*)@",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Channel<Entry> Queue = Channel.CreateUnbounded<Entry>(
         new UnboundedChannelOptions
@@ -500,17 +505,11 @@ public static class AppLog
             }
         }
 
-        // v7.9.9.2: userinfo may have no scheme at all ("--proxy
-        // user:pass@host:8080"), and a URL may contain several '@'. Use the
-        // last one and only redact when the segment before it looks like
-        // credentials (contains ':'), so plain "name@host" is left readable.
-        int at = value.LastIndexOf('@');
-        if (at <= 0) return value;
-
-        int schemeEnd = 0;
-        int scheme = value.LastIndexOf("://", at, StringComparison.Ordinal);
-        if (scheme >= 0) schemeEnd = scheme + 3;
-        if (!value[schemeEnd..at].Contains(':', StringComparison.Ordinal)) return value;
-        return value[..schemeEnd] + "***" + value[at..];
+        // v7.9.9.11: the old LastIndexOf('@') + LastIndexOf("://") pairing
+        // mis-handled a line with two URLs (over-redacting between them while
+        // leaking the first one's userinfo). Match each credential-bearing
+        // segment separately; a plain "name@host" has no ':' and is untouched.
+        return UserInfoPattern.Replace(value,
+            m => (m.Groups["scheme"].Success ? m.Groups["scheme"].Value : "") + "***@");
     }
 }

@@ -702,14 +702,27 @@ public static class Program
         "--nnedi-status", "--nnedi-update", "--list-subtitle-fonts", "--font-import",
     };
 
-    /// <summary>First option that CUI would silently ignore, or null.</summary>
-    private static string? EncodeOptionWithNoInput(string[] args)
+    /// <summary>CUI-compatible options whose value is the next argv token.</summary>
+    private static readonly HashSet<string> CuiValueOptions = new(StringComparer.OrdinalIgnoreCase)
     {
-        foreach (string arg in args)
+        "--lang", "--update-feed", "--ffmpeg", "--ffprobe", "--ffmpeg-source",
+        "--proxy", "--gh-proxy", "--ffmpeg-env", "--font-import", "--completion",
+    };
+
+    /// <summary>First option that CUI would silently ignore, or null.</summary>
+    internal static string? EncodeOptionWithNoInput(string[] args)
+    {
+        for (int i = 0; i < args.Length; i++)
         {
+            string arg = args[i];
             if (!arg.StartsWith('-')) continue;
             string name = arg.Split('=', 2)[0];
             if (!CuiCompatibleOptions.Contains(name)) return arg;
+            // v7.9.9.11: the old per-token scan reported a *value* beginning
+            // with '-' (e.g. `--ffmpeg -myffmpeg`) as a stray encode option.
+            // CliParser consumes the following token for these options, so
+            // the guard must skip it too.
+            if (!arg.Contains('=') && CuiValueOptions.Contains(name) && i + 1 < args.Length) i++;
         }
         return null;
     }

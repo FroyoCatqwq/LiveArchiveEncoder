@@ -512,6 +512,20 @@ public static class RealtimeEncoder
         }
     }
 
+    /// <summary>
+    /// v7.9.9.11: the separate-audio budget had the same unchecked double→int
+    /// conversion that JoinTimeout fixed in v7.9.9.5. A corrupt/HTTP duration
+    /// above ~34 years wrapped the timeout negative and killed the audio pass
+    /// on its first poll. Bounded in seconds so the millisecond budget is finite.
+    /// </summary>
+    internal static int AudioTimeoutSeconds(double span)
+    {
+        // A corrupt probe can also yield NaN/Infinity; Math.Max propagates NaN,
+        // and (int)NaN would be 0 -- a timeout that fires immediately.
+        double seconds = double.IsFinite(span) ? Math.Max(120.0, span * 2.0 + 120.0) : 120.0;
+        return (int)Math.Clamp(seconds, 120.0, int.MaxValue / 1000.0);
+    }
+
     private static EncodeResult RunSplitCore(
         RealtimeOptions o, CancellationToken cancellationToken, ref bool videoStarted)
     {
@@ -605,7 +619,7 @@ public static class RealtimeEncoder
             // finally to clean it up.
             Directory.CreateDirectory(stageDir);
             double span = duration.Value;
-            int audioTimeout = (int)Math.Max(120.0, span * 2.0 + 120.0);
+            int audioTimeout = AudioTimeoutSeconds(span);
 
             // From here on a fallback to the inline pipeline would replay a
             // whole realtime encode; RunSplit must let the failure surface.

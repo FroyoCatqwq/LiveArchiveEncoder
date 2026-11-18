@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using LiveArchiveEncoder.Configuration;
 using LiveArchiveEncoder.Core;
+using LiveArchiveEncoder.Diagnostics;
 using LiveArchiveEncoder.FFmpeg;
 using LiveArchiveEncoder.Localization;
 using LiveArchiveEncoder.PostProcess;
@@ -387,6 +388,10 @@ public static partial class Cui
         string? line = Console.ReadLine();
         if (line is not null) return line;
         _onEof?.Invoke();
+        // v7.9.9.11: Environment.Exit skips Main's finally, so AppLog.Close
+        // never ran on a scripted/EOF exit -- run.end and the queued tail were
+        // lost. Close is idempotent, so the normal path is unaffected.
+        AppLog.Close();
         Environment.Exit(0);
         return "";
     }

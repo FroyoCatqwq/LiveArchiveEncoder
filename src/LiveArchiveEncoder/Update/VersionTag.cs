@@ -1,3 +1,4 @@
+using System.Globalization;
 using LiveArchiveEncoder.Core;
 
 namespace LiveArchiveEncoder.Update;
@@ -44,7 +45,8 @@ public sealed class VersionTag : IComparable<VersionTag>, IEquatable<VersionTag>
         {
             string field = fields[i].Trim();
             if (field.Length == 0) return null;
-            if (!int.TryParse(field, out int value) || value < 0) return null;
+            if (!int.TryParse(field, NumberStyles.None, CultureInfo.InvariantCulture, out int value)
+                || value < 0) return null;
             parts[i] = value;
         }
         return new VersionTag(parts);

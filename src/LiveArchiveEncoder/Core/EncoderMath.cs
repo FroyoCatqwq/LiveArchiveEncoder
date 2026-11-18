@@ -578,7 +578,19 @@ public static class EncoderMath
     private static string PadColorExpr(string? color)
     {
         string value = (color ?? "").Trim();
-        return value.Length == 0 ? "black" : value;
+        if (value.Length == 0) return "black";
+        // v7.9.9.11: `pad='s colour is a single AVOption token. A value with
+        // ':' ',' '=' or quotes injects additional options (or a whole new
+        // filter) into the graph. Reject it here so every entry point -- CLI,
+        // CUI and config.json -- fails with one clear message before preflight.
+        if (value.Any(c => char.IsWhiteSpace(c)
+                           || c is ':' or ',' or '=' or '\'' or '"' or '[' or ']'
+                               or ';' or '\\' or '(' or ')'))
+        {
+            throw new ArgumentException(
+                $"pad colour '{color}' must be a colour name or 0xRRGGBB");
+        }
+        return value;
     }
 
     public static string CanonicalFitMode(string? value)

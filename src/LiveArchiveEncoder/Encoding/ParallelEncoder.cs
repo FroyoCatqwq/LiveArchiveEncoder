@@ -411,8 +411,12 @@ public static class ParallelEncoder
     /// 120 s. Bounded in seconds so ProcessRunner's millisecond budget stays
     /// finite as well.
     /// </summary>
-    private static int JoinTimeout(double span) =>
-        (int)Math.Clamp(Math.Max(120.0, span * 2.0), 120.0, int.MaxValue / 1000.0);
+    internal static int JoinTimeout(double span)
+    {
+        // v7.9.9.11: same non-finite guard as RealtimeEncoder.AudioTimeoutSeconds.
+        double seconds = double.IsFinite(span) ? Math.Max(120.0, span * 2.0) : 120.0;
+        return (int)Math.Clamp(seconds, 120.0, int.MaxValue / 1000.0);
+    }
 
     /// <summary>
     /// What the link has to sustain for the run to keep up: the source's own

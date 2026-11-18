@@ -771,43 +771,43 @@ public static class CliParser
                     fpsLevelsExplicit = true;
                     break;
                 case "--qv":
-                    if (!TryValue(out string qvRaw) || !int.TryParse(qvRaw, out int qvValue))
+                    if (!TryValue(out string qvRaw) || !TryInt(qvRaw, out int qvValue))
                         return (null, "--qv requires an integer");
                     qv = qvValue;
                     break;
                 case "--threads":
-                    if (!TryValue(out string threadsRaw) || !int.TryParse(threadsRaw, out threads))
+                    if (!TryValue(out string threadsRaw) || !TryInt(threadsRaw, out threads))
                         return (null, "--threads requires an integer");
                     break;
                 case "--buffer-frames":
-                    if (!TryValue(out string bufferRaw) || !int.TryParse(bufferRaw, out bufferFrames))
+                    if (!TryValue(out string bufferRaw) || !TryInt(bufferRaw, out bufferFrames))
                         return (null, "--buffer-frames requires an integer");
                     bufferFramesExplicit = true;
                     break;
                 case "--audio-kbps":
-                    if (!TryValue(out string kbpsRaw) || !int.TryParse(kbpsRaw, out audioKbps))
+                    if (!TryValue(out string kbpsRaw) || !TryInt(kbpsRaw, out audioKbps))
                         return (null, "--audio-kbps requires an integer");
                     audioKbpsExplicit = true;
                     break;
                 case "--audio-channels":
-                    if (!TryValue(out string chRaw) || !int.TryParse(chRaw, out audioChannels))
+                    if (!TryValue(out string chRaw) || !TryInt(chRaw, out audioChannels))
                         return (null, "--audio-channels requires an integer");
                     audioChannelsExplicit = true;
                     break;
                 case "--audio-rate":
-                    if (!TryValue(out string rateRaw) || !int.TryParse(rateRaw, out int rateValue))
+                    if (!TryValue(out string rateRaw) || !TryInt(rateRaw, out int rateValue))
                         return (null, "--audio-rate requires an integer");
                     audioRate = rateValue;
                     break;
                 // ---- v7.9: stream selection ----
                 case "--video-stream":
-                    if (!TryValue(out string vsRaw) || !int.TryParse(vsRaw, out int vsValue))
+                    if (!TryValue(out string vsRaw) || !TryInt(vsRaw, out int vsValue))
                         return (null, "--video-stream requires an integer (see --list-streams)");
                     if (vsValue < 0) return (null, "--video-stream must be 0 or greater");
                     videoStream = vsValue;
                     break;
                 case "--audio-stream":
-                    if (!TryValue(out string asRaw) || !int.TryParse(asRaw, out int asValue))
+                    if (!TryValue(out string asRaw) || !TryInt(asRaw, out int asValue))
                         return (null, "--audio-stream requires an integer (see --list-streams)");
                     if (asValue < 0) return (null, "--audio-stream must be 0 or greater");
                     audioStream = asValue;
@@ -821,7 +821,7 @@ public static class CliParser
                     subtitleFiles.Add(subRaw.Trim().Trim('"'));
                     break;
                 case "--subtitle-stream":
-                    if (!TryValue(out string ssRaw) || !int.TryParse(ssRaw, out int ssValue))
+                    if (!TryValue(out string ssRaw) || !TryInt(ssRaw, out int ssValue))
                         return (null, "--subtitle-stream requires an integer (see --list-streams)");
                     if (ssValue < 0) return (null, "--subtitle-stream must be 0 or greater");
                     subtitleStream = ssValue;
@@ -874,12 +874,12 @@ public static class CliParser
                     autoSubtitle = true;
                     break;
                 case "--width":
-                    if (!TryValue(out string wRaw) || !int.TryParse(wRaw, out width))
+                    if (!TryValue(out string wRaw) || !TryInt(wRaw, out width))
                         return (null, "--width requires an integer");
                     widthExplicit = true;
                     break;
                 case "--height":
-                    if (!TryValue(out string hRaw) || !int.TryParse(hRaw, out height))
+                    if (!TryValue(out string hRaw) || !TryInt(hRaw, out height))
                         return (null, "--height requires an integer");
                     heightExplicit = true;
                     break;
@@ -987,7 +987,7 @@ public static class CliParser
                     if (hwaccel.Length == 0) return (null, "--hwaccel requires a method name");
                     break;
                 case "--parallel":
-                    if (!TryValue(out string parRaw) || !int.TryParse(parRaw, out parallel))
+                    if (!TryValue(out string parRaw) || !TryInt(parRaw, out parallel))
                         return (null, "--parallel requires an integer");
                     if (parallel < 1) return (null, "--parallel must be at least 1");
                     if (parallel > Constants.MaxParallelShards)
@@ -1026,7 +1026,16 @@ public static class CliParser
                     // Bare means "guess this shell". Only a known shell name is
                     // consumed, so `--ffmpeg-env --quiet` cannot swallow --quiet.
                     ffmpegEnv = "auto";
-                    if (inlineValue is not null) ffmpegEnv = inlineValue.Trim().ToLowerInvariant();
+                    if (inlineValue is not null)
+                    {
+                        // v7.9.9.11: the inline form bypassed IsShell entirely,
+                        // so `--ffmpeg-env=turbo` produced a bash activation
+                        // line on Windows instead of a usage error.
+                        string inlineShell = inlineValue.Trim();
+                        if (!FFmpeg.ToolchainPath.IsShell(inlineShell))
+                            return (null, "--ffmpeg-env supports cmd, powershell, bash, zsh, sh or auto");
+                        ffmpegEnv = inlineShell.ToLowerInvariant();
+                    }
                     else if (i + 1 < args.Length && FFmpeg.ToolchainPath.IsShell(args[i + 1]))
                         ffmpegEnv = args[++i].Trim().ToLowerInvariant();
                     break;
@@ -1149,8 +1158,7 @@ public static class CliParser
                     // `name` is the option; TryValue may advance `i`.
                     string vbvOption = name;
                     if (!TryValue(out string vbvRaw)
-                        || !int.TryParse(vbvRaw, NumberStyles.Integer,
-                            CultureInfo.InvariantCulture, out int vbvValue)
+                        || !TryInt(vbvRaw, out int vbvValue)
                         || vbvValue <= 0 || vbvValue > 1_000_000)
                         return (null, $"{vbvOption} requires a positive kbps value");
                     if (vbvOption == "--recompress-maxrate") rcMaxrate = vbvValue;
@@ -1173,7 +1181,7 @@ public static class CliParser
                     recompressCodecs.Add(recompressCodecValue.Trim().ToLowerInvariant());
                     break;
                 case "--recompress-quality":
-                    if (!TryValue(out string rcqRaw) || !int.TryParse(rcqRaw, out int rcqValue))
+                    if (!TryValue(out string rcqRaw) || !TryInt(rcqRaw, out int rcqValue))
                         return (null, "--recompress-quality requires an integer");
                     if (rcqValue < 1 || rcqValue > 63)
                         return (null, "--recompress-quality must be between 1 and 63");
@@ -1185,13 +1193,13 @@ public static class CliParser
                     recompressAudioCodecs.Add(rcacValue.Trim().ToLowerInvariant());
                     break;
                 case "--recompress-audio-kbps":
-                    if (!TryValue(out string rcabRaw) || !int.TryParse(rcabRaw, out int rcabValue)
+                    if (!TryValue(out string rcabRaw) || !TryInt(rcabRaw, out int rcabValue)
                         || rcabValue < 0)
                         return (null, "--recompress-audio-kbps requires a non-negative integer");
                     recompressAudioKbpsList.Add(rcabValue);
                     break;
                 case "--recompress-video-kbps":
-                    if (!TryValue(out string rcvRaw) || !int.TryParse(rcvRaw, out int rcvValue)
+                    if (!TryValue(out string rcvRaw) || !TryInt(rcvRaw, out int rcvValue)
                         || rcvValue <= 0)
                         return (null, "--recompress-video-kbps requires a positive integer");
                     recompressVideoKbps.Add(rcvValue);
@@ -1652,6 +1660,12 @@ public static class CliParser
     private static bool TryDouble(string text, out double value) =>
         double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
         && double.IsFinite(value);
+
+    // v7.9.9.11: int options used CurrentCulture while every float and --emit-args
+    // value is invariant. One command could parse differently per machine, and
+    // --emit-args could write back text the parser then refused.
+    private static bool TryInt(string text, out int value) =>
+        int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
 
     /// <summary>
     /// A <c>--gh-proxy</c> value: "" for off, the normalised prefix otherwise.
