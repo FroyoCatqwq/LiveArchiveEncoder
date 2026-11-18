@@ -7,6 +7,41 @@ edition, [`CHANGELOG.md`](CHANGELOG.md) — entries there are kept verbatim, wit
 measurements and reasoning behind each decision. `⚠` marks a change a user can
 notice in an output, a default, a file name or a CLI contract.
 
+## v7.9.9.12 (2026-11-18) — visible tearing, hard cap, real encoder checks
+
+Seven changes; still the v7.9 line, no v8 work included.
+
+* **Tearing**: the CUI menu edited `Tearing` but never passed it into
+  `RealtimeOptions`, so interactive encodes were always tear-free. Fixed. A new
+  OpenCV e2e encodes a moving bar and measures the top/bottom centroid offset:
+  ~5–6 px on almost every frame when tearing is on, 0 when it is off. The old
+  suite only asserted that `tblend` appeared in the argv string.
+* **`--max-video-kbps`**: a global hard ceiling for the video stream, also in
+  CUI row 40 and the settings file. Applied in the single shared
+  `VideoQualityArgs` path so preflight and the real encode agree. Measured on a
+  noisy source: 1605 kbps with a 2000 kbps soft target, 178 kbps with a 150 kbps
+  global cap. 0 (default) means unlimited.
+* **Encoder verification**: `ffmpeg -encoders` is only a compile-time list.
+  Probing now rejects "Unknown encoder" replies and runs one real frame before
+  calling an encoder usable (`EncoderCaps.CanEncode`). CUI marks unusable rows
+  `[!]`; both front ends reject them at selection time.
+* **FFmpeg discovery**: any build installed by LAE now outranks the default
+  btbn candidates and PATH; `--ffmpeg-source path` remains an explicit opt-out.
+* **CUI state**: changing the base fps clears the ladder instead of restoring
+  `13,12,10,8,5`; direct-compression mode clears it too. Changing the input
+  file resets the whole subtitle configuration so old sidecars/stream indices
+  cannot leak into the new source.
+* **`--dynamic-fps`** (CUI row 41): applies the fps ladder to every encoder,
+  including fixed-quantiser ones, and jumps straight to the target rung so the
+  frame repetition is actually visible. Measured MJPEG: 9 → 26 repeated slots
+  out of 56. The controller trigger is the tighter of `Limit` and the global
+  cap. Off by default.
+
+Tests: `V79912Tests` (6 unit) and `tests/e2e/test_v79912.py` (3 e2e). Unit suite
+**781 passed**; both e2e phases green.
+
+---
+
 ## v7.9.9.11 (2026-11-18) — full-project audit bugfixes
 
 A maintenance release for the v7.9 line. **Default encoding parameters and output

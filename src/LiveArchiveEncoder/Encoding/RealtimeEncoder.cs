@@ -299,7 +299,8 @@ public static class RealtimeEncoder
                 transportFmt: transportFmt,
                 openH264Rc: o.OpenH264Rc,
                 openH264SkipFrames: o.OpenH264SkipFrames,
-                extraEncoderArgs: o.ExtraEncoderArgs);
+                extraEncoderArgs: o.ExtraEncoderArgs,
+                maxVideoKbps: o.MaxVideoKbps);
         }
 
         // A hardware method is only ever used after it has decoded a frame here,
@@ -846,7 +847,7 @@ public static class RealtimeEncoder
         cmd.AddRange(ArgsBuilder.VideoQualityArgs(
             o.Encoder.Name, o.Quality, o.LimitKbps, o.OpenH264Rc, o.OpenH264SkipFrames,
             o.Encoder.Caps is null || o.Encoder.Caps.HasRcMode,
-            ArgsBuilder.PinsBitrate(o.ExtraEncoderArgs)));
+            ArgsBuilder.PinsBitrate(o.ExtraEncoderArgs), o.MaxVideoKbps));
         // v7.9.6: pin the format on the encoder side too when the user named
         // one. The pipe already carries --pix_fmt, but without this the encoder
         // is free to hand the muxer its own default (measured: libx264 given
@@ -1231,14 +1232,18 @@ public static class RealtimeEncoder
                 double totalRate = monitor.RateKbps();
                 double videoRate = Math.Max(0.0, totalRate - (hasAudio ? o.AudioKbps : 0.0));
 
-                // v7.9.8.11.1: with a calibrated quantiser an intra-only encoder
-                // is already at its reachable bitrate floor. Dropping fps cannot
-                // shrink a JPEG frame, it only makes the picture stutter, and the
-                // early (small-window) rate estimate used to send the ladder to
-                // its last rung with no way back. Keep the ladder out unless the
-                // estimate is wildly off -- three times the ceiling, which also
-                // covers the first second's 2-3x spike from a tiny sample window.
-                if (IntraQuality.IsIntraOnly(o.Encoder.Name) && videoRate < o.LimitKbps * 3.0)
+                // v7.9.9.12: the global hard cap is also the controller's
+                // trigger when it is tighter than the soft Limit.
+                double controlLimit = o.MaxVideoKbps > 0
+                    ? Math.Min(o.LimitKbps, o.MaxVideoKbps) : o.LimitKbps;
+                bool intra = IntraQuality.IsIntraOnly(o.Encoder.Name);
+                // v7.9.9.12: --dynamic-fps opts fixed-quantiser encoders into the
+                // same ladder everybody else uses. Without it the historical
+                // rule stays: a calibrated JPEG is at its floor and repeating
+                // frames only makes it stutter.
+                bool skipIntra = intra && !o.DynamicFps;
+
+                if (skipIntra && videoRate < controlLimit * 3.0)
                 {
                     // Also undo any rung the first, tiny-window estimate already
                     // took: the calibrated quantiser owns the bitrate now.
@@ -1246,34 +1251,33 @@ public static class RealtimeEncoder
                     highSince = null;
                     lowSince = null;
                 }
-                else if (videoRate >= o.LimitKbps)
+                else if (videoRate >= controlLimit)
                 {
                     lowSince = null;
                     highSince ??= now;
-                    // v7.9.8.11.1: for an intra-only encoder bitrate is
-                    // bytes/frame * fps. Pick the shallowest rung that can
-                    // actually fit the limit instead of walking to the deepest;
-                    // when no rung fits, stay put (RungFor returns 0).
-                    int target = IntraQuality.IsIntraOnly(o.Encoder.Name)
+                    int target = skipIntra
                         ? IntraQuality.RungFor(
                             videoRate * 1000.0 / 8.0 / Math.Max(0.1, effectiveFps),
-                            levels, o.LimitKbps)
+                            levels, controlLimit)
                         : EncoderMath.TargetLevel(videoRate, ladder);
                     if (target > currentLevel)
                     {
-                        double hold = videoRate >= o.LimitKbps * 1.25 ? 0.18 : 0.30;
-                        if (now - highSince.Value >= hold) currentLevel++;
+                        double hold = videoRate >= controlLimit * 1.25 ? 0.18 : 0.30;
+                        if (now - highSince.Value >= hold)
+                            currentLevel = o.DynamicFps ? target : currentLevel + 1;
                     }
-                    else if (target < currentLevel && videoRate < o.LimitKbps * 1.10)
+                    else if (target < currentLevel && videoRate < controlLimit * 1.10)
                     {
-                        if (now - highSince.Value >= 0.80) currentLevel--;
+                        if (now - highSince.Value >= 0.80)
+                            currentLevel = o.DynamicFps ? target : currentLevel - 1;
                     }
                 }
                 else if (currentLevel > 0 && videoRate <= ladder[currentLevel].RiseBelowKbps)
                 {
                     highSince = null;
                     lowSince ??= now;
-                    if (now - lowSince.Value >= 0.75) currentLevel--;
+                    if (now - lowSince.Value >= 0.75)
+                        currentLevel = o.DynamicFps ? 0 : currentLevel - 1;
                 }
                 else
                 {
@@ -1519,7 +1523,7 @@ public static class RealtimeEncoder
             videoCmd.AddRange(ArgsBuilder.VideoQualityArgs(
                 o.Encoder.Name, o.Quality, o.LimitKbps, o.OpenH264Rc, o.OpenH264SkipFrames,
                 o.Encoder.Caps is null || o.Encoder.Caps.HasRcMode,
-            ArgsBuilder.PinsBitrate(o.ExtraEncoderArgs)));
+                ArgsBuilder.PinsBitrate(o.ExtraEncoderArgs), o.MaxVideoKbps));
             // v7.9.8.11.1: the probe must carry the same picture flags as the
             // real encode, or MJPEG fails its full-range check here and the
             // split route silently falls back to inline.

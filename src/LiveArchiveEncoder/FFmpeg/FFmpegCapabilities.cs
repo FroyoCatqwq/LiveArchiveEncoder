@@ -190,17 +190,65 @@ public static partial class FFmpegCapabilities
     public static EncoderCaps ProbeEncoderCaps(string ffmpeg, EncoderInfo encoder)
     {
         CaptureResult p = ProcessRunner.Run([ffmpeg, "-hide_banner", "-h", $"encoder={encoder.Name}"], 20);
-        if (p.ExitCode != 0)
+        string help = p.Stdout + "\n" + p.Stderr;
+        // v7.9.9.12: some wrappers answer "unknown encoder" with exit code 0.
+        // Do not trust a zero exit alone -- the filter probe already learned
+        // this the hard way.
+        if (p.ExitCode != 0 || AnnouncesUnknownEncoder(help, encoder.Name))
         {
             throw new InvalidOperationException(
-                p.Stderr.Trim() is { Length: > 0 } err ? err : $"cannot query encoder {encoder.Name}");
+                help.Trim() is { Length: > 0 } err ? err : $"cannot query encoder {encoder.Name}");
         }
 
         // v7.9.9.11: some builds and wrappers write `-h encoder=...` to stderr.
         // VerifyNamedFilters and BuildProfileStore.Sweep already inspect both
         // streams; parsing only stdout silently lost OpenH264's -rc_mode and
         // the supported pixel-format list on those builds.
-        return ParseEncoderText(p.Stdout + "\n" + p.Stderr, encoder);
+        EncoderCaps caps = ParseEncoderText(help, encoder);
+        return caps with { CanEncode = CanActuallyEncode(ffmpeg, encoder.Name, caps.SupportedPixFmts) };
+    }
+
+    private static bool AnnouncesUnknownEncoder(string text, string name) =>
+        text.Contains($"Unknown encoder '{name}'", StringComparison.OrdinalIgnoreCase)
+        || text.Contains($"Encoder not found: {name}", StringComparison.OrdinalIgnoreCase)
+        // FFmpeg 9 answers `Codec 'libopenh264' is not recognized by FFmpeg.`
+        // with exit code 0 -- the exact trap this check exists for.
+        || text.Contains($"Codec '{name}' is not recognized", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// v7.9.9.12: `ffmpeg -encoders` is a compile-time list; a wrapper such as
+    /// yt-dlp's can omit an encoder that the CUI still offers from an older
+    /// cached profile. Encode one real frame and only then call it supported.
+    /// </summary>
+    public static bool CanActuallyEncode(string ffmpeg, string name, IReadOnlyList<string>? pixFormats = null)
+    {
+        // CIF/25 fps is the one geometry every classic encoder in the catalog
+        // accepts: MPEG-1 refuses 12 fps, H.261/H.263 refuse 256x192. A probe
+        // must not reject an encoder the real preflight can open, so it uses
+        // the same shape Preflight.Video uses (testsrc2, three frames).
+        var formats = new List<string> { "", "yuv420p" };
+        if (pixFormats is not null)
+        {
+            foreach (string fmt in pixFormats.Take(4))
+                if (fmt.Length > 0 && !formats.Contains(fmt, StringComparer.Ordinal)) formats.Add(fmt);
+        }
+        foreach (string fmt in formats)
+        {
+            var args = new List<string>
+            {
+                ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc2=size=352x288:rate=25:duration=0.3",
+                "-frames:v", "3", "-c:v", name,
+            };
+            if (fmt.Length > 0) args.AddRange(["-pix_fmt", fmt]);
+            args.AddRange(["-f", "null", "-"]);
+            try
+            {
+                if (ProcessRunner.Run(args, 30).ExitCode == 0) return true;
+            }
+            catch (Exception) { /* this format did not work; try the next */ }
+        }
+        return false;
     }
 
     internal static EncoderCaps ParseEncoderText(string text, EncoderInfo encoder)

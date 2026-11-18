@@ -210,6 +210,12 @@ public sealed class UserConfig
     /// <summary>v7.9.9.10: horizontal / random / empty (off).</summary>
     public string Tearing { get; set; } = "";
 
+    /// <summary>v7.9.9.12: absolute video bitrate ceiling in kbps; 0 = unlimited.</summary>
+    public double MaxVideoKbps { get; set; }
+
+    /// <summary>v7.9.9.12: apply the fps ladder to every encoder family.</summary>
+    public bool DynamicFps { get; set; }
+
     /// <summary>v7.9.9.2: most-recently-used input/output directories (newest first).</summary>
     public List<string> RecentDirectories { get; set; } = [];
 
@@ -564,6 +570,8 @@ public static class ConfigStore
         RealTime = c.RealTime,
         ExtraEncoderArgs = c.ExtraEncoderArgs,
         Tearing = c.Tearing,
+        MaxVideoKbps = c.MaxVideoKbps,
+        DynamicFps = c.DynamicFps,
         RecentDirectories = [.. c.RecentDirectories],
         EraAspect = c.EraAspect,
         H264Impl = c.H264Impl,
@@ -742,6 +750,10 @@ public static class ConfigStore
         c.RealTime = stored.RealTime;
         c.ExtraEncoderArgs = stored.ExtraEncoderArgs ?? "";
         c.Tearing = stored.Tearing ?? "";
+        // v7.9.9.12: a negative/invalid cap from a hand-edited file means off.
+        c.MaxVideoKbps = double.IsFinite(stored.MaxVideoKbps) && stored.MaxVideoKbps >= 0
+            ? stored.MaxVideoKbps : 0;
+        c.DynamicFps = stored.DynamicFps;
         c.RecentDirectories = [.. stored.RecentDirectories ?? []];
         c.EraAspect = stored.EraAspect;
         c.H264Impl = stored.H264Impl;

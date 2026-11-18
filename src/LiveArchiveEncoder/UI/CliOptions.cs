@@ -467,6 +467,12 @@ public sealed class CliOptions
     /// </summary>
     public string? Tearing { get; init; }
 
+    /// <summary>v7.9.9.12: hard video bitrate ceiling (kbps), null = keep config.</summary>
+    public double? MaxVideoKbps { get; init; }
+
+    /// <summary>v7.9.9.12: enable the fps ladder for every encoder family.</summary>
+    public bool? DynamicFps { get; init; }
+
     /// <summary>
     /// v7.9.6.3: the frame shape an era preset should be captured and delivered
     /// in -- <c>source</c> (the preset's own), <c>4:3</c> or <c>16:9</c>. Only
@@ -645,6 +651,8 @@ public static class CliParser
         string? era = null;
         string? discShorthand = null;
         string? tearing = null;
+        double? maxVideoKbps = null;
+        bool? dynamicFps = null;
         string? eraAspect = null;
         string? h264 = null;
         string? netTest = null;
@@ -1253,6 +1261,16 @@ public static class CliParser
                         return (null, "--tearing must be horizontal, random, off");
                     break;
 
+                // v7.9.9.12: hard video ceiling and the all-encoder fps ladder.
+                case "--max-video-kbps":
+                    if (!TryValue(out string capRaw)
+                        || !TryDouble(capRaw, out double capValue) || capValue < 0)
+                        return (null, "--max-video-kbps requires a non-negative number (0 = no cap)");
+                    maxVideoKbps = capValue;
+                    break;
+                case "--dynamic-fps": dynamicFps = true; break;
+                case "--no-dynamic-fps": dynamicFps = false; break;
+
                 // v7.9.6.3: the shape a preset is captured and delivered in.
                 case "--era-aspect":
                     if (!TryValue(out string aspectRaw)) return (null, "--era-aspect requires a value");
@@ -1445,6 +1463,8 @@ public static class CliParser
             // field --era writes, so downstream code has one path.
             Era = discShorthand ?? era,
             Tearing = tearing,
+            MaxVideoKbps = maxVideoKbps,
+            DynamicFps = dynamicFps,
 
             EraAspect = eraAspect,
             H264Impl = h264,
@@ -1624,6 +1644,11 @@ public static class CliParser
             ("--tearing", "horizontal|random|off",
                 "reproduce a dropped vertical sync in the live pass: the top of the "
                 + "picture lags one frame behind the bottom (off by default)"),
+            ("--max-video-kbps", "KBPS",
+                "absolute video bitrate ceiling; 0 disables the global cap (default 0)"),
+            ("--dynamic-fps", "",
+                "let the frame-rate ladder repeat frames for every encoder, including "
+                + "fixed-quantiser ones (off by default)"),
             ("--era-aspect", "4:3|16:9|source",
                 "capture and deliver a preset in this frame shape; only shapes the "
                 + "selected encoder can encode are accepted (default: source)"),

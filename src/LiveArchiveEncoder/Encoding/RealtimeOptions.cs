@@ -47,6 +47,12 @@ public sealed record RealtimeOptions
     /// </summary>
     public string Tearing { get; init; } = "";
 
+    /// <summary>v7.9.9.12: absolute video-stream ceiling in kbps; 0 = no cap.</summary>
+    public double MaxVideoKbps { get; init; }
+
+    /// <summary>v7.9.9.12: run the fps ladder for fixed-quantiser encoders too.</summary>
+    public bool DynamicFps { get; init; }
+
     /// <summary>
     /// Per-rung bitrate thresholds, keyed by FPS. Empty derives them from
     /// <see cref="LimitKbps"/>/<see cref="RecoverKbps"/>, which is the v7.6 rule.

@@ -178,9 +178,17 @@ public static partial class Cui
                     FileInfo? selected = InputFileMenu();
                     if (selected is not null)
                     {
+                        bool changed = !string.Equals(
+                            c.InputPath?.FullName, selected.FullName, StringComparison.OrdinalIgnoreCase);
                         c.InputPath = selected;
                         if (c.Encoder is not null && c.OutputIsAuto)
                             c.OutputPath = DefaultOutput(selected, c.Encoder);
+                        // v7.9.9.12: a subtitle picked for the previous source is
+                        // meaningless here -- sidecar names and stream indices are
+                        // per-file. Leaving them behind silently burns/embeds the
+                        // wrong thing (or fails deep in preflight).
+                        if (changed)
+                            c.Subtitles = new SubtitleConfig();
                         // v7.9.6.3: a network input is measured when the run
                         // starts; the menu says so instead of cancelling the
                         // user's choice.
@@ -1377,6 +1385,7 @@ public static partial class Cui
             string pix = item.Caps is { SupportedPixFmts.Count: > 0 } caps
                 ? string.Join(",", caps.SupportedPixFmts) : L.T("value.notprobed");
             string marker = c.Encoder is not null && item.Name == c.Encoder.Name ? " <" : "";
+            if (item.Caps is { CanEncode: false }) marker += " [!]";
             Console.WriteLine($" {i + 1,3}. {item.Name,-14} [{item.Family,-18}] {item.Description}{marker}");
             Console.WriteLine($"       {L.T("encoder.pixfmts")}: {pix}");
         }
@@ -1391,7 +1400,12 @@ public static partial class Cui
                 throw new ArgumentException(L.T("encoder.outofrange"));
 
             EncoderInfo chosen = encoders[idx - 1];
-            chosen.Caps ??= FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, chosen);
+            // v7.9.9.12: `ffmpeg -encoders` is only a compile-time list. Probe
+            // (including one real frame) on every selection so a wrapper build
+            // missing an encoder is rejected here, not 20 minutes into preflight.
+            chosen.Caps = FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, chosen);
+            if (!chosen.Caps.CanEncode)
+                throw new ArgumentException(L.T("encoder.cannotencode"));
 
             // v7.8: a container the new encoder cannot write is dropped rather
             // than carried over -- otherwise selecting mpeg1video after libx264
@@ -1674,6 +1688,10 @@ public static partial class Cui
                 c.ExtraEncoderArgs.Length == 0 ? L.T("value.none") : c.ExtraEncoderArgs);
             Row(39, L.T("param.tearing"),
                 c.Tearing.Length == 0 ? L.T("value.none") : c.Tearing);
+            Row(40, L.T("param.maxvideokbps"),
+                c.MaxVideoKbps <= 0 ? L.T("value.none") : $"{c.MaxVideoKbps:G6}");
+            Row(41, L.T("param.dynamicfps"),
+                c.DynamicFps ? L.T("param.dynamicfps.on") : L.T("param.dynamicfps.off"));
 
             // v7.9.9.3: the live encoder's VBV dials are visible too, not just
             // reachable by typing a raw string into 35. They share the same
@@ -1715,10 +1733,14 @@ public static partial class Cui
                             c.Fps = fps;
                             if (!fpsExact) Console.WriteLine(L.T("param.fpsadjusted", $"{c.Fps:G6}"));
                         }
-                        c.FpsLevels = EncoderMath.SelectLevels(c.Fps, Constants.DefaultFpsLevels);
-                        // A rung above the new base rate cannot be reached, so
-                        // its thresholds are dropped along with it.
-                        c.FpsLevelKbps = EncoderMath.PruneRungs(c.FpsLevelKbps, c.FpsLevels);
+                        // v7.9.9.12: changing the base frame rate invalidates the
+                        // old ladder (13,12,10,... belongs to 13 fps). Present a
+                        // clean single rung and let the user build a new ladder
+                        // in row 5 if they want one -- silently keeping a ladder
+                        // for a different base rate is what made frame dropping
+                        // look broken.
+                        c.FpsLevels = [c.Fps];
+                        c.FpsLevelKbps = [];
                         break;
                     case "5":
                         string levelsRaw = ReadRaw(L.T("param.prompt.levels",
@@ -1755,7 +1777,15 @@ public static partial class Cui
                     case "34":
                         // v7.9.9.1: direct compression instead of a live
                         // simulation. Persisted, so the choice survives a restart.
+                        // v7.9.9.12: a direct encode has no wall-clock mapping,
+                        // so it carries no ladder at all -- clear it on the way
+                        // in instead of silently ignoring it at run time.
                         c.RealTime = !c.RealTime;
+                        if (!c.RealTime)
+                        {
+                            c.FpsLevels = [c.Fps];
+                            c.FpsLevelKbps = [];
+                        }
                         Console.WriteLine(c.RealTime
                             ? L.T("param.realtime.on") : L.T("param.realtime.off"));
                         break;
@@ -1802,6 +1832,17 @@ public static partial class Cui
                             c.Tearing.Length == 0 ? L.T("value.none") : c.Tearing));
                         break;
                     }
+                    case "40":
+                        c.MaxVideoKbps = ReadDouble(
+                            L.T("param.prompt.maxvideokbps", $"{c.MaxVideoKbps:G6}"),
+                            c.MaxVideoKbps);
+                        if (c.MaxVideoKbps < 0) c.MaxVideoKbps = 0;
+                        break;
+                    case "41":
+                        c.DynamicFps = !c.DynamicFps;
+                        Console.WriteLine(c.DynamicFps
+                            ? L.T("param.dynamicfps.on") : L.T("param.dynamicfps.off"));
+                        break;
                     // v7.9.9.9: the disc targets moved into the era table (menu
                     // 14), so there is no separate row here any more.
                     case "7":
@@ -2447,6 +2488,12 @@ public static partial class Cui
                 // bitrate window, so it runs a single rung.
                 FpsLevels = c.RealTime ? c.FpsLevels : [c.Fps],
                 RealTime = c.RealTime,
+                // v7.9.9.12: the menu has edited this since v7.9.9.10 but the
+                // initialiser never handed it to the encoder -- CUI encodes
+                // were always tear-free. Now both front ends agree.
+                Tearing = c.Tearing,
+                MaxVideoKbps = c.MaxVideoKbps,
+                DynamicFps = c.DynamicFps,
                 ExtraEncoderArgs = c.ExtraEncoderArgs,
                 FpsLevelKbps = c.FpsLevelKbps,
                 Quality = c.Qv,

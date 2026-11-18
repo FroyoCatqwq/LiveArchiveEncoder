@@ -63,7 +63,8 @@ public static class Preflight
         // v7.9.9.7: --extra-encoder-args is part of the real encode command.
         // A trial without it proved a DIFFERENT command (a -maxrate without
         // -bufsize passed the trial and then failed in avcodec_open2 mid-run).
-        string extraEncoderArgs = "")
+        string extraEncoderArgs = "",
+        double maxVideoKbps = 0)
     {
         string tempDir = Path.Combine(Path.GetTempPath(),
             "live_archive_preflight_" + Guid.NewGuid().ToString("N"));
@@ -141,7 +142,7 @@ public static class Preflight
                 // the rare build that dropped it, not to make every caller
                 // prove it ran one.
                 encoder.Caps is null || encoder.Caps.HasRcMode,
-                ArgsBuilder.PinsBitrate(extraEncoderArgs)));
+                ArgsBuilder.PinsBitrate(extraEncoderArgs), maxVideoKbps));
             // v7.9.6: an explicit request is also pinned on the encoder side, so
             // the output really keeps it instead of being quietly retuned to the
             // encoder's own default.

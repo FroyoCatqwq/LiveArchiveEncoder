@@ -42,9 +42,15 @@ public static class ArgsBuilder
     public static List<string> VideoQualityArgs(
         string name, int quality, double? limitKbps = null,
         string? rcMode = null, bool allowSkipFrames = false, bool supportsRcMode = true,
-        bool preferBitrate = false)
+        bool preferBitrate = false, double maxVideoKbps = 0)
     {
         double ceiling = limitKbps is { } kbps && kbps > 0 ? kbps : FallbackCeilingKbps;
+        // v7.9.9.12: a global hard ceiling wins over the per-encoder target.
+        // It is enforced here, in the one function every command builder uses
+        // (real encode, preflight and the split-audio video pass), so the
+        // preflight cannot validate a command that the encode then clamps.
+        if (double.IsFinite(maxVideoKbps) && maxVideoKbps > 0)
+            ceiling = Math.Min(ceiling, maxVideoKbps);
 
         switch (EncoderMath.ScaleOf(name))
         {
@@ -80,9 +86,21 @@ public static class ArgsBuilder
                 // the bitrate form, which is what its preset actually asked
                 // for. This is why --era dvd used to encode at 2.1 Mbps while
                 // its preset said 6000.
-                return preferBitrate
-                    ? ["-b:v", $"{ceiling.ToString("G6", CultureInfo.InvariantCulture)}k"]
-                    : ["-q:v", quality.ToString(CultureInfo.InvariantCulture)];
+                if (preferBitrate)
+                    return ["-b:v", $"{ceiling.ToString("G6", CultureInfo.InvariantCulture)}k"];
+                var qv = new List<string> { "-q:v", quality.ToString(CultureInfo.InvariantCulture) };
+                // v7.9.9.12: fixed quantiser encoders used to ignore the global
+                // ceiling entirely. A VBV pair makes the cap explicit; encoders
+                // that cannot honour it say so in preflight instead of silently
+                // overshooting.
+                if (double.IsFinite(maxVideoKbps) && maxVideoKbps > 0)
+                {
+                    qv.AddRange([
+                        "-maxrate", $"{maxVideoKbps.ToString("G6", CultureInfo.InvariantCulture)}k",
+                        "-bufsize", $"{(maxVideoKbps * 2).ToString("G6", CultureInfo.InvariantCulture)}k",
+                    ]);
+                }
+                return qv;
         }
     }
 

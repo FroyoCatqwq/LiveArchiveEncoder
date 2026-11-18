@@ -61,7 +61,7 @@ public sealed record SourceStream(
     int Index, string Type, string? Codec, string? Language, string? Title, StreamInfo? Video = null);
 
 /// <summary>Capabilities reported by `ffmpeg -h encoder=NAME`.</summary>
-public sealed class EncoderCaps
+public sealed record EncoderCaps
 {
     public string Name { get; init; } = "";
     public string Description { get; init; } = "";
@@ -70,6 +70,14 @@ public sealed class EncoderCaps
     public List<double> SupportedRates { get; init; } = [];
     public bool HasCrf { get; init; }
     public bool HasQscale { get; init; }
+
+    /// <summary>
+    /// v7.9.9.12: true when a real one-frame encode with this binary succeeded.
+    /// `ffmpeg -encoders` lists what was compiled in, not what can actually run
+    /// on this machine (a build can list an encoder whose library is missing).
+    /// Defaults to true so older cached profiles stay usable.
+    /// </summary>
+    public bool CanEncode { get; init; } = true;
 
     /// <summary>
     /// v7.9.8.8: true when <c>ffmpeg -h encoder=NAME</c> lists an
@@ -365,6 +373,20 @@ public sealed class Config
 
     /// <summary>v7.9.9.10: reproduce a dropped vsync -- horizontal / random, empty = off.</summary>
     public string Tearing { get; set; } = "";
+
+    /// <summary>
+    /// v7.9.9.12: absolute ceiling for the *video* stream in kbps. 0 means no
+    /// global cap (the per-encoder Limit still applies). Unlike LimitKbps this
+    /// is a hard FFmpeg-level bound, not a controller trigger.
+    /// </summary>
+    public double MaxVideoKbps { get; set; }
+
+    /// <summary>
+    /// v7.9.9.12: let the fps ladder drive frame repetition for every encoder,
+    /// including the fixed-quantiser (intra-only) family that used to be pinned
+    /// to one rung. Off by default so existing runs are unchanged.
+    /// </summary>
+    public bool DynamicFps { get; set; }
 
     /// <summary>v7.9.9.2: most-recently-used input/output directories (newest first).</summary>
     public List<string> RecentDirectories { get; set; } = [];

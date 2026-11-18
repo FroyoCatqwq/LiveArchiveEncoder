@@ -66,6 +66,20 @@ public static class Toolchain
     /// <summary>The ffmpeg executable a source would contribute, or null.</summary>
     public static string? FFmpegFor(string id) => Exe(id, "ffmpeg");
 
+    /// <summary>
+    /// Cheapest possible "is anything installed" check: no -version subprocess.
+    /// v7.9.9.12: startup discovery uses this so a managed build can outrank the
+    /// default btbn candidates without paying for a version probe on every run.
+    /// </summary>
+    public static (string Id, string FFmpeg)? FirstInstalled(string? preferredId = null)
+    {
+        if (preferredId.HasText && FFmpegFor(preferredId) is { } preferred)
+            return (preferredId, preferred);
+        foreach (FfmpegDist dist in FfmpegCatalog.Available)
+            if (FFmpegFor(dist.Id) is { } exe) return (dist.Id, exe);
+        return null;
+    }
+
     public static List<InstalledToolchain> Installed()
     {
         var list = new List<InstalledToolchain>();

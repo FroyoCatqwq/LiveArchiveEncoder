@@ -13,26 +13,24 @@ public static partial class FFmpegDiscovery
     /// <summary>
     /// Pick the ffmpeg to use.
     ///
-    /// Order: an explicit <c>--ffmpeg</c> path, then a build this tool installed
-    /// itself under <c>%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg</c>, then whatever
-    /// sits next to the executable, then PATH. The managed install outranks PATH
-    /// because a user who asked for a specific distribution expects that one to
-    /// win over a stray system copy.
+    /// Order: an explicit <c>--ffmpeg</c> path, then <b>any</b> build this tool
+    /// installed itself under <c>%LOCALAPPDATA%\LiveArchiveEncoder\ffmpeg</c>,
+    /// then whatever sits next to the executable, then PATH.
+    ///
+    /// v7.9.9.12: an installed build now wins even on an untouched configuration.
+    /// The old rule only honoured the configured source id, so a machine that had
+    /// installed (say) ytdlp still silently used the default btbn candidate;
+    /// "path" remains an explicit opt-out and keeps the previous behaviour.
     /// </summary>
     public static string FindFFmpeg(string? userValue, string? sourceId = null)
     {
         if (userValue.HasText) return ResolveExecutable(userValue);
 
-        // A managed build only wins when it was explicitly selected. An
-        // untouched configuration must keep using the system FFmpeg: silently
-        // switching every scripted run to a build the user installed on a whim
-        // would change output nobody asked to change.
-        if (sourceId.HasText
-            && !string.Equals(sourceId, "path", StringComparison.OrdinalIgnoreCase)
-            && Toolchain.FFmpegFor(sourceId) is { Length: > 0 } managed)
+        if (!string.Equals(sourceId, "path", StringComparison.OrdinalIgnoreCase)
+            && Toolchain.FirstInstalled(sourceId) is { } managed)
         {
-            IsBtbn = string.Equals(sourceId, "btbn", StringComparison.OrdinalIgnoreCase);
-            return managed;
+            IsBtbn = string.Equals(managed.Id, "btbn", StringComparison.OrdinalIgnoreCase);
+            return managed.FFmpeg;
         }
 
         foreach (string path in CandidateBtbnFFmpegPaths())

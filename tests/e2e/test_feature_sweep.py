@@ -66,6 +66,15 @@ def test_encoder_produces_a_valid_file(exe, src, workdir, encoder):
     proc = run([str(exe), "--encoder", encoder, "--end", END,
                 "--ffmpeg-source", "path", str(work)])
 
+    # v7.9.9.12: the completion catalog is static, but a particular FFmpeg build
+    # may not be able to run every encoder in it. The product now rejects those
+    # at argument time with a clear message -- that is the desired behaviour,
+    # not a sweep failure.
+    unusable = ("cannot encode with this FFmpeg build" in proc.stderr
+                or "is not detected as a legacy/classic video encoder" in proc.stderr)
+    if proc.returncode == 2 and unusable:
+        pytest.skip(f"encoder not usable with this FFmpeg build: {encoder}")
+
     assert proc.returncode == 0, (
         f"exit={proc.returncode}: {(proc.stderr.strip().splitlines() or [''])[-1][:200]}")
 

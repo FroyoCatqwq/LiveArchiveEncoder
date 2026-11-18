@@ -124,7 +124,16 @@ public static class Cli
                 $"ERROR: {wantedEncoder} is not detected as a legacy/classic video encoder.");
             return 2;
         }
-        encoder.Caps = caps.EncoderCaps(encoder);
+        encoder.Caps = caps.EncoderCaps(encoder)
+            ?? FFmpegCapabilities.ProbeEncoderCaps(ffmpeg, encoder);
+        // v7.9.9.12: an encoder listed by `-encoders` can still be unusable in
+        // this build (missing shared library, wrapper without the codec). One
+        // real frame decides it, and the user hears about it at argument time.
+        if (!encoder.Caps.CanEncode)
+        {
+            Console.Error.WriteLine($"ERROR: {encoder.Name} cannot encode with this FFmpeg build.");
+            return 2;
+        }
 
         // v7.8: the container is part of the encoder selection, so it is
         // applied before anything reads FormatName -- the output extension
@@ -816,6 +825,9 @@ public static class Cli
             RealTime = !args.NoRealtime && config.RealTime,
             ExtraEncoderArgs = extraArgs,
             Tearing = args.Tearing ?? config.Tearing ?? "",
+            // v7.9.9.12: an explicit CLI cap wins; otherwise the stored one.
+            MaxVideoKbps = args.MaxVideoKbps ?? config.MaxVideoKbps,
+            DynamicFps = args.DynamicFps ?? config.DynamicFps,
             FpsLevelKbps = disc is null ? levelKbps : [],
             Quality = config.Qv,
             QualityExplicit = args.Qv.HasValue,
