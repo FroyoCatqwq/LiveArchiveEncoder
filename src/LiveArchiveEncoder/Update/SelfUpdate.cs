@@ -128,7 +128,14 @@ public static class SelfUpdate
     public static string InstallDirectory()
     {
         string? exe = Environment.ProcessPath;
-        if (exe.HasText)
+        // v7.9.9.13: `dotnet LiveArchiveEncoder.dll --update` reports the
+        // dotnet host as ProcessPath. Updating there would write into the
+        // shared runtime directory (or fail on permissions). The app base is
+        // the install directory in that case.
+        string? host = exe is null ? null : Path.GetFileName(exe);
+        if (exe.HasText
+            && !string.Equals(host, "dotnet", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(host, "dotnet.exe", StringComparison.OrdinalIgnoreCase))
         {
             string? dir = Path.GetDirectoryName(exe);
             if (dir.HasText) return dir!;

@@ -154,6 +154,7 @@
     <File Path="src/LiveArchiveEncoder/UI/Cli.cs" />
     <File Path="src/LiveArchiveEncoder/UI/CliArgs.cs" />
     <File Path="src/LiveArchiveEncoder/UI/CliOptions.cs" />
+    <File Path="src/LiveArchiveEncoder/UI/CliValueParsers.cs" />
     <File Path="src/LiveArchiveEncoder/UI/Completion.cs" />
     <File Path="src/LiveArchiveEncoder/UI/CpuInfo.cs" />
     <File Path="src/LiveArchiveEncoder/UI/Cui.cs" />
@@ -230,6 +231,7 @@
     <File Path="tests/LiveArchiveEncoder.Tests/V79910Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V79911Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V79912Tests.cs" />
+    <File Path="tests/LiveArchiveEncoder.Tests/V79913Tests.cs" />
     <File Path="tests/LiveArchiveEncoder.Tests/V799Tests.cs" />
   </Folder>
   <Folder Name="/tests/e2e/">

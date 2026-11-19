@@ -5,7 +5,7 @@
 The operation manual. For migration details and measurements see
 [`../README.md`](../README.md) and [`test-report-v7.en.md`](test-report-v7.en.md);
 per-version history is in [`CHANGELOG.en.md`](CHANGELOG.en.md); the index of every
-document (both languages) is in [`README.md`](README.md).
+document (both languages) is in [`README.en.md`](README.en.md).
 
 > **In one sentence**: take a modern video and re-encode it the way a live recording
 > was archived that year — realtime paced, into RV20 / RoQ / MPEG-1 / MPEG-4 / WMV2
@@ -978,7 +978,9 @@ accepted — **DVD-Video** (`VIDEO_TS/` plus `*.IFO`, read straight by FFmpeg's
 (`MPEGAV/*.DAT`, unpacked to a temp directory with 7-Zip). Any other image (a data
 disc, a Blu-ray) is refused with exit 2. The product keeps the ISO's name.
 
-**Disc targets**: `--disc dvd|vcd|svcd|cd` (CUI parameter row `39.`) pins:
+**Disc targets**: `--disc dvd|vcd|svcd|cd` (shorthand for `--era disc/<ID>` since
+v7.9.9.9; the old CUI parameter row `39.` was removed — use the era preset menu
+`14.`) pins:
 
 | Target | Codec | PAL / NTSC | Video | Audio |
 | --- | --- | --- | --- | --- |

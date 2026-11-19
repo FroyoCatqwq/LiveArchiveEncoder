@@ -123,13 +123,29 @@ public static class ToolchainPath
     public static string InsertProfileBlock(string content, string dir) =>
         RemoveProfileBlock(content) + ProfileBlock(dir);
 
+    // v7.9.9.13: the activation line is pasted or eval'd by the user. A path
+    // containing $(...), backticks, %VAR% or double quotes used to turn it into
+    // a command-injection vector on PowerShell/cmd/fish (POSIX was already
+    // escaped). Ordinary paths are left byte-for-byte unchanged.
+    private static string PowerShellEscape(string dir) => "'" + dir.Replace("'", "''") + "'";
+
+    private static string FishEscape(string dir) =>
+        "\"" + dir.Replace("\\", "\\\\").Replace("\"", "\\\"")
+            .Replace("$", "\\$").Replace("(", "\\(").Replace(")", "\\)") + "\"";
+
+    private static string CmdEscape(string dir) =>
+        dir.Replace("%", "%%").Replace("^", "^^")
+           .Replace("\"", "").Replace("&", "^&").Replace("|", "^|");
+
     /// <summary>The one line a user can paste (or eval) into an already-open shell.</summary>
     public static string ActivateLine(string? shell, string dir)
     {
         string name = (shell ?? "").Trim().ToLowerInvariant();
-        if (name is "cmd" or "command" or "bat") return $"set \"PATH={dir};%PATH%\"";
-        if (name is "powershell" or "pwsh" or "ps") return $"$env:PATH = \"{dir};$env:PATH\"";
-        if (name == "fish") return $"set -gx PATH \"{dir}\" $PATH";
+        if (name is "cmd" or "command" or "bat")
+            return $"set \"PATH={CmdEscape(dir)};%PATH%\"";
+        if (name is "powershell" or "pwsh" or "ps")
+            return $"$env:PATH = {PowerShellEscape(dir)} + ';' + $env:PATH";
+        if (name == "fish") return $"set -gx PATH {FishEscape(dir)} $PATH";
         return $"export PATH=\"{PosixEscape(dir)}:$PATH\"";
     }
 

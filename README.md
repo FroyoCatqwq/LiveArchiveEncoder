@@ -34,8 +34,10 @@ edition of every document.
 
 **The port keeps the realtime simulation semantics of v6.3.3.** The capture
 thread feeds frames at the source cadence and the main loop emits one output
-slot every `1/fps` seconds. Nothing here removes that pacing, so total wall time
-remains tied to media duration.
+slot every `1/fps` seconds, so total wall time tracks media duration. Pass
+`--no-realtime` to encode as fast as the machine allows; the output is the same,
+only the waiting disappears. Since v7.9.9.10 `--tearing` adds an opt-in dropped-
+vsync artefact, v7.9.9.12 added `--max-video-kbps` and `--dynamic-fps`.
 
 ## Platforms
 
@@ -122,13 +124,13 @@ Every release carries four builds, on both hosts:
 | file | platform | runtime needed |
 | --- | --- | --- |
 | `…-win-x64.zip` | Windows | .NET 10 or .NET 11 (`RollForward=Major`) |
-| `…-win-x64-aot.zip` | Windows | none (NativeAOT, single exe) |
+| `…-win-x64-self-contained.zip` | Windows | none (self-contained) |
 | `…-linux-x64.tar.gz` | Linux | .NET 10 or .NET 11 |
-| `…-linux-x64-aot.tar.gz` | Linux | none (NativeAOT, single file) |
+| `…-linux-x64-self-contained.tar.gz` | Linux | none (self-contained) |
 
 The Linux archives keep the executable bit, so `tar xzf … && ./LiveArchiveEncoder`
-works as-is. The AOT binaries link against the build host's glibc — older
-distributions should take the JIT build. FFmpeg is still needed either way.
+works as-is. NativeAOT builds are no longer published (v7.8.1); the self-contained
+packages are the no-runtime option. FFmpeg is still needed either way.
 
 ## Tests
 
@@ -157,7 +159,7 @@ baseline uses the system FFmpeg too, so on a box that only has a managed build,
 put that build's `bin` on `PATH` first):
 
 ```bash
-pip install -r tests/e2e/requirements.txt   # pytest==9.1.1 + pytest-xdist
+pip install -r tests/e2e/requirements.txt   # pytest, xdist, OpenCV + numpy (pixel tests)
 python tools/e2e.py                          # two-phase run (see below)
 pytest                                       # the same cases, one at a time
 pytest tests/e2e/test_compare_matrix.py -k wmv2   # a single case
@@ -340,8 +342,8 @@ pipeline when the muxer rejects the split. Measured numbers are in
 The version-by-version history lives in **[`docs/CHANGELOG.md`](docs/CHANGELOG.md)**
 (v7.9.8 onwards) and **[`docs/CHANGELOG-archive.md`](docs/CHANGELOG-archive.md)**
 (Python v6.2.2 → v7.9.7), with what changed, why, and whether an output changes.
-Release notes for each published build live in `publish/release/notes-*.md`
-(GitHub/Codeberg releases carry the published copies). This file is the guide:
+Per-release notes are published with the GitHub/Codeberg release itself. This
+file is the guide:
 what the tool does, how to build and test it, and which constraints are
 deliberate.
 
@@ -369,7 +371,7 @@ src/LiveArchiveEncoder/
   UI/             CLI parser + help, CUI menus, shared reporting, --cpu-info,
                   post-encode playback
   PostProcess/    v7.6: the stages that follow the live encode -- era presets
-                  (v7.9.5.1: 18 sites that name their own codec, plus user
+                  (27 rows across 13 sites that name their own codec, plus user
                   presets), the recompress argument validator and codec catalog
                   (v7.9.5.1: thirteen video / seven audio encoders with their
                   legal containers), subtitle font lookup (v7.9.5.1: ASS style
@@ -431,10 +433,10 @@ checked only for sample rate, fonts never resolved), is in
 
 ## Known constraints
 
-* **Wall time is bounded by media duration.** This is the realtime simulation
-  design, not a performance defect. Making a one-hour source finish in minutes
-  requires dropping the wall-clock pacing, which changes frame selection and
-  bitrate-control outcomes and must be re-validated.
+* **Wall time is bounded by media duration by default.** This is the realtime
+  simulation design, not a performance defect. `--no-realtime` removes the
+  wall-clock pacing; the frame-selection and bitrate-control outcomes stay the
+  same, it simply does not wait.
 * **`-threads` is passed before the raw-video input**, exactly as in v6.3.3.
   FFmpeg scoping means it may not reach the output video encoder as a user would
   expect; it was left alone to preserve behaviour, and should be benchmarked

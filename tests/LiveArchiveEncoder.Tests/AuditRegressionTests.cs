@@ -22,16 +22,18 @@ public sealed class AuditRegressionTests
     public async Task AnExplicitEraNativeBeatsEraModern()
     {
         (CliOptions? modern, _) = CliParser.Parse(["clip.mkv", "--era-modern"]);
-        (CliOptions? both, _) = CliParser.Parse(["clip.mkv", "--era-modern", "--era-native"]);
+        (CliOptions? both, string? bothError) = CliParser.Parse(
+            ["clip.mkv", "--era-modern", "--era-native"]);
         (CliOptions? native, _) = CliParser.Parse(["clip.mkv", "--era-native"]);
         (CliOptions? plain, _) = CliParser.Parse(["clip.mkv"]);
 
-        // Before 7.9.8.10 CliOptions.EraNative had no reader at all, so the
-        // third case behaved exactly like the first.
+        // Before 7.9.8.10 CliOptions.EraNative had no reader at all. v7.9.9.13
+        // makes the mutually exclusive pair a usage error instead of silently
+        // ignoring order.
         await Assert.That(modern!.EraNative).IsFalse();
-        await Assert.That(both!.EraNative).IsTrue();
+        await Assert.That(both).IsNull();
+        await Assert.That(bothError).IsNotNull();
         await Assert.That(Cli.EraNativeOf(modern!)).IsFalse();
-        await Assert.That(Cli.EraNativeOf(both!)).IsTrue();
         await Assert.That(Cli.EraNativeOf(native!)).IsTrue();
         await Assert.That(Cli.EraNativeOf(plain!)).IsTrue();
     }

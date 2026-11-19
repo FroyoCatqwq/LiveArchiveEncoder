@@ -246,7 +246,15 @@ public static partial class FFmpegCapabilities
             {
                 if (ProcessRunner.Run(args, 30).ExitCode == 0) return true;
             }
-            catch (Exception) { /* this format did not work; try the next */ }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception)
+            {
+                // v7.9.9.13: a Ctrl+C caught while probing is NOT a failed
+                // pixel format. Caching "cannot encode" would make every later
+                // run in this CUI session reject the encoder.
+                if (Core.Interrupt.CurrentToken.IsCancellationRequested) throw;
+                /* this format did not work; try the next */
+            }
         }
         return false;
     }

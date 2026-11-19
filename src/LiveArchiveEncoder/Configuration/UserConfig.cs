@@ -730,8 +730,12 @@ public static class ConfigStore
         // the one literal that survives: it records a decision, and a decision
         // must outlive the run that made it (null means "never asked", which is
         // what lets Nnedi probe and pick a route on its own).
-        c.GhProxy = string.Equals(stored.GhProxy?.Trim(), FFmpeg.GitHubProxy.Off,
-                StringComparison.OrdinalIgnoreCase)
+        // v7.9.9.13: --no-gh-proxy stores "" while this method only recognised
+        // the literal "off", so the decision silently reverted to "auto" on
+        // the next start. null still means "never asked"; "" is explicit.
+        c.GhProxy = stored.GhProxy is { Length: 0 }
+                || string.Equals(stored.GhProxy?.Trim(), FFmpeg.GitHubProxy.Off,
+                    StringComparison.OrdinalIgnoreCase)
             ? FFmpeg.GitHubProxy.Off
             : FFmpeg.GitHubProxy.Normalise(stored.GhProxy).Prefix;
         c.NnediWeights = stored.NnediWeights;

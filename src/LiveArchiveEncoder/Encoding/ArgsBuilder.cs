@@ -49,8 +49,10 @@ public static class ArgsBuilder
         // It is enforced here, in the one function every command builder uses
         // (real encode, preflight and the split-audio video pass), so the
         // preflight cannot validate a command that the encode then clamps.
+        // v7.9.9.13: 1e308 is finite but doubling it produces Infinityk in
+        // -bufsize. Keep everything in the range an int kbps field can carry.
         if (double.IsFinite(maxVideoKbps) && maxVideoKbps > 0)
-            ceiling = Math.Min(ceiling, maxVideoKbps);
+            ceiling = Math.Min(ceiling, Math.Min(maxVideoKbps, int.MaxValue / 2.0));
 
         switch (EncoderMath.ScaleOf(name))
         {
@@ -95,9 +97,10 @@ public static class ArgsBuilder
                 // overshooting.
                 if (double.IsFinite(maxVideoKbps) && maxVideoKbps > 0)
                 {
+                    double cap = Math.Min(maxVideoKbps, int.MaxValue / 2.0);
                     qv.AddRange([
-                        "-maxrate", $"{maxVideoKbps.ToString("G6", CultureInfo.InvariantCulture)}k",
-                        "-bufsize", $"{(maxVideoKbps * 2).ToString("G6", CultureInfo.InvariantCulture)}k",
+                        "-maxrate", $"{cap.ToString("G6", CultureInfo.InvariantCulture)}k",
+                        "-bufsize", $"{(cap * 2).ToString("G6", CultureInfo.InvariantCulture)}k",
                     ]);
                 }
                 return qv;

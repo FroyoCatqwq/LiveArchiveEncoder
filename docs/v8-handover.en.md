@@ -1,5 +1,9 @@
 # v8 handover (the frozen v7 baseline)
 
+> **Planning material, not current guidance.** v8 has not started; the v7.9 line is
+> still maintained (currently v7.9.9.13). The v7.9.9.6 baseline and test counts
+> below are historical snapshots for a future rewrite only.
+
 **English** · [中文](v8-handover.md)
 
 Baseline version: **v7.9.9.6** (2026-11-09).

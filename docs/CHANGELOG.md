@@ -6,8 +6,8 @@
 .NET 11）的完整变更记录。**新的在上，旧的在下面。**
 
 本文件只记"改了什么、为什么"，以及会影响老用户的地方。命令用法、参数表、排错都
-在 [`usage.md`](usage.md)；每个正式发布还有一份独立说明，放在
-`publish/release/notes-*.md`（GitHub / Codeberg 的 release 正文就是它）。
+在 [`usage.md`](usage.md)；每个正式发布的说明随 GitHub / Codeberg release
+一起发布，构建时临时写的 `publish/release/notes-*.md` 不入库。
 
 ## 关于史料与写法
 
@@ -19,6 +19,64 @@
   不影响产物的条目不标。
 
 > **v7.9.8 以前的变更记录已拆到 [`CHANGELOG-archive.md`](CHANGELOG-archive.md)**；本文件只保留 v7.9.8 及以后。
+
+---
+
+## v7.9.9.13（2026-11-19）
+
+全项目审查 + 真实素材验证 + 文档清理 + 低风险可维护性整理。继续 v7.9 系列，未启动 v8。
+**默认编码参数与产物字节不变。**
+
+### 1. 审查修复的 bug（18 项）
+
+**编码/进程**
+* `Kill` 后未等待进程真正退出，取消/超时路径可能留下持有 `.part` 与网络句柄的子进程；
+  新增统一的 `KillAndWait`，所有异常路径都等待。
+* 解码器最终等待的毫秒数未钳制，损坏素材的极大时长会溢出成 `WaitForExit(-1)`（无限等待）。
+* Ctrl+C 命中编码器试编码时被当成“像素格式不可用”，错误结论被写进能力缓存，整个
+  CUI 会话持续误判；现在取消异常原样上抛且不写缓存。
+* `--max-video-kbps 1e308` 产生 `-bufsize Infinityk`；上限钳到 int kbps 范围内。
+* PowerShell / cmd / fish 的 PATH 激活行未转义 shell 元字符（POSIX 已转义），现已分别处理。
+
+**CLI / 配置 / 更新**
+* 损坏的 `config.json` 会被 CLI 结束时的默认快照覆盖；现在用 `TryLoad` 区分“不存在”
+  与“不可读”，后者跳过默认路径写回。
+* 撕裂、码率上限、动态帧率只进当次 `RealtimeOptions`，没进 `Config`，导致 `--save-config`
+  / `--emit-args` 丢失；三条路径全部补齐。
+* `--recompress-only` 短路掉配置转换，带 `--save-config` / `--emit-args` 时会白跑一次转码；
+  现在显式报互斥错误。
+* `--no-gh-proxy` 的空字符串决策没有被 `ConfigStore.Apply` 识别，下次启动又变回自动；已修正。
+* 二次压缩第 2 遍起的片段绕过 VBV 校验；现在每遍都校验。
+* CUI 工具链菜单输入的代理 / 探测出的前端未写回配置，与 CLI 行为不一致。
+* CUI 时代预设 `m`（原生/现代）切换只改显示，不改实际二压参数；现在切换时重算。
+* `dotnet LiveArchiveEncoder.dll --update` 会把 dotnet 宿主目录当成安装目录；改为应用基目录。
+* 多个终点动作选项同时给出时静默择一；现在显式互斥报错。
+* `--help` 缺 `--no-dynamic-fps`；`--era-modern` / `--era-native` 同时给出时顺序无效，现改为互斥错误。
+* Linux 下切换仅大小写不同的输入文件误判为“未变化”，字幕残留；改为按 OS 区分大小写。
+
+### 2. 真实素材测试（Z:\影视库，472 GB / 2298 文件）
+
+两轮共 19 个用例：第一轮 9 种容器/编码（MPEG-1 50fps DAT、flv1、HEVC 10-bit MKV、
+H.264 MP4、MPEG-2 MPG/RMVB/VOB/WMV、DVD-Video ISO）全部通过；第二轮 6 个编码器 +
+全局码率上限 + 动态帧率 + 撕裂 + ASS 外挂字幕，18/19 通过，唯一失败是 `flv1`
+不在经典编码器目录中，产品按设计拒绝（明确报错）。
+
+### 3. 文档整理
+
+* 修正已删除的 CUI 参数页 `39.`、失效代理端口 10808、发布包命名矛盾（AOT 已停发）、
+  英文 README 与中文版不同步（`--no-realtime` 等）、站点数量 18→13、`notes-*.md` 失效引用、
+  两处中英链接语言错配。
+* v8 交接与架构 §8 明确标注为**规划资料、v8 未启动**；架构版本锚点更新到 v7.9.9.13。
+* usage 中英双语补充 v7.9.9.11/.12 新行为（真实试编码 `[!]`、FFmpeg 发现顺序、新选项）。
+
+### 4. 可维护性
+
+`CliParser` 改为 `partial`，把值解析 / InvariantCulture 规则拆到新的
+`UI/CliValueParsers.cs`；`.slnx` 同步。新增 `V79913Tests`（5 项单测）。
+
+### 5. 验证
+
+单测 **786 全过**；e2e 两阶段 **29 + 227 通过 / 3 跳过**；三机双 TFM 构建 0 警告 0 错误。
 
 ---
 

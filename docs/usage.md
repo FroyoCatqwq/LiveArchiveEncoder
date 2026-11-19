@@ -2,7 +2,7 @@
 
 [English](usage.en.md) · **中文**
 
-面向使用者的操作手册。迁移细节与验证数据看 [`../README.md`](../README.md) 与
+面向使用者的操作手册。迁移细节与验证数据看 [`../README.zh.md`](../README.zh.md) 与
 [`test-report-v7.md`](test-report-v7.md)；**每版改了什么**看
 [`CHANGELOG.md`](CHANGELOG.md)；全部文档的索引（中英两版并列）看
 [`README.md`](README.md)。
@@ -1204,7 +1204,7 @@ feed 读不到或没有匹配资产时才用（v7.9.8.13.2 补齐，之前该字
 # Windows
 LiveArchiveEncoder.exe --ffmpeg-list
 LiveArchiveEncoder.exe --ffmpeg-download                       # 默认 btbn
-LiveArchiveEncoder.exe --ffmpeg-download nonfree --proxy http://127.0.0.1:10808
+LiveArchiveEncoder.exe --ffmpeg-download nonfree --proxy http://127.0.0.1:20808
 LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --ffmpeg-source btbn
 LiveArchiveEncoder.exe src.mp4 out.rm --encoder rv20 --ffmpeg-source path   # 回到系统 FFmpeg
 LiveArchiveEncoder.exe --ffmpeg-delete btbn
@@ -2269,7 +2269,8 @@ LiveArchiveEncoder --update-check      # 会自动直连 GitHub，不走前沿
 自动跨 VOB 分片），以及含 `MPEGAV/*.DAT` 的 **Video CD**（用 7-Zip 解到临时目录）。
 其它 ISO（数据盘、蓝光）明确拒绝并退出 2。输出名按 ISO 原名推导。
 
-**介质约束**：`--disc dvd|vcd|svcd|cd`（CUI 参数页 `39.`）锁定：
+**介质约束**：`--disc dvd|vcd|svcd|cd`（v7.9.9.9 起是 `--era disc/<ID>` 的简写，
+入口在 CUI 时代预设菜单 `14.`；旧的参数页 `39. 介质目标` 已删除）锁定：
 
 | 目标 | 编码器 | PAL / NTSC | 视频 | 音频 |
 | --- | --- | --- | --- | --- |

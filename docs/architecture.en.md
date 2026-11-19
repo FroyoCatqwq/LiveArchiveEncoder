@@ -2,17 +2,17 @@
 
 **English** · [中文](architecture.md)
 
-Version anchor: **v7.9.9.4** (2026-11-08).
+Version anchor: **v7.9.9.13** (2026-11-19; historical figures keep their original version labels).
 
 This document is written for three readers: whoever maintains v7 next, whoever has to
 audit why it is shaped the way it is, and whoever will rewrite it as v8 in Rust. It
 describes the present only. Usage lives in [`usage.en.md`](usage.en.md), history in
 [`CHANGELOG.en.md`](CHANGELOG.en.md), process in [`MAINTENANCE.en.md`](MAINTENANCE.en.md).
 
-> **v8 is decided**: a thorough, in-depth rewrite in Rust. v7.9 therefore enters
-> maintenance mode — bugfixes, hotfixes and small features only, no structural work.
-> Section 8 states what v8 must inherit, what it must fix, and how to get there.
-> Everything else describes v7 as it stands.
+> **v8 is a plan, not a started project**: the v7.9 line is still maintained
+> (bugfixes, hotfixes, small features) and is being made more maintainable. Section 8
+> is the earlier migration sketch and is planning material only; everything else
+> describes v7 as it stands.
 
 Scale (excluding `bin`/`obj`): 83 C# files, ~29,500 lines; 52 unit-test files,
 ~9,600 lines; 23 e2e Python files, ~4,400 lines; 11 bilingual document pairs. In other

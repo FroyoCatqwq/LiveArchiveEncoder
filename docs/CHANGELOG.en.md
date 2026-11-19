@@ -7,6 +7,35 @@ edition, [`CHANGELOG.md`](CHANGELOG.md) — entries there are kept verbatim, wit
 measurements and reasoning behind each decision. `⚠` marks a change a user can
 notice in an output, a default, a file name or a CLI contract.
 
+## v7.9.9.13 (2026-11-19) — project audit, real-media testing, docs & cleanup
+
+Another v7.9 maintenance release. No v8 work. Default encode parameters and
+output bytes are unchanged.
+
+* **18 audited bug fixes.** Process cleanup now waits after `Kill`; the decoder
+  wait is clamped; a cancelled encoder probe no longer caches "cannot encode";
+  a huge `--max-video-kbps` cannot emit `Infinityk`; shell activation lines are
+  escaped for PowerShell/cmd/fish. A corrupt `config.json` is no longer
+  overwritten by CLI defaults; tearing/cap/dynamic-fps are included in
+  `--save-config` and `--emit-args`; `--recompress-only` rejects those
+  combinations instead of wasting an encode; `--no-gh-proxy` persists; VBV is
+  validated for every recompress pass; CUI proxy/front and era-native toggles
+  are persisted/applied; `dotnet …dll --update` uses the app directory; terminal
+  options and `--era-modern`/`--era-native` are explicit usage errors;
+  `--no-dynamic-fps` appears in `--help`; Linux input changes are case-sensitive.
+* **Real media.** 19 cases against `Z:\影视库` (472 GB): 9 container/codec cases
+  including 50 fps MPEG-1 DAT, HEVC 10-bit, VOB with two audio tracks and a
+  DVD-Video ISO all passed; 18/19 of the encoder-matrix/feature/SIDECAR-ASS cases
+  passed, with `flv1` correctly refused as outside the classic encoder catalog.
+* **Docs.** Removed a deleted CUI row number, a dead proxy port, stale AOT
+  package names, an obsolete site count and broken references; marked v8
+  material as planning-only; synchronised both READMEs and both usage guides.
+* **Maintainability.** `CliParser` is now `partial` with value parsing extracted
+  to `UI/CliValueParsers.cs`; `.slnx` updated. Added `V79913Tests` (5 cases).
+* Tests: **786 unit**, e2e **29 + 227 passed / 3 skipped**, three machines green.
+
+---
+
 ## v7.9.9.12 (2026-11-18) — visible tearing, hard cap, real encoder checks
 
 Seven changes; still the v7.9 line, no v8 work included.

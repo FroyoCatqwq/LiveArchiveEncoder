@@ -194,6 +194,13 @@ public static class CliArgs
             argv.AddRange(["--era-aspect", eraShape]);
         if (c.H264Impl is { Length: > 0 } h264Impl)
             argv.AddRange(["--h264", h264Impl]);
+        // v7.9.9.13: the v7.9.9.10-.12 settings were never emitted, so the
+        // printed "equivalent command line" produced a different encode.
+        if (c.Tearing is { Length: > 0 } tear)
+            argv.AddRange(["--tearing", tear]);
+        if (c.MaxVideoKbps > 0)
+            argv.AddRange(["--max-video-kbps", Num(c.MaxVideoKbps)]);
+        if (c.DynamicFps) argv.Add("--dynamic-fps");
 
         return argv;
     }

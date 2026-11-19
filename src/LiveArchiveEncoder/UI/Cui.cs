@@ -178,8 +178,13 @@ public static partial class Cui
                     FileInfo? selected = InputFileMenu();
                     if (selected is not null)
                     {
+                        // v7.9.9.13: match StartEncoding's OS-aware comparison;
+                        // on Linux A.mp4 and a.mp4 are different files, so a
+                        // case-insensitive check left the old subtitles behind.
                         bool changed = !string.Equals(
-                            c.InputPath?.FullName, selected.FullName, StringComparison.OrdinalIgnoreCase);
+                            c.InputPath?.FullName, selected.FullName,
+                            OperatingSystem.IsWindows()
+                                ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
                         c.InputPath = selected;
                         if (c.Encoder is not null && c.OutputIsAuto)
                             c.OutputPath = DefaultOutput(selected, c.Encoder);

@@ -985,7 +985,7 @@ public static class RealtimeEncoder
         }
         catch (Exception exc)
         {
-            try { decoder.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            KillAndWait(decoder);
             throw new InvalidOperationException($"Failed to start encoder FFmpeg: {exc.Message}", exc);
         }
 
@@ -1018,8 +1018,8 @@ public static class RealtimeEncoder
             // used to orphan two FFmpeg processes holding the network source
             // and the .part output open for the rest of the session.
             cts.Cancel();
-            try { decoder.Kill(entireProcessTree: true); } catch { /* already gone */ }
-            try { encoderProc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            KillAndWait(decoder);
+            KillAndWait(encoderProc);
             encoderProc.Dispose();
             throw;
         }
@@ -1409,7 +1409,13 @@ public static class RealtimeEncoder
             int encRc = encoderProc.ExitCode;
 
             double decoderTimeout = Math.Max(10.0, (duration ?? 30.0) * 0.25 + 10.0);
-            if (!decoder.WaitForExit((int)(decoderTimeout * 1000)))
+            // v7.9.9.13: an unbounded duration from a damaged container could
+            // overflow int milliseconds; -1 would mean wait forever. Clamp in
+            // seconds first, like the audio/join budgets.
+            int decoderWaitMs = (int)Math.Clamp(
+                double.IsFinite(decoderTimeout) ? decoderTimeout : 10.0,
+                0.0, int.MaxValue / 1000.0) * 1000;
+            if (!decoder.WaitForExit(decoderWaitMs))
             {
                 try { decoder.Kill(entireProcessTree: true); } catch { /* already gone */ }
                 decoder.WaitForExit(5000);
@@ -1479,14 +1485,7 @@ public static class RealtimeEncoder
             captureState.Stop = true;
             cts.Cancel();
             foreach (Process proc in new[] { decoder, encoderProc })
-            {
-                try
-                {
-                    proc.Refresh();
-                    if (!proc.HasExited) proc.Kill(entireProcessTree: true);
-                }
-                catch { /* already gone */ }
-            }
+                KillAndWait(proc);
             // No `using` on the encoder any more (it is started inside a guard),
             // so its handle is released here.
             try { encoderProc.Dispose(); } catch { /* nothing left to release */ }
@@ -1668,6 +1667,18 @@ public static class RealtimeEncoder
     }
 
     /// <summary>
+    /// v7.9.9.13: Kill only requests termination; without a bounded WaitForExit
+    /// a grandchild can keep the .part file / network handle alive while the
+    /// caller already tries to delete the staging directory.
+    /// </summary>
+    private static void KillAndWait(Process proc, int ms = 5000)
+    {
+        try { proc.Refresh(); if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
+        catch { /* already gone */ }
+        try { proc.WaitForExit(ms); } catch { /* already gone */ }
+    }
+
+    /// <summary>
     /// Wait for a child in 250 ms slices so a cancel is observed while it is
     /// still running. Killing is the caller's desired outcome either way; what
     /// differs is whether the user waits two minutes to find out.
@@ -1680,13 +1691,12 @@ public static class RealtimeEncoder
         {
             if (token.IsCancellationRequested)
             {
-                try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+                KillAndWait(proc);
                 token.ThrowIfCancellationRequested();
             }
             if (clock.Elapsed.TotalSeconds < timeoutSeconds) continue;
 
-            try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
-            proc.WaitForExit(5000);
+            KillAndWait(proc);
             throw new InvalidOperationException(timeoutMessage);
         }
     }

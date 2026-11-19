@@ -24,10 +24,26 @@ public static class Cli
         // Loaded once: the post-processing stages are sticky (a user sets the
         // recompress arguments in the menu and then runs the CLI), so the CLI has
         // to consult the same file the interactive shell writes.
-        UserConfig stored = ConfigStore.Load();
+        // v7.9.9.13: a corrupt config must be ignored, never overwritten by the
+        // defaults this run happens to use. TryLoad distinguishes "missing"
+        // (safe to create) from "unreadable" (leave the user's file alone).
+        string configPath = ConfigStore.DefaultPath;
+        UserConfig? loadedConfig = ConfigStore.TryLoad(configPath);
+        bool canPersist = loadedConfig is not null || !File.Exists(configPath);
+        UserConfig stored = loadedConfig ?? new UserConfig();
         // v7.9.5.1: the user's own era presets live in that file, so --era can
         // name one of them. Done before the lookup below and before any listing.
         EraPresets.Register(stored);
+
+        // v7.9.9.13: the recompress-only shortcut used to bypass the settings
+        // conversion block entirely, so a `--save-config` / `--emit-args` run
+        // spent minutes transcoding and still wrote nothing. Say so up front.
+        if (args.RecompressOnly && (args.SaveConfig is { Length: > 0 } || args.EmitArgs))
+        {
+            Console.Error.WriteLine(
+                "ERROR: --recompress-only cannot be combined with --save-config or --emit-args");
+            return 2;
+        }
 
         // v7.9.5: the recompress pass on its own. No live encode, no encoder
         // discovery, no capability probe -- this path exists so an existing
@@ -568,6 +584,11 @@ public static class Cli
                 // (and the next CUI session) see it. Previously it reached the
                 // encoder but was never written back.
                 ExtraEncoderArgs = args.ExtraEncoderArgs ?? stored.ExtraEncoderArgs ?? "",
+                // v7.9.9.13: these reached RealtimeOptions but were missing from
+                // Config, so --save-config / --emit-args silently dropped them.
+                Tearing = args.Tearing ?? stored.Tearing ?? "",
+                MaxVideoKbps = args.MaxVideoKbps ?? stored.MaxVideoKbps,
+                DynamicFps = args.DynamicFps ?? stored.DynamicFps,
                 StartTimeSeconds = args.StartTime,
                 EndTimeSeconds = args.EndTime,
                 Encoder = encoder,
@@ -756,7 +777,8 @@ public static class Cli
         // v7.9.8.13.2: a sidecar found by name is a per-run discovery, not a
         // setting. Persisting it made the next unrelated run inherit it.
         if (args.SubtitlesDiscovered) snapshot.Subtitles = stored.Subtitles;
-        ConfigStore.Save(snapshot);
+        // v7.9.9.13: never replace a settings file we could not read.
+        if (canPersist) ConfigStore.Save(snapshot, configPath);
 
         // v7.9.8.3: nnedi needs a weights file, and "which file" is a question
         // only this layer can answer (an explicit flag, then the settings file,
@@ -1355,6 +1377,10 @@ public static class Cli
             }
             else
             {
+                // v7.9.9.13: pass 2+ used to skip ValidateVvb entirely, so a
+                // -maxrate without -b:v only failed after the live pass.
+                string? passVbv = PostProcess.FragmentEditor.ValidateVbv(pass.Args);
+                if (passVbv is not null) return (rc, $"{passVbv} (pass {i + 1})");
                 rc.Extra.Add(pass);
             }
         }
